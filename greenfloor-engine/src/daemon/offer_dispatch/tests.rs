@@ -496,3 +496,81 @@ fn managed_post_override_success_returns_true() {
         .expect("success post");
     assert!(posted);
 }
+
+#[tokio::test]
+async fn execute_strategy_actions_parallel_success_runs_prepare_path() {
+    use std::collections::BTreeMap;
+
+    use super::execute_strategy_actions;
+    use crate::cycle::SpendableAssetProfile;
+    use crate::daemon::dispatch_test_controls::{DaemonDispatchOverrides, ManagedPostTestMode};
+    use crate::daemon::offer_dispatch::reservation_ctx::{
+        parallel_reservation_asset_ids, parallel_reservation_context,
+    };
+
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let program_path = dir.path().join("program.yaml");
+    write_minimal_program_with_signer(
+        &program_path,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    let markets_path = dir.path().join("markets.yaml");
+    write_test_markets_file(&markets_path);
+    let market = MarketConfig {
+        market_id: "m1".to_string(),
+        enabled: true,
+        base_asset: "xch".to_string(),
+        base_symbol: "XCH".to_string(),
+        quote_asset: "xch".to_string(),
+        quote_asset_type: "stable".to_string(),
+        receive_address: "xch1test".to_string(),
+        signer_key_id: "key-1".to_string(),
+        mode: "sell_only".to_string(),
+        pricing: json!({
+            "min_price_quote_per_base": 0.0031,
+            "max_price_quote_per_base": 0.0038,
+        }),
+        cancel_move_threshold_bps: None,
+        ladders: HashMap::default(),
+    };
+    let bundle = crate::config::load_program_bundle(&program_path).expect("program bundle");
+    let reservation_ctx = parallel_reservation_context(&bundle.signer, "mainnet", &market, 0)
+        .await
+        .expect("reservation ctx");
+    let mut spendable_profiles = BTreeMap::new();
+    for asset_id in parallel_reservation_asset_ids(&reservation_ctx) {
+        spendable_profiles.insert(
+            asset_id,
+            SpendableAssetProfile {
+                total: 999_999_999,
+                max_single: 999_999_999,
+                max_single_known: true,
+            },
+        );
+    }
+    let mut test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(true, false),
+        true,
+    );
+    test_ctx.dispatch.test_controls.offer_dispatch = DaemonDispatchOverrides::default()
+        .spendable_profiles(spendable_profiles)
+        .managed_post(ManagedPostTestMode::Success);
+
+    let output = execute_strategy_actions(
+        &store,
+        &test_ctx.cycle_context(),
+        &market,
+        &[sample_action()],
+    )
+    .await
+    .expect("parallel dispatch");
+    assert_eq!(output.executed_count, 1);
+}

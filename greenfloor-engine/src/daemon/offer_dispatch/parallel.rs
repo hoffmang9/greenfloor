@@ -46,17 +46,18 @@ async fn prepare_parallel_dispatch(
     signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
+    dispatch_overrides: &DaemonDispatchOverrides,
 ) -> SignerResult<ParallelDispatchSetup> {
     let program = resources.program();
     let reservation_ctx =
         parallel_reservation_context(signer_config, &program.network, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
-    let spendable_profiles = coinset_spendable_profiles_by_asset(
-        &resources.network,
-        &market.receive_address,
-        &asset_ids,
-    )
-    .await?;
+    let spendable_profiles = if let Some(profiles) = dispatch_overrides.spendable_profiles.clone() {
+        profiles
+    } else {
+        coinset_spendable_profiles_by_asset(&resources.network, &market.receive_address, &asset_ids)
+            .await?
+    };
     let batch_plan =
         plan_parallel_managed_dispatch(expanded, &reservation_ctx, &spendable_profiles)?;
     let ttl = crate::config::u64_to_i64(
@@ -219,6 +220,7 @@ pub async fn execute_actions_parallel(
         signer_config,
         market,
         expanded,
+        dispatch_overrides,
     )
     .await?;
 

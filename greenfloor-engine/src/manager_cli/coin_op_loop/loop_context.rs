@@ -44,6 +44,11 @@ pub(super) async fn prepare_coin_op_loop_common(
         prep.asset_id,
     )
     .await?;
+    #[cfg(test)]
+    let exec_ctx = CoinOpExecContext {
+        test_overrides: prep.mgr.coin_op_test_overrides.clone(),
+        ..exec_ctx
+    };
     let ladder_entry = prep
         .size_base_units
         .filter(|value| *value > 0)

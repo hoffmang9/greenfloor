@@ -8,6 +8,11 @@ use super::{ManagerContext, ManagerOutput};
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::runtime::{EnvReader, ManagerRuntime, PromptReader, StdioPromptReader};
 
+#[cfg(test)]
+use crate::coin_ops::execution::CoinOpTestOverrides;
+#[cfg(test)]
+use crate::offer::operator::BuildOfferTestOverrides;
+
 #[derive(Debug, Clone, Default)]
 struct MapEnvReader {
     values: HashMap<String, String>,
@@ -74,6 +79,10 @@ pub struct ManagerContextBuilder {
     json_compact: bool,
     env_overrides: Vec<(String, String)>,
     prompt_lines: Vec<String>,
+    #[cfg(test)]
+    coin_op_test_overrides: Option<CoinOpTestOverrides>,
+    #[cfg(test)]
+    offer_test_overrides: Option<BuildOfferTestOverrides>,
 }
 
 impl ManagerContextBuilder {
@@ -89,6 +98,10 @@ impl ManagerContextBuilder {
             json_compact: true,
             env_overrides: Vec::new(),
             prompt_lines: Vec::new(),
+            #[cfg(test)]
+            coin_op_test_overrides: None,
+            #[cfg(test)]
+            offer_test_overrides: None,
         }
     }
 
@@ -104,6 +117,11 @@ impl ManagerContextBuilder {
 
     pub fn state_db(mut self, path: impl Into<String>) -> Self {
         self.state_db = path.into();
+        self
+    }
+
+    pub fn dexie_base_url(mut self, url: impl Into<String>) -> Self {
+        self.dexie_base_url = Some(url.into());
         self
     }
 
@@ -130,6 +148,18 @@ impl ManagerContextBuilder {
         self
     }
 
+    #[cfg(test)]
+    pub fn coin_op_test_overrides(mut self, overrides: CoinOpTestOverrides) -> Self {
+        self.coin_op_test_overrides = Some(overrides);
+        self
+    }
+
+    #[cfg(test)]
+    pub fn offer_test_overrides(mut self, overrides: BuildOfferTestOverrides) -> Self {
+        self.offer_test_overrides = Some(overrides);
+        self
+    }
+
     fn assemble_inner(self, output: ManagerOutput) -> ManagerContext {
         let ManagerContextBuilder {
             program_config,
@@ -141,6 +171,10 @@ impl ManagerContextBuilder {
             testnet_markets_path,
             env_overrides,
             prompt_lines,
+            #[cfg(test)]
+            coin_op_test_overrides,
+            #[cfg(test)]
+            offer_test_overrides,
             ..
         } = self;
         let resolved_cats = cats_config.unwrap_or_else(|| {
@@ -170,6 +204,10 @@ impl ManagerContextBuilder {
             state_db,
             dexie_base_url,
             testnet_markets_path,
+            #[cfg(test)]
+            coin_op_test_overrides: coin_op_test_overrides.unwrap_or_default(),
+            #[cfg(test)]
+            offer_test_overrides: offer_test_overrides.unwrap_or_default(),
         }
     }
 

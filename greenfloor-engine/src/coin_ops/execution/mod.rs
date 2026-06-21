@@ -6,6 +6,9 @@ pub mod context;
 mod helpers;
 mod test_overrides;
 
+#[cfg(test)]
+mod tests;
+
 pub use cap::resolve_combine_input_cap;
 pub use combine_prereq::submit_combine_prereq;
 pub use context::CoinOpExecContext;

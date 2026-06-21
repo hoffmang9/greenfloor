@@ -365,3 +365,67 @@ async fn push_tx_emits_success_payload() {
         Some("SUCCESS")
     );
 }
+
+#[tokio::test]
+async fn run_coinset_command_resolve_client_emits_json() {
+    let args = CoinsetCliArgs {
+        command: CoinsetCommands::ResolveClient(CoinsetResolveClientArgs {
+            client: CoinsetClientArgs {
+                network: "mainnet".to_string(),
+                base_url: String::new(),
+            },
+            json: true,
+        }),
+    };
+    run_coinset_command(args).await.expect("resolve-client");
+}
+
+#[tokio::test]
+async fn run_coinset_command_post_delegates_to_rpc() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_all_mempool_tx_ids")
+        .with_status(200)
+        .with_body(r#"{"success":true,"mempool_tx_ids":[]}"#)
+        .create_async()
+        .await;
+
+    let args = CoinsetCliArgs {
+        command: CoinsetCommands::Post(CoinsetPostArgs {
+            client: CoinsetClientArgs {
+                network: "mainnet".to_string(),
+                base_url: server.url(),
+            },
+            endpoint: "get_all_mempool_tx_ids".to_string(),
+            body_json: "{}".to_string(),
+            json: true,
+        }),
+    };
+    run_coinset_command(args).await.expect("post");
+}
+
+#[test]
+fn run_coinset_command_coin_id_from_record_emits_json() {
+    let parent = Bytes32::new([0x11; 32]);
+    let puzzle_hash = Bytes32::new([0x22; 32]);
+    let amount = 42_u64;
+    let record = json!({
+        "coin": {
+            "parent_coin_info": format!("0x{}", hex::encode(parent)),
+            "puzzle_hash": format!("0x{}", hex::encode(puzzle_hash)),
+            "amount": amount,
+        }
+    });
+    let args = CoinsetCliArgs {
+        command: CoinsetCommands::CoinIdFromRecord(CoinsetCoinIdFromRecordArgs {
+            record_json: record.to_string(),
+            json: true,
+        }),
+    };
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(run_coinset_command(args))
+        .expect("coin-id-from-record");
+}
