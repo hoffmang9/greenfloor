@@ -1,0 +1,93 @@
+//! Offer transition policy for daemon cycle signals (taker detection, venue rules).
+//!
+//! Batch DB reconcile lives in `offer::lifecycle::reconcile_watched_offers`; per-market
+//! cycle reconcile lives in `daemon::reconcile_market_cycle`.
+
+mod builders;
+mod decision;
+mod metadata;
+mod state;
+mod transition;
+
+#[cfg(test)]
+mod tests;
+
+pub use state::{ReconcileState, ReconcileStateError};
+pub use transition::CycleOfferTransition;
+
+use builders::{
+    missing_watched_offer_expired, missing_watched_offer_preserved, unchanged, unsupported_venue,
+};
+
+use decision::resolve_watched_offer_decision;
+
+/// Unchanged offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn unchanged_offer_transition(
+    current_state: &str,
+    reason: impl Into<String>,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    Ok(unchanged(old_state.clone(), reason.into()).into_cycle_transition_no_coinset(old_state))
+}
+
+/// Unsupported venue offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn unsupported_venue_offer_transition(
+    current_state: &str,
+    venue: &str,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    Ok(unsupported_venue(venue).into_cycle_transition_no_coinset(old_state))
+}
+
+/// Resolve missing watched offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn resolve_missing_watched_offer_transition(
+    current_state: &str,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    let decision = if old_state.is_terminal() {
+        missing_watched_offer_preserved(old_state.clone())
+    } else {
+        missing_watched_offer_expired()
+    };
+    Ok(decision.into_cycle_transition_no_coinset(old_state))
+}
+
+/// Resolve watched offer transition from signals.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn resolve_watched_offer_transition_from_signals(
+    current_state: &str,
+    status: Option<i64>,
+    coinset_tx_ids: Vec<String>,
+    coinset_confirmed_tx_ids: Vec<String>,
+    coinset_mempool_tx_ids: Vec<String>,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    Ok(resolve_watched_offer_decision(
+        &old_state,
+        status,
+        &coinset_tx_ids,
+        &coinset_confirmed_tx_ids,
+        &coinset_mempool_tx_ids,
+    )
+    .into_cycle_transition(
+        old_state,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    ))
+}

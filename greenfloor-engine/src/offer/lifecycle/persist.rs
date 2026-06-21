@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use tracing::Level;
 
+use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::operator_log::{LogContext, OFFER_LIFECYCLE_TRANSITION, TAKER_DETECTION};
@@ -25,15 +26,20 @@ pub fn persist_offer_lifecycle_transition(
     last_seen_status: Option<i64>,
     options: &ReconcilePersistOptions<'_>,
 ) -> SignerResult<()> {
-    store.upsert_offer_state(offer_id, market_id, &transition.new_state, last_seen_status)?;
+    store.upsert_offer_state(
+        offer_id,
+        market_id,
+        &transition.new_state.as_str(),
+        last_seen_status,
+    )?;
     let mut payload = json!({
         "offer_id": offer_id,
         "market_id": market_id,
-        "old_state": transition.old_state,
-        "new_state": transition.new_state,
+        "old_state": transition.old_state.as_str(),
+        "new_state": transition.new_state.as_str(),
         "changed": transition.changed,
         "reason": transition.reason,
-        "signal": transition.signal,
+        "signal": transition.signal.map(OfferSignal::as_str),
         "signal_source": transition.signal_source,
         "last_seen_status": last_seen_status,
         "dexie_status": last_seen_status,
@@ -67,8 +73,8 @@ pub fn persist_offer_lifecycle_transition(
                 "venue": options.venue.unwrap_or("dexie"),
                 "signal": transition.taker_signal,
                 "advisory_diagnostic": transition.taker_diagnostic,
-                "old_state": transition.old_state,
-                "new_state": transition.new_state,
+                "old_state": transition.old_state.as_str(),
+                "new_state": transition.new_state.as_str(),
                 "last_seen_status": last_seen_status,
                 "signal_source": transition.signal_source,
                 "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
