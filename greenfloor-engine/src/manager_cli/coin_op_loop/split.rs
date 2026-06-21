@@ -2,6 +2,8 @@ use crate::async_boundary::ManagerCommandFuture;
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_split_gate;
+#[cfg(test)]
+use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::{coin_op_non_negative_u64, i64_to_usize};
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
@@ -54,6 +56,8 @@ pub struct CoinSplitRequest<'a> {
     pub behavior: CoinSplitBehavior,
     pub size_base_units: Option<i64>,
     pub max_iterations: i32,
+    #[cfg(test)]
+    pub test_overrides: CoinOpTestOverrides,
 }
 
 struct SplitLoopContext<'a> {
@@ -80,6 +84,8 @@ async fn prepare_split_loop_context(
         behavior,
         size_base_units,
         max_iterations: _,
+        #[cfg(test)]
+        test_overrides,
     } = request;
     let CoinSplitBehavior { wait, gating } = behavior;
     let common = prepare_coin_op_loop_common(CoinOpLoopPrep {
@@ -91,6 +97,8 @@ async fn prepare_split_loop_context(
         wait,
         size_base_units,
         coin_ids,
+        #[cfg(test)]
+        test_overrides,
     })
     .await?;
     let (amount_per_coin, number_of_coins) = resolve_split_targets(

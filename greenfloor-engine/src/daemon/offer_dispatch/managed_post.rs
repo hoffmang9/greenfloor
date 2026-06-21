@@ -1,7 +1,7 @@
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
-use crate::daemon::dispatch_test_controls::DaemonDispatchOverrides;
+use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::error::SignerResult;
 use crate::offer::operator::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
@@ -16,14 +16,14 @@ pub fn post_managed_planned_action<'a>(
     paths: &'a DaemonCyclePaths,
     market: &'a MarketConfig,
     action: &'a PlannedAction,
-    dispatch_overrides: &'a DaemonDispatchOverrides,
+    dispatch_injections: &'a DaemonDispatchTestInjections,
 ) -> ManagedOfferPostFuture<'a> {
     Box::pin(post_managed_planned_action_async(
         program,
         paths,
         market,
         action,
-        dispatch_overrides,
+        dispatch_injections,
     ))
 }
 
@@ -32,9 +32,9 @@ async fn post_managed_planned_action_async(
     paths: &DaemonCyclePaths,
     market: &MarketConfig,
     action: &PlannedAction,
-    dispatch_overrides: &DaemonDispatchOverrides,
+    dispatch_injections: &DaemonDispatchTestInjections,
 ) -> SignerResult<bool> {
-    if let Some(result) = super::test_overrides::managed_post_result(dispatch_overrides) {
+    if let Some(result) = super::test_overrides::managed_post_result(dispatch_injections) {
         return result;
     }
     if action.size <= 0 {

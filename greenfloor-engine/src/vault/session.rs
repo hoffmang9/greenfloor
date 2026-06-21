@@ -74,30 +74,17 @@ mod tests {
         config.vault.custody_keys[0].public_key_hex.clone()
     }
 
-    fn write_vault_session_program(path: &std::path::Path, home_dir: &std::path::Path) {
-        write_minimal_program_with_signer(
-            path,
-            MinimalProgramParams {
-                home_dir,
-                ..Default::default()
-            },
-        );
-        let contents = std::fs::read_to_string(path).expect("read program");
-        std::fs::write(
-            path,
-            contents.replace(
-                "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb9901baa6b7a99d\"\n      curve: SECP256R1",
-                "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58\"\n      curve: BLS12_381",
-            ),
-        )
-        .expect("write fixed program");
-    }
-
     #[tokio::test]
     async fn resolve_vault_session_fetches_kms_public_key_when_missing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let program_path = dir.path().join("program.yaml");
-        write_vault_session_program(&program_path, dir.path());
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
         let mut config = load_program_bundle(&program_path)
             .expect("program bundle")
             .signer;
@@ -121,7 +108,13 @@ mod tests {
     fn build_vault_session_uses_preloaded_kms_hex() {
         let dir = tempfile::tempdir().expect("tempdir");
         let program_path = dir.path().join("program.yaml");
-        write_vault_session_program(&program_path, dir.path());
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
         let config = load_program_bundle(&program_path)
             .expect("program bundle")
             .signer;

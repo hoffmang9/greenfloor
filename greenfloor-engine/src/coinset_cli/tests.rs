@@ -367,8 +367,8 @@ async fn push_tx_emits_success_payload() {
 }
 
 #[tokio::test]
-async fn run_coinset_command_resolve_client_emits_json() {
-    let args = CoinsetCliArgs {
+async fn run_coinset_command_dispatches_subcommands() {
+    let resolve_args = CoinsetCliArgs {
         command: CoinsetCommands::ResolveClient(CoinsetResolveClientArgs {
             client: CoinsetClientArgs {
                 network: "mainnet".to_string(),
@@ -377,11 +377,10 @@ async fn run_coinset_command_resolve_client_emits_json() {
             json: true,
         }),
     };
-    run_coinset_command(args).await.expect("resolve-client");
-}
+    run_coinset_command(resolve_args)
+        .await
+        .expect("resolve-client");
 
-#[tokio::test]
-async fn run_coinset_command_post_delegates_to_rpc() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_all_mempool_tx_ids")
@@ -389,8 +388,7 @@ async fn run_coinset_command_post_delegates_to_rpc() {
         .with_body(r#"{"success":true,"mempool_tx_ids":[]}"#)
         .create_async()
         .await;
-
-    let args = CoinsetCliArgs {
+    let post_args = CoinsetCliArgs {
         command: CoinsetCommands::Post(CoinsetPostArgs {
             client: CoinsetClientArgs {
                 network: "mainnet".to_string(),
@@ -401,11 +399,8 @@ async fn run_coinset_command_post_delegates_to_rpc() {
             json: true,
         }),
     };
-    run_coinset_command(args).await.expect("post");
-}
+    run_coinset_command(post_args).await.expect("post");
 
-#[test]
-fn run_coinset_command_coin_id_from_record_emits_json() {
     let parent = Bytes32::new([0x11; 32]);
     let puzzle_hash = Bytes32::new([0x22; 32]);
     let amount = 42_u64;
@@ -416,16 +411,13 @@ fn run_coinset_command_coin_id_from_record_emits_json() {
             "amount": amount,
         }
     });
-    let args = CoinsetCliArgs {
+    let coin_id_args = CoinsetCliArgs {
         command: CoinsetCommands::CoinIdFromRecord(CoinsetCoinIdFromRecordArgs {
             record_json: record.to_string(),
             json: true,
         }),
     };
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
-        .block_on(run_coinset_command(args))
+    run_coinset_command(coin_id_args)
+        .await
         .expect("coin-id-from-record");
 }

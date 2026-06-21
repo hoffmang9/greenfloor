@@ -1,14 +1,14 @@
 use crate::daemon::dispatch_test_controls::{
-    DaemonDispatchOverrides, ManagedPostTestMode, ParallelDispatchTestMode,
+    DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };
 use crate::error::{SignerError, SignerResult};
 
 use super::OfferDispatchOutput;
 
 pub(crate) fn parallel_dispatch_result(
-    overrides: &DaemonDispatchOverrides,
+    injections: &DaemonDispatchTestInjections,
 ) -> Option<SignerResult<OfferDispatchOutput>> {
-    match overrides.parallel_dispatch? {
+    match injections.parallel? {
         ParallelDispatchTestMode::Transient => Some(Err(SignerError::ReservationContention(
             "test override".to_string(),
         ))),
@@ -23,9 +23,9 @@ pub(crate) fn parallel_dispatch_result(
 }
 
 pub(crate) fn managed_post_result(
-    overrides: &DaemonDispatchOverrides,
+    injections: &DaemonDispatchTestInjections,
 ) -> Option<SignerResult<bool>> {
-    match overrides.managed_post? {
+    match injections.managed_post? {
         ManagedPostTestMode::Success => Some(Ok(true)),
         ManagedPostTestMode::Failure => Some(Ok(false)),
     }

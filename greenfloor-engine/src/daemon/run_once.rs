@@ -14,7 +14,7 @@ use crate::error::SignerResult;
 use crate::metrics::{metric_millis_to_u64, metric_u64_to_usize};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
-use super::dispatch_test_controls::DaemonDispatchOverrides;
+use super::dispatch_test_controls::DaemonDispatchTestInjections;
 use super::market_context::DaemonCycleResources;
 use super::markets::enabled_market_ids;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
@@ -32,7 +32,7 @@ pub struct DaemonCycleTestControls {
     #[serde(default)]
     pub force_market_error_for: Option<String>,
     #[serde(default, skip)]
-    pub offer_dispatch: DaemonDispatchOverrides,
+    pub offer_dispatch: DaemonDispatchTestInjections,
 }
 
 /// Env gate for non-default `test_controls` on `greenfloor-engine daemon-once`.

@@ -1,4 +1,4 @@
-//! Request-carried daemon offer-dispatch test controls.
+//! Request-carried daemon offer-dispatch test injections.
 
 use std::collections::BTreeMap;
 
@@ -17,17 +17,18 @@ pub enum ManagedPostTestMode {
     Failure,
 }
 
+/// Test-only offer-dispatch injections carried on `DaemonCycleTestControls`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DaemonDispatchOverrides {
-    pub(crate) parallel_dispatch: Option<ParallelDispatchTestMode>,
+pub struct DaemonDispatchTestInjections {
+    pub(crate) parallel: Option<ParallelDispatchTestMode>,
     pub(crate) managed_post: Option<ManagedPostTestMode>,
     pub(crate) spendable_profiles: Option<BTreeMap<String, SpendableAssetProfile>>,
 }
 
-impl DaemonDispatchOverrides {
+impl DaemonDispatchTestInjections {
     #[must_use]
-    pub fn parallel_dispatch(mut self, mode: ParallelDispatchTestMode) -> Self {
-        self.parallel_dispatch = Some(mode);
+    pub fn parallel(mut self, mode: ParallelDispatchTestMode) -> Self {
+        self.parallel = Some(mode);
         self
     }
 

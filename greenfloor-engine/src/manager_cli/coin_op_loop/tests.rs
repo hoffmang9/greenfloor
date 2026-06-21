@@ -1,3 +1,4 @@
+use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCoin};
 
 use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};
@@ -119,6 +120,7 @@ async fn until_ready_requires_size_base_units() {
         },
         size_base_units: None,
         max_iterations: 3,
+        test_overrides: CoinOpTestOverrides::default(),
     })
     .await
     .expect_err("missing size");
@@ -157,6 +159,7 @@ async fn until_ready_disallows_no_wait() {
         },
         size_base_units: Some(10),
         max_iterations: 3,
+        test_overrides: CoinOpTestOverrides::default(),
     })
     .await
     .expect_err("no-wait conflict");
@@ -307,7 +310,6 @@ fn write_split_test_markets(path: &std::path::Path) {
 
 #[tokio::test]
 async fn coin_split_executes_with_test_overrides() {
-    use crate::coin_ops::execution::CoinOpTestOverrides;
     use crate::coin_ops::SpendableCoin;
     use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
     use crate::minimal_program_template::{
@@ -328,13 +330,6 @@ async fn coin_split_executes_with_test_overrides() {
     let coin_id = "a".repeat(64);
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
-        .coin_op_test_overrides(CoinOpTestOverrides {
-            wallet_coins: Some(vec![SpendableCoin {
-                id: coin_id.clone(),
-                amount: 1_000_000,
-            }]),
-            mixed_split_operation_id: Some("split-op-test".to_string()),
-        })
         .build_capturing();
     let code = run_coin_split(CoinSplitRequest {
         mgr: &harness.ctx,
@@ -356,6 +351,13 @@ async fn coin_split_executes_with_test_overrides() {
         },
         size_base_units: None,
         max_iterations: 1,
+        test_overrides: CoinOpTestOverrides {
+            wallet_coins: Some(vec![SpendableCoin {
+                id: coin_id.clone(),
+                amount: 1_000_000,
+            }]),
+            mixed_split_operation_id: Some("split-op-test".to_string()),
+        },
     })
     .await
     .expect("coin-split");

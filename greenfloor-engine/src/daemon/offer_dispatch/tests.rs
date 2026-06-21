@@ -9,6 +9,7 @@ use super::{
 };
 use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
+use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
@@ -281,125 +282,148 @@ fn sample_action() -> PlannedAction {
     }
 }
 
-#[tokio::test]
-async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
-    use super::execute_strategy_actions;
-    use crate::daemon::dispatch_test_controls::{
-        DaemonDispatchOverrides, ManagedPostTestMode, ParallelDispatchTestMode,
+struct ParallelDispatchHarness {
+    _dir: tempfile::TempDir,
+    store: SqliteStore,
+    program_path: std::path::PathBuf,
+    test_ctx: crate::daemon::test_support::TestCycleContextBundle,
+}
+
+impl ParallelDispatchHarness {
+    fn new(parallelism_enabled: bool, dry_run: bool, with_signer: bool) -> Self {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("greenfloor.sqlite");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let program_path = dir.path().join("program.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        let markets_path = dir.path().join("markets.yaml");
+        write_test_markets_file(&markets_path);
+        let test_ctx = test_context_from_program_file(
+            &dir,
+            &db_path,
+            &program_path,
+            sample_program(parallelism_enabled, dry_run),
+            with_signer,
+        );
+        Self {
+            _dir: dir,
+            store,
+            program_path,
+            test_ctx,
+        }
+    }
+
+    fn set_offer_dispatch(&mut self, injections: DaemonDispatchTestInjections) {
+        self.test_ctx.dispatch.test_controls.offer_dispatch = injections;
+    }
+
+    async fn execute(
+        &self,
+        market: &MarketConfig,
+        actions: &[PlannedAction],
+    ) -> crate::error::SignerResult<OfferDispatchOutput> {
+        use super::execute_strategy_actions;
+
+        execute_strategy_actions(&self.store, &self.test_ctx.cycle_context(), market, actions).await
+    }
+}
+
+async fn generous_spendable_profiles(
+    program_path: &std::path::Path,
+    market: &MarketConfig,
+) -> BTreeMap<String, crate::cycle::SpendableAssetProfile> {
+    use crate::cycle::SpendableAssetProfile;
+    use crate::daemon::offer_dispatch::reservation_ctx::{
+        parallel_reservation_asset_ids, parallel_reservation_context,
     };
 
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
-    );
-    let markets_path = dir.path().join("markets.yaml");
-    write_test_markets_file(&markets_path);
-    let mut test_ctx = test_context_from_program_file(
-        &dir,
-        &db_path,
-        &program_path,
-        sample_program(true, false),
-        true,
-    );
-    test_ctx.dispatch.test_controls.offer_dispatch = DaemonDispatchOverrides::default()
-        .parallel_dispatch(ParallelDispatchTestMode::Transient)
-        .managed_post(ManagedPostTestMode::Success);
+    let bundle = crate::config::load_program_bundle(program_path).expect("program bundle");
+    let reservation_ctx = parallel_reservation_context(&bundle.signer, "mainnet", market, 0)
+        .await
+        .expect("reservation ctx");
+    let mut spendable_profiles = BTreeMap::new();
+    for asset_id in parallel_reservation_asset_ids(&reservation_ctx) {
+        spendable_profiles.insert(
+            asset_id,
+            SpendableAssetProfile {
+                total: 999_999_999,
+                max_single: 999_999_999,
+                max_single_known: true,
+            },
+        );
+    }
+    spendable_profiles
+}
 
-    let output = execute_strategy_actions(
-        &store,
-        &test_ctx.cycle_context(),
-        &sample_market(),
-        &[sample_action()],
-    )
-    .await
-    .expect("dispatch");
+fn sample_market_with_pricing() -> MarketConfig {
+    MarketConfig {
+        pricing: json!({
+            "min_price_quote_per_base": 0.0031,
+            "max_price_quote_per_base": 0.0038,
+        }),
+        ..sample_market()
+    }
+}
+
+#[tokio::test]
+async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
+    };
+
+    let mut harness = ParallelDispatchHarness::new(true, false, true);
+    harness.set_offer_dispatch(
+        DaemonDispatchTestInjections::default()
+            .parallel(ParallelDispatchTestMode::Transient)
+            .managed_post(ManagedPostTestMode::Success),
+    );
+
+    let output = harness
+        .execute(&sample_market(), &[sample_action()])
+        .await
+        .expect("dispatch");
     assert_eq!(output.executed_count, 1);
 }
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
-    use super::execute_strategy_actions;
     use crate::daemon::dispatch_test_controls::{
-        DaemonDispatchOverrides, ParallelDispatchTestMode,
+        DaemonDispatchTestInjections, ParallelDispatchTestMode,
     };
 
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
+    let mut harness = ParallelDispatchHarness::new(true, false, true);
+    harness.set_offer_dispatch(
+        DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Fatal),
     );
-    let markets_path = dir.path().join("markets.yaml");
-    write_test_markets_file(&markets_path);
-    let mut test_ctx = test_context_from_program_file(
-        &dir,
-        &db_path,
-        &program_path,
-        sample_program(true, false),
-        true,
-    );
-    test_ctx.dispatch.test_controls.offer_dispatch =
-        DaemonDispatchOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Fatal);
 
-    let err = execute_strategy_actions(
-        &store,
-        &test_ctx.cycle_context(),
-        &sample_market(),
-        &[sample_action()],
-    )
-    .await
-    .expect_err("fatal parallel error");
+    let err = harness
+        .execute(&sample_market(), &[sample_action()])
+        .await
+        .expect_err("fatal parallel error");
     assert!(err.to_string().contains("permanent_offer_build_failure"));
 }
 
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
-    use super::execute_strategy_actions;
-    use crate::daemon::dispatch_test_controls::{DaemonDispatchOverrides, ManagedPostTestMode};
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode,
+    };
 
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
+    let mut harness = ParallelDispatchHarness::new(false, false, true);
+    harness.set_offer_dispatch(
+        DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Success),
     );
-    let markets_path = dir.path().join("markets.yaml");
-    write_test_markets_file(&markets_path);
-    let mut test_ctx = test_context_from_program_file(
-        &dir,
-        &db_path,
-        &program_path,
-        sample_program(false, false),
-        true,
-    );
-    test_ctx.dispatch.test_controls.offer_dispatch =
-        DaemonDispatchOverrides::default().managed_post(ManagedPostTestMode::Success);
 
-    let output = execute_strategy_actions(
-        &store,
-        &test_ctx.cycle_context(),
-        &sample_market(),
-        &[sample_action()],
-    )
-    .await
-    .expect("dispatch");
+    let output = harness
+        .execute(&sample_market(), &[sample_action()])
+        .await
+        .expect("dispatch");
     assert_eq!(output.executed_count, 1);
 }
 
@@ -474,11 +498,11 @@ fn coordinator_multi_asset_acquire_requires_all_assets() {
 fn offer_dispatch_parallel_override_success_returns_output() {
     use super::test_overrides::parallel_dispatch_result;
     use crate::daemon::dispatch_test_controls::{
-        DaemonDispatchOverrides, ParallelDispatchTestMode,
+        DaemonDispatchTestInjections, ParallelDispatchTestMode,
     };
 
     let overrides =
-        DaemonDispatchOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Success);
+        DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Success);
     let output = parallel_dispatch_result(&overrides)
         .expect("override configured")
         .expect("success output");
@@ -488,9 +512,12 @@ fn offer_dispatch_parallel_override_success_returns_output() {
 #[test]
 fn managed_post_override_success_returns_true() {
     use super::test_overrides::managed_post_result;
-    use crate::daemon::dispatch_test_controls::{DaemonDispatchOverrides, ManagedPostTestMode};
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode,
+    };
 
-    let overrides = DaemonDispatchOverrides::default().managed_post(ManagedPostTestMode::Success);
+    let overrides =
+        DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Success);
     let posted = managed_post_result(&overrides)
         .expect("override configured")
         .expect("success post");
@@ -499,78 +526,22 @@ fn managed_post_override_success_returns_true() {
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_success_runs_prepare_path() {
-    use std::collections::BTreeMap;
-
-    use super::execute_strategy_actions;
-    use crate::cycle::SpendableAssetProfile;
-    use crate::daemon::dispatch_test_controls::{DaemonDispatchOverrides, ManagedPostTestMode};
-    use crate::daemon::offer_dispatch::reservation_ctx::{
-        parallel_reservation_asset_ids, parallel_reservation_context,
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode,
     };
 
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
+    let market = sample_market_with_pricing();
+    let mut harness = ParallelDispatchHarness::new(true, false, true);
+    let spendable_profiles = generous_spendable_profiles(&harness.program_path, &market).await;
+    harness.set_offer_dispatch(
+        DaemonDispatchTestInjections::default()
+            .spendable_profiles(spendable_profiles)
+            .managed_post(ManagedPostTestMode::Success),
     );
-    let markets_path = dir.path().join("markets.yaml");
-    write_test_markets_file(&markets_path);
-    let market = MarketConfig {
-        market_id: "m1".to_string(),
-        enabled: true,
-        base_asset: "xch".to_string(),
-        base_symbol: "XCH".to_string(),
-        quote_asset: "xch".to_string(),
-        quote_asset_type: "stable".to_string(),
-        receive_address: "xch1test".to_string(),
-        signer_key_id: "key-1".to_string(),
-        mode: "sell_only".to_string(),
-        pricing: json!({
-            "min_price_quote_per_base": 0.0031,
-            "max_price_quote_per_base": 0.0038,
-        }),
-        cancel_move_threshold_bps: None,
-        ladders: HashMap::default(),
-    };
-    let bundle = crate::config::load_program_bundle(&program_path).expect("program bundle");
-    let reservation_ctx = parallel_reservation_context(&bundle.signer, "mainnet", &market, 0)
+
+    let output = harness
+        .execute(&market, &[sample_action()])
         .await
-        .expect("reservation ctx");
-    let mut spendable_profiles = BTreeMap::new();
-    for asset_id in parallel_reservation_asset_ids(&reservation_ctx) {
-        spendable_profiles.insert(
-            asset_id,
-            SpendableAssetProfile {
-                total: 999_999_999,
-                max_single: 999_999_999,
-                max_single_known: true,
-            },
-        );
-    }
-    let mut test_ctx = test_context_from_program_file(
-        &dir,
-        &db_path,
-        &program_path,
-        sample_program(true, false),
-        true,
-    );
-    test_ctx.dispatch.test_controls.offer_dispatch = DaemonDispatchOverrides::default()
-        .spendable_profiles(spendable_profiles)
-        .managed_post(ManagedPostTestMode::Success);
-
-    let output = execute_strategy_actions(
-        &store,
-        &test_ctx.cycle_context(),
-        &market,
-        &[sample_action()],
-    )
-    .await
-    .expect("parallel dispatch");
+        .expect("parallel dispatch");
     assert_eq!(output.executed_count, 1);
 }

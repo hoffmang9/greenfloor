@@ -17,11 +17,6 @@ use super::paths::{
 use super::runtime::ManagerRuntime;
 
 #[cfg(test)]
-use crate::coin_ops::execution::CoinOpTestOverrides;
-#[cfg(test)]
-use crate::offer::operator::BuildOfferTestOverrides;
-
-#[cfg(test)]
 pub mod test_builder;
 
 #[derive(Debug, Clone)]
@@ -34,10 +29,6 @@ pub struct ManagerContext {
     pub state_db: String,
     pub dexie_base_url: Option<String>,
     testnet_markets_path: Option<PathBuf>,
-    #[cfg(test)]
-    pub coin_op_test_overrides: CoinOpTestOverrides,
-    #[cfg(test)]
-    pub offer_test_overrides: BuildOfferTestOverrides,
 }
 
 impl ManagerContext {
@@ -75,10 +66,6 @@ impl ManagerContext {
                 state_db,
                 dexie_base_url,
                 testnet_markets_path,
-                #[cfg(test)]
-                coin_op_test_overrides: CoinOpTestOverrides::default(),
-                #[cfg(test)]
-                offer_test_overrides: BuildOfferTestOverrides::default(),
             },
             command,
         )
