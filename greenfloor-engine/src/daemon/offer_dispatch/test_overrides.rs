@@ -1,3 +1,8 @@
+//! Test-only injection mappers for offer dispatch.
+//!
+//! Unit tests here cover the branch table. Integration wiring is exercised in
+//! `tests/harness_tests.rs`, which asserts dispatch outcomes only.
+
 use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };

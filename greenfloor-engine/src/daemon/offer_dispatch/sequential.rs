@@ -16,8 +16,6 @@ pub async fn execute_actions_sequential(
 ) -> SignerResult<OfferDispatchOutput> {
     let program = ctx.resources.program();
     let paths = &ctx.resources.paths;
-    #[cfg(test)]
-    let dispatch_injections = &ctx.dispatch.test_controls.offer_dispatch;
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
 
@@ -29,7 +27,7 @@ pub async fn execute_actions_sequential(
             market,
             action,
             #[cfg(test)]
-            dispatch_injections,
+            &ctx.dispatch.test_controls.offer_dispatch,
         )
         .await?;
         if counts_as_executed {

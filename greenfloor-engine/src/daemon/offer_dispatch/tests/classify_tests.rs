@@ -6,22 +6,10 @@ use super::super::{
     classify_parallel_dispatch, is_parallel_dispatch_transient_signer_error,
     record_parallel_fallback_audit, OfferDispatchOutput, ParallelDispatchDecision,
 };
-use crate::config::ManagerProgramConfig;
+use super::fixtures::sample_program;
 use crate::cycle::parallel_managed_dispatch_enabled;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
-
-fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
-    ManagerProgramConfig {
-        runtime_market_slot_count: 1,
-        runtime_offer_parallelism_enabled: parallelism_enabled,
-        runtime_offer_parallelism_max_workers: 2,
-        runtime_dry_run: dry_run,
-        tx_block_websocket_reconnect_interval_seconds: 1,
-        tx_block_fallback_poll_interval_seconds: 1,
-        ..Default::default()
-    }
-}
 
 #[test]
 fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {

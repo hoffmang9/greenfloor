@@ -9,7 +9,7 @@ use crate::cycle::{
     parallel_max_workers, plan_parallel_managed_dispatch, reservation_release_status,
     ParallelReservationContext, PlannedAction, SpendableAssetProfile, StrategyActionSellCountInput,
 };
-use crate::daemon::market_context::{DaemonCycleResources, MarketCycleContext};
+use crate::daemon::market_context::MarketCycleContext;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
@@ -23,9 +23,6 @@ use super::reservation_ctx::{
 use super::OfferDispatchOutput;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
-
-#[cfg(test)]
-use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 
 struct ParallelPostJob {
     action: PlannedAction,
@@ -42,26 +39,25 @@ struct ParallelDispatchSetup {
 }
 
 async fn load_spendable_profiles_from_coinset(
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     reservation_ctx: &ParallelReservationContext,
 ) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
     let asset_ids = parallel_reservation_asset_ids(reservation_ctx);
-    coinset_spendable_profiles_by_asset(&resources.network, &market.receive_address, &asset_ids)
+    coinset_spendable_profiles_by_asset(&ctx.resources.network, &market.receive_address, &asset_ids)
         .await
 }
 
 async fn resolve_parallel_spendable_profiles(
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     reservation_ctx: &ParallelReservationContext,
-    #[cfg(test)] injections: &DaemonDispatchTestInjections,
 ) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
     #[cfg(test)]
-    if let Some(profiles) = &injections.spendable_profiles {
+    if let Some(profiles) = &ctx.dispatch.test_controls.offer_dispatch.spendable_profiles {
         return Ok(profiles.clone());
     }
-    load_spendable_profiles_from_coinset(resources, market, reservation_ctx).await
+    load_spendable_profiles_from_coinset(ctx, market, reservation_ctx).await
 }
 
 fn prepare_parallel_dispatch(
@@ -136,10 +132,9 @@ fn prepare_parallel_dispatch(
 }
 
 async fn run_parallel_post_jobs(
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     setup: ParallelDispatchSetup,
-    #[cfg(test)] dispatch_injections: DaemonDispatchTestInjections,
 ) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
     let ParallelDispatchSetup {
         coordinator,
@@ -148,6 +143,10 @@ async fn run_parallel_post_jobs(
         max_workers,
         mut skip_items,
     } = setup;
+
+    let resources = ctx.resources;
+    #[cfg(test)]
+    let dispatch_injections = ctx.dispatch.test_controls.offer_dispatch.clone();
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let mut handles = Vec::with_capacity(jobs.len());
@@ -230,9 +229,9 @@ pub async fn execute_actions_parallel(
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
     #[cfg(test)]
-    let dispatch_injections = &ctx.dispatch.test_controls.offer_dispatch;
-    #[cfg(test)]
-    if let Some(result) = super::test_overrides::parallel_dispatch_result(dispatch_injections) {
+    if let Some(result) =
+        super::test_overrides::parallel_dispatch_result(&ctx.dispatch.test_controls.offer_dispatch)
+    {
         return result;
     }
 
@@ -240,14 +239,8 @@ pub async fn execute_actions_parallel(
         parallel_reservation_context(signer_config, &ctx.resources.program().network, market, 0)
             .await?;
 
-    let spendable_profiles = resolve_parallel_spendable_profiles(
-        ctx.resources,
-        market,
-        &reservation_ctx,
-        #[cfg(test)]
-        dispatch_injections,
-    )
-    .await?;
+    let spendable_profiles =
+        resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;
 
     let setup = prepare_parallel_dispatch(
         store,
@@ -268,14 +261,7 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let (executed, action_items) = run_parallel_post_jobs(
-        ctx.resources,
-        market,
-        setup,
-        #[cfg(test)]
-        dispatch_injections.clone(),
-    )
-    .await?;
+    let (executed, action_items) = run_parallel_post_jobs(ctx, market, setup).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,

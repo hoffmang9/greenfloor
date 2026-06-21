@@ -1,3 +1,6 @@
+//! Integration tests for offer dispatch wiring through `execute_strategy_actions`.
+//! Injection branch tables are covered in `test_overrides::tests`.
+
 use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };
@@ -65,7 +68,6 @@ async fn execute_strategy_actions_parallel_success_short_circuits_prepare_path()
         .await
         .expect("parallel shortcut dispatch");
     assert_eq!(output.executed_count, 1);
-    assert_eq!(output.newly_executed_sell_counts.get(&1), Some(&1));
 }
 
 #[tokio::test]
