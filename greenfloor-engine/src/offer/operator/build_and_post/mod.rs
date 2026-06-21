@@ -71,6 +71,49 @@ pub struct BuildAndPostOfferRequest {
     pub test_overrides: crate::offer::operator::BuildOfferTestOverrides,
 }
 
+/// Shared fields for constructing a [`BuildAndPostOfferRequest`] from CLI or daemon callers.
+#[derive(Debug, Clone)]
+pub struct BuildAndPostOfferRequestParts {
+    pub program_path: PathBuf,
+    pub markets_path: PathBuf,
+    pub testnet_markets_path: Option<PathBuf>,
+    pub network: String,
+    pub market_id: Option<String>,
+    pub pair: Option<String>,
+    pub size_base_units: u64,
+    pub repeat: u32,
+    pub publish_venue: Option<String>,
+    pub dexie_base_url: Option<String>,
+    pub splash_base_url: Option<String>,
+    pub venue: BuildAndPostVenueOptions,
+    pub run: BuildAndPostRunOptions,
+    pub action_side: Option<String>,
+}
+
+impl BuildAndPostOfferRequest {
+    #[must_use]
+    pub fn from_parts(parts: BuildAndPostOfferRequestParts) -> Self {
+        Self {
+            program_path: parts.program_path,
+            markets_path: parts.markets_path,
+            testnet_markets_path: parts.testnet_markets_path,
+            network: parts.network,
+            market_id: parts.market_id,
+            pair: parts.pair,
+            size_base_units: parts.size_base_units,
+            repeat: parts.repeat,
+            publish_venue: parts.publish_venue,
+            dexie_base_url: parts.dexie_base_url,
+            splash_base_url: parts.splash_base_url,
+            venue: parts.venue,
+            run: parts.run,
+            action_side: parts.action_side,
+            #[cfg(test)]
+            test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BuildAndPostOfferResponse {
     pub exit_code: i32,

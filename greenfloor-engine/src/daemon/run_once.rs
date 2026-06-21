@@ -51,6 +51,13 @@ pub fn daemon_test_controls_enabled() -> bool {
 }
 
 impl DaemonCycleTestControls {
+    /// True when env-gated `daemon-once` test controls differ from defaults.
+    ///
+    /// `offer_dispatch` is intentionally excluded: it is `#[cfg(test)]` and
+    /// `#[serde(skip)]`, so it is only set in-process by unit tests (via
+    /// `offer_dispatch::tests::harness::set_offer_dispatch`) and never
+    /// deserialized from CLI JSON. Dispatch injections therefore bypass
+    /// `GREENFLOOR_DAEMON_TEST_CONTROLS` by design.
     #[must_use]
     pub fn is_non_default(&self) -> bool {
         self.skip_strategy_execution || self.force_market_error_for.is_some()

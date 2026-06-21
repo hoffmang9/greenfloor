@@ -29,6 +29,9 @@ mod daemon;
 mod manager;
 mod offer;
 
-pub use daemon::{ManagedCoinOpPlansFuture, ManagedOfferPostFuture, StrategyDispatchFuture};
+pub use daemon::{
+    ManagedCoinOpPlansFuture, ManagedOfferPostFuture, OwnedManagedOfferPostFuture,
+    StrategyDispatchFuture,
+};
 pub use manager::ManagerCommandFuture;
 pub use offer::{BuildAndPostOfferFuture, BuildVaultCatOfferFuture};

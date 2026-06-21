@@ -1,4 +1,6 @@
 //! Explicit test overrides for coin-op execution (injected via `CoinOpExecContext`).
+//!
+//! Canonical pattern: see [`crate::test_support::injections`].
 
 use crate::coin_ops::SpendableCoin;
 

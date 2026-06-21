@@ -1,4 +1,6 @@
 //! Request-carried daemon offer-dispatch test injections.
+//!
+//! Canonical pattern: see [`crate::test_support::injections`].
 
 use std::collections::BTreeMap;
 

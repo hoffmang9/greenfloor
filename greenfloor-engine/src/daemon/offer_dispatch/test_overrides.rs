@@ -2,6 +2,8 @@
 //!
 //! Unit tests here cover the branch table. Integration wiring is exercised in
 //! `tests/harness_tests.rs`, which asserts dispatch outcomes only.
+//!
+//! Canonical pattern: see [`crate::test_support::injections`].
 
 use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,

@@ -48,17 +48,7 @@ async fn create_offer_for_post(
     started: Instant,
 ) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
-    let created = match create_offer(
-        &ctx.signer_config,
-        &ctx.market,
-        request.size_base_units,
-        ctx.quote_price,
-        &ctx.action_side,
-        #[cfg(test)]
-        &ctx.test_overrides,
-    )
-    .await
-    {
+    let created = match create_offer(ctx, request.size_base_units).await {
         Ok(result) => result,
         Err(err) => {
             return Ok(Err(PostIterationOutcome::Failure(PostFailure {

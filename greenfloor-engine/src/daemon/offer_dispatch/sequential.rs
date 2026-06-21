@@ -6,7 +6,7 @@ use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
 use crate::offer::request::normalize_offer_side;
 
-use super::managed_post::post_managed_planned_action;
+use super::managed_post::{post_managed_planned_action, ManagedPostContext};
 use super::OfferDispatchOutput;
 
 pub async fn execute_actions_sequential(
@@ -14,22 +14,13 @@ pub async fn execute_actions_sequential(
     market: &MarketConfig,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    let program = ctx.resources.program();
-    let paths = &ctx.resources.paths;
+    let post_ctx = ManagedPostContext::from_market_cycle(ctx);
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
 
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
-        let counts_as_executed = post_managed_planned_action(
-            program,
-            paths,
-            market,
-            action,
-            #[cfg(test)]
-            &ctx.dispatch.test_controls.offer_dispatch,
-        )
-        .await?;
+        let counts_as_executed = post_managed_planned_action(&post_ctx, market, action).await?;
         if counts_as_executed {
             executed += 1;
         }

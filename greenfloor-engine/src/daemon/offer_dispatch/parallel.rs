@@ -16,7 +16,7 @@ use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
 use crate::storage::SqliteStore;
 
 use super::coordinator::OfferReservationCoordinator;
-use super::managed_post::post_managed_planned_action;
+use super::managed_post::{post_managed_planned_action_owned, ManagedPostContext};
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
@@ -38,16 +38,6 @@ struct ParallelDispatchSetup {
     skip_items: Vec<StrategyActionSellCountInput>,
 }
 
-async fn load_spendable_profiles_from_coinset(
-    ctx: &MarketCycleContext<'_>,
-    market: &MarketConfig,
-    reservation_ctx: &ParallelReservationContext,
-) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
-    let asset_ids = parallel_reservation_asset_ids(reservation_ctx);
-    coinset_spendable_profiles_by_asset(&ctx.resources.network, &market.receive_address, &asset_ids)
-        .await
-}
-
 async fn resolve_parallel_spendable_profiles(
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
@@ -57,7 +47,9 @@ async fn resolve_parallel_spendable_profiles(
     if let Some(profiles) = &ctx.dispatch.test_controls.offer_dispatch.spendable_profiles {
         return Ok(profiles.clone());
     }
-    load_spendable_profiles_from_coinset(ctx, market, reservation_ctx).await
+    let asset_ids = parallel_reservation_asset_ids(reservation_ctx);
+    coinset_spendable_profiles_by_asset(&ctx.resources.network, &market.receive_address, &asset_ids)
+        .await
 }
 
 fn prepare_parallel_dispatch(
@@ -132,7 +124,7 @@ fn prepare_parallel_dispatch(
 }
 
 async fn run_parallel_post_jobs(
-    ctx: &MarketCycleContext<'_>,
+    post_ctx: Arc<ManagedPostContext>,
     market: &MarketConfig,
     setup: ParallelDispatchSetup,
 ) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
@@ -144,10 +136,7 @@ async fn run_parallel_post_jobs(
         mut skip_items,
     } = setup;
 
-    let resources = ctx.resources;
-    #[cfg(test)]
-    let dispatch_injections = ctx.dispatch.test_controls.offer_dispatch.clone();
-
+    let market = market.clone();
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let mut handles = Vec::with_capacity(jobs.len());
 
@@ -158,13 +147,10 @@ async fn run_parallel_post_jobs(
             .await
             .map_err(|err| SignerError::Other(format!("parallel semaphore failed: {err}")))?;
         let coordinator = coordinator.clone();
-        let program = resources.program().clone();
+        let post_ctx = Arc::clone(&post_ctx);
         let market = market.clone();
-        let paths = resources.paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
-        #[cfg(test)]
-        let dispatch_injections = dispatch_injections.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
@@ -177,15 +163,9 @@ async fn run_parallel_post_jobs(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result = post_managed_planned_action(
-                        &program,
-                        &paths,
-                        &market,
-                        &job.action,
-                        #[cfg(test)]
-                        &dispatch_injections,
-                    )
-                    .await?;
+                    let action = job.action.clone();
+                    let post_result =
+                        post_managed_planned_action_owned(post_ctx, market, action).await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
@@ -261,7 +241,8 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let (executed, action_items) = run_parallel_post_jobs(ctx, market, setup).await?;
+    let post_ctx = Arc::new(ManagedPostContext::from_market_cycle(ctx));
+    let (executed, action_items) = run_parallel_post_jobs(post_ctx, market, setup).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,
