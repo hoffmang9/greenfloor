@@ -2,6 +2,51 @@
 
 use serde_json::Value;
 
+use crate::cycle::lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal};
+
+pub const DEXIE_STATUS_CANCELLED: i64 = 3;
+pub const DEXIE_STATUS_CONFIRMED: i64 = 4;
+pub const DEXIE_STATUS_ACTIVE: i64 = 5;
+pub const DEXIE_STATUS_EXPIRED: i64 = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DexieStatusReconcile {
+    Cancelled,
+    Lifecycle {
+        signal: OfferSignal,
+        new_state: OfferLifecycleState,
+    },
+    Unchanged,
+}
+
+#[must_use]
+pub fn reconcile_from_dexie_status(status: i64) -> DexieStatusReconcile {
+    match status {
+        DEXIE_STATUS_CONFIRMED => {
+            let transition =
+                apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
+            DexieStatusReconcile::Lifecycle {
+                signal: transition.signal,
+                new_state: transition.new_state,
+            }
+        }
+        DEXIE_STATUS_EXPIRED => {
+            let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired);
+            DexieStatusReconcile::Lifecycle {
+                signal: transition.signal,
+                new_state: transition.new_state,
+            }
+        }
+        DEXIE_STATUS_CANCELLED => DexieStatusReconcile::Cancelled,
+        _ => DexieStatusReconcile::Unchanged,
+    }
+}
+
+#[must_use]
+pub fn is_dexie_pattern_fallback_status(status: i64) -> bool {
+    matches!(status, DEXIE_STATUS_CONFIRMED | DEXIE_STATUS_ACTIVE)
+}
+
 const COINSET_TX_ID_KEYS: &[&str] = &[
     "tx_id",
     "txId",
@@ -221,6 +266,34 @@ impl From<DexieOfferPayload> for Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reconcile_from_dexie_status_maps_known_codes() {
+        use crate::cycle::lifecycle::{OfferLifecycleState, OfferSignal};
+
+        assert!(matches!(
+            reconcile_from_dexie_status(DEXIE_STATUS_CONFIRMED),
+            DexieStatusReconcile::Lifecycle {
+                signal: OfferSignal::TxConfirmed,
+                new_state: OfferLifecycleState::TxBlockConfirmed,
+            }
+        ));
+        assert!(matches!(
+            reconcile_from_dexie_status(DEXIE_STATUS_EXPIRED),
+            DexieStatusReconcile::Lifecycle {
+                signal: OfferSignal::Expired,
+                new_state: OfferLifecycleState::Expired,
+            }
+        ));
+        assert_eq!(
+            reconcile_from_dexie_status(DEXIE_STATUS_CANCELLED),
+            DexieStatusReconcile::Cancelled
+        );
+        assert_eq!(
+            reconcile_from_dexie_status(0),
+            DexieStatusReconcile::Unchanged
+        );
+    }
 
     #[test]
     fn id_and_status_read_nested_offer_body() {

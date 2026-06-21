@@ -1,5 +1,6 @@
 use super::{
-    resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
+    decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
+    resolve_watched_offer_transition_from_signals, state::ReconcileState,
     unchanged_offer_transition, unsupported_venue_offer_transition,
 };
 
@@ -146,4 +147,60 @@ fn unknown_reconcile_state_is_rejected() {
         err.to_string(),
         "unknown offer reconcile state: not_a_real_state"
     );
+}
+
+#[test]
+fn decision_preserves_terminal_state_on_mempool_signal() {
+    let current = ReconcileState::parse("tx_block_confirmed").expect("valid reconcile state");
+    let coinset_tx_ids = vec!["m".repeat(64)];
+    let coinset_mempool_tx_ids = coinset_tx_ids.clone();
+    let decision = resolve_watched_offer_decision(
+        &current,
+        Some(0),
+        &coinset_tx_ids,
+        &[],
+        &coinset_mempool_tx_ids,
+    );
+    let transition = decision.into_cycle_transition(
+        "tx_block_confirmed",
+        coinset_tx_ids,
+        vec![],
+        coinset_mempool_tx_ids,
+    );
+    assert_eq!(transition.new_state, "tx_block_confirmed");
+    assert!(!transition.changed);
+    assert_eq!(transition.reason, "coinset_mempool_observed");
+    assert!(transition.signal.is_none());
+}
+
+#[test]
+fn decision_skips_coinset_confirmed_when_offer_is_cancelled() {
+    let current = ReconcileState::parse("cancelled").expect("valid reconcile state");
+    let decision = resolve_watched_offer_decision(
+        &current,
+        Some(0),
+        &["c".repeat(64)],
+        &["c".repeat(64)],
+        &[],
+    );
+    let transition = decision.into_cycle_transition_no_coinset("cancelled");
+    assert_eq!(transition.new_state, "cancelled");
+    assert_eq!(transition.reason, "ok");
+    assert_eq!(transition.signal_source, "dexie_status_fallback");
+    assert!(!transition.changed);
+}
+
+#[test]
+fn decision_skips_coinset_confirmed_when_dexie_status_is_cancelled() {
+    let current = ReconcileState::parse("open").expect("valid reconcile state");
+    let decision = resolve_watched_offer_decision(
+        &current,
+        Some(3),
+        &["c".repeat(64)],
+        &["c".repeat(64)],
+        &[],
+    );
+    let transition = decision.into_cycle_transition_no_coinset("open");
+    assert_eq!(transition.new_state, "cancelled");
+    assert_eq!(transition.signal_source, "dexie_status_fallback");
 }

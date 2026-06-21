@@ -21,6 +21,18 @@ impl OfferLifecycleState {
             Self::Expired => "expired",
         }
     }
+
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "open" => Some(Self::Open),
+            "mempool_observed" => Some(Self::MempoolObserved),
+            "tx_block_confirmed" => Some(Self::TxBlockConfirmed),
+            "refresh_due" => Some(Self::RefreshDue),
+            "expired" => Some(Self::Expired),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +123,15 @@ pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> Of
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_lifecycle_state_from_storage_string() {
+        assert_eq!(
+            OfferLifecycleState::parse("mempool_observed"),
+            Some(OfferLifecycleState::MempoolObserved)
+        );
+        assert_eq!(OfferLifecycleState::parse("unknown"), None);
+    }
 
     #[test]
     fn open_to_mempool_observed() {

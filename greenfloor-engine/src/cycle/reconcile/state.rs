@@ -16,6 +16,8 @@ impl std::fmt::Display for ReconcileStateError {
     }
 }
 
+impl std::error::Error for ReconcileStateError {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReconcileState {
     Lifecycle(OfferLifecycleState),
@@ -25,18 +27,18 @@ pub(crate) enum ReconcileState {
 
 impl ReconcileState {
     pub(crate) fn parse(raw: &str) -> Result<Self, ReconcileStateError> {
-        match raw.trim() {
-            "open" => Ok(Self::Lifecycle(OfferLifecycleState::Open)),
-            "mempool_observed" => Ok(Self::Lifecycle(OfferLifecycleState::MempoolObserved)),
-            "tx_block_confirmed" => Ok(Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed)),
-            "refresh_due" => Ok(Self::Lifecycle(OfferLifecycleState::RefreshDue)),
-            "expired" => Ok(Self::Lifecycle(OfferLifecycleState::Expired)),
-            "cancelled" => Ok(Self::Cancelled),
-            STATE_UNSUPPORTED_VENUE => Ok(Self::UnsupportedVenue),
-            other => Err(ReconcileStateError {
-                state: other.to_string(),
-            }),
+        let trimmed = raw.trim();
+        if trimmed == "cancelled" {
+            return Ok(Self::Cancelled);
         }
+        if trimmed == STATE_UNSUPPORTED_VENUE {
+            return Ok(Self::UnsupportedVenue);
+        }
+        OfferLifecycleState::parse(trimmed)
+            .map(Self::Lifecycle)
+            .ok_or_else(|| ReconcileStateError {
+                state: trimmed.to_string(),
+            })
     }
 
     pub(crate) fn as_str(&self) -> Cow<'_, str> {
