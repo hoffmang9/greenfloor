@@ -21,6 +21,7 @@ runs:
 
     - uses: Swatinem/rust-cache@v2
       with:
+        shared-key: greenfloor-engine
         workspaces: |
           greenfloor-engine -> target
         cache-workspace-crates: true
