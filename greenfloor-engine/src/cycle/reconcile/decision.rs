@@ -4,12 +4,14 @@ use crate::offer::dexie_payload::{
     DEXIE_STATUS_CANCELLED,
 };
 
+use super::builders::{
+    dexie_fallback_transition, open_signal_transition, preserve_mempool_observation, preserve_state,
+};
 use super::metadata::{
     REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
-    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
-    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE, TAKER_COINSET_TX_BLOCK_WEBHOOK,
-    TAKER_DIAGNOSTIC_COINSET_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
-    TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
+    REASON_MISSING_STATUS, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
@@ -67,49 +69,6 @@ fn dispatch(
     }
 }
 
-fn preserve_state(current_state: &ReconcileState, reason: &'static str) -> ReconcileTransition {
-    ReconcileTransition::new(
-        current_state.clone(),
-        reason,
-        SIGNAL_SOURCE_NONE,
-        None,
-        TAKER_NONE,
-        TAKER_NONE,
-    )
-}
-
-fn open_signal_transition(
-    signal: OfferSignal,
-    reason: &'static str,
-    signal_source: &'static str,
-    taker_signal: &'static str,
-    taker_diagnostic: &'static str,
-) -> ReconcileTransition {
-    ReconcileTransition::new(
-        ReconcileState::from_open_signal(signal),
-        reason,
-        signal_source,
-        Some(signal),
-        taker_signal,
-        taker_diagnostic,
-    )
-}
-
-fn dexie_fallback_transition(
-    new_state: ReconcileState,
-    signal: Option<OfferSignal>,
-    taker_diagnostic: &'static str,
-) -> ReconcileTransition {
-    ReconcileTransition::new(
-        new_state,
-        REASON_OK,
-        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
-        signal,
-        TAKER_NONE,
-        taker_diagnostic,
-    )
-}
-
 impl ReconcileDispatch {
     fn apply(self, current_state: &ReconcileState) -> ReconcileTransition {
         match self {
@@ -122,14 +81,7 @@ impl ReconcileDispatch {
             ),
             Self::CoinsetMempool => {
                 if current_state.is_terminal() {
-                    ReconcileTransition::new(
-                        current_state.clone(),
-                        REASON_COINSET_MEMPOOL,
-                        SIGNAL_SOURCE_COINSET_MEMPOOL,
-                        None,
-                        TAKER_NONE,
-                        TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
-                    )
+                    preserve_mempool_observation(current_state)
                 } else {
                     open_signal_transition(
                         OfferSignal::MempoolSeen,
