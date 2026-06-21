@@ -11,6 +11,7 @@ mod cycle_entry;
 mod cycle_paths;
 mod daemon_loop;
 mod disabled_markets;
+#[cfg(test)]
 mod dispatch_test_controls;
 mod inventory_phase;
 mod lock;

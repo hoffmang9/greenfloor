@@ -3,9 +3,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::coin_ops::execution::{
-    resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides,
-};
+#[cfg(test)]
+use crate::coin_ops::execution::CoinOpTestOverrides;
+use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext};
 use crate::coin_ops::SpendableCoin;
 use crate::config::{
     load_markets_config_with_overlay, load_program_bundle_gated, resolve_market_for_build,
@@ -48,6 +48,7 @@ pub(super) async fn build_coin_op_exec_context(
             as i64,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::default(),
+        #[cfg(test)]
         test_overrides: CoinOpTestOverrides::default(),
     })
 }

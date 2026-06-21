@@ -12,6 +12,7 @@ use crate::vault::{
 };
 
 use super::helpers::wallet_coins_to_spendable;
+#[cfg(test)]
 use super::test_overrides::CoinOpTestOverrides;
 
 pub struct CoinOpExecContext {
@@ -22,6 +23,7 @@ pub struct CoinOpExecContext {
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
+    #[cfg(test)]
     pub test_overrides: CoinOpTestOverrides,
 }
 
@@ -32,6 +34,7 @@ impl CoinOpExecContext {
     ///
     /// Returns an error if the operation fails.
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+        #[cfg(test)]
         if let Some(coins) = self.test_overrides.wallet_coins_override() {
             return Ok(coins.to_vec());
         }
@@ -58,6 +61,7 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
     ) -> SignerResult<String> {
+        #[cfg(test)]
         if let Some(operation_id) = self.test_overrides.mixed_split_operation_id_override() {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());

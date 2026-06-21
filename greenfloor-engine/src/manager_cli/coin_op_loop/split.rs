@@ -56,8 +56,6 @@ pub struct CoinSplitRequest<'a> {
     pub behavior: CoinSplitBehavior,
     pub size_base_units: Option<i64>,
     pub max_iterations: i32,
-    #[cfg(test)]
-    pub test_overrides: CoinOpTestOverrides,
 }
 
 struct SplitLoopContext<'a> {
@@ -84,8 +82,6 @@ async fn prepare_split_loop_context(
         behavior,
         size_base_units,
         max_iterations: _,
-        #[cfg(test)]
-        test_overrides,
     } = request;
     let CoinSplitBehavior { wait, gating } = behavior;
     let common = prepare_coin_op_loop_common(CoinOpLoopPrep {
@@ -97,8 +93,6 @@ async fn prepare_split_loop_context(
         wait,
         size_base_units,
         coin_ids,
-        #[cfg(test)]
-        test_overrides,
     })
     .await?;
     let (amount_per_coin, number_of_coins) = resolve_split_targets(
@@ -133,14 +127,10 @@ async fn prepare_split_loop_context(
     })
 }
 
-pub fn run_coin_split(request: CoinSplitRequest<'_>) -> ManagerCommandFuture<'_> {
-    Box::pin(run_coin_split_async(request))
-}
-
-async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
-    let mgr = request.mgr;
-    let max_iterations = request.max_iterations;
-    let SplitLoopContext {
+async fn run_coin_split_from_context(
+    mgr: &ManagerContext,
+    max_iterations: i32,
+    SplitLoopContext {
         common,
         amount_per_coin,
         number_of_coins,
@@ -148,7 +138,8 @@ async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32
         output_amounts,
         split_fee,
         gating,
-    } = prepare_split_loop_context(request).await?;
+    }: SplitLoopContext<'_>,
+) -> SignerResult<i32> {
     let super::loop_context::CoinOpLoopCommon {
         exec_ctx,
         wait,
@@ -214,4 +205,38 @@ async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32
             "operations": operations,
         }),
     )
+}
+
+pub fn run_coin_split(request: CoinSplitRequest<'_>) -> ManagerCommandFuture<'_> {
+    Box::pin(run_coin_split_async(request))
+}
+
+async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
+    let mgr = request.mgr;
+    let max_iterations = request.max_iterations;
+    let ctx = prepare_split_loop_context(request).await?;
+    run_coin_split_from_context(mgr, max_iterations, ctx).await
+}
+
+#[cfg(test)]
+pub fn run_coin_split_with_test_overrides(
+    request: CoinSplitRequest<'_>,
+    test_overrides: CoinOpTestOverrides,
+) -> ManagerCommandFuture<'_> {
+    Box::pin(run_coin_split_with_test_overrides_async(
+        request,
+        test_overrides,
+    ))
+}
+
+#[cfg(test)]
+async fn run_coin_split_with_test_overrides_async(
+    request: CoinSplitRequest<'_>,
+    test_overrides: CoinOpTestOverrides,
+) -> SignerResult<i32> {
+    let mgr = request.mgr;
+    let max_iterations = request.max_iterations;
+    let mut ctx = prepare_split_loop_context(request).await?;
+    ctx.common.exec_ctx.test_overrides = test_overrides;
+    run_coin_split_from_context(mgr, max_iterations, ctx).await
 }

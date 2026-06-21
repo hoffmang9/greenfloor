@@ -1,6 +1,4 @@
 use crate::cli_util::optional_str;
-#[cfg(test)]
-use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::error::SignerResult;
 use crate::manager_cli::coin_op_loop::{
     self, CoinCombineBehavior, CoinCombineRequest, CoinSplitBehavior, CoinSplitRequest,
@@ -74,8 +72,6 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                 ),
                 size_base_units: optional_positive_size(size_base_units),
                 max_iterations,
-                #[cfg(test)]
-                test_overrides: CoinOpTestOverrides::default(),
             })
             .await
         }

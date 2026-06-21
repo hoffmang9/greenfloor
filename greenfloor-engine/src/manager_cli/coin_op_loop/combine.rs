@@ -3,8 +3,6 @@ use serde_json::json;
 
 use crate::coin_ops::coin_op_non_negative_u64;
 use crate::coin_ops::evaluate_coin_combine_gate;
-#[cfg(test)]
-use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::resolve_combine_count;
@@ -77,8 +75,6 @@ async fn prepare_combine_loop_context(
         wait,
         size_base_units,
         coin_ids,
-        #[cfg(test)]
-        test_overrides: CoinOpTestOverrides::default(),
     })
     .await?;
     let number_of_coins =

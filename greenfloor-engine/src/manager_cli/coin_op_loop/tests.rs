@@ -3,6 +3,7 @@ use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCo
 
 use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
+use super::split::run_coin_split_with_test_overrides;
 use super::split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
 use super::until_ready::UntilReadyWaitMode;
 use crate::manager_cli::test_support::ManagerContextBuilder;
@@ -120,7 +121,6 @@ async fn until_ready_requires_size_base_units() {
         },
         size_base_units: None,
         max_iterations: 3,
-        test_overrides: CoinOpTestOverrides::default(),
     })
     .await
     .expect_err("missing size");
@@ -159,7 +159,6 @@ async fn until_ready_disallows_no_wait() {
         },
         size_base_units: Some(10),
         max_iterations: 3,
-        test_overrides: CoinOpTestOverrides::default(),
     })
     .await
     .expect_err("no-wait conflict");
@@ -331,34 +330,36 @@ async fn coin_split_executes_with_test_overrides() {
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = run_coin_split(CoinSplitRequest {
-        mgr: &harness.ctx,
-        network: "mainnet",
-        market_id: Some("m1"),
-        pair: None,
-        coin_ids: std::slice::from_ref(&coin_id),
-        amount_per_coin: 100,
-        number_of_coins: 2,
-        behavior: CoinSplitBehavior {
-            wait: UntilReadyWaitMode {
-                until_ready: false,
-                no_wait: true,
+    let code = run_coin_split_with_test_overrides(
+        CoinSplitRequest {
+            mgr: &harness.ctx,
+            network: "mainnet",
+            market_id: Some("m1"),
+            pair: None,
+            coin_ids: std::slice::from_ref(&coin_id),
+            amount_per_coin: 100,
+            number_of_coins: 2,
+            behavior: CoinSplitBehavior {
+                wait: UntilReadyWaitMode {
+                    until_ready: false,
+                    no_wait: true,
+                },
+                gating: CoinSplitGating {
+                    allow_lock_all_spendable: true,
+                    force_split_when_ready: true,
+                },
             },
-            gating: CoinSplitGating {
-                allow_lock_all_spendable: true,
-                force_split_when_ready: true,
-            },
+            size_base_units: None,
+            max_iterations: 1,
         },
-        size_base_units: None,
-        max_iterations: 1,
-        test_overrides: CoinOpTestOverrides {
+        CoinOpTestOverrides {
             wallet_coins: Some(vec![SpendableCoin {
                 id: coin_id.clone(),
                 amount: 1_000_000,
             }]),
             mixed_split_operation_id: Some("split-op-test".to_string()),
         },
-    })
+    )
     .await
     .expect("coin-split");
     assert_eq!(code, 0);

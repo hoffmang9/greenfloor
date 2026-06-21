@@ -5,6 +5,7 @@ mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
+#[cfg(test)]
 mod test_overrides;
 
 #[cfg(test)]

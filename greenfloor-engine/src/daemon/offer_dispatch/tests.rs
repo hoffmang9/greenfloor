@@ -190,67 +190,6 @@ async fn record_parallel_fallback_audit_persists_event() {
     assert_eq!(events[0].event_type, "offer_parallel_fallback");
 }
 
-#[tokio::test]
-async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() {
-    use super::execute_strategy_actions;
-
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
-    );
-    let markets_path = dir.path().join("markets.yaml");
-    write_test_markets_file(&markets_path);
-    let test_ctx = test_context_from_program_file(
-        &dir,
-        &db_path,
-        &program_path,
-        sample_program(false, false),
-        false,
-    );
-    let market = MarketConfig {
-        market_id: "m1".to_string(),
-        enabled: true,
-        base_asset: "xch".to_string(),
-        base_symbol: "XCH".to_string(),
-        quote_asset: "xch".to_string(),
-        quote_asset_type: "stable".to_string(),
-        receive_address: "xch1test".to_string(),
-        signer_key_id: "key-1".to_string(),
-        mode: "sell_only".to_string(),
-        pricing: json!({}),
-        cancel_move_threshold_bps: None,
-        ladders: HashMap::default(),
-    };
-    let actions = vec![PlannedAction {
-        size: 1,
-        repeat: 1,
-        pair: "xch".to_string(),
-        expiry_unit: "minutes".to_string(),
-        expiry_value: 10,
-        cancel_after_create: false,
-        reason: "test".to_string(),
-        target_spread_bps: None,
-        side: "sell".to_string(),
-    }];
-
-    let output = execute_strategy_actions(&store, &test_ctx.cycle_context(), &market, &actions)
-        .await
-        .expect("dispatch");
-
-    assert_eq!(output.executed_count, 0);
-    let events = store
-        .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
-        .expect("events");
-    assert_eq!(events.len(), 1);
-}
-
 fn sample_market() -> MarketConfig {
     MarketConfig {
         market_id: "m1".to_string(),
@@ -369,6 +308,22 @@ fn sample_market_with_pricing() -> MarketConfig {
         }),
         ..sample_market()
     }
+}
+
+#[tokio::test]
+async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() {
+    let harness = ParallelDispatchHarness::new(false, false, false);
+    let output = harness
+        .execute(&sample_market(), &[sample_action()])
+        .await
+        .expect("dispatch");
+
+    assert_eq!(output.executed_count, 0);
+    let events = harness
+        .store
+        .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
+        .expect("events");
+    assert_eq!(events.len(), 1);
 }
 
 #[tokio::test]

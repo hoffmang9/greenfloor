@@ -14,10 +14,12 @@ use crate::error::SignerResult;
 use crate::metrics::{metric_millis_to_u64, metric_u64_to_usize};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
-use super::dispatch_test_controls::DaemonDispatchTestInjections;
 use super::market_context::DaemonCycleResources;
 use super::markets::enabled_market_ids;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
+
+#[cfg(test)]
+use super::dispatch_test_controls::DaemonDispatchTestInjections;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DaemonDispatchState {
@@ -31,6 +33,7 @@ pub struct DaemonCycleTestControls {
     pub skip_strategy_execution: bool,
     #[serde(default)]
     pub force_market_error_for: Option<String>,
+    #[cfg(test)]
     #[serde(default, skip)]
     pub offer_dispatch: DaemonDispatchTestInjections,
 }

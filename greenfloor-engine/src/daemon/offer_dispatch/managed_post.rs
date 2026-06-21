@@ -1,28 +1,31 @@
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
-use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::error::SignerResult;
 use crate::offer::operator::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
-    BuildAndPostVenueOptions, BuildOfferTestOverrides,
+    BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
 
 use crate::async_boundary::ManagedOfferPostFuture;
+
+#[cfg(test)]
+use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 
 pub fn post_managed_planned_action<'a>(
     program: &'a ManagerProgramConfig,
     paths: &'a DaemonCyclePaths,
     market: &'a MarketConfig,
     action: &'a PlannedAction,
-    dispatch_injections: &'a DaemonDispatchTestInjections,
+    #[cfg(test)] dispatch_injections: &'a DaemonDispatchTestInjections,
 ) -> ManagedOfferPostFuture<'a> {
     Box::pin(post_managed_planned_action_async(
         program,
         paths,
         market,
         action,
+        #[cfg(test)]
         dispatch_injections,
     ))
 }
@@ -32,8 +35,9 @@ async fn post_managed_planned_action_async(
     paths: &DaemonCyclePaths,
     market: &MarketConfig,
     action: &PlannedAction,
-    dispatch_injections: &DaemonDispatchTestInjections,
+    #[cfg(test)] dispatch_injections: &DaemonDispatchTestInjections,
 ) -> SignerResult<bool> {
+    #[cfg(test)]
     if let Some(result) = super::test_overrides::managed_post_result(dispatch_injections) {
         return result;
     }
@@ -62,7 +66,8 @@ async fn post_managed_planned_action_async(
             persist_results: true,
         },
         action_side: Some(side),
-        test_overrides: BuildOfferTestOverrides::default(),
+        #[cfg(test)]
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
     })
     .await?;
     Ok(response.exit_code == 0)

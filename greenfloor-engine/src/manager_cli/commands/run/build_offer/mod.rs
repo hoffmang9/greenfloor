@@ -3,8 +3,11 @@ use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::util::require_market_selector;
 use crate::offer::operator::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
-    BuildAndPostVenueOptions, BuildOfferTestOverrides,
+    BuildAndPostVenueOptions,
 };
+
+#[cfg(test)]
+use crate::offer::operator::BuildOfferTestOverrides;
 
 use super::super::clap::ManagerCommands;
 
@@ -51,7 +54,8 @@ pub(crate) fn build_and_post_request(
             persist_results: true,
         },
         action_side: None,
-        test_overrides: BuildOfferTestOverrides::default(),
+        #[cfg(test)]
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
     })
 }
 

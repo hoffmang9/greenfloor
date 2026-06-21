@@ -1,8 +1,6 @@
 //! Shared coin-op loop preparation for split and combine CLI commands.
 
 use crate::coin_ops::execution::CoinOpExecContext;
-#[cfg(test)]
-use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::config::LadderEntry;
 use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
@@ -30,8 +28,6 @@ pub(super) struct CoinOpLoopPrep<'a> {
     pub wait: UntilReadyWaitMode,
     pub size_base_units: Option<i64>,
     pub coin_ids: &'a [String],
-    #[cfg(test)]
-    pub test_overrides: CoinOpTestOverrides,
 }
 
 pub(super) async fn prepare_coin_op_loop_common(
@@ -48,11 +44,6 @@ pub(super) async fn prepare_coin_op_loop_common(
         prep.asset_id,
     )
     .await?;
-    #[cfg(test)]
-    let exec_ctx = CoinOpExecContext {
-        test_overrides: prep.test_overrides,
-        ..exec_ctx
-    };
     let ladder_entry = prep
         .size_base_units
         .filter(|value| *value > 0)

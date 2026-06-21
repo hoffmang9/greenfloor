@@ -54,6 +54,7 @@ async fn create_offer_for_post(
         request.size_base_units,
         ctx.quote_price,
         &ctx.action_side,
+        #[cfg(test)]
         &ctx.test_overrides,
     )
     .await
