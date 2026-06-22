@@ -223,4 +223,129 @@ async fn run_signer_denomination_phase_rejects_nonzero_bootstrap_fee() {
     assert_eq!(result.reason, "signer_mixed_split_fee_not_supported");
     assert!(!result.ready);
     assert_eq!(result.fee_mojos, 500);
+    assert!(!result.ready);
+}
+
+#[tokio::test]
+async fn run_signer_denomination_phase_skips_when_ladder_already_ready() {
+    use crate::config::ManagerProgramConfig;
+    use crate::test_support::ladder::market_with_side_ladder;
+    use crate::test_support::signer_config::test_signer_config;
+
+    const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+    let coin_body = r#"{
+        "success": true,
+        "coin_records": [
+            {
+                "coin": {
+                    "parent_coin_info": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
+                    "amount": 10
+                },
+                "coinbase": false,
+                "confirmed_block_index": 1,
+                "spent": false,
+                "spent_block_index": 0,
+                "timestamp": 1
+            },
+            {
+                "coin": {
+                    "parent_coin_info": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
+                    "amount": 10
+                },
+                "coinbase": false,
+                "confirmed_block_index": 1,
+                "spent": false,
+                "spent_block_index": 0,
+                "timestamp": 1
+            },
+            {
+                "coin": {
+                    "parent_coin_info": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
+                    "amount": 10
+                },
+                "coinbase": false,
+                "confirmed_block_index": 1,
+                "spent": false,
+                "spent_block_index": 0,
+                "timestamp": 1
+            }
+        ]
+    }"#;
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(coin_body)
+        .create_async()
+        .await;
+
+    let market = market_with_side_ladder(RECEIVE_ADDRESS, "sell", 10, 2);
+    let program = ManagerProgramConfig::default();
+    let signer = test_signer_config(&server.url());
+
+    let result =
+        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
+            .await
+            .expect("phase");
+
+    assert_eq!(result.reason, "already_ready");
+    assert!(!result.ready);
+}
+
+#[tokio::test]
+async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
+    use super::prepare_bootstrap_split_plan;
+    use crate::config::ManagerProgramConfig;
+    use crate::test_support::ladder::market_with_side_ladder;
+    use crate::test_support::signer_config::test_signer_config;
+
+    const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+    let coin_body = r#"{
+        "success": true,
+        "coin_records": [{
+            "coin": {
+                "parent_coin_info": "c325057d788bee13367cb8e2d71ff3e209b5e94b31b296322ba1a143053fef5b",
+                "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
+                "amount": 1000
+            },
+            "coinbase": false,
+            "confirmed_block_index": 1,
+            "spent": false,
+            "spent_block_index": 0,
+            "timestamp": 1
+        }]
+    }"#;
+    let mut server = mockito::Server::new_async().await;
+    let _coin_mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(coin_body)
+        .create_async()
+        .await;
+    let _fee_mock = server
+        .mock("POST", "/get_fee_estimate")
+        .with_status(200)
+        .with_body(r#"{"success":false}"#)
+        .create_async()
+        .await;
+
+    let market = market_with_side_ladder(RECEIVE_ADDRESS, "sell", 10, 2);
+    let program = ManagerProgramConfig {
+        coin_ops_minimum_fee_mojos: 0,
+        ..Default::default()
+    };
+    let signer = test_signer_config(&server.url());
+
+    let plan_ctx =
+        prepare_bootstrap_split_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
+            .await
+            .expect("phase result")
+            .expect("split plan context");
+
+    assert_eq!(plan_ctx.fee_mojos, 0);
+    assert_eq!(plan_ctx.fee_source, "config_minimum_fee_fallback");
+    assert!(!plan_ctx.bootstrap_plan.output_amounts_base_units.is_empty());
 }

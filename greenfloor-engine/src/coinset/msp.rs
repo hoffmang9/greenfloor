@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use super::asset::is_xch_like_asset;
 use super::direct_api;
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 
 pub const DEFAULT_MSP_BASE_URL: &str = "https://api-msp.coinset.org";
@@ -27,17 +28,19 @@ impl MspCoinset {
     /// Returns an error if the operation fails.
     pub fn for_network(network: &str, base_url: Option<&str>) -> SignerResult<Self> {
         let network = direct_api::normalize_coinset_network(network);
-        let url = base_url
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map_or_else(
-                || DEFAULT_MSP_BASE_URL.to_string(),
-                |value| value.trim_end_matches('/').to_string(),
-            );
         match network {
-            "mainnet" | "testnet11" => Ok(Self::new(url)),
+            "mainnet" | "testnet11" => Ok(Self::new(resolve_msp_base_url(base_url))),
             other => Err(SignerError::Other(format!("unsupported network: {other}"))),
         }
+    }
+
+    /// MSP client scoped to signer config (`network` + optional `coinset_msp_base_url`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the signer network is unsupported.
+    pub fn for_signer(signer: &SignerConfig) -> SignerResult<Self> {
+        Self::for_network(&signer.network, msp_base_url_for_signer(signer))
     }
 
     #[must_use]
@@ -104,15 +107,43 @@ pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
     Ok(MspCoinset::for_network(network, None)?.client().clone())
 }
 
+/// Resolve the MSP coinset base URL from signer config, if configured.
+#[must_use]
+pub fn msp_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
+    let url = signer.coinset_msp_base_url.trim();
+    if url.is_empty() {
+        None
+    } else {
+        Some(url)
+    }
+}
+
+fn resolve_msp_base_url(base_url: Option<&str>) -> String {
+    base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || DEFAULT_MSP_BASE_URL.to_string(),
+            |value| value.trim_end_matches('/').to_string(),
+        )
+}
+
+/// Coinset client for signer config (network + MSP base URL).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn client_for_signer(signer: &SignerConfig) -> SignerResult<CoinsetClient> {
+    Ok(MspCoinset::for_signer(signer)?.client().clone())
+}
+
 /// Client for config.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub fn client_for_config(config: &crate::config::SignerConfig) -> SignerResult<CoinsetClient> {
-    Ok(MspCoinset::new(&config.coinset_msp_base_url)
-        .client()
-        .clone())
+pub fn client_for_config(config: &SignerConfig) -> SignerResult<CoinsetClient> {
+    client_for_signer(config)
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +232,19 @@ async fn resolve_one_asset(msp: &MspCoinset, raw: &str) -> SignerResult<String> 
 mod tests {
     use super::*;
     use crate::hex::hex_to_bytes32;
+
+    #[test]
+    fn msp_base_url_for_signer_returns_none_when_unconfigured() {
+        use crate::test_support::signer_config::test_signer_config;
+
+        let signer = test_signer_config("");
+        assert!(msp_base_url_for_signer(&signer).is_none());
+        let signer = test_signer_config("https://msp.example.test");
+        assert_eq!(
+            msp_base_url_for_signer(&signer),
+            Some("https://msp.example.test")
+        );
+    }
 
     #[test]
     fn normalize_asset_id_accepts_xch_and_hex() {

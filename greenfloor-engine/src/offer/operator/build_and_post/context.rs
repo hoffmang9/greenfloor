@@ -1,4 +1,4 @@
-use crate::coinset::get_conservative_fee_estimate;
+use crate::coinset::get_conservative_fee_estimate_for_signer;
 use crate::config::{
     action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle_gated,
     resolve_market_for_build, resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig,
@@ -61,7 +61,7 @@ pub(super) async fn resolve_build_and_post_context(
             .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
-    let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&request.network).await;
+    let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&signer_config).await;
 
     Ok(ResolvedBuildAndPostContext {
         program,
@@ -94,8 +94,8 @@ pub(super) fn resolve_action_side(
     action_side_from_pricing(pricing)
 }
 
-async fn resolve_maker_offer_fee(network: &str) -> (u64, String) {
-    match get_conservative_fee_estimate(network, None, 1_000_000, Some(1)).await {
+async fn resolve_maker_offer_fee(signer: &SignerConfig) -> (u64, String) {
+    match get_conservative_fee_estimate_for_signer(signer, 1_000_000, Some(1)).await {
         Ok(Some(fee)) => (fee, "coinset_conservative_fee".to_string()),
         Ok(None) | Err(_) => (0, "coinset_fee_unavailable".to_string()),
     }
@@ -157,5 +157,44 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         offer_fee_source: "coinset_fee_unavailable".to_string(),
         #[cfg(test)]
         test_overrides: BuildOfferTestOverrides::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_maker_offer_fee;
+    use crate::test_support::signer_config::test_signer_config;
+
+    #[tokio::test]
+    async fn resolve_maker_offer_fee_uses_signer_msp_endpoint() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_fee_estimate")
+            .with_status(200)
+            .with_body(r#"{"success":true,"estimates":[100,250]}"#)
+            .create_async()
+            .await;
+        let signer = test_signer_config(&server.url());
+
+        let (fee_mojos, fee_source) = resolve_maker_offer_fee(&signer).await;
+
+        assert_eq!(fee_mojos, 250);
+        assert_eq!(fee_source, "coinset_conservative_fee");
+    }
+
+    #[tokio::test]
+    async fn resolve_maker_offer_fee_reports_unavailable_on_lookup_failure() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_fee_estimate")
+            .with_status(500)
+            .create_async()
+            .await;
+        let signer = test_signer_config(&server.url());
+
+        let (fee_mojos, fee_source) = resolve_maker_offer_fee(&signer).await;
+
+        assert_eq!(fee_mojos, 0);
+        assert_eq!(fee_source, "coinset_fee_unavailable");
     }
 }

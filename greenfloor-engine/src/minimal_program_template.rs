@@ -93,3 +93,22 @@ pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramPara
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("write signer program {}: {err}", path.display()));
 }
+
+/// Write a minimal signer program fixture with an explicit MSP base URL.
+///
+/// # Panics
+///
+/// Panics if the file cannot be written.
+pub fn write_minimal_program_with_signer_msp(
+    path: &Path,
+    msp_base_url: &str,
+    params: MinimalProgramParams<'_>,
+) {
+    write_minimal_program_with_signer(
+        path,
+        MinimalProgramParams {
+            coinset_msp_base_url: Some(msp_base_url),
+            ..params
+        },
+    );
+}

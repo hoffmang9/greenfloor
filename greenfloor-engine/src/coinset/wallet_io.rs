@@ -45,17 +45,6 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
     })?))
 }
 
-/// Resolve the MSP coinset base URL from signer config, if configured.
-#[must_use]
-pub fn msp_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
-    let url = signer.coinset_msp_base_url.trim();
-    if url.is_empty() {
-        None
-    } else {
-        Some(url)
-    }
-}
-
 /// List wallet unspent coins for a signer (uses `coinset_msp_base_url` when set).
 ///
 /// # Errors
@@ -71,7 +60,7 @@ pub async fn list_wallet_unspent_coins_for_signer(
         network,
         receive_address,
         asset_id,
-        msp_base_url_for_signer(signer),
+        msp::msp_base_url_for_signer(signer),
     )
     .await
 }
@@ -81,7 +70,7 @@ pub async fn list_wallet_unspent_coins_for_signer(
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn list_wallet_unspent_coins(
+pub(crate) async fn list_wallet_unspent_coins(
     network: &str,
     receive_address: &str,
     asset_id: &str,
@@ -168,19 +157,6 @@ pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn msp_base_url_for_signer_returns_none_when_unconfigured() {
-        use crate::test_support::signer_config::test_signer_config;
-
-        let signer = test_signer_config("");
-        assert!(msp_base_url_for_signer(&signer).is_none());
-        let signer = test_signer_config("https://msp.example.test");
-        assert_eq!(
-            msp_base_url_for_signer(&signer),
-            Some("https://msp.example.test")
-        );
-    }
 
     #[test]
     fn spend_bundle_hash_from_hex_rejects_garbage() {

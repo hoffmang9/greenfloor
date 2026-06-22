@@ -180,7 +180,6 @@ async fn prepare_bootstrap_split_plan(
     };
 
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
-        &program.network,
         signer_config,
         program.coin_ops_minimum_fee_mojos,
         bootstrap_plan.output_amounts_base_units.len(),

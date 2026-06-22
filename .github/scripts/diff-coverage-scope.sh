@@ -15,7 +15,8 @@ while IFS= read -r file; do
       if [[ "${file}" == *"/tests/"* ]] \
         || [[ "${file}" == *"/test_support/"* ]] \
         || [[ "${file}" == *"/test_env/"* ]] \
-        || [[ "${file}" == *"/test_overrides/"* ]]; then
+        || [[ "${file}" == *"/test_overrides/"* ]] \
+        || [[ "${file}" == *"_tests.rs" ]]; then
         continue
       fi
       run_rust_cov=true
