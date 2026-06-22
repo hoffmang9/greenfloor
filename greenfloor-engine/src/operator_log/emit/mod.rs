@@ -4,5 +4,8 @@ mod audit;
 mod context;
 mod deferred;
 
-pub use context::{AuditDurability, LogContext};
-pub use deferred::{audit_row_defer_dual, emit_deferred_dual_traces, DeferredDualEmit};
+#[cfg(test)]
+mod tests;
+
+pub use context::LogContext;
+pub(crate) use deferred::{audit_row_defer_dual, emit_deferred_dual_traces, DeferredDualEmit};

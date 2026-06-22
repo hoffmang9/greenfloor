@@ -42,108 +42,138 @@ pub struct PostIterationBatch {
     pub failure_audits: Vec<PostFailureAudit>,
 }
 
-pub fn flush_post_batch(
-    store: &SqliteStore,
-    ctx: &ResolvedBuildAndPostContext,
-    records: &[OfferPostPersistRecord],
-    failures: &[PostFailureAudit],
-) -> SignerResult<()> {
-    let mut deferred_traces = Vec::new();
-    store.immediate_transaction("post flush", |store| {
-        for record in records {
-            upsert_offer_post_record(store, record)?;
-        }
-        for failure in failures {
-            let payload = post_failure_payload(
-                &ctx.market.market_id,
-                &ctx.publish_venue,
-                &failure.error,
-                failure.offer_ref.as_deref(),
-            );
-            audit_row_defer_dual(
-                &mut deferred_traces,
-                store,
-                DeferredDualEmit {
-                    ctx: LogContext::OFFER_POST,
-                    level: Level::WARN,
-                    trace_message: "offer post failed",
-                    audit_event_type: OFFER_POST_FAILURE,
-                    payload,
-                    market_id: Some(ctx.market.market_id.clone()),
-                },
-            )?;
-        }
-        for record in records {
-            let payload = strategy_offer_execution_payload(record);
-            audit_row_defer_dual(
-                &mut deferred_traces,
-                store,
-                DeferredDualEmit {
-                    ctx: LogContext::MARKET_CYCLE,
-                    level: Level::INFO,
-                    trace_message: "strategy offer executed",
-                    audit_event_type: STRATEGY_OFFER_EXECUTION,
-                    payload,
-                    market_id: Some(record.market_id.clone()),
-                },
-            )?;
-        }
-        Ok(())
-    })?;
-    emit_deferred_dual_traces(&deferred_traces);
-    Ok(())
+pub struct PostBatchEmitter<'a> {
+    ctx: &'a ResolvedBuildAndPostContext,
 }
 
-fn post_failure_payload(
-    market_id: &str,
-    publish_venue: &str,
-    error: &str,
-    offer_ref: Option<&str>,
-) -> Value {
-    let mut payload = json!({
-        "market_id": market_id,
-        "venue": publish_venue,
-        "error": error,
-        "planned_count": 1,
-        "executed_count": 0,
-    });
-    if let Some(offer_ref) = offer_ref {
-        if let Value::Object(obj) = &mut payload {
-            obj.insert("offer_ref".to_string(), json!(offer_ref));
-        }
+impl<'a> PostBatchEmitter<'a> {
+    #[must_use]
+    pub fn new(ctx: &'a ResolvedBuildAndPostContext) -> Self {
+        Self { ctx }
     }
-    payload
-}
 
-fn trace_post_failure(ctx: &ResolvedBuildAndPostContext, error: &str, offer_ref: Option<&str>) {
-    let payload = post_failure_payload(&ctx.market.market_id, &ctx.publish_venue, error, offer_ref);
-    let _ = LogContext::OFFER_POST.dual_trace(
-        Level::WARN,
-        "offer post failed",
-        OFFER_POST_FAILURE,
-        &payload,
-        Some(&ctx.market.market_id),
-    );
-}
+    pub fn trace_iteration(&self, outcome: &str, offer_ref: &str) {
+        crate::trace_event!(
+            INFO,
+            LogContext::OFFER_POST,
+            OFFER_POST_ITERATION,
+            {
+                market_id = self.ctx.market.market_id.as_str(),
+                outcome = outcome,
+                publish_venue = self.ctx.publish_venue.as_str(),
+                offer_ref = offer_ref,
+            };
+            "offer post iteration"
+        );
+    }
 
-fn trace_post_iteration(outcome: &str, ctx: &ResolvedBuildAndPostContext, offer_ref: &str) {
-    crate::trace_event!(
-        INFO,
-        LogContext::OFFER_POST,
-        OFFER_POST_ITERATION,
-        {
-            market_id = ctx.market.market_id.as_str(),
-            outcome = outcome,
-            publish_venue = ctx.publish_venue.as_str(),
-            offer_ref = offer_ref,
+    pub fn trace_failure(&self, error: &str, offer_ref: Option<&str>) {
+        let payload = self.failure_payload(error, offer_ref);
+        LogContext::OFFER_POST.dual_trace(
+            Level::WARN,
+            "offer post failed",
+            OFFER_POST_FAILURE,
+            &payload,
+            Some(self.ctx.market.market_id.as_str()),
+        );
+    }
+
+    pub fn trace_completed(
+        &self,
+        outcome: &str,
+        publish_attempts: usize,
+        publish_failures: u32,
+        dry_run: bool,
+    ) {
+        let level = match outcome {
+            "success" => Level::INFO,
+            "failure" => Level::ERROR,
+            _ => Level::WARN,
         };
-        "offer post iteration"
-    );
+        crate::trace_event!(
+            level = level,
+            LogContext::OFFER_POST,
+            OFFER_POST_COMPLETED,
+            {
+                market_id = self.ctx.market.market_id.as_str(),
+                outcome = outcome,
+                publish_attempts = publish_attempts,
+                publish_failures = publish_failures,
+                dry_run = dry_run,
+            };
+            "build-and-post-offer completed"
+        );
+    }
+
+    pub fn flush(
+        &self,
+        store: &SqliteStore,
+        records: &[OfferPostPersistRecord],
+        failures: &[PostFailureAudit],
+    ) -> SignerResult<()> {
+        let mut deferred_traces = Vec::new();
+        store.immediate_transaction("post flush", |store| {
+            for record in records {
+                upsert_offer_post_record(store, record)?;
+            }
+            for failure in failures {
+                audit_row_defer_dual(&mut deferred_traces, store, self.deferred_failure(failure))?;
+            }
+            for record in records {
+                audit_row_defer_dual(
+                    &mut deferred_traces,
+                    store,
+                    Self::deferred_execution(record),
+                )?;
+            }
+            Ok(())
+        })?;
+        emit_deferred_dual_traces(&deferred_traces);
+        Ok(())
+    }
+
+    fn deferred_failure(&self, failure: &PostFailureAudit) -> DeferredDualEmit {
+        DeferredDualEmit::new(
+            LogContext::OFFER_POST,
+            Level::WARN,
+            "offer post failed",
+            OFFER_POST_FAILURE,
+            self.failure_payload(&failure.error, failure.offer_ref.as_deref()),
+            Some(self.ctx.market.market_id.clone()),
+        )
+    }
+
+    fn deferred_execution(record: &OfferPostPersistRecord) -> DeferredDualEmit {
+        DeferredDualEmit::new(
+            LogContext::MARKET_CYCLE,
+            Level::INFO,
+            "strategy offer executed",
+            STRATEGY_OFFER_EXECUTION,
+            strategy_offer_execution_payload(record),
+            Some(record.market_id.clone()),
+        )
+    }
+
+    fn failure_payload(&self, error: &str, offer_ref: Option<&str>) -> Value {
+        let mut payload = json!({
+            "market_id": self.ctx.market.market_id.as_str(),
+            "venue": self.ctx.publish_venue.as_str(),
+            "error": error,
+            "planned_count": 1,
+            "executed_count": 0,
+        });
+        if let Some(offer_ref) = offer_ref {
+            if let Value::Object(obj) = &mut payload {
+                obj.insert("offer_ref".to_string(), json!(offer_ref));
+            }
+        }
+        payload
+    }
 }
 
 pub fn apply_post_iteration_outcome(
     target: PostEmitTarget,
-    ctx: &ResolvedBuildAndPostContext,
+    emitter: &PostBatchEmitter<'_>,
     outcome: PostIterationOutcome,
     batch: &mut PostIterationBatch,
 ) {
@@ -153,12 +183,12 @@ pub fn apply_post_iteration_outcome(
                 .get("offer_prefix")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            trace_post_iteration("preview", ctx, offer_ref);
+            emitter.trace_iteration("preview", offer_ref);
             batch.built_offers_preview.push(preview);
         }
         PostIterationOutcome::Failure(failure) => {
             if target == PostEmitTarget::TraceOnly {
-                trace_post_failure(ctx, &failure.error, None);
+                emitter.trace_failure(&failure.error, None);
             } else {
                 batch.failure_audits.push(PostFailureAudit {
                     error: failure.error.clone(),
@@ -168,7 +198,7 @@ pub fn apply_post_iteration_outcome(
             batch.publish_failures += 1;
             batch
                 .post_results
-                .push(failure.to_venue_result(&ctx.publish_venue));
+                .push(failure.to_venue_result(&emitter.ctx.publish_venue));
         }
         PostIterationOutcome::Success(success) => {
             if success.success {
@@ -177,7 +207,7 @@ pub fn apply_post_iteration_outcome(
                     .as_ref()
                     .map(|record| offer_log_ref(&record.offer_id))
                     .unwrap_or_default();
-                trace_post_iteration("success", ctx, &offer_ref);
+                emitter.trace_iteration("success", &offer_ref);
             } else {
                 let error = success
                     .result
@@ -190,7 +220,7 @@ pub fn apply_post_iteration_outcome(
                     .as_ref()
                     .map(|record| offer_log_ref(&record.offer_id));
                 if target == PostEmitTarget::TraceOnly {
-                    trace_post_failure(ctx, &error, offer_ref.as_deref());
+                    emitter.trace_failure(&error, offer_ref.as_deref());
                 } else {
                     batch
                         .failure_audits
@@ -204,33 +234,6 @@ pub fn apply_post_iteration_outcome(
             }
         }
     }
-}
-
-pub fn trace_offer_post_completed(
-    outcome: &str,
-    market_id: &str,
-    publish_attempts: usize,
-    publish_failures: u32,
-    dry_run: bool,
-) {
-    let level = match outcome {
-        "success" => Level::INFO,
-        "failure" => Level::ERROR,
-        _ => Level::WARN,
-    };
-    crate::trace_event_at_level!(
-        level,
-        LogContext::OFFER_POST,
-        OFFER_POST_COMPLETED,
-        {
-            market_id = market_id,
-            outcome = outcome,
-            publish_attempts = publish_attempts,
-            publish_failures = publish_failures,
-            dry_run = dry_run,
-        };
-        "build-and-post-offer completed"
-    );
 }
 
 fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {

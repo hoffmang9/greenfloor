@@ -14,31 +14,29 @@ macro_rules! event_at_level {
 }
 
 /// Emit a structured operator trace event (`service`, `event`, and `phase` are always set).
+///
+/// Pass a compile-time level (`INFO`, `WARN`, …) or `level = $runtime_level` when the level
+/// is chosen at runtime.
 #[macro_export]
 macro_rules! trace_event {
-    ($level:ident, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
-        tracing::event!(
-            tracing::Level::$level,
-            service = ($ctx).service,
-            event = $event,
-            phase = ($ctx).phase,
-            $($fields)*
-            $msg
-        );
-    };
-}
-
-/// Like [`trace_event!`], but the tracing level is chosen at runtime.
-#[macro_export]
-macro_rules! trace_event_at_level {
-    ($level:expr, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+    (level = $level:expr, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
         $crate::event_at_level!(
             $level,
-            service = ($ctx).service,
+            service = ($ctx).service(),
             event = $event,
-            phase = ($ctx).phase,
+            phase = ($ctx).phase(),
             $($fields)*
             $msg
         )
+    };
+    ($level:ident, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::event!(
+            tracing::Level::$level,
+            service = ($ctx).service(),
+            event = $event,
+            phase = ($ctx).phase(),
+            $($fields)*
+            $msg
+        );
     };
 }

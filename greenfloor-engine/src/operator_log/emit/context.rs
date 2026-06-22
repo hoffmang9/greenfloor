@@ -4,19 +4,72 @@ use tracing::Level;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::audit::{mirror_only, persist_and_mirror, persist_only};
+use super::audit::{persist_and_mirror, persist_only, trace_payload_mirror};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AuditDurability {
+pub(crate) enum AuditDurability {
     #[default]
     Required,
     BestEffort,
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct DualAudit<'a> {
+    level: Level,
+    trace_message: &'static str,
+    event_type: &'a str,
+    payload: &'a Value,
+    market_id: Option<&'a str>,
+}
+
+impl<'a> DualAudit<'a> {
+    #[must_use]
+    pub(crate) fn new(
+        level: Level,
+        trace_message: &'static str,
+        event_type: &'a str,
+        payload: &'a Value,
+    ) -> Self {
+        Self {
+            level,
+            trace_message,
+            event_type,
+            payload,
+            market_id: None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn with_market_id(mut self, market_id: &'a str) -> Self {
+        self.market_id = Some(market_id);
+        self
+    }
+
+    pub(crate) const fn level(self) -> Level {
+        self.level
+    }
+
+    pub(crate) const fn trace_message(self) -> &'static str {
+        self.trace_message
+    }
+
+    pub(crate) const fn event_type(self) -> &'a str {
+        self.event_type
+    }
+
+    pub(crate) const fn payload(self) -> &'a Value {
+        self.payload
+    }
+
+    pub(crate) const fn market_id(self) -> Option<&'a str> {
+        self.market_id
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct LogContext {
-    pub service: &'static str,
-    pub phase: &'static str,
+    service: &'static str,
+    phase: &'static str,
 }
 
 impl LogContext {
@@ -45,7 +98,31 @@ impl LogContext {
         phase: "coinset",
     };
 
-    /// Persist and mirror one audit outcome (`AuditDurability::Required`).
+    #[must_use]
+    pub const fn service(self) -> &'static str {
+        self.service
+    }
+
+    #[must_use]
+    pub const fn phase(self) -> &'static str {
+        self.phase
+    }
+
+    fn audit_ref<'a>(
+        level: Level,
+        trace_message: &'static str,
+        event_type: &'a str,
+        payload: &'a Value,
+        market_id: Option<&'a str>,
+    ) -> DualAudit<'a> {
+        let audit = DualAudit::new(level, trace_message, event_type, payload);
+        match market_id {
+            Some(market_id) => audit.with_market_id(market_id),
+            None => audit,
+        }
+    }
+
+    /// Persist and mirror one audit outcome.
     ///
     /// # Errors
     ///
@@ -55,64 +132,30 @@ impl LogContext {
         store: &SqliteStore,
         level: Level,
         trace_message: &'static str,
-        audit_event_type: &str,
+        event_type: &str,
         payload: &Value,
         market_id: Option<&str>,
     ) -> SignerResult<()> {
         persist_and_mirror(
             store,
             self,
-            level,
-            trace_message,
-            audit_event_type,
-            payload,
-            market_id,
+            &Self::audit_ref(level, trace_message, event_type, payload, market_id),
         )
     }
 
-    /// Mirror one audit outcome to trace without persisting.
-    ///
-    /// # Errors
-    ///
-    /// Always returns `Ok(())` today; reserved for future trace-side failures.
+    /// Mirror one audit payload to trace without persisting.
     pub fn dual_trace(
         self,
         level: Level,
         trace_message: &'static str,
-        audit_event_type: &str,
+        event_type: &str,
         payload: &Value,
         market_id: Option<&str>,
-    ) -> SignerResult<()> {
-        mirror_only(
+    ) {
+        trace_payload_mirror(
             self,
-            level,
-            trace_message,
-            audit_event_type,
-            payload,
-            market_id,
+            &Self::audit_ref(level, trace_message, event_type, payload, market_id),
         );
-        Ok(())
-    }
-
-    /// Persist an audit row without a trace mirror (`AuditDurability::Required`).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the audit insert fails.
-    pub fn audit(
-        self,
-        store: &SqliteStore,
-        audit_event_type: &str,
-        payload: &Value,
-        market_id: Option<&str>,
-    ) -> SignerResult<()> {
-        self.audit_with(
-            store,
-            audit_event_type,
-            payload,
-            market_id,
-            AuditDurability::Required,
-        )
     }
 
     /// Persist an audit row without a trace mirror.
@@ -120,14 +163,36 @@ impl LogContext {
     /// # Errors
     ///
     /// Returns an error when the audit insert fails.
-    pub fn audit_with(
+    pub fn audit(
         self,
         store: &SqliteStore,
-        audit_event_type: &str,
+        event_type: &str,
         payload: &Value,
         market_id: Option<&str>,
-        durability: AuditDurability,
     ) -> SignerResult<()> {
-        persist_only(store, audit_event_type, payload, market_id, durability)
+        persist_only(
+            store,
+            event_type,
+            payload,
+            market_id,
+            AuditDurability::Required,
+        )
+    }
+
+    /// Persist an audit row without a trace mirror; DB errors are logged and ignored.
+    pub fn audit_best_effort(
+        self,
+        store: &SqliteStore,
+        event_type: &str,
+        payload: &Value,
+        market_id: Option<&str>,
+    ) {
+        let _ = persist_only(
+            store,
+            event_type,
+            payload,
+            market_id,
+            AuditDurability::BestEffort,
+        );
     }
 }

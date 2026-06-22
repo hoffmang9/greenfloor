@@ -15,59 +15,53 @@ use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::strategy_phase::run_strategy_phase;
 
-fn trace_market_phase(market_id: &str, market_phase: &str, outcome: &str, level: Level) {
+#[derive(Clone, Copy)]
+enum MarketPhaseTraceOutcome {
+    Started,
+    Failed,
+    Completed,
+}
+
+impl MarketPhaseTraceOutcome {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+        }
+    }
+}
+
+fn trace_market_phase(
+    market_id: &str,
+    market_phase: &str,
+    outcome: MarketPhaseTraceOutcome,
+    level: Level,
+) {
+    macro_rules! emit {
+        ($msg:literal) => {
+            crate::trace_event!(
+                level = level,
+                LogContext::MARKET_CYCLE,
+                MARKET_PHASE,
+                {
+                    market_id = market_id,
+                    market_phase = market_phase,
+                    outcome = outcome.label(),
+                };
+                $msg
+            );
+        };
+    }
     match outcome {
-        "started" => {
-            crate::trace_event_at_level!(
-                level,
-                LogContext::MARKET_CYCLE,
-                MARKET_PHASE,
-                {
-                    market_id = market_id,
-                    market_phase = market_phase,
-                    outcome = outcome,
-                };
-                "market phase started"
-            );
+        MarketPhaseTraceOutcome::Started => {
+            emit!("market phase started");
         }
-        "failed" => {
-            crate::trace_event_at_level!(
-                level,
-                LogContext::MARKET_CYCLE,
-                MARKET_PHASE,
-                {
-                    market_id = market_id,
-                    market_phase = market_phase,
-                    outcome = outcome,
-                };
-                "market phase failed"
-            );
+        MarketPhaseTraceOutcome::Failed => {
+            emit!("market phase failed");
         }
-        "completed" => {
-            crate::trace_event_at_level!(
-                level,
-                LogContext::MARKET_CYCLE,
-                MARKET_PHASE,
-                {
-                    market_id = market_id,
-                    market_phase = market_phase,
-                    outcome = outcome,
-                };
-                "market phase completed"
-            );
-        }
-        _ => {
-            crate::trace_event_at_level!(
-                level,
-                LogContext::MARKET_CYCLE,
-                MARKET_PHASE,
-                {
-                    market_id = market_id,
-                    market_phase = market_phase,
-                    outcome = outcome,
-                };
-                "market phase event"
-            );
+        MarketPhaseTraceOutcome::Completed => {
+            emit!("market phase completed");
         }
     }
 }
@@ -80,12 +74,27 @@ async fn run_logged_market_phase<F, T>(
 where
     F: Future<Output = SignerResult<T>>,
 {
-    trace_market_phase(market_id, market_phase, "started", Level::DEBUG);
+    trace_market_phase(
+        market_id,
+        market_phase,
+        MarketPhaseTraceOutcome::Started,
+        Level::DEBUG,
+    );
     let result = body.await;
     if result.is_err() {
-        trace_market_phase(market_id, market_phase, "failed", Level::WARN);
+        trace_market_phase(
+            market_id,
+            market_phase,
+            MarketPhaseTraceOutcome::Failed,
+            Level::WARN,
+        );
     } else {
-        trace_market_phase(market_id, market_phase, "completed", Level::DEBUG);
+        trace_market_phase(
+            market_id,
+            market_phase,
+            MarketPhaseTraceOutcome::Completed,
+            Level::DEBUG,
+        );
     }
     result
 }

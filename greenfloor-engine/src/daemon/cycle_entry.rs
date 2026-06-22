@@ -217,8 +217,8 @@ fn trace_daemon_cycle_completed(exit_code: i32, summary: &DaemonCycleSummary, ma
     } else {
         Level::WARN
     };
-    crate::trace_event_at_level!(
-        level,
+    crate::trace_event!(
+        level = level,
         LogContext::DAEMON_CYCLE,
         DAEMON_CYCLE_COMPLETED,
         {

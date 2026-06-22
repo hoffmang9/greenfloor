@@ -8,9 +8,8 @@ mod redact;
 #[cfg(test)]
 pub mod test_util;
 
-pub use emit::{
-    audit_row_defer_dual, emit_deferred_dual_traces, AuditDurability, DeferredDualEmit, LogContext,
-};
+pub use emit::LogContext;
+pub(crate) use emit::{audit_row_defer_dual, emit_deferred_dual_traces, DeferredDualEmit};
 
 pub use events::coin_op_ledger_event;
 pub use events::*;
