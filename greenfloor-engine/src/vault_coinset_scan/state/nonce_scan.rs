@@ -22,7 +22,7 @@ impl ScanState {
         let mut empty_batch_count = 0u32;
 
         for batch_start in
-            (self.checkpoint_start_nonce..=max_nonce_target).step_by(nonce_batch_size as usize)
+            (self.checkpoint_ctx.start_nonce..=max_nonce_target).step_by(nonce_batch_size as usize)
         {
             let batch_end = batch_start
                 .saturating_add(nonce_batch_size.saturating_sub(1))
@@ -56,20 +56,20 @@ impl ScanState {
             }
             if empty_batch_count >= empty_batch_stop_count {
                 self.stop_reason = ScanStopReason::EmptyNonceBatches;
-                if self.checkpoint_enabled {
+                if self.checkpoint_ctx.enabled {
                     self.write_checkpoint(batch_end)?;
                 }
                 break;
             }
 
             ingest_records(
-                &mut self.by_coin_id,
+                &mut self.checkpoint.by_coin_id,
                 &batch_nonce_p2,
                 DiscoverySource::PuzzleHash,
                 &by_puzzle,
             );
             ingest_records(
-                &mut self.by_coin_id,
+                &mut self.checkpoint.by_coin_id,
                 &batch_nonce_p2,
                 DiscoverySource::Hint,
                 &by_hint,
@@ -77,7 +77,7 @@ impl ScanState {
 
             scanned_since_resume = scanned_since_resume
                 .saturating_add(u32::try_from(batch_nonces.len()).unwrap_or(u32::MAX));
-            if self.checkpoint_enabled
+            if self.checkpoint_ctx.enabled
                 && (scanned_since_resume.is_multiple_of(checkpoint_save_interval)
                     || batch_end >= max_nonce_target)
             {
@@ -98,7 +98,7 @@ impl ScanState {
             let normalized = normalize_hex_id(&p2_hash);
             if !normalized.is_empty() {
                 batch_nonce_p2.insert(*nonce, normalized.clone());
-                self.nonce_to_p2.insert(*nonce, normalized);
+                self.checkpoint.nonce_to_p2.insert(*nonce, normalized);
             }
         }
         Ok(batch_nonce_p2)

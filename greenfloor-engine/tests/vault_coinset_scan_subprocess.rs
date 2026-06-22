@@ -84,7 +84,8 @@ fn vault_coinset_scan_metadata_helpers_in_lib() {
 #[test]
 fn vault_coinset_scan_checkpoint_round_trip_via_lib() {
     use greenfloor_engine::vault_coinset_scan::checkpoint::{
-        load_scan_checkpoint, save_scan_checkpoint, SaveCheckpointParams,
+        load_scan_checkpoint, save_scan_checkpoint, CheckpointWriteMetadata, LoadCheckpointResult,
+        LoadedCheckpoint,
     };
     use greenfloor_engine::vault_coinset_scan::types::{CoinKind, CoinRow};
     use std::collections::HashMap;
@@ -111,22 +112,33 @@ fn vault_coinset_scan_checkpoint_round_trip_via_lib() {
             cat_symbols: vec![],
         },
     );
-    save_scan_checkpoint(&SaveCheckpointParams {
-        checkpoint_file: &path,
-        network: "mainnet",
-        launcher_id: &launcher,
-        include_spent: false,
-        max_nonce_completed: 1,
-        nonce_to_p2: &HashMap::from([(1, "b".repeat(64))]),
-        by_coin_id: &by_coin_id,
-        cat_asset_cache: &HashMap::new(),
-        parent_lineage_cache: &HashMap::new(),
+    let checkpoint = LoadedCheckpoint {
+        nonce_to_p2: HashMap::from([(1, "b".repeat(64))]),
+        by_coin_id,
+        cat_asset_cache: HashMap::new(),
+        parent_lineage_cache: HashMap::new(),
         last_synced_height: Some(100),
-        scan_start_height: Some(0),
-        scan_end_height: Some(100),
-    })
+    };
+    save_scan_checkpoint(
+        &path,
+        &CheckpointWriteMetadata {
+            network: "mainnet",
+            launcher_id: &launcher,
+            include_spent: false,
+            max_nonce_completed: 1,
+            scan_start_height: Some(0),
+            scan_end_height: Some(100),
+        },
+        &checkpoint,
+    )
     .expect("save checkpoint");
-    let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false).expect("load");
-    assert_eq!(loaded.start_nonce, 2);
+    let LoadCheckpointResult::Loaded {
+        checkpoint: loaded,
+        start_nonce,
+    } = load_scan_checkpoint(&path, "mainnet", &launcher, false).expect("load")
+    else {
+        panic!("expected loaded checkpoint");
+    };
+    assert_eq!(start_nonce, 2);
     assert!(loaded.by_coin_id.contains_key(&coin_id));
 }

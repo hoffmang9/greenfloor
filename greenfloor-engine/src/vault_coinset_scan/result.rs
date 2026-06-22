@@ -74,6 +74,8 @@ pub struct CheckpointSummary {
     pub parent_lineage_cache_entries: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced_height: Option<u64>,
+    /// When resume is skipped because on-disk checkpoint params differ from the scan request.
+    /// Values: `launcher_id_mismatch`, `network_mismatch`, `include_spent_mismatch`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discard_reason: Option<String>,
 }

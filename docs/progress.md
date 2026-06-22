@@ -16,6 +16,17 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-21 — Vault coinset scan checkpoint module decomposed
+
+Split the largest non-test Rust file into `checkpoint/{runtime,file,load,save}` with typed
+`LoadCheckpointResult` load outcomes. `ScanState` embeds `LoadedCheckpoint` as live resume
+payload; scan orchestration metadata lives in `ScanCheckpointContext`.
+
+**Operator JSON change:** when an on-disk checkpoint is discarded because request params
+differ, `checkpoint.discard_reason` is now specific (`launcher_id_mismatch`,
+`network_mismatch`, `include_spent_mismatch`) instead of generic
+`checkpoint_params_mismatch`.
+
 ### 2026-06-21 — Test coverage gaps closed; test injection gated behind `cfg(test)` (#118)
 
 In-process harness tests for parallel offer dispatch, coinset CLI dispatch, Dexie cats

@@ -1,9 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::error::SignerResult;
 use crate::vault_coinset_scan::cat_detect::{classify_coin_rows, CatDetectCaches};
-use crate::vault_coinset_scan::checkpoint::save_scan_checkpoint;
-use crate::vault_coinset_scan::checkpoint::{ParentLineageEntry, SaveCheckpointParams};
+use crate::vault_coinset_scan::checkpoint::{
+    save_scan_checkpoint, CheckpointWriteMetadata, LoadCheckpointDiscardReason,
+    LoadCheckpointResult, LoadedCheckpoint,
+};
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::result::{
     apply_name_verification, filter_rows, CheckpointSummary, NameVerification, ScanBatchConfig,
@@ -22,6 +24,68 @@ use prepare::{
     resolve_scan_metadata,
 };
 
+pub(super) struct ScanCheckpointContext {
+    enabled: bool,
+    resumed: bool,
+    discard_reason: Option<LoadCheckpointDiscardReason>,
+    start_nonce: u32,
+}
+
+impl ScanCheckpointContext {
+    fn from_load(enabled: bool, load_result: LoadCheckpointResult) -> (Self, LoadedCheckpoint) {
+        match load_result {
+            LoadCheckpointResult::Loaded {
+                checkpoint,
+                start_nonce,
+            } => {
+                let payload = *checkpoint;
+                let resumed = has_checkpoint_resume_data(&payload, start_nonce);
+                (
+                    Self {
+                        enabled,
+                        resumed,
+                        discard_reason: None,
+                        start_nonce,
+                    },
+                    payload,
+                )
+            }
+            LoadCheckpointResult::Discarded(reason) => (
+                Self {
+                    enabled,
+                    resumed: false,
+                    discard_reason: Some(reason),
+                    start_nonce: 0,
+                },
+                LoadedCheckpoint::empty(),
+            ),
+        }
+    }
+
+    fn summary(
+        &self,
+        file: Option<String>,
+        save_interval: Option<u32>,
+        cat_asset_cache_entries: usize,
+        parent_lineage_cache_entries: usize,
+        last_synced_height: Option<u64>,
+    ) -> CheckpointSummary {
+        CheckpointSummary {
+            enabled: self.enabled,
+            file,
+            resumed: self.resumed,
+            start_nonce: self.start_nonce,
+            save_interval,
+            cat_asset_cache_entries,
+            parent_lineage_cache_entries,
+            last_synced_height,
+            discard_reason: self
+                .discard_reason
+                .map(|reason| reason.as_str().to_string()),
+        }
+    }
+}
+
 pub struct ScanState {
     request: ScanRequest,
     scanner: crate::coinset::DirectCoinsetScanClient,
@@ -30,14 +94,8 @@ pub struct ScanState {
     effective_asset_type: crate::vault_coinset_scan::types::AssetTypeFilter,
     requested_cat_ids: HashSet<String>,
     asset_id_to_symbols: std::collections::BTreeMap<String, Vec<String>>,
-    checkpoint_enabled: bool,
-    checkpoint_resumed: bool,
-    checkpoint_discarded_mismatch: bool,
-    checkpoint_start_nonce: u32,
-    nonce_to_p2: HashMap<u32, String>,
-    by_coin_id: HashMap<String, CoinRow>,
-    cat_asset_cache: HashMap<String, String>,
-    parent_lineage_cache: HashMap<String, ParentLineageEntry>,
+    checkpoint_ctx: ScanCheckpointContext,
+    checkpoint: LoadedCheckpoint,
     window: crate::vault_coinset_scan::window::ScanWindowPlan,
     stop_reason: ScanStopReason,
 }
@@ -59,7 +117,7 @@ impl ScanState {
         let name_verification = state.verify_and_filter_names().await?;
         state.save_final_checkpoint()?;
         let filtered = filter_rows(
-            &state.by_coin_id,
+            &state.checkpoint.by_coin_id,
             state.effective_asset_type,
             &state.requested_cat_ids,
         );
@@ -79,28 +137,15 @@ impl ScanState {
         } = resolve_scan_client(&request)?;
 
         let checkpoint_enabled = request.checkpoint_file.is_some();
-        let loaded = load_checkpoint_or_default(&request, &scanner.network, &launcher_id)?;
-        let checkpoint_discarded_mismatch = loaded.discarded_mismatch;
-        let checkpoint_resumed = !loaded.discarded_mismatch
-            && (loaded.start_nonce > 0
-                || !loaded.by_coin_id.is_empty()
-                || !loaded.cat_asset_cache.is_empty()
-                || !loaded.parent_lineage_cache.is_empty());
-        let crate::vault_coinset_scan::checkpoint::LoadedCheckpoint {
-            start_nonce: checkpoint_start_nonce,
-            nonce_to_p2,
-            by_coin_id,
-            cat_asset_cache,
-            parent_lineage_cache,
-            last_synced_height: checkpoint_last_synced_height,
-            ..
-        } = loaded;
+        let load_result = load_checkpoint_or_default(&request, &scanner.network, &launcher_id)?;
+        let (checkpoint_ctx, checkpoint) =
+            ScanCheckpointContext::from_load(checkpoint_enabled, load_result);
 
         let window = resolve_effective_window(
             &scanner,
             &request,
-            checkpoint_enabled,
-            checkpoint_last_synced_height,
+            checkpoint_ctx.enabled,
+            checkpoint.last_synced_height,
         )
         .await?;
 
@@ -112,14 +157,8 @@ impl ScanState {
             effective_asset_type,
             requested_cat_ids,
             asset_id_to_symbols,
-            checkpoint_enabled,
-            checkpoint_resumed,
-            checkpoint_discarded_mismatch,
-            checkpoint_start_nonce,
-            nonce_to_p2,
-            by_coin_id,
-            cat_asset_cache,
-            parent_lineage_cache,
+            checkpoint_ctx,
+            checkpoint,
             window,
             stop_reason: ScanStopReason::MaxNonceReached,
         })
@@ -127,66 +166,70 @@ impl ScanState {
 
     async fn classify_rows(&mut self) -> SignerResult<()> {
         let mut detect_caches = CatDetectCaches::new(
-            std::mem::take(&mut self.cat_asset_cache),
-            std::mem::take(&mut self.parent_lineage_cache),
+            std::mem::take(&mut self.checkpoint.cat_asset_cache),
+            std::mem::take(&mut self.checkpoint.parent_lineage_cache),
         );
 
         classify_coin_rows(
             &self.scanner,
-            &mut self.by_coin_id,
-            &self.nonce_to_p2,
+            &mut self.checkpoint.by_coin_id,
+            &self.checkpoint.nonce_to_p2,
             &self.asset_id_to_symbols,
             self.request.parent_lookup_batch_size,
             &mut detect_caches,
         )
         .await?;
 
-        self.cat_asset_cache = detect_caches.cat_asset_cache;
-        self.parent_lineage_cache = detect_caches.parent_lineage_cache;
+        self.checkpoint.cat_asset_cache = detect_caches.cat_asset_cache;
+        self.checkpoint.parent_lineage_cache = detect_caches.parent_lineage_cache;
         Ok(())
     }
 
     async fn verify_and_filter_names(&mut self) -> SignerResult<Option<NameVerification>> {
-        if self.by_coin_id.is_empty() {
+        if self.checkpoint.by_coin_id.is_empty() {
             return Ok(None);
         }
         let verified_coin_ids = self
             .scanner
-            .existing_coin_names(&self.by_coin_id.keys().cloned().collect::<Vec<_>>())
+            .existing_coin_names(
+                &self
+                    .checkpoint
+                    .by_coin_id
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
             .await?;
         Ok(apply_name_verification(
-            &mut self.by_coin_id,
+            &mut self.checkpoint.by_coin_id,
             &verified_coin_ids,
         ))
     }
 
-    fn save_final_checkpoint(&self) -> SignerResult<()> {
-        if !self.checkpoint_enabled {
+    fn save_final_checkpoint(&mut self) -> SignerResult<()> {
+        if !self.checkpoint_ctx.enabled {
             return Ok(());
         }
-        let max_nonce_scanned = self.nonce_to_p2.keys().copied().max().unwrap_or(0);
-        self.write_checkpoint(max_nonce_scanned)
+        self.write_checkpoint(self.checkpoint.max_nonce_scanned())
     }
 
-    pub(super) fn write_checkpoint(&self, max_nonce_completed: u32) -> SignerResult<()> {
-        save_scan_checkpoint(&SaveCheckpointParams {
-            checkpoint_file: self
-                .request
+    pub(super) fn write_checkpoint(&mut self, max_nonce_completed: u32) -> SignerResult<()> {
+        self.checkpoint.last_synced_height = self.window.checkpoint_synced_height;
+        save_scan_checkpoint(
+            self.request
                 .checkpoint_file
                 .as_ref()
                 .expect("checkpoint file"),
-            network: &self.scanner.network,
-            launcher_id: &self.launcher_id,
-            include_spent: self.request.include_spent,
-            max_nonce_completed,
-            nonce_to_p2: &self.nonce_to_p2,
-            by_coin_id: &self.by_coin_id,
-            cat_asset_cache: &self.cat_asset_cache,
-            parent_lineage_cache: &self.parent_lineage_cache,
-            last_synced_height: self.window.checkpoint_synced_height,
-            scan_start_height: self.window.effective_start_height,
-            scan_end_height: self.window.effective_end_height,
-        })
+            &CheckpointWriteMetadata {
+                network: &self.scanner.network,
+                launcher_id: &self.launcher_id,
+                include_spent: self.request.include_spent,
+                max_nonce_completed,
+                scan_start_height: self.window.effective_start_height,
+                scan_end_height: self.window.effective_end_height,
+            },
+            &self.checkpoint,
+        )
     }
 
     fn finish(
@@ -194,7 +237,7 @@ impl ScanState {
         filtered: Vec<CoinRow>,
         name_verification: Option<NameVerification>,
     ) -> ScanResult {
-        let max_nonce_scanned = self.nonce_to_p2.keys().copied().max().unwrap_or(0);
+        let max_nonce_scanned = self.checkpoint.max_nonce_scanned();
         let mut requested_cat_ids: Vec<String> = self.requested_cat_ids.into_iter().collect();
         requested_cat_ids.sort();
         let mut requested_cat_tickers = self.request.requested_cat_tickers;
@@ -212,28 +255,19 @@ impl ScanState {
             count: filtered.len(),
             name_verification,
             cache_clear: self.request.cache_clear,
-            checkpoint: CheckpointSummary {
-                enabled: self.checkpoint_enabled,
-                file: self
-                    .request
+            checkpoint: self.checkpoint_ctx.summary(
+                self.request
                     .checkpoint_file
                     .map(|path| path.display().to_string()),
-                resumed: self.checkpoint_resumed,
-                start_nonce: self.checkpoint_start_nonce,
-                save_interval: if self.checkpoint_enabled {
+                if self.checkpoint_ctx.enabled {
                     Some(self.request.checkpoint_save_interval)
                 } else {
                     None
                 },
-                cat_asset_cache_entries: self.cat_asset_cache.len(),
-                parent_lineage_cache_entries: self.parent_lineage_cache.len(),
-                last_synced_height: self.window.checkpoint_synced_height,
-                discard_reason: if self.checkpoint_discarded_mismatch {
-                    Some("checkpoint_params_mismatch".to_string())
-                } else {
-                    None
-                },
-            },
+                self.checkpoint.cat_asset_cache.len(),
+                self.checkpoint.parent_lineage_cache.len(),
+                self.window.checkpoint_synced_height,
+            ),
             scan_batches: ScanBatchConfig {
                 nonce_batch_size: self.request.nonce_batch_size,
                 empty_batch_stop_count: self.request.empty_batch_stop_count,
@@ -250,6 +284,13 @@ impl ScanState {
             coins: filtered,
         }
     }
+}
+
+fn has_checkpoint_resume_data(checkpoint: &LoadedCheckpoint, start_nonce: u32) -> bool {
+    start_nonce > 0
+        || !checkpoint.by_coin_id.is_empty()
+        || !checkpoint.cat_asset_cache.is_empty()
+        || !checkpoint.parent_lineage_cache.is_empty()
 }
 
 use prepare::{ResolvedScanClient, ScanMetadata};

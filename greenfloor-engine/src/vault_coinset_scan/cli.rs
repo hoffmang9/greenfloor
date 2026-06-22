@@ -12,7 +12,6 @@ use crate::manager_cli::{
     default_vault_scan_metadata_config_paths, optional_path,
 };
 use crate::paths::expand_home;
-use crate::vault_coinset_scan::checkpoint::clear_cache_files;
 use crate::vault_coinset_scan::launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, ResolveLauncherIdParams,
 };
@@ -20,6 +19,32 @@ use crate::vault_coinset_scan::metadata::parse_csv_values;
 use crate::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
 use crate::vault_coinset_scan::state::ScanState;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
+
+#[must_use]
+fn clear_cache_files(paths: &[String]) -> BTreeMap<String, String> {
+    let mut results = BTreeMap::new();
+    for raw_path in paths {
+        let clean = raw_path.trim();
+        if clean.is_empty() {
+            continue;
+        }
+        let path = expand_home(std::path::Path::new(clean));
+        let key = path.display().to_string();
+        if path.exists() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    results.insert(key, "deleted".to_string());
+                }
+                Err(err) => {
+                    results.insert(key, format!("delete_failed:{err}"));
+                }
+            }
+        } else {
+            results.insert(key, "not_found".to_string());
+        }
+    }
+    results
+}
 
 #[derive(Debug, Parser)]
 pub struct VaultCoinsetScanCheckpointCli {
@@ -288,5 +313,25 @@ mod tests {
         assert_eq!(args.network, "mainnet");
         assert_eq!(args.max_nonce, 100);
         assert!(!args.include_spent);
+    }
+
+    #[test]
+    fn clear_cache_files_reports_missing_and_deleted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let existing = dir.path().join("exists.txt");
+        std::fs::write(&existing, "x").expect("write file");
+        let missing = dir.path().join("missing.txt");
+        let results = super::clear_cache_files(&[
+            existing.display().to_string(),
+            missing.display().to_string(),
+        ]);
+        assert_eq!(
+            results.get(&existing.display().to_string()),
+            Some(&"deleted".to_string())
+        );
+        assert_eq!(
+            results.get(&missing.display().to_string()),
+            Some(&"not_found".to_string())
+        );
     }
 }
