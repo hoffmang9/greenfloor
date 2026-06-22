@@ -4,7 +4,7 @@
 //!
 //! | Type | Layer | Carrier | Test entry |
 //! |------|-------|---------|------------|
-//! | [`CoinOpTestOverrides`](crate::coin_ops::execution::CoinOpTestOverrides) | coin ops | `CoinOpExecContext.test_overrides` | `run_coin_split_with_test_overrides` |
+//! | [`CoinOpTestOverrides`](crate::coin_ops::execution::CoinOpTestOverrides) | coin ops | `CoinOpExecContext.test_overrides` | `run_coin_split_with_test_overrides`, `execute_managed_coin_op_plans_with_test_overrides` |
 //! | [`BuildOfferTestOverrides`](crate::offer::operator::BuildOfferTestOverrides) | offer operator | `BuildAndPostOfferRequest.test_overrides` | `run_command_with_test_overrides` |
 //! | [`DaemonDispatchTestInjections`](crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections) | daemon dispatch | `DaemonCycleTestControls.offer_dispatch` | `ParallelDispatchHarness::set_offer_dispatch` |
 //!

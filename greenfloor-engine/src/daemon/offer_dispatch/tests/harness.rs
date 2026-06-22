@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -11,6 +11,7 @@ use crate::cycle::PlannedAction;
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
 use crate::storage::SqliteStore;
+use crate::test_support::market_config;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
 };
@@ -54,20 +55,9 @@ pub(super) fn test_context_from_program_file(
 }
 
 pub(super) fn sample_market() -> MarketConfig {
-    MarketConfig {
-        market_id: "m1".to_string(),
-        enabled: true,
-        base_asset: "xch".to_string(),
-        base_symbol: "XCH".to_string(),
-        quote_asset: "xch".to_string(),
-        quote_asset_type: "stable".to_string(),
-        receive_address: "xch1test".to_string(),
-        signer_key_id: "key-1".to_string(),
-        mode: "sell_only".to_string(),
-        pricing: json!({}),
-        cancel_move_threshold_bps: None,
-        ladders: HashMap::default(),
-    }
+    let mut market = market_config::sample_market("xch1test");
+    market.quote_asset_type = "stable".to_string();
+    market
 }
 
 pub(super) fn sample_market_with_pricing() -> MarketConfig {

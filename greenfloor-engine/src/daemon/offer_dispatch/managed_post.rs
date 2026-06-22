@@ -109,3 +109,78 @@ pub fn post_managed_planned_action_owned(
 ) -> OwnedManagedOfferPostFuture {
     Box::pin(async move { execute_managed_post(&post_ctx, &market, &action).await })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::config::ManagerProgramConfig;
+    use crate::cycle::PlannedAction;
+    use crate::daemon::cycle_paths::DaemonCyclePaths;
+    use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
+    use crate::test_support::market_config::sample_market;
+
+    fn sample_post_context() -> ManagedPostContext {
+        ManagedPostContext {
+            program: ManagerProgramConfig {
+                network: "mainnet".to_string(),
+                runtime_dry_run: false,
+                offer_publish_venue: "dexie".to_string(),
+                dexie_api_base: "https://dexie.example".to_string(),
+                splash_api_base: "https://splash.example".to_string(),
+                ..Default::default()
+            },
+            paths: DaemonCyclePaths::new(
+                PathBuf::from("/tmp/program.yaml"),
+                PathBuf::from("/tmp/markets.yaml"),
+                None,
+            ),
+            dispatch_injections: DaemonDispatchTestInjections::default(),
+        }
+    }
+
+    fn sample_action(size: i64) -> PlannedAction {
+        PlannedAction {
+            size,
+            repeat: 1,
+            side: "sell".to_string(),
+            pair: String::new(),
+            expiry_unit: "minutes".to_string(),
+            expiry_value: 10,
+            cancel_after_create: false,
+            reason: "test".to_string(),
+            target_spread_bps: None,
+        }
+    }
+
+    #[test]
+    fn daemon_managed_post_request_builds_drop_only_offer_parts() {
+        let post_ctx = sample_post_context();
+        let market = sample_market("xch1test");
+        let action = sample_action(25);
+
+        let request =
+            daemon_managed_post_request(&post_ctx, &market, &action).expect("managed post request");
+
+        assert_eq!(request.network, "mainnet");
+        assert_eq!(request.market_id.as_deref(), Some("m1"));
+        assert_eq!(request.size_base_units, 25);
+        assert_eq!(request.action_side.as_deref(), Some("sell"));
+        assert!(request.venue.drop_only);
+        assert!(!request.venue.claim_rewards);
+        assert_eq!(request.publish_venue.as_deref(), Some("dexie"));
+    }
+
+    #[tokio::test]
+    async fn execute_managed_post_skips_non_positive_size_without_network() {
+        let post_ctx = sample_post_context();
+        let market = sample_market("xch1test");
+        let action = sample_action(0);
+
+        let posted = post_managed_planned_action(&post_ctx, &market, &action)
+            .await
+            .expect("managed post");
+        assert!(!posted);
+    }
+}

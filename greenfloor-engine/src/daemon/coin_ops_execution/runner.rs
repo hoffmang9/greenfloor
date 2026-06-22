@@ -93,6 +93,29 @@ pub fn execute_managed_coin_op_plans<'a>(
         market,
         plans,
         watched_coin_ids,
+        #[cfg(test)]
+        CoinOpTestOverrides::default(),
+    ))
+}
+
+/// Run managed coin-op plans with injected wallet/split overrides (tests only).
+#[cfg(test)]
+#[must_use]
+pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
+    program: &'a ManagerProgramConfig,
+    signer_config: &'a SignerConfig,
+    market: &'a MarketConfig,
+    plans: &'a [CoinOpPlan],
+    watched_coin_ids: &'a HashSet<String>,
+    test_overrides: CoinOpTestOverrides,
+) -> ManagedCoinOpPlansFuture<'a> {
+    Box::pin(execute_managed_coin_op_plans_async(
+        program,
+        signer_config,
+        market,
+        plans,
+        watched_coin_ids,
+        test_overrides,
     ))
 }
 
@@ -102,6 +125,7 @@ async fn execute_managed_coin_op_plans_async(
     market: &MarketConfig,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
+    #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
     if market.receive_address.trim().is_empty() {
         return skip_all_plans(
@@ -131,7 +155,7 @@ async fn execute_managed_coin_op_plans_async(
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: watched_coin_ids.iter().cloned().collect(),
         #[cfg(test)]
-        test_overrides: CoinOpTestOverrides::default(),
+        test_overrides,
     };
 
     let mut items = Vec::new();

@@ -1,6 +1,16 @@
 //! Shared transient-retry and polling backoff policy for HTTP adapters.
 
 const RATE_LIMIT_PATTERN: &str = "try again in ";
+const MAX_BACKOFF_ATTEMPT_SHIFT: u32 = 31;
+
+fn exponential_multiplier(attempt: u32) -> f64 {
+    2f64.powi(i32::try_from(attempt.min(MAX_BACKOFF_ATTEMPT_SHIFT)).unwrap_or(31))
+}
+
+#[must_use]
+pub fn exponential_backoff_f64(base: f64, attempt: u32, cap: f64) -> f64 {
+    (base * exponential_multiplier(attempt)).min(cap)
+}
 
 /// Parse Dexie/Cloud Wallet rate-limit hint: ``try again in N seconds``.
 pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
@@ -42,13 +52,12 @@ pub fn dexie_invalid_offer_should_retry(error: &str, attempt: u32, max_attempts:
 
 #[must_use]
 pub fn dexie_invalid_offer_retry_sleep(attempt: u32, initial_sleep: f64) -> f64 {
-    let multiplier = 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31));
-    (initial_sleep * multiplier).min(8.0)
+    exponential_backoff_f64(initial_sleep, attempt, 8.0)
 }
 
 #[must_use]
 pub fn coinset_fee_lookup_retry_sleep(attempt: u32) -> f64 {
-    (0.5 * 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31))).min(8.0)
+    exponential_backoff_f64(0.5, attempt, 8.0)
 }
 
 /// Sleep duration to use after a failed poll tick, or ``None`` when timed out.
@@ -111,5 +120,11 @@ mod tests {
         assert!(poll_exponential_sleep_now(10, 10, 1.0, 0.5, 8.0).is_none());
         assert_eq!(poll_exponential_sleep_now(0, 10, 0.0, 0.5, 8.0), Some(0.5));
         assert!((poll_exponential_advance_sleep(0.5, 0.5, 8.0, 2.0) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exponential_backoff_doubles_until_cap() {
+        assert!((exponential_backoff_f64(0.25, 1, 8.0) - 0.5).abs() < f64::EPSILON);
+        assert!((exponential_backoff_f64(0.25, 10, 8.0) - 8.0).abs() < f64::EPSILON);
     }
 }

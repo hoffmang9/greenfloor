@@ -6,7 +6,6 @@ pub mod cancel;
 pub mod dispatch;
 pub mod execution;
 pub mod lifecycle;
-pub mod managed;
 pub mod market;
 pub mod notifications;
 pub mod orchestration;
@@ -31,18 +30,6 @@ pub use execution::{
     ParallelReservationContext, ParallelSkipItem,
 };
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
-pub use managed::{
-    can_parallelize_managed_offers, classify_dexie_visibility_outcome,
-    classify_managed_post_result, classify_managed_transient_error,
-    count_parallel_transient_failures, is_managed_upstream_transient_error,
-    is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
-    is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
-    managed_retry_decision, parallel_managed_dispatch_enabled, parallel_max_workers,
-    prepare_parallel_managed_submission_decision, reservation_release_status,
-    should_apply_parallel_transient_cooldown, ManagedActionOutcome, ManagedActionStatus,
-    ManagedParallelismGate, ManagedRetryDecision, ManagedRetryDecisionKind,
-    ParallelSubmissionDecision,
-};
 pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
     needs_inventory_fallback, one_sided_offer_counts_by_side, post_reconcile_market_cycle_phases,

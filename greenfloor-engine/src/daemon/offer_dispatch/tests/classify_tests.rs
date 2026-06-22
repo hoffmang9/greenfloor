@@ -3,17 +3,24 @@ use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 use super::super::{
-    classify_parallel_dispatch, is_parallel_dispatch_transient_signer_error,
-    record_parallel_fallback_audit, OfferDispatchOutput, ParallelDispatchDecision,
+    classify_parallel_dispatch, parallel_managed_dispatch_enabled, parallel_max_workers,
+    record_parallel_fallback_audit, reservation_release_status, OfferDispatchOutput,
+    ParallelDispatchDecision,
 };
-use super::fixtures::sample_program;
-use crate::cycle::parallel_managed_dispatch_enabled;
+use crate::config::ManagerProgramConfig;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
 
 #[test]
 fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
-    let mut program = sample_program(true, false);
+    let mut program = ManagerProgramConfig {
+        runtime_market_slot_count: 1,
+        runtime_offer_parallelism_enabled: true,
+        runtime_offer_parallelism_max_workers: 2,
+        tx_block_websocket_reconnect_interval_seconds: 1,
+        tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
+    };
     assert!(parallel_managed_dispatch_enabled(&program));
     program.runtime_offer_parallelism_enabled = false;
     assert!(!parallel_managed_dispatch_enabled(&program));
@@ -23,15 +30,28 @@ fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
 }
 
 #[test]
+fn parallel_max_workers_caps_at_submission_count() {
+    assert_eq!(parallel_max_workers(3, 8), 3);
+    assert_eq!(parallel_max_workers(0, 0), 0);
+    assert_eq!(parallel_max_workers(5, 0), 1);
+}
+
+#[test]
+fn reservation_release_status_reflects_execution_outcome() {
+    assert_eq!(reservation_release_status(true), "released_success");
+    assert_eq!(reservation_release_status(false), "released_failed");
+}
+
+#[test]
 fn parallel_transient_signer_error_classifies_reservation_and_upstream() {
     let contention = SignerError::ReservationContention("busy".to_string());
-    assert!(is_parallel_dispatch_transient_signer_error(&contention));
+    assert!(contention.is_parallel_dispatch_transient());
     let upstream = SignerError::ManagedUpstreamTransient("timeout".to_string());
-    assert!(is_parallel_dispatch_transient_signer_error(&upstream));
+    assert!(upstream.is_parallel_dispatch_transient());
     let locked = SignerError::DatabaseLocked;
-    assert!(is_parallel_dispatch_transient_signer_error(&locked));
+    assert!(locked.is_parallel_dispatch_transient());
     let fatal = SignerError::Other("permanent_offer_build_failure: bad puzzle".to_string());
-    assert!(!is_parallel_dispatch_transient_signer_error(&fatal));
+    assert!(!fatal.is_parallel_dispatch_transient());
 }
 
 #[test]

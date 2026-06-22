@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
 use super::dispatch::{
-    reservation_request_for_managed_offer, ManagedOfferReservationRequest, SpendableAssetProfile,
+    reservation_request_for_managed_offer, single_input_preferred_skip_reason,
+    ManagedOfferReservationRequest, SpendableAssetProfile,
 };
-use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
 use crate::error::SignerResult;
 
@@ -95,25 +95,37 @@ pub fn plan_parallel_managed_dispatch(
     let prep = build_parallel_reservation_prep(&reservation_inputs, ctx)?;
     let mut plan = ParallelBatchPlan::default();
     for entry in &prep.entries {
-        let decision = prepare_parallel_managed_submission_decision(
-            &entry.requested_amounts,
-            spendable_profiles,
-        );
-        match decision {
-            ParallelSubmissionDecision::Skip { reason } => {
-                plan.skip_items.push(ParallelSkipItem {
-                    submit_index: entry.submit_index,
-                    reason,
-                });
-            }
-            ParallelSubmissionDecision::Proceed { available_amounts } => {
-                plan.queue.push(ParallelQueueItem {
-                    submit_index: entry.submit_index,
-                    requested_amounts: entry.requested_amounts.clone(),
-                    available_amounts,
-                });
-            }
+        if entry.requested_amounts.is_empty() {
+            plan.skip_items.push(ParallelSkipItem {
+                submit_index: entry.submit_index,
+                reason: "reservation_invalid_request".to_string(),
+            });
+            continue;
         }
+        if let Some(reason) =
+            single_input_preferred_skip_reason(&entry.requested_amounts, spendable_profiles)
+        {
+            plan.skip_items.push(ParallelSkipItem {
+                submit_index: entry.submit_index,
+                reason,
+            });
+            continue;
+        }
+        let available_amounts = entry
+            .requested_amounts
+            .keys()
+            .map(|asset_id| {
+                let total = spendable_profiles
+                    .get(asset_id)
+                    .map_or(0, |profile| profile.total);
+                (asset_id.clone(), total)
+            })
+            .collect();
+        plan.queue.push(ParallelQueueItem {
+            submit_index: entry.submit_index,
+            requested_amounts: entry.requested_amounts.clone(),
+            available_amounts,
+        });
     }
     Ok(plan)
 }
@@ -195,6 +207,57 @@ mod tests {
             quote_unit_mojo_multiplier: 1000,
             quote_price: 1.5,
         }
+    }
+
+    #[test]
+    fn plan_parallel_managed_dispatch_skips_invalid_request() {
+        let ctx = sample_reservation_context();
+        let actions = vec![PlannedAction {
+            size: 0,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }];
+        let plan =
+            plan_parallel_managed_dispatch(&actions, &ctx, &BTreeMap::default()).expect("plan");
+        assert_eq!(plan.skip_items.len(), 1);
+        assert_eq!(plan.skip_items[0].reason, "reservation_invalid_request");
+        assert!(plan.queue.is_empty());
+    }
+
+    #[test]
+    fn plan_parallel_managed_dispatch_skips_when_single_input_combine_required() {
+        let ctx = sample_reservation_context();
+        let actions = vec![PlannedAction {
+            size: 5,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }];
+        let profiles = BTreeMap::from([(
+            "base_asset".to_string(),
+            SpendableAssetProfile {
+                total: 6000,
+                max_single: 1000,
+                max_single_known: true,
+            },
+        )]);
+        let plan = plan_parallel_managed_dispatch(&actions, &ctx, &profiles).expect("plan");
+        assert_eq!(plan.skip_items.len(), 1);
+        assert!(plan.skip_items[0]
+            .reason
+            .contains("single_input_preferred_requires_combine"));
+        assert!(plan.queue.is_empty());
     }
 
     #[test]

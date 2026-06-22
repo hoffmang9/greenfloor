@@ -69,3 +69,27 @@ pub async fn coinset_spendable_profiles_by_asset(
     }
     Ok(profiles)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn spendable_profiles_empty_when_asset_set_or_address_missing() {
+        let empty_assets = BTreeSet::new();
+        let profiles = coinset_spendable_profiles_by_asset("mainnet", "xch1test", &empty_assets)
+            .await
+            .expect("profiles");
+        assert!(profiles.is_empty());
+
+        let assets = BTreeSet::from(["asset-1".to_string()]);
+        let profiles = coinset_spendable_profiles_by_asset("mainnet", "  ", &assets)
+            .await
+            .expect("profiles");
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles["asset-1"].total, 0);
+        assert_eq!(profiles["asset-1"].max_single, 0);
+    }
+}
