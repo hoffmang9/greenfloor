@@ -2,12 +2,12 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::offer::bootstrap::{bootstrap_offer_gate_for_status, BootstrapPhaseStatus};
 use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPlan};
-use crate::offer::publish::{bootstrap_offer_gate, BootstrapOfferGate};
 
 #[derive(Debug, Clone)]
 pub struct BootstrapPhaseResult {
-    pub status: String,
+    phase_status: BootstrapPhaseStatus,
     pub reason: String,
     pub ready: bool,
     pub fee_mojos: u64,
@@ -31,7 +31,7 @@ impl Serialize for BootstrapPhaseResult {
             + usize::from(!self.wait_events.is_empty())
             + usize::from(self.plan.is_some());
         let mut state = serializer.serialize_struct("BootstrapPhaseResult", field_count)?;
-        state.serialize_field("status", &self.status)?;
+        state.serialize_field("status", self.status())?;
         state.serialize_field("reason", &self.reason)?;
         state.serialize_field("ready", &self.ready)?;
         state.serialize_field("fee_mojos", &self.fee_mojos)?;
@@ -84,13 +84,18 @@ fn is_empty_json_value(value: &Value) -> bool {
 
 impl BootstrapPhaseResult {
     #[must_use]
+    pub fn status(&self) -> &'static str {
+        self.phase_status.as_str()
+    }
+
+    #[must_use]
     pub fn to_operator_json(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({}))
     }
 
     pub(super) fn from_snapshot(snapshot: BootstrapPhaseSnapshot) -> Self {
         Self {
-            status: snapshot.status.to_string(),
+            phase_status: BootstrapPhaseStatus::from_snapshot_status(snapshot.status),
             reason: snapshot.reason,
             ready: snapshot.ready,
             fee_mojos: 0,
@@ -105,7 +110,7 @@ impl BootstrapPhaseResult {
 
     pub(crate) fn skipped(reason: impl Into<String>) -> Self {
         Self {
-            status: "skipped".to_string(),
+            phase_status: BootstrapPhaseStatus::Skipped,
             reason: reason.into(),
             ready: false,
             fee_mojos: 0,
@@ -118,14 +123,15 @@ impl BootstrapPhaseResult {
         }
     }
 
+    /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
     #[must_use]
-    pub fn offer_creation_gate(&self) -> BootstrapOfferGate {
-        bootstrap_offer_gate(&self.status, &self.reason, self.ready)
+    pub fn offer_creation_block_error(&self) -> Option<String> {
+        bootstrap_offer_gate_for_status(self.phase_status, &self.reason, self.ready).block_error()
     }
 
     pub(super) fn failed(failure: BootstrapPhaseFailure) -> Self {
         Self {
-            status: "failed".to_string(),
+            phase_status: BootstrapPhaseStatus::Failed,
             reason: failure.reason,
             ready: false,
             fee_mojos: failure.fee_mojos,
@@ -185,7 +191,30 @@ impl BootstrapPhaseFailure {
     }
 }
 
-#[must_use]
-pub fn bootstrap_blocks_offer(result: &BootstrapPhaseResult) -> Option<String> {
-    result.offer_creation_gate().block_error(&result.reason)
+#[cfg(test)]
+mod tests {
+    use super::BootstrapPhaseResult;
+    use crate::offer::bootstrap::BootstrapPhaseSnapshot;
+
+    #[test]
+    fn from_snapshot_block_error_matches_snapshot_gate() {
+        for (status, reason, ready) in [
+            ("failed", "bootstrap_invalid_ladder", false),
+            ("skipped", "already_ready", false),
+            ("skipped", "seed_missing", false),
+            ("executed", "bootstrap_submitted", true),
+            ("executed", "split_submitted", false),
+        ] {
+            let snapshot = BootstrapPhaseSnapshot {
+                status,
+                reason: reason.to_string(),
+                ready,
+            };
+            assert_eq!(
+                BootstrapPhaseResult::from_snapshot(snapshot.clone()).offer_creation_block_error(),
+                snapshot.offer_creation_block_error(),
+                "status={status} reason={reason} ready={ready}"
+            );
+        }
+    }
 }

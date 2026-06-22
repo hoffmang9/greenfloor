@@ -9,15 +9,13 @@ use crate::offer::publish::expected_publish_asset_fields;
 
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
-use super::publish::{
-    finalize_publish_payload, offer_post_persist_record, publish_offer, PublishOfferParams,
-};
+use super::publish::{finalize_publish_payload, offer_post_persist_record, publish_offer};
 use super::types::{timing_payload, PostAttemptSuccess, PostFailure, PostIterationOutcome};
 use super::BuildAndPostOfferRequest;
 use crate::metrics::metric_millis_to_u64;
 use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
-    bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
+    run_signer_denomination_phase, BootstrapPhaseResult,
 };
 
 async fn run_bootstrap_phase(
@@ -111,15 +109,15 @@ async fn publish_created_offer(
         &ctx.resolved_quote_asset_id,
     );
     let publish_started = Instant::now();
-    let publish = publish_offer(PublishOfferParams {
-        publish_venue: &ctx.publish_venue,
+    let publish = publish_offer(
+        &ctx.publish_venue,
         dexie,
         splash,
-        offer_text: created.offer_text.trim(),
-        drop_only: request.venue.drop_only,
-        claim_rewards: request.venue.claim_rewards,
-        expected: (&asset_fields).into(),
-    })
+        created.offer_text.trim(),
+        request.venue.drop_only,
+        request.venue.claim_rewards,
+        &asset_fields,
+    )
     .await?;
     let publish_ms = metric_millis_to_u64(publish_started.elapsed().as_millis());
 
@@ -165,7 +163,7 @@ pub(super) async fn run_post_iteration(
 
     let (bootstrap_action, bootstrap_result) = run_bootstrap_phase(request, ctx).await?;
     if let Some(bootstrap_result) = bootstrap_result {
-        if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
+        if let Some(error) = bootstrap_result.offer_creation_block_error() {
             return Ok((
                 bootstrap_action,
                 PostIterationOutcome::Failure(PostFailure {

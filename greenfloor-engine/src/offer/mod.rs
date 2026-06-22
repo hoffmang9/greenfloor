@@ -39,9 +39,8 @@ pub use codec::{
 };
 pub use pricing::quote_mojos_for_base_size;
 pub use publish::{
-    bootstrap_block_error, bootstrap_offer_gate, dexie_offer_asset_expectation_error,
-    expected_publish_asset_fields, post_offer_phase_dexie, BootstrapOfferGate,
-    ExpectedPublishAssetFields, ExpectedPublishAssetFieldsRef, PostOfferPhaseDexieParams,
+    expected_publish_asset_fields, post_offer_phase_dexie, ExpectedPublishAssetFields,
+    PostOfferPhaseDexieParams, PublishAssetSide,
 };
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,

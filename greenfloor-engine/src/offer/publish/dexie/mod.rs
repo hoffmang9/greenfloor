@@ -7,7 +7,7 @@ use crate::cycle::{
 };
 use crate::error::SignerResult;
 
-use super::{dexie_offer_asset_expectation_error, ExpectedPublishAssetFieldsRef};
+use super::{dexie_offer_asset_expectation_error, ExpectedPublishAssetFields};
 
 const DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS: u32 = 4;
 const DEXIE_INVALID_OFFER_RETRY_INITIAL_SLEEP_SECONDS: f64 = 1.0;
@@ -22,7 +22,7 @@ pub struct PostOfferPhaseDexieParams<'a> {
     pub offer_text: &'a str,
     pub drop_only: bool,
     pub claim_rewards: bool,
-    pub expected: ExpectedPublishAssetFieldsRef<'a>,
+    pub expected: &'a ExpectedPublishAssetFields,
 }
 
 #[derive(Debug)]
@@ -94,7 +94,7 @@ async fn post_dexie_offer_with_invalid_offer_retry(
 pub(super) async fn poll_dexie_offer_visibility_once(
     dexie: &DexieClient,
     offer_id: &str,
-    expected: ExpectedPublishAssetFieldsRef<'_>,
+    expected: &ExpectedPublishAssetFields,
 ) -> OfferVisibilityPoll {
     let payload = match dexie.get_offer(offer_id).await {
         Ok(payload) => payload,
@@ -137,7 +137,7 @@ pub(super) async fn poll_dexie_offer_visibility_once(
 async fn wait_for_dexie_offer_visible(
     dexie: &DexieClient,
     offer_id: &str,
-    expected: ExpectedPublishAssetFieldsRef<'_>,
+    expected: &ExpectedPublishAssetFields,
 ) -> Option<String> {
     let clean_offer_id = offer_id.trim();
     if clean_offer_id.is_empty() {

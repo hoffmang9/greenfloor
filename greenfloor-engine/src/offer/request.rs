@@ -23,10 +23,58 @@ pub fn signer_split_asset_id(
     resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
 ) -> String {
+    offer_asset_ids_for_side(action_side, resolved_base_asset_id, resolved_quote_asset_id).0
+}
+
+/// Normalized offer/request asset ids for an action side.
+#[must_use]
+pub fn offer_asset_ids_for_side(
+    action_side: &str,
+    resolved_base_asset_id: &str,
+    resolved_quote_asset_id: &str,
+) -> (String, String) {
     if normalize_offer_side(action_side) == "buy" {
-        normalize_offer_asset_id(resolved_quote_asset_id)
+        (
+            normalize_offer_asset_id(resolved_quote_asset_id),
+            normalize_offer_asset_id(resolved_base_asset_id),
+        )
     } else {
-        normalize_offer_asset_id(resolved_base_asset_id)
+        (
+            normalize_offer_asset_id(resolved_base_asset_id),
+            normalize_offer_asset_id(resolved_quote_asset_id),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OfferSideAssets {
+    pub offered_asset_id: String,
+    pub requested_asset_id: String,
+    pub offered_symbol: String,
+    pub requested_symbol: String,
+}
+
+/// Normalized offered/requested asset ids and display symbols for an action side.
+#[must_use]
+pub(crate) fn offer_side_assets_for_side(
+    action_side: &str,
+    base_symbol: &str,
+    quote_asset: &str,
+    resolved_base_asset_id: &str,
+    resolved_quote_asset_id: &str,
+) -> OfferSideAssets {
+    let (offered_asset_id, requested_asset_id) =
+        offer_asset_ids_for_side(action_side, resolved_base_asset_id, resolved_quote_asset_id);
+    let (offered_symbol, requested_symbol) = if normalize_offer_side(action_side) == "buy" {
+        (quote_asset.to_string(), base_symbol.to_string())
+    } else {
+        (base_symbol.to_string(), quote_asset.to_string())
+    };
+    OfferSideAssets {
+        offered_asset_id,
+        requested_asset_id,
+        offered_symbol,
+        requested_symbol,
     }
 }
 
@@ -94,22 +142,13 @@ pub fn compute_signer_offer_leg_amounts(
     let (base_offer_mojos, quote_request_mojos) =
         base_and_quote_leg_mojos(size_base_units, quote_price, base_mult, quote_mult)?;
 
-    let (offer_asset_id, request_asset_id, offer_amount_mojos, request_amount_mojos) =
-        if side == "buy" {
-            (
-                normalize_offer_asset_id(resolved_quote_asset_id),
-                normalize_offer_asset_id(resolved_base_asset_id),
-                quote_request_mojos,
-                base_offer_mojos,
-            )
-        } else {
-            (
-                normalize_offer_asset_id(resolved_base_asset_id),
-                normalize_offer_asset_id(resolved_quote_asset_id),
-                base_offer_mojos,
-                quote_request_mojos,
-            )
-        };
+    let (offer_asset_id, request_asset_id) =
+        offer_asset_ids_for_side(action_side, resolved_base_asset_id, resolved_quote_asset_id);
+    let (offer_amount_mojos, request_amount_mojos) = if side == "buy" {
+        (quote_request_mojos, base_offer_mojos)
+    } else {
+        (base_offer_mojos, quote_request_mojos)
+    };
 
     Ok(SignerOfferLegAmounts {
         offer_asset_id,
@@ -234,6 +273,42 @@ mod tests {
     #[test]
     fn normalize_offer_asset_id_strips_prefix() {
         assert_eq!(normalize_offer_asset_id("0xAbCd"), "abcd");
+    }
+
+    #[test]
+    fn offer_side_assets_for_side_matches_ids_and_symbols() {
+        let quote_cat = "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb";
+        assert_eq!(
+            offer_side_assets_for_side("sell", "A1", "xch", BASE_ASSET, QUOTE_XCH),
+            OfferSideAssets {
+                offered_asset_id: BASE_ASSET.to_string(),
+                requested_asset_id: QUOTE_XCH.to_string(),
+                offered_symbol: "A1".to_string(),
+                requested_symbol: "xch".to_string(),
+            }
+        );
+        assert_eq!(
+            offer_side_assets_for_side("buy", "A1", "xch", BASE_ASSET, quote_cat),
+            OfferSideAssets {
+                offered_asset_id: quote_cat.to_string(),
+                requested_asset_id: BASE_ASSET.to_string(),
+                offered_symbol: "xch".to_string(),
+                requested_symbol: "A1".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn offer_asset_ids_for_side_matches_leg_asset_selection() {
+        let quote_cat = "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb";
+        assert_eq!(
+            offer_asset_ids_for_side("sell", BASE_ASSET, QUOTE_XCH),
+            (BASE_ASSET.to_string(), QUOTE_XCH.to_string())
+        );
+        assert_eq!(
+            offer_asset_ids_for_side("buy", BASE_ASSET, quote_cat),
+            (quote_cat.to_string(), BASE_ASSET.to_string())
+        );
     }
 
     #[test]

@@ -10,6 +10,14 @@ pub struct BootstrapPhaseSnapshot {
     pub ready: bool,
 }
 
+impl BootstrapPhaseSnapshot {
+    /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
+    #[must_use]
+    pub fn offer_creation_block_error(&self) -> Option<String> {
+        super::gate::bootstrap_offer_gate_for_snapshot(self).block_error()
+    }
+}
+
 /// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
 #[must_use]
 pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {

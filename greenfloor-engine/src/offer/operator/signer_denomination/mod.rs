@@ -20,7 +20,7 @@ use crate::offer::bootstrap::{
 };
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
-pub use types::{bootstrap_blocks_offer, BootstrapPhaseResult};
+pub use types::BootstrapPhaseResult;
 
 use futures::SignerDenominationPhaseFuture;
 use planning::{
@@ -90,18 +90,14 @@ fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseR
     } = params;
     let remaining = plan_bootstrap_mixed_outputs(ladder_entries, refreshed_spendable);
     let executed = bootstrap_executed_phase(&remaining);
-    BootstrapPhaseResult {
-        status: executed.status.to_string(),
-        reason: executed.reason,
-        ready: executed.ready,
-        fee_mojos,
-        fee_source,
-        fee_lookup_error,
-        wait_error: None,
-        split_result,
-        wait_events,
-        plan: Some(bootstrap_plan),
-    }
+    let mut result = BootstrapPhaseResult::from_snapshot(executed);
+    result.fee_mojos = fee_mojos;
+    result.fee_source = fee_source;
+    result.fee_lookup_error = fee_lookup_error;
+    result.split_result = split_result;
+    result.wait_events = wait_events;
+    result.plan = Some(bootstrap_plan);
+    result
 }
 
 struct BootstrapSplitPlanContext {
