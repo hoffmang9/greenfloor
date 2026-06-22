@@ -4,7 +4,8 @@ use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
 use futures_util::future::try_join_all;
 
-use super::{coin_records_from_response, decode_receive_address, resolve, unspent_coin_records};
+use super::{coin_records_from_response, resolve, unspent_coin_records};
+use crate::bech32m::decode_address;
 use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 
@@ -13,7 +14,7 @@ pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     receive_address: &str,
     asset_id: Bytes32,
 ) -> SignerResult<Vec<CoinRecord>> {
-    let p2_puzzle_hash = decode_receive_address(receive_address)?;
+    let p2_puzzle_hash = decode_address(receive_address)?;
     let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, p2_puzzle_hash.into()).into();
     let response = with_coinset_client_retries(|| async {
         client

@@ -29,8 +29,8 @@ pub use asset::is_xch_like_asset;
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
 pub use cats::{
-    cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, decode_receive_address,
-    list_unspent_cats_by_ids, require_cat_from_parent_spend,
+    cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats_by_ids,
+    require_cat_from_parent_spend,
 };
 pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{

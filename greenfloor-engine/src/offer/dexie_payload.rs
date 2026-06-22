@@ -232,6 +232,17 @@ impl DexieOfferPayload {
     pub fn status(&self) -> Option<i64> {
         dexie_offer_status(self.body())
     }
+
+    /// Offer file text (`offer1…`) from a Dexie get-offer JSON payload.
+    ///
+    /// This only extracts the string field; Bech32m decode happens in [`crate::bech32m`].
+    pub fn offer_file_text(&self) -> Option<&str> {
+        self.body()
+            .get("offer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
 }
 
 impl From<Value> for DexieOfferPayload {

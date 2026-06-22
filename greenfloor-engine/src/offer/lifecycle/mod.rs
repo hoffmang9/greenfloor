@@ -2,13 +2,19 @@
 
 mod cancel;
 mod cancel_cli;
+mod cancel_onchain;
 mod persist;
 mod reconcile_watched_offers;
 mod status_cli;
 mod transition;
 
-pub use cancel::{cancel_offers_on_dexie, CancelOfferTarget, DexieCancelOutcome};
+pub use cancel::{
+    cancel_offers_on_chain, cancel_offers_on_dexie, CancelOfferOutcome, CancelOfferTarget,
+};
 pub use cancel_cli::{offers_cancel_cli, OffersCancelCliItem, OffersCancelCliResult};
+pub use cancel_onchain::{
+    cancel_offer_on_chain, CancelOfferOnChainParams, CancelOfferOnChainResult,
+};
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

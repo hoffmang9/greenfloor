@@ -20,9 +20,7 @@ fn parent_spent_block_index(sim: &Simulator, parent_coin_id: Bytes32) -> u32 {
 }
 
 fn simulator_receive_address(harness: &SimulatorVaultHarness) -> String {
-    chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
-        .encode()
-        .expect("receive address")
+    crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch").expect("receive address")
 }
 
 #[test]

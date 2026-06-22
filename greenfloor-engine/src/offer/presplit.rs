@@ -2,12 +2,13 @@ use chia_protocol::{Bytes32, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{
-    encode_offer, Cat, CatSpend, InnerPuzzleSpend, MipsSpend, Offer, Spend, SpendContext, Vault,
+    Cat, CatSpend, InnerPuzzleSpend, MipsSpend, Offer, Spend, SpendContext, Vault,
 };
 use chia_sdk_types::Conditions;
 use clvm_utils::TreeHash;
 use clvmr::{Allocator, NodePtr};
 
+use crate::bech32m::encode_offer;
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::{
@@ -15,7 +16,10 @@ use crate::offer::plan::{
 };
 use crate::offer::types::OfferTerms;
 use crate::vault::materialize::build_vault_cat_inner_spend;
-use crate::vault::members::{nonce_member_puzzle_hash, p2_conditions_or_singleton_puzzle_hash};
+use crate::vault::members::{
+    m_of_n_hash, nonce_member_puzzle_hash, p2_conditions_or_singleton_puzzle_hash,
+    singleton_member_hash, MemberConfig,
+};
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 #[must_use]
@@ -72,6 +76,51 @@ pub fn build_presplit_conditions_inner_spend(
     mips_spend.members.insert(
         fixed_conditions_hash,
         InnerPuzzleSpend::new(0, Vec::new(), fixed_spend),
+    );
+    mips_spend.members.insert(
+        full_puzzle_hash,
+        InnerPuzzleSpend::m_of_n(
+            0,
+            Vec::new(),
+            1,
+            vec![fixed_conditions_hash, p2_singleton_hash],
+        ),
+    );
+    mips_spend
+        .spend(ctx, full_puzzle_hash)
+        .map_err(SignerError::from)
+}
+
+/// Inner spend for presplit offer CAT cancel via the singleton branch.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub(crate) fn build_presplit_offer_cancel_inner_spend(
+    ctx: &mut SpendContext,
+    cancel_delegated: Spend,
+    launcher_id: Bytes32,
+    fixed_conditions_hash: TreeHash,
+) -> SignerResult<Spend> {
+    let member_config = MemberConfig::default();
+    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false)?;
+    let full_puzzle_hash = m_of_n_hash(
+        &member_config.with_top_level(true),
+        1,
+        vec![fixed_conditions_hash, p2_singleton_hash],
+    )?;
+    let nil_spend = Spend::new(NodePtr::NIL, NodePtr::NIL);
+    let mut mips_spend = MipsSpend::new(nil_spend);
+    let fixed_placeholder = ctx
+        .delegated_spend(Conditions::new())
+        .map_err(SignerError::from)?;
+    mips_spend.members.insert(
+        fixed_conditions_hash,
+        InnerPuzzleSpend::new(0, Vec::new(), fixed_placeholder),
+    );
+    mips_spend.members.insert(
+        p2_singleton_hash,
+        InnerPuzzleSpend::new(0, Vec::new(), cancel_delegated),
     );
     mips_spend.members.insert(
         full_puzzle_hash,
@@ -160,7 +209,7 @@ fn encode_presplit_offer_from_input(
     let offer_spend_bundle = offer
         .to_spend_bundle(&mut offer_ctx)
         .map_err(SignerError::from)?;
-    let offer_text = encode_offer(&offer_spend_bundle).map_err(SignerError::from)?;
+    let offer_text = encode_offer(&offer_spend_bundle)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;
     Ok((offer_text, spend_bundle_hex))
 }

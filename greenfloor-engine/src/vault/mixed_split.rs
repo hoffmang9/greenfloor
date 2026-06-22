@@ -2,6 +2,7 @@ use chia_protocol::{Bytes32, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Cat, Id, Relation, SpendContext, Spends};
 
+use crate::bech32m::decode_address;
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -74,7 +75,7 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     let client = coinset::client_for_config(&config)?;
     let mut vault_ctx = resolve_vault_spend_context(config).await?;
     let backend = LiveCoinset(&client);
-    let receive_puzzle_hash = coinset::decode_receive_address(&request.receive_address)?;
+    let receive_puzzle_hash = decode_address(&request.receive_address)?;
 
     let target_total: u64 = request.output_amounts.iter().sum();
     let selection = backend

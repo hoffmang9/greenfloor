@@ -12,6 +12,7 @@
 
 pub mod adapters;
 pub mod async_boundary;
+pub mod bech32m;
 pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;

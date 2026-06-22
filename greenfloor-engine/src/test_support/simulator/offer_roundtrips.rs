@@ -93,10 +93,8 @@ async fn split_presplit_cat_on_sim(
 ) -> (Cat, Bytes32) {
     let source_coin_id = source_cat.coin.coin_id();
     let offer_nonce = offer_nonce_from_cats(std::slice::from_ref(&source_cat));
-    let receive_address =
-        chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
-            .encode()
-            .expect("test receive address");
+    let receive_address = crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch")
+        .expect("test receive address");
     let terms = crate::offer::types::OfferTerms {
         receive_address,
         offer_asset_id: hex::encode(harness.chain.asset_id),
@@ -370,10 +368,8 @@ fn build_leg_request(
     offer_cat: &Cat,
     request_cat: &Cat,
 ) -> CreateOfferRequest {
-    let receive_address =
-        chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
-            .encode()
-            .expect("test receive address");
+    let receive_address = crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch")
+        .expect("test receive address");
     match scenario {
         OfferLegScenario::BuySideDirect => {
             let base_cat = offer_cat;

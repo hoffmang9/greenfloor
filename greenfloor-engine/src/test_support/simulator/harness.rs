@@ -332,10 +332,8 @@ pub(crate) fn sample_create_offer_request(
     split_input_coins: bool,
     broadcast_split: bool,
 ) -> crate::offer::CreateOfferRequest {
-    let receive_address =
-        chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
-            .encode()
-            .expect("test receive address");
+    let receive_address = crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch")
+        .expect("test receive address");
     crate::offer::CreateOfferRequest {
         receive_address,
         offer_asset_id: hex::encode(harness.chain.asset_id),

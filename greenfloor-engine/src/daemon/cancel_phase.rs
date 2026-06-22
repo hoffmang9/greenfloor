@@ -2,7 +2,10 @@ use serde_json::{json, Value};
 use tracing::Level;
 
 use crate::adapters::DexieClient;
-use crate::config::{cancel_policy_stable_vs_unstable, MarketConfig};
+use crate::config::{
+    cancel_policy_stable_vs_unstable, is_signer_execution_soft_skip, signer_execution_skip_reason,
+    MarketConfig,
+};
 use crate::cycle::{
     collect_open_offer_ids_for_cancel, evaluate_cancel_policy_decision, CancelPolicyDecision,
     MarketCycleResultState,
@@ -12,7 +15,7 @@ use crate::operator_log::{LogContext, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
 
 use crate::offer::dexie_payload::dexie_offer_status;
-use crate::offer::lifecycle::{cancel_offers_on_dexie, CancelOfferTarget};
+use crate::offer::lifecycle::{cancel_offers_on_chain, CancelOfferTarget};
 
 use super::market_context::MarketCycleContext;
 
@@ -49,20 +52,29 @@ fn cancel_policy_payload(
     })
 }
 
-async fn execute_dexie_cancellations(
+async fn execute_on_chain_cancellations(
     store: &SqliteStore,
     dexie: &DexieClient,
-    market_id: &str,
+    signer_config: crate::config::SignerConfig,
+    market: &MarketConfig,
     target_offer_ids: &[String],
 ) -> SignerResult<(i64, Vec<Value>)> {
+    let receive_address = market.receive_address.trim();
+    if receive_address.is_empty() {
+        return Err(crate::error::SignerError::Other(format!(
+            "missing receive_address for market {}",
+            market.market_id
+        )));
+    }
     let targets: Vec<CancelOfferTarget> = target_offer_ids
         .iter()
         .map(|offer_id| CancelOfferTarget {
             offer_id: offer_id.clone(),
-            market_id: market_id.to_string(),
+            market_id: market.market_id.clone(),
+            receive_address: receive_address.to_string(),
         })
         .collect();
-    let outcomes = cancel_offers_on_dexie(store, dexie, &targets).await?;
+    let outcomes = cancel_offers_on_chain(store, dexie, signer_config, &targets).await?;
     let mut cancel_executed = 0_i64;
     let mut items = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
@@ -72,15 +84,12 @@ async fn execute_dexie_cancellations(
                 "offer_id": outcome.offer_id,
                 "status": "executed",
                 "reason": "cancelled_on_strong_unstable_move",
+                "operation_id": outcome.operation_id,
                 "attempts": 1,
             }));
         } else {
             let error = if outcome.error.is_empty() {
-                outcome
-                    .venue_response
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("cancel_failed")
+                "cancel_failed"
             } else {
                 outcome.error.as_str()
             };
@@ -156,8 +165,35 @@ pub async fn run_market_cancel_phase(
             }));
         }
     } else {
+        let signer_config = match ctx.resources.signer_for_execution() {
+            Err(err) if is_signer_execution_soft_skip(&err) => {
+                for offer_id in &target_offer_ids {
+                    items.push(json!({
+                        "offer_id": offer_id,
+                        "status": "skipped",
+                        "reason": format!("cancel_skipped:{}", signer_execution_skip_reason(&err)),
+                        "attempts": 0,
+                    }));
+                }
+                let payload =
+                    cancel_policy_payload(market_id, &decision, cancel_planned, 0, &items);
+                LogContext::MARKET_CYCLE.dual_audit(
+                    store,
+                    Level::INFO,
+                    "offer cancel policy evaluated",
+                    OFFER_CANCEL_POLICY,
+                    &payload,
+                    Some(market_id),
+                )?;
+                state.merge_cancel_policy(cancel_triggered, cancel_planned, 0);
+                return Ok(payload);
+            }
+            Err(err) => return Err(err),
+            Ok(signer) => signer.clone(),
+        };
         (cancel_executed, items) =
-            execute_dexie_cancellations(store, dexie, market_id, &target_offer_ids).await?;
+            execute_on_chain_cancellations(store, dexie, signer_config, market, &target_offer_ids)
+                .await?;
     }
 
     let payload = cancel_policy_payload(

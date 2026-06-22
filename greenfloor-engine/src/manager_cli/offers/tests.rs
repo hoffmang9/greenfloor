@@ -1,3 +1,5 @@
+#![allow(clippy::large_futures)]
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -5,14 +7,21 @@ use clap::Parser;
 use serde_json::json;
 
 use crate::manager_cli::commands::ManagerCli;
-use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
-use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
+use crate::manager_cli::test_support::{
+    pop_json, write_combine_dust_markets, ManagerContextBuilder,
+};
+use crate::minimal_program_template::{
+    write_minimal_program, write_minimal_program_with_signer, MinimalProgramParams,
+};
 use crate::storage::SqliteStore;
 
 use super::{
     run_offers_cancel_command, run_offers_reconcile_command, OffersCancelCliArgs,
     OffersReconcileCliArgs,
 };
+
+const TEST_RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+const TEST_CAT_ASSET_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn write_offers_program(path: &Path, home_dir: &Path, dexie_api_base: &str) {
     write_minimal_program(
@@ -25,6 +34,13 @@ fn write_offers_program(path: &Path, home_dir: &Path, dexie_api_base: &str) {
             ..Default::default()
         },
     );
+}
+
+fn write_cancel_test_markets(path: &Path) {
+    write_combine_dust_markets(path, TEST_CAT_ASSET_ID, TEST_RECEIVE_ADDRESS);
+    let mut yaml = std::fs::read_to_string(path).expect("read markets");
+    yaml = yaml.replace("dust_m", "m1");
+    std::fs::write(path, yaml).expect("write markets");
 }
 
 fn seed_offer_states(db_path: &Path, rows: &[(&str, &str, &str)]) {
@@ -109,13 +125,12 @@ async fn offers_reconcile_updates_states_from_dexie() {
 }
 
 #[tokio::test]
-async fn offers_cancel_cancel_open_uses_dexie() {
+async fn offers_cancel_cancel_open_selects_open_offers() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
-    std::fs::write(&markets, "markets: []\n").expect("write markets");
+    write_cancel_test_markets(&markets);
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(
         &db_path,
         &[
@@ -126,12 +141,21 @@ async fn offers_cancel_cancel_open_uses_dexie() {
 
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("POST", "/v1/offers/offer-open/cancel")
+        .mock("GET", "/v1/offers/offer-open")
         .with_status(200)
-        .with_body(r#"{"success":true,"id":"offer-open","status":3}"#)
+        .with_body(json!({"id":"offer-open","status":0}).to_string())
         .create_async()
         .await;
-    write_offers_program(&program, dir.path(), &server.url());
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            dexie_api_base: &server.url(),
+            low_inventory_alerts_enabled: true,
+            pushover_enabled: true,
+            ..Default::default()
+        },
+    );
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
@@ -145,38 +169,21 @@ async fn offers_cancel_cancel_open_uses_dexie() {
     )
     .await
     .expect("offers-cancel");
-    assert_eq!(code, 0);
+    assert_eq!(code, 2);
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("venue"), Some(&json!("dexie")));
     assert_eq!(payload.get("selected_count"), Some(&json!(1)));
-    assert_eq!(payload.get("cancelled_count"), Some(&json!(1)));
-    assert_eq!(payload.get("failed_count"), Some(&json!(0)));
-
-    let store = SqliteStore::open(&db_path).expect("open db");
-    let rows = store.list_offer_states(None, 10).expect("rows");
-    let by_id: HashMap<_, _> = rows
-        .iter()
-        .map(|row| (row.offer_id.as_str(), row))
-        .collect();
-    assert_eq!(by_id.get("offer-open").expect("open").state, "cancelled");
-    assert_eq!(
-        by_id.get("offer-open").expect("open").last_seen_status,
-        Some(3)
-    );
-    assert_eq!(
-        by_id.get("offer-expired").expect("expired").state,
-        "expired"
-    );
+    assert_eq!(payload.get("cancelled_count"), Some(&json!(0)));
+    assert_eq!(payload.get("failed_count"), Some(&json!(1)));
 }
 
 #[tokio::test]
-async fn offers_cancel_by_offer_id_uses_dexie() {
+async fn offers_cancel_by_offer_id_fetches_dexie_offer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
-    std::fs::write(&markets, "markets: []\n").expect("write markets");
+    write_cancel_test_markets(&markets);
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(
         &db_path,
         &[
@@ -187,12 +194,19 @@ async fn offers_cancel_by_offer_id_uses_dexie() {
 
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("POST", "/v1/offers/offer-target/cancel")
+        .mock("GET", "/v1/offers/offer-target")
         .with_status(200)
-        .with_body(r#"{"success":true,"id":"offer-target","status":3}"#)
+        .with_body(json!({"id":"offer-target","status":0}).to_string())
         .create_async()
         .await;
-    write_offers_program(&program, dir.path(), &server.url());
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            dexie_api_base: &server.url(),
+            ..Default::default()
+        },
+    );
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
@@ -206,10 +220,10 @@ async fn offers_cancel_by_offer_id_uses_dexie() {
     )
     .await
     .expect("offers-cancel");
-    assert_eq!(code, 0);
+    assert_eq!(code, 2);
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("selected_count"), Some(&json!(1)));
-    assert_eq!(payload.get("cancelled_count"), Some(&json!(1)));
+    assert_eq!(payload.get("failed_count"), Some(&json!(1)));
 }
 
 #[tokio::test]
@@ -217,19 +231,25 @@ async fn offers_cancel_reports_dexie_failure() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
-    std::fs::write(&markets, "markets: []\n").expect("write markets");
+    write_cancel_test_markets(&markets);
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(&db_path, &[("offer-fail", "m1", "open")]);
 
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("POST", "/v1/offers/offer-fail/cancel")
-        .with_status(200)
+        .mock("GET", "/v1/offers/offer-fail")
+        .with_status(404)
         .with_body(r#"{"success":false,"error":"not_found"}"#)
         .create_async()
         .await;
-    write_offers_program(&program, dir.path(), &server.url());
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            dexie_api_base: &server.url(),
+            ..Default::default()
+        },
+    );
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
@@ -247,6 +267,17 @@ async fn offers_cancel_reports_dexie_failure() {
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("cancelled_count"), Some(&json!(0)));
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
+    let item = payload
+        .get("items")
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .expect("item");
+    let error = item
+        .get("result")
+        .and_then(|value| value.get("error"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    assert!(error.contains("offer_cancel_dexie_offer_not_found"));
 }
 
 #[test]
