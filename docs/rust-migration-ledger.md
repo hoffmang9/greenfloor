@@ -60,17 +60,19 @@ Global flags on `greenfloor-manager`:
 
 ## Breaking changes log
 
-| Date       | Change                                                                           | Action                                                                           |
-| ---------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| 2026-06-17 | Python `greenfloor-manager` / `greenfloord` entrypoints removed                  | Install Cargo binaries                                                           |
-| 2026-06-17 | Manager `build-and-post-offer` is Rust-only (no PyO3)                            | Use `greenfloor-manager build-and-post-offer`                                    |
-| 2026-06-17 | `greenfloor-engine-pyo3` deleted; Coinset IO via `greenfloor-engine coinset …`   | `cargo install --path greenfloor-engine --bins` for scripts                      |
-| 2026-06-17 | Daemon tests use `greenfloor-engine daemon-once --request-json`                  | Set `GREENFLOOR_DAEMON_TEST_CONTROLS=1` when using non-default `test_controls`   |
-| 2026-06-17 | `greenfloor-engine` no longer exposes `build-and-post-offer` or `offers-*`       | Use `greenfloor-manager` for operator lifecycle commands                         |
-| 2026-06-17 | `doctor` validates `signer_key_id` on enabled markets (not Python keys registry) | Ensure each enabled market has `signer_key_id` set                               |
-| 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`)          | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first |
-| 2026-06-17 | Python `config/models.py` deleted; script config via manager field CLIs          | Call `greenfloor-manager` field commands; do not walk operator YAML for policy   |
-| 2026-06-17 | `markets-fields` exports `markets` (all) and `enabled_markets`                   | Scripts needing disabled-market metadata use `markets`; operators use `enabled`  |
-| 2026-06-21 | Removed `offer::` bootstrap/publish wrapper re-exports (library consumers)       | Use `BootstrapPhaseResult::offer_creation_block_error()`; see ADR 0014           |
+| Date       | Change                                                                           | Action                                                                              |
+| ---------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 2026-06-17 | Python `greenfloor-manager` / `greenfloord` entrypoints removed                  | Install Cargo binaries                                                              |
+| 2026-06-17 | Manager `build-and-post-offer` is Rust-only (no PyO3)                            | Use `greenfloor-manager build-and-post-offer`                                       |
+| 2026-06-17 | `greenfloor-engine-pyo3` deleted; Coinset IO via `greenfloor-engine coinset …`   | `cargo install --path greenfloor-engine --bins` for scripts                         |
+| 2026-06-17 | Daemon tests use `greenfloor-engine daemon-once --request-json`                  | Set `GREENFLOOR_DAEMON_TEST_CONTROLS=1` when using non-default `test_controls`      |
+| 2026-06-17 | `greenfloor-engine` no longer exposes `build-and-post-offer` or `offers-*`       | Use `greenfloor-manager` for operator lifecycle commands                            |
+| 2026-06-17 | `doctor` validates `signer_key_id` on enabled markets (not Python keys registry) | Ensure each enabled market has `signer_key_id` set                                  |
+| 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`)          | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first    |
+| 2026-06-17 | Python `config/models.py` deleted; script config via manager field CLIs          | Call `greenfloor-manager` field commands; do not walk operator YAML for policy      |
+| 2026-06-17 | `markets-fields` exports `markets` (all) and `enabled_markets`                   | Scripts needing disabled-market metadata use `markets`; operators use `enabled`     |
+| 2026-06-21 | Removed `offer::` bootstrap/publish wrapper re-exports (library consumers)       | Use `BootstrapPhaseResult::offer_creation_block_error()`; see ADR 0014              |
+| 2026-06-22 | `offers-cancel` JSON field `cancelled_count` renamed to `submitted_count`        | Counts successful on-chain submits; confirmed cancel is `cancelled` after reconcile |
+| 2026-06-22 | On-chain cancel only; no Dexie cancel API                                        | See ADR 0015; use `offers-cancel` + `offers-reconcile`                              |
 
 Add a row here for every intentional operator-facing break during the migration.

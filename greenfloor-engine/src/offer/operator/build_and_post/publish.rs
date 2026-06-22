@@ -5,6 +5,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::publish::{
     post_offer_phase_dexie, ExpectedPublishAssetFields, PostOfferPhaseDexieParams,
 };
+use crate::offer::types::CreateOfferResult;
 use crate::storage::OfferPostPersistRecord;
 
 use super::context::ResolvedBuildAndPostContext;
@@ -78,11 +79,20 @@ pub(super) fn offer_post_persist_record(
     execution_mode: &str,
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
+    create_result: Option<&CreateOfferResult>,
 ) -> Option<OfferPostPersistRecord> {
     if !publish.success {
         return None;
     }
     let offer_id = publish.offer_id.clone()?;
+    let (presplit_input_coin_id, fixed_delegated_puzzle_hash) = create_result
+        .and_then(|result| result.presplit_cancel_metadata.as_ref())
+        .map_or((None, None), |metadata| {
+            (
+                Some(metadata.input_coin_id.clone()),
+                Some(metadata.fixed_delegated_puzzle_hash.clone()),
+            )
+        });
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.market.market_id.clone(),
@@ -92,5 +102,8 @@ pub(super) fn offer_post_persist_record(
         resolved_base_asset_id: ctx.resolved_base_asset_id.clone(),
         resolved_quote_asset_id: ctx.resolved_quote_asset_id.clone(),
         created_extra: json!({"execution_mode": execution_mode}),
+        presplit_input_coin_id,
+        fixed_delegated_puzzle_hash,
+        execution_mode: Some(execution_mode.to_string()),
     })
 }

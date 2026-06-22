@@ -19,7 +19,7 @@ backed by the canonical `greenfloor-engine` crate.
 
 - Scope and architecture: `docs/plan.md`
 - Operator deployment/recovery: `docs/runbook.md`
-- Architecture decisions index: `docs/README.md`
+- Architecture decisions index: [`docs/README.md`](docs/README.md) (start with ADR 0015 for on-chain cancel)
 
 ## Offer Files
 
@@ -34,6 +34,7 @@ backed by the canonical `greenfloor-engine` crate.
 - Stable-vs-unstable pairs should use shorter expiries than other pair types.
 - Explicit cancel operations are rare and policy-gated.
 - Cancel is only for stable-vs-unstable pairs and only when unstable-leg price movement is strong enough to justify early withdrawal.
+- **Cancellation is on-chain:** Dexie supplies the offer file only; GreenFloor spends the offered input coin back to vault change via Coinset and records `cancel_submitted` until reconcile confirms `cancelled` (see ADR 0015).
 - Default behavior remains expiry-driven rotation instead of frequent cancel/repost churn.
 
 ## Quickstart

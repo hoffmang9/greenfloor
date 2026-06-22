@@ -163,6 +163,8 @@ async fn offers_cancel_cancel_open_selects_open_offers() {
         &harness.ctx,
         OffersCancelCliArgs {
             offer_id: vec![],
+            offer_file: vec![],
+            market_id: None,
             cancel_open: true,
             venue: None,
         },
@@ -173,7 +175,7 @@ async fn offers_cancel_cancel_open_selects_open_offers() {
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("venue"), Some(&json!("dexie")));
     assert_eq!(payload.get("selected_count"), Some(&json!(1)));
-    assert_eq!(payload.get("cancelled_count"), Some(&json!(0)));
+    assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
 }
 
@@ -214,6 +216,8 @@ async fn offers_cancel_by_offer_id_fetches_dexie_offer() {
         &harness.ctx,
         OffersCancelCliArgs {
             offer_id: vec!["offer-target".to_string()],
+            offer_file: vec![],
+            market_id: None,
             cancel_open: false,
             venue: None,
         },
@@ -257,6 +261,8 @@ async fn offers_cancel_reports_dexie_failure() {
         &harness.ctx,
         OffersCancelCliArgs {
             offer_id: vec!["offer-fail".to_string()],
+            offer_file: vec![],
+            market_id: None,
             cancel_open: false,
             venue: None,
         },
@@ -265,7 +271,7 @@ async fn offers_cancel_reports_dexie_failure() {
     .expect("offers-cancel");
     assert_eq!(code, 2);
     let payload = pop_json(&harness.captured);
-    assert_eq!(payload.get("cancelled_count"), Some(&json!(0)));
+    assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
     let item = payload
         .get("items")

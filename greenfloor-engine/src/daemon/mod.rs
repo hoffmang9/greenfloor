@@ -41,7 +41,7 @@ pub mod watchlist;
 
 pub use crate::coin_ops::execution::CoinOpExecContext;
 pub use crate::offer::lifecycle::{
-    cancel_offers_on_dexie, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
+    cancel_offers_on_chain, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
     ReconcileBatchItem, ReconcileBatchResult, ReconcileCliResult,
 };
 pub use cancel_phase::run_market_cancel_phase;

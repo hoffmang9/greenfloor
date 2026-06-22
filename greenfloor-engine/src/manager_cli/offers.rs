@@ -40,6 +40,10 @@ pub struct OffersStatusCliArgs {
 pub struct OffersCancelCliArgs {
     #[arg(long, action = clap::ArgAction::Append)]
     pub offer_id: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, value_name = "PATH_OR_BECH32")]
+    pub offer_file: Vec<String>,
+    #[arg(long, value_name = "MARKET_ID")]
+    pub market_id: Option<String>,
     #[arg(long)]
     pub cancel_open: bool,
     #[arg(long)]
@@ -128,6 +132,8 @@ pub async fn run_offers_cancel_command(
         &program.dexie_api_base,
         &venue,
         &args.offer_id,
+        &args.offer_file,
+        args.market_id.as_deref(),
         args.cancel_open,
         bundle.signer,
         &market_by_id,

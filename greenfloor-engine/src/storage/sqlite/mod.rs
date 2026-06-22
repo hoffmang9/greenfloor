@@ -3,6 +3,7 @@
 mod alerts;
 mod audit;
 mod coin_ops;
+mod migrations;
 mod offers;
 mod pricing;
 mod reservations;
@@ -29,6 +30,16 @@ pub struct OfferPostPersistRecord {
     pub resolved_base_asset_id: String,
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
+    pub presplit_input_coin_id: Option<String>,
+    pub fixed_delegated_puzzle_hash: Option<String>,
+    pub execution_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OfferCancelMetadataRow {
+    pub presplit_input_coin_id: Option<String>,
+    pub fixed_delegated_puzzle_hash: Option<String>,
+    pub execution_mode: Option<String>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
@@ -130,6 +141,7 @@ impl SqliteStore {
         conn.execute_batch(SCHEMA).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;
+        migrations::apply_schema_migrations(&conn)?;
         Ok(Self { conn })
     }
 }

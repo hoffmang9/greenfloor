@@ -11,8 +11,8 @@ Accepted (2026-05); operator scope finalized by
 
 ## Current state
 
-- **Operators:** vault KMS signing, offer creation, bootstrap mixed-splits, and asset
-  resolution run in-process in `greenfloor-engine`.
+- **Operators:** vault KMS signing, offer creation, offer cancel/reclaim spends, bootstrap
+  mixed-splits, and asset resolution run in-process in `greenfloor-engine`.
 - **Scripts:** Coinset push/fee via `greenfloor-engine coinset …` CLI subcommands.
 - **On-chain IO:** Coinset MSP via Rust (`greenfloor-engine/src/coinset/`).
 - Cloud Wallet GraphQL is removed from offer/bootstrap/asset paths.
@@ -32,6 +32,8 @@ PyO3 briefly provided in-process access for Python orchestration and parity test
 
 - Rust simulator atomic-take roundtrip for CAT:CAT requested legs remains
   sell-CAT/request-XCH only; buy-side and cat-cat fixtures validate offer build shape.
+- On-chain presplit-existing cancel: covered by simulator e2e (ADR 0015); live mainnet
+  cancel proof tracked separately in operator runbooks.
 
 ## Consequences
 

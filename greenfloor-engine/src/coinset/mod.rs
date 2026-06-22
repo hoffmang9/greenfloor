@@ -48,7 +48,7 @@ pub use parse::{
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
     to_coinset_hex, u64_from_value,
 };
-pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
+pub use presplit::{fetch_unspent_offer_input_cat, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{
     with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,

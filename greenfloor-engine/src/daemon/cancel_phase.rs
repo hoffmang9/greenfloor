@@ -72,6 +72,7 @@ async fn execute_on_chain_cancellations(
             offer_id: offer_id.clone(),
             market_id: market.market_id.clone(),
             receive_address: receive_address.to_string(),
+            offer_text: None,
         })
         .collect();
     let outcomes = cancel_offers_on_chain(store, dexie, signer_config, &targets).await?;
@@ -82,8 +83,8 @@ async fn execute_on_chain_cancellations(
             cancel_executed += 1;
             items.push(json!({
                 "offer_id": outcome.offer_id,
-                "status": "executed",
-                "reason": "cancelled_on_strong_unstable_move",
+                "status": "cancel_submitted",
+                "reason": "cancel_submitted_on_strong_unstable_move",
                 "operation_id": outcome.operation_id,
                 "attempts": 1,
             }));

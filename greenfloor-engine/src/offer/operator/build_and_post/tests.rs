@@ -131,14 +131,15 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": false}),
     };
-    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1).is_none());
+    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1, None).is_none());
 
     let success = PublishResult {
         success: true,
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": true, "id": "offer-1"}),
     };
-    let record = offer_post_persist_record(&success, "sell", "direct", &ctx, 10).expect("record");
+    let record =
+        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None).expect("record");
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
 }
@@ -182,6 +183,9 @@ fn flush_post_batch_writes_offer_state() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({"execution_mode": "direct"}),
+                presplit_input_coin_id: None,
+                fixed_delegated_puzzle_hash: None,
+                execution_mode: Some("direct".to_string()),
             }],
             &[],
         )

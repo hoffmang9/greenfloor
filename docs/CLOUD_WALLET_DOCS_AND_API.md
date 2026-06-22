@@ -156,6 +156,11 @@ Use this as a quick guide for commonly integrated operations.
 
 ## `cancelOffer` Deep Dive
 
+> **GreenFloor operators:** production cancel does **not** use ent-wallet `cancelOffer`.
+> GreenFloor fetches the Dexie offer file and submits an on-chain reclaim spend via Coinset
+> (see [ADR 0015](decisions/0015-on-chain-offer-cancel.md)). The notes below describe
+> ent-wallet behavior for reference when comparing presplit cancel semantics.
+
 `cancelOffer` supports two operational modes with different side effects and return behavior.
 
 ### Input Shape

@@ -279,6 +279,9 @@ mod tests {
             resolved_base_asset_id: "a1".to_string(),
             resolved_quote_asset_id: "xch".to_string(),
             created_extra: json!({"execution_mode": "direct"}),
+            presplit_input_coin_id: None,
+            fixed_delegated_puzzle_hash: None,
+            execution_mode: Some("direct".to_string()),
         };
         let payload = strategy_offer_execution_payload(&record);
         assert_eq!(
