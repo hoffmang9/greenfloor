@@ -11,6 +11,8 @@ use clvmr::{Allocator, NodePtr};
 
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend};
 use crate::error::{SignerError, SignerResult};
+use crate::offer::plan::build_requested_payments;
+use crate::offer::types::OfferTerms;
 use crate::vault::materialize::build_vault_cat_inner_spend;
 use crate::vault::members::{nonce_member_puzzle_hash, p2_conditions_or_singleton_puzzle_hash};
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
@@ -109,8 +111,6 @@ pub fn vault_change_puzzle_hash(launcher_id: Bytes32) -> SignerResult<Bytes32> {
 
 #[derive(Debug, Clone)]
 pub struct PresplitOfferBinding {
-    pub requested_payments: RequestedPayments,
-    pub requested_asset_info: AssetInfo,
     pub offer_amount: u64,
     pub expires_at: Option<u64>,
     pub fixed_conditions_tree_hash: TreeHash,
@@ -118,34 +118,37 @@ pub struct PresplitOfferBinding {
 }
 
 impl PresplitOfferBinding {
-    /// Plan.
+    /// Plan presplit fixed conditions and P2 puzzle hash using one spend context.
+    ///
+    /// Requested payments must be built in the same [`SpendContext`] used for
+    /// assertions (CAT quote memos are allocator-backed node pointers).
     ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn plan(
+    pub(crate) fn plan(
         launcher_id: Bytes32,
-        requested_payments: RequestedPayments,
-        requested_asset_info: AssetInfo,
-        offer_amount: u64,
-        expires_at: Option<u64>,
+        terms: &OfferTerms,
+        receive_puzzle_hash: Bytes32,
+        offer_nonce: Bytes32,
     ) -> SignerResult<Self> {
         let mut ctx = SpendContext::new();
+        let requested_payments =
+            build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
+        let requested_asset_info = AssetInfo::new();
         let fixed_spend = build_fixed_presplit_conditions_spend(
             &mut ctx,
             &requested_payments,
             &requested_asset_info,
-            offer_amount,
-            expires_at,
+            terms.offer_amount,
+            terms.expires_at,
         )?;
         let fixed_conditions_tree_hash = ctx.tree_hash(fixed_spend.puzzle);
         let p2_hashes =
             p2_conditions_or_singleton_puzzle_hash(fixed_conditions_tree_hash, launcher_id)?;
         Ok(Self {
-            requested_payments,
-            requested_asset_info,
-            offer_amount,
-            expires_at,
+            offer_amount: terms.offer_amount,
+            expires_at: terms.expires_at,
             fixed_conditions_tree_hash,
             p2_puzzle_hash: p2_hashes.puzzle_hash.into(),
         })
@@ -286,20 +289,24 @@ where
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn build_offer_from_presplit_cat(
+pub(crate) async fn build_offer_from_presplit_cat(
     presplit_cat: Cat,
     launcher_id: Bytes32,
     binding: PresplitOfferBinding,
+    terms: &OfferTerms,
+    receive_puzzle_hash: Bytes32,
     offer_nonce: Bytes32,
 ) -> SignerResult<(String, String, String)> {
-    // Rebuild fixed conditions in a fresh SpendContext for the actual CAT spend.
-    // PresplitOfferBinding::plan already canonicalizes p2_puzzle_hash; this ctx is
-    // only for materializing the inner puzzle spend on chain.
+    // Rebuild requested payments and fixed conditions in one SpendContext so CAT
+    // quote memos remain valid through assertion tree hashing.
     let mut ctx = SpendContext::new();
+    let requested_payments =
+        build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
+    let requested_asset_info = AssetInfo::new();
     let fixed_spend = build_fixed_presplit_conditions_spend(
         &mut ctx,
-        &binding.requested_payments,
-        &binding.requested_asset_info,
+        &requested_payments,
+        &requested_asset_info,
         binding.offer_amount,
         binding.expires_at,
     )?;
@@ -314,15 +321,22 @@ pub async fn build_offer_from_presplit_cat(
         .map_err(SignerError::from)?;
     let input_spend_bundle = SpendBundle::new(ctx.take(), chia_bls::Signature::default());
 
+    let mut offer_ctx = SpendContext::new();
+    let requested_payments =
+        build_requested_payments(&mut offer_ctx, terms, receive_puzzle_hash, offer_nonce)?;
+    let requested_asset_info = AssetInfo::new();
+
     let mut allocator = Allocator::new();
     let offer = Offer::from_input_spend_bundle(
         &mut allocator,
         input_spend_bundle.clone(),
-        binding.requested_payments,
-        binding.requested_asset_info,
+        requested_payments,
+        requested_asset_info,
     )
     .map_err(SignerError::from)?;
-    let offer_spend_bundle = offer.to_spend_bundle(&mut ctx).map_err(SignerError::from)?;
+    let offer_spend_bundle = offer
+        .to_spend_bundle(&mut offer_ctx)
+        .map_err(SignerError::from)?;
     let offer_text = encode_offer(&offer_spend_bundle).map_err(SignerError::from)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;
     Ok((offer_text, spend_bundle_hex, hex::encode(offer_nonce)))
@@ -336,6 +350,8 @@ mod tests {
     use chia_sdk_types::run_puzzle;
     use chia_sdk_types::Condition;
     use clvm_traits::FromClvm;
+
+    use crate::offer::types::OfferTerms;
 
     #[test]
     fn p2_conditions_or_singleton_hash_is_deterministic() {
@@ -369,14 +385,18 @@ mod tests {
             None,
             chia_sdk_driver::CatInfo::new(Bytes32::new([0x02; 32]), None, Bytes32::default()),
         );
-        let binding = PresplitOfferBinding::plan(
-            launcher_id,
-            RequestedPayments::new(),
-            AssetInfo::new(),
-            1000,
-            None,
-        )
-        .expect("binding");
+        let terms = OfferTerms {
+            receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w"
+                .to_string(),
+            offer_asset_id: hex::encode(Bytes32::new([0x02; 32])),
+            offer_amount: 1000,
+            request_asset_id: "xch".to_string(),
+            request_amount: 1,
+            expires_at: None,
+        };
+        let binding =
+            PresplitOfferBinding::plan(launcher_id, &terms, Bytes32::default(), Bytes32::default())
+                .expect("binding");
         let mismatched_cat = predict_presplit_cat(&source_cat, Bytes32::new([0x99; 32]), 1000);
         let err = verify_presplit_cat_offer_binding(&mismatched_cat, &binding).unwrap_err();
         assert!(matches!(err, SignerError::PresplitCoinPuzzleHashMismatch));

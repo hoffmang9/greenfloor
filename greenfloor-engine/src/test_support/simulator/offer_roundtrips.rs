@@ -7,7 +7,7 @@ use serde::Serialize;
 use super::coinset_backend::SimulatorOfferCoinset;
 use super::harness::{
     fetch_cat_from_sim, sample_create_offer_request, take_atomic_offer_on_sim,
-    xch_requested_payments, SimulatorVaultHarness,
+    SimulatorVaultHarness,
 };
 use crate::offer::build::build_vault_cat_offer_with_spend;
 use crate::offer::presplit::{
@@ -93,17 +93,23 @@ async fn split_presplit_cat_on_sim(
 ) -> (Cat, Bytes32) {
     let source_coin_id = source_cat.coin.coin_id();
     let offer_nonce = offer_nonce_from_cats(std::slice::from_ref(&source_cat));
-    let requested_payments = xch_requested_payments(
-        offer_nonce,
-        harness.chain.p2_message_hash,
-        TEST_XCH_MOJO_MULT,
-    );
+    let receive_address =
+        chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
+            .encode()
+            .expect("test receive address");
+    let terms = crate::offer::types::OfferTerms {
+        receive_address,
+        offer_asset_id: hex::encode(harness.chain.asset_id),
+        offer_amount,
+        request_asset_id: "xch".to_string(),
+        request_amount: TEST_XCH_MOJO_MULT,
+        expires_at: None,
+    };
     let binding = crate::offer::presplit::PresplitOfferBinding::plan(
         harness.chain.launcher_id,
-        requested_payments,
-        chia_sdk_driver::AssetInfo::new(),
-        offer_amount,
-        None,
+        &terms,
+        harness.chain.p2_message_hash,
+        offer_nonce,
     )
     .expect("binding");
     let change_amount = source_cat.coin.amount - offer_amount;

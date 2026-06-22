@@ -4,7 +4,7 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::CoinsetClient;
 use chia_sdk_driver::Cat;
 
-use super::cats::{list_unspent_cats, list_unspent_cats_by_ids};
+use super::cats::{list_unspent_cats_by_ids, list_unspent_cats_with_lineage};
 use crate::error::{SignerError, SignerResult};
 
 /// Minimum CAT output amount for offer/dust policy (1000 mojos = 1 CAT unit).
@@ -107,7 +107,7 @@ pub(crate) async fn select_cats_for_spend(
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
     let cats = if explicit_coin_ids.is_empty() {
-        list_unspent_cats(client, receive_address, asset_id).await?
+        list_unspent_cats_with_lineage(client, receive_address, asset_id).await?
     } else {
         list_unspent_cats_by_ids(client, explicit_coin_ids).await?
     };
