@@ -32,9 +32,9 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
    source-coin nonce used during planning.
 
 3a. **Presplit cancel metadata is persisted at post time** in `offer_state`:
-   `presplit_input_coin_id`, `fixed_delegated_puzzle_hash`, and `execution_mode`. Cancel
-   prefers stored metadata; when absent (legacy rows, DB loss, manual posts), cancel falls
-   back to extraction from the Dexie offer file.
+`presplit_input_coin_id`, `fixed_delegated_puzzle_hash`, and `execution_mode`. Cancel
+prefers stored metadata; when absent (legacy rows, DB loss, manual posts), cancel falls
+back to extraction from the Dexie offer file.
 
 4. **Input CAT resolution uses `OfferCoinsetBackend::fetch_unspent_offer_input_cat`.**
    Lookup tries coin id from the offer spend bundle (authoritative for on-chain coins),

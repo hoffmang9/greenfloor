@@ -2,15 +2,12 @@
 
 use clap::Args;
 
-use std::collections::HashMap;
-
 use crate::cli_util::optional_trimmed;
-use crate::config::{
-    load_markets_config_with_overlay, load_program_bundle_gated, load_program_config, MarketConfig,
-};
+use crate::config::{load_program_bundle_gated, load_program_config};
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
-    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliResult,
+    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliRequest,
+    OffersCancelCliResult,
 };
 use crate::storage::resolve_state_db_path;
 
@@ -120,23 +117,17 @@ pub async fn run_offers_cancel_command(
         .filter(|value| !value.is_empty())
         .unwrap_or(program.offer_publish_venue.as_str())
         .to_ascii_lowercase();
-    let markets =
-        load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
-    let market_by_id: HashMap<String, MarketConfig> = markets
-        .markets
-        .into_iter()
-        .map(|market| (market.market_id.clone(), market))
-        .collect();
     let payload: OffersCancelCliResult = offers_cancel_cli(
         &db_path,
         &program.dexie_api_base,
         &venue,
-        &args.offer_id,
-        &args.offer_file,
-        args.market_id.as_deref(),
-        args.cancel_open,
+        &OffersCancelCliRequest {
+            offer_ids: args.offer_id,
+            offer_files: args.offer_file,
+            market_id: args.market_id,
+            cancel_open: args.cancel_open,
+        },
         bundle.signer,
-        &market_by_id,
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };

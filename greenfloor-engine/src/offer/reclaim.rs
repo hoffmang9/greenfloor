@@ -10,9 +10,10 @@ use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
-    build_presplit_offer_cancel_inner_spend, vault_change_puzzle_hash, PresplitOfferBinding,
+    build_presplit_offer_cancel_inner_spend, vault_change_puzzle_hash,
+    verify_fixed_delegated_puzzle_hash_for_cat, PresplitOfferBinding,
 };
-use crate::storage::OfferCancelMetadataRow;
+use crate::offer::types::PresplitCancelFields;
 use crate::vault::materialize::{
     append_vault_singleton_spend_for_vault, build_vault_cat_inner_spend,
 };
@@ -40,52 +41,39 @@ pub fn first_offered_cat(offer: &Offer) -> SignerResult<Cat> {
     Err(SignerError::OfferCancelNoSpendableInput)
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct OfferCancelSpendHints {
-    pub presplit_input_coin_id: Option<String>,
-    pub fixed_delegated_puzzle_hash: Option<String>,
-}
-
-impl OfferCancelSpendHints {
-    #[must_use]
-    pub fn from_metadata(metadata: &OfferCancelMetadataRow) -> Self {
-        Self {
-            presplit_input_coin_id: metadata.presplit_input_coin_id.clone(),
-            fixed_delegated_puzzle_hash: metadata.fixed_delegated_puzzle_hash.clone(),
-        }
-    }
-}
-
-async fn resolve_offer_input_cat_with_hints<C: OfferCoinsetBackend>(
+async fn input_cat_from_hint_coin_id<C: OfferCoinsetBackend>(
     backend: &C,
-    spend_bundle: &SpendBundle,
-    offered: &Cat,
-    hints: Option<&OfferCancelSpendHints>,
-) -> SignerResult<Cat> {
-    if let Some(coin_id_hex) = hints
-        .and_then(|value| value.presplit_input_coin_id.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        if let Ok(coin_id) = hex_to_bytes32(coin_id_hex) {
-            if let Ok(cat) = backend
-                .fetch_unspent_offer_input_cat(coin_id, None, None)
-                .await
-            {
-                if cat.coin.amount == offered.coin.amount {
-                    return Ok(cat);
-                }
-            }
-        }
+    coin_id_hex: &str,
+    offered_amount: u64,
+) -> Option<Cat> {
+    let coin_id = hex_to_bytes32(coin_id_hex.trim()).ok()?;
+    let cat = backend
+        .fetch_unspent_offer_input_cat(coin_id, None, None)
+        .await
+        .ok()?;
+    if cat.coin.amount == offered_amount {
+        Some(cat)
+    } else {
+        None
     }
-    resolve_offer_input_cat(backend, spend_bundle, offered).await
 }
 
 async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
     backend: &C,
     spend_bundle: &SpendBundle,
     offered: &Cat,
+    fields: Option<&PresplitCancelFields>,
 ) -> SignerResult<Cat> {
+    if let Some(coin_id_hex) = fields
+        .and_then(|value| value.input_coin_id.as_deref())
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(cat) =
+            input_cat_from_hint_coin_id(backend, coin_id_hex, offered.coin.amount).await
+        {
+            return Ok(cat);
+        }
+    }
     let mut coin_ids = vec![offered.coin.coin_id()];
     for coin_spend in &spend_bundle.coin_spends {
         if coin_spend.coin.amount == offered.coin.amount {
@@ -118,21 +106,57 @@ async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
 }
 
 fn presplit_fixed_conditions_tree_hash(
-    vault_ctx: &VaultSpendContext,
+    launcher_id: Bytes32,
     cat: &Cat,
     spend_bundle: &SpendBundle,
-    hints: Option<&OfferCancelSpendHints>,
+    fields: Option<&PresplitCancelFields>,
 ) -> SignerResult<TreeHash> {
-    if let Some(hash_hex) = hints
+    if let Some(hash_hex) = fields
         .and_then(|value| value.fixed_delegated_puzzle_hash.as_deref())
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        return hex_to_tree_hash(hash_hex);
+        let hash = hex_to_tree_hash(hash_hex)?;
+        verify_fixed_delegated_puzzle_hash_for_cat(launcher_id, cat, hash)?;
+        return Ok(hash);
     }
-    let binding =
-        PresplitOfferBinding::from_presplit_input_spend(vault_ctx.launcher_id, cat, spend_bundle)?;
-    Ok(binding.fixed_conditions_tree_hash)
+    PresplitOfferBinding::from_presplit_input_spend(launcher_id, cat, spend_bundle)
+        .map(|binding| binding.fixed_conditions_tree_hash)
+}
+
+fn reclaim_mode_for_cat(
+    vault_ctx: &mut VaultSpendContext,
+    cat: &Cat,
+    spend_bundle: &SpendBundle,
+    fields: Option<&PresplitCancelFields>,
+) -> SignerResult<OfferCatReclaimMode> {
+    if fields.is_some_and(PresplitCancelFields::is_direct_execution) {
+        return Ok(OfferCatReclaimMode::DirectVault);
+    }
+    if fields.is_some_and(PresplitCancelFields::is_presplit_execution) {
+        return Ok(OfferCatReclaimMode::PresplitOffer {
+            fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
+                vault_ctx.launcher_id,
+                cat,
+                spend_bundle,
+                fields,
+            )?,
+        });
+    }
+    if vault_ctx
+        .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
+        .is_some()
+    {
+        return Ok(OfferCatReclaimMode::DirectVault);
+    }
+    Ok(OfferCatReclaimMode::PresplitOffer {
+        fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
+            vault_ctx.launcher_id,
+            cat,
+            spend_bundle,
+            fields,
+        )?,
+    })
 }
 
 /// Build a spend bundle that returns an offered CAT coin to vault change.
@@ -194,34 +218,19 @@ pub async fn build_offer_cancel_spend_bundle<C: OfferCoinsetBackend>(
     vault_ctx: &mut VaultSpendContext,
     backend: &C,
     offer_text: &str,
-    hints: Option<&OfferCancelSpendHints>,
+    fields: Option<&PresplitCancelFields>,
 ) -> SignerResult<SpendBundle> {
     let spend_bundle = decode_offer(offer_text)?;
     let mut allocator = clvmr::Allocator::new();
     let offer = Offer::from_spend_bundle(&mut allocator, &spend_bundle)?;
     let offered_cat = first_offered_cat(&offer)?;
-    let cat =
-        resolve_offer_input_cat_with_hints(backend, &spend_bundle, &offered_cat, hints).await?;
+    let cat = resolve_offer_input_cat(backend, &spend_bundle, &offered_cat, fields).await?;
     let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id)?;
     let vault = backend
         .fetch_latest_vault(vault_ctx.launcher_id, vault_ctx.inner_puzzle_hash)
         .await?;
     let signer = VaultFastForwardSigner::from_context(vault_ctx);
-    let mode = if vault_ctx
-        .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-        .is_some()
-    {
-        OfferCatReclaimMode::DirectVault
-    } else {
-        OfferCatReclaimMode::PresplitOffer {
-            fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
-                vault_ctx,
-                &cat,
-                &spend_bundle,
-                hints,
-            )?,
-        }
-    };
+    let mode = reclaim_mode_for_cat(vault_ctx, &cat, &spend_bundle, fields)?;
     build_vault_cat_reclaim_spend_bundle(
         vault_ctx,
         cat,
