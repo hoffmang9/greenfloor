@@ -2,11 +2,15 @@
 name: CI
 
 "on":
+  # opened/reopened/ready_for_review: first CI when a PR is created or marked ready.
+  # Branch updates use push below so workflow-only commits still trigger CI and we
+  # avoid duplicate push + pull_request synchronize runs on every commit.
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
   push:
     branches:
       - main
+      - "**"
   workflow_dispatch:
 
 concurrency:
