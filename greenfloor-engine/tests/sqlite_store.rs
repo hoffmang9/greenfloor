@@ -2,13 +2,40 @@ use std::collections::BTreeMap;
 
 use chrono::{Duration, Utc};
 use greenfloor_engine::storage::{
-    CoinOpLedgerEntry, OfferReservationLeaseRequest, SqliteStore, StoredAlertState,
+    CoinOpLedgerEntry, OfferReservationAcquireOutcome, OfferReservationLeaseRequest, SqliteStore,
+    StoredAlertState,
 };
 use rusqlite::Connection;
 use serde_json::json;
 
 fn open_store(path: &std::path::Path) -> SqliteStore {
     SqliteStore::open(path).expect("open sqlite store")
+}
+
+fn acquire_test_reservation_lease(
+    store: &SqliteStore,
+    reservation_id: &str,
+    wallet_id: &str,
+    amounts: &BTreeMap<String, i64>,
+    lease_seconds: i64,
+) {
+    assert!(
+        matches!(
+            store
+                .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
+                    reservation_id,
+                    market_id: "m1",
+                    wallet_id,
+                    requested_amounts: amounts,
+                    available_amounts: amounts,
+                    lease_seconds,
+                    now: None,
+                })
+                .expect("try acquire"),
+            OfferReservationAcquireOutcome::Acquired
+        ),
+        "reservation acquire failed for {reservation_id}"
+    );
 }
 
 fn coin_op_entry<'a>(
@@ -470,9 +497,7 @@ fn offer_reservation_lease_roundtrip() {
     let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 1000);
     amounts.insert("cat-1".to_string(), 2500);
-    store
-        .add_offer_reservation_lease("res-1", "m1", "vault-1", &amounts, 120)
-        .expect("add lease");
+    acquire_test_reservation_lease(&store, "res-1", "vault-1", &amounts, 120);
     let rows = store
         .list_offer_reservation_leases(Some("res-1"))
         .expect("list");
@@ -496,9 +521,7 @@ fn offer_reservation_release_clears_reserved_amount() {
     let store = open_store(&dir.path().join("gf.sqlite"));
     let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 700);
-    store
-        .add_offer_reservation_lease("res-2", "m1", "vault-1", &amounts, 120)
-        .expect("add lease");
+    acquire_test_reservation_lease(&store, "res-2", "vault-1", &amounts, 120);
     assert_eq!(
         store
             .release_offer_reservation_lease("res-2", "released_success")
@@ -522,9 +545,7 @@ fn offer_reservation_expiry_marks_active_rows_expired() {
     let store = open_store(&dir.path().join("gf.sqlite"));
     let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 120);
-    store
-        .add_offer_reservation_lease("res-3", "m1", "vault-1", &amounts, 1)
-        .expect("add lease");
+    acquire_test_reservation_lease(&store, "res-3", "vault-1", &amounts, 1);
     assert_eq!(
         store
             .expire_offer_reservation_leases(Some(Utc::now() + Duration::hours(1)))
@@ -546,7 +567,7 @@ fn try_acquire_offer_reservation_lease_rejects_insufficient_capacity() {
     requested.insert("asset".to_string(), 100);
     let mut available = BTreeMap::default();
     available.insert("asset".to_string(), 50);
-    let err = store
+    let outcome = store
         .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
             reservation_id: "res-4",
             market_id: "m1",
@@ -556,8 +577,10 @@ fn try_acquire_offer_reservation_lease_rejects_insufficient_capacity() {
             lease_seconds: 120,
             now: None,
         })
-        .expect("try acquire")
-        .expect("error");
+        .expect("try acquire");
+    let OfferReservationAcquireOutcome::Rejected(err) = outcome else {
+        panic!("expected rejection, got {outcome:?}");
+    };
     assert!(err.contains("reservation_insufficient_asset"));
     assert!(store
         .list_offer_reservation_leases(Some("res-4"))
@@ -575,18 +598,20 @@ fn try_acquire_offer_reservation_lease_persists_rows_on_success() {
     let mut available = BTreeMap::default();
     available.insert("asset".to_string(), 150);
     available.insert("xch".to_string(), 40);
-    assert!(store
-        .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
-            reservation_id: "res-5",
-            market_id: "m1",
-            wallet_id: "vault-1",
-            requested_amounts: &requested,
-            available_amounts: &available,
-            lease_seconds: 120,
-            now: None,
-        })
-        .expect("try acquire")
-        .is_none());
+    assert!(matches!(
+        store
+            .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
+                reservation_id: "res-5",
+                market_id: "m1",
+                wallet_id: "vault-1",
+                requested_amounts: &requested,
+                available_amounts: &available,
+                lease_seconds: 120,
+                now: None,
+            })
+            .expect("try acquire"),
+        OfferReservationAcquireOutcome::Acquired
+    ));
     assert_eq!(
         store
             .list_offer_reservation_leases(Some("res-5"))
@@ -607,9 +632,7 @@ fn prune_offer_reservation_leases_removes_old_inactive_rows() {
     let store = open_store(&dir.path().join("gf.sqlite"));
     let mut amounts = BTreeMap::default();
     amounts.insert("asset".to_string(), 10);
-    store
-        .add_offer_reservation_lease("res-6", "m1", "vault-1", &amounts, 120)
-        .expect("add lease");
+    acquire_test_reservation_lease(&store, "res-6", "vault-1", &amounts, 120);
     store
         .release_offer_reservation_lease("res-6", "released_success")
         .expect("release");
