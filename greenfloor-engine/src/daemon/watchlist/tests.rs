@@ -40,12 +40,16 @@ fn watchlist_includes_open_refresh_due_and_mempool_observed() {
         .upsert_offer_state("o3", "m1", "mempool_observed", Some(0))
         .expect("upsert");
     store
+        .upsert_offer_state("o5", "m1", "cancel_submitted", Some(0))
+        .expect("upsert");
+    store
         .upsert_offer_state("o4", "m1", "cancelled", Some(3))
         .expect("upsert");
     let ids = watchlist_offer_ids(&store, "m1").expect("watchlist");
     assert!(ids.contains("o1"));
     assert!(ids.contains("o2"));
     assert!(ids.contains("o3"));
+    assert!(ids.contains("o5"));
     assert!(!ids.contains("o4"));
 }
 

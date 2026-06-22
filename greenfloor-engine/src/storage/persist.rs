@@ -17,7 +17,10 @@ pub fn upsert_offer_post_record(
         OfferLifecycleState::Open.as_str(),
         None,
         &super::sqlite::utcnow_iso(),
-        Some(&record.cancel_fields),
+        super::sqlite::OfferCancelWrite {
+            fields: Some(&record.cancel_fields),
+            execution_mode: record.execution_mode,
+        },
     )
 }
 
@@ -39,7 +42,7 @@ pub fn persist_offer_post_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::types::PresplitCancelFields;
+    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
     use serde_json::json;
 
     #[test]
@@ -59,10 +62,8 @@ mod tests {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields {
-                    execution_mode: Some("direct".to_string()),
-                    ..PresplitCancelFields::default()
-                },
+                cancel_fields: PresplitCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
             }],
         )
         .expect("persist");
@@ -96,24 +97,27 @@ mod tests {
                 cancel_fields: PresplitCancelFields {
                     input_coin_id: Some("c".repeat(64)),
                     fixed_delegated_puzzle_hash: Some("d".repeat(64)),
-                    execution_mode: Some("presplit_existing".to_string()),
                 },
+                execution_mode: Some(OfferExecutionMode::PresplitExisting),
             }],
         )
         .expect("persist");
 
-        let fields = store
-            .offer_cancel_fields_for_id("offer-presplit")
+        let metadata = store
+            .offer_cancel_metadata_for_id("offer-presplit")
             .expect("fields")
             .expect("row");
         assert_eq!(
-            fields.input_coin_id.as_deref(),
+            metadata.fields.input_coin_id.as_deref(),
             Some("c".repeat(64).as_str())
         );
         assert_eq!(
-            fields.fixed_delegated_puzzle_hash.as_deref(),
+            metadata.fields.fixed_delegated_puzzle_hash.as_deref(),
             Some("d".repeat(64).as_str())
         );
-        assert_eq!(fields.execution_mode.as_deref(), Some("presplit_existing"));
+        assert_eq!(
+            metadata.execution_mode,
+            Some(OfferExecutionMode::PresplitExisting)
+        );
     }
 }

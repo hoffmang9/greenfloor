@@ -6,16 +6,15 @@ use crate::config::{
     cancel_policy_stable_vs_unstable, is_signer_execution_soft_skip, signer_execution_skip_reason,
     MarketConfig,
 };
-use crate::cycle::{
-    collect_open_offer_ids_for_cancel, evaluate_cancel_policy_decision, CancelPolicyDecision,
-    MarketCycleResultState,
-};
+use crate::cycle::{evaluate_cancel_policy_decision, ReconcileState, CancelPolicyDecision, MarketCycleResultState};
 use crate::error::SignerResult;
+use crate::offer::dexie_payload::dexie_offer_status;
+use crate::offer::lifecycle::{
+    cancel_offers_on_chain, collect_dexie_open_offer_ids, filter_out_cancel_pending_offer_ids,
+    CancelOfferTarget,
+};
 use crate::operator_log::{LogContext, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
-
-use crate::offer::dexie_payload::dexie_offer_status;
-use crate::offer::lifecycle::{cancel_offers_on_chain, CancelOfferTarget};
 
 use super::market_context::MarketCycleContext;
 
@@ -61,11 +60,9 @@ async fn execute_on_chain_cancellations(
 ) -> SignerResult<(i64, Vec<Value>)> {
     let targets: Vec<CancelOfferTarget> = target_offer_ids
         .iter()
-        .map(|offer_id| CancelOfferTarget {
+        .map(|offer_id| CancelOfferTarget::Tracked {
             offer_id: offer_id.clone(),
             market_id: market.market_id.clone(),
-            state: "open".to_string(),
-            offer_text: None,
         })
         .collect();
     let outcomes = cancel_offers_on_chain(store, dexie, signer_config, &targets).await?;
@@ -76,7 +73,7 @@ async fn execute_on_chain_cancellations(
             cancel_executed += 1;
             items.push(json!({
                 "offer_id": outcome.offer_id,
-                "status": "cancel_submitted",
+                "status": ReconcileState::CancelSubmitted.as_str(),
                 "reason": "cancel_submitted_on_strong_unstable_move",
                 "operation_id": outcome.operation_id,
                 "attempts": 1,
@@ -96,6 +93,19 @@ async fn execute_on_chain_cancellations(
         }
     }
     Ok((cancel_executed, items))
+}
+
+fn cancel_target_offer_ids(store: &SqliteStore, offers: &[Value]) -> SignerResult<Vec<String>> {
+    let offer_rows = cancel_offer_status_rows(offers);
+    let target_offer_ids = collect_dexie_open_offer_ids(&offer_rows);
+    if target_offer_ids.is_empty() {
+        return Ok(target_offer_ids);
+    }
+    let db_rows = store.list_offer_states_for_ids(&target_offer_ids)?;
+    Ok(filter_out_cancel_pending_offer_ids(
+        &target_offer_ids,
+        &db_rows,
+    ))
 }
 
 /// Run market cancel phase.
@@ -128,8 +138,7 @@ pub async fn run_market_cancel_phase(
         env_threshold,
     );
 
-    let offer_rows = cancel_offer_status_rows(offers);
-    let target_offer_ids = collect_open_offer_ids_for_cancel(&offer_rows);
+    let target_offer_ids = cancel_target_offer_ids(store, offers)?;
     let mut items = Vec::new();
     let cancel_planned =
         crate::config::usize_to_i64(target_offer_ids.len(), "cancel.target_offer_ids.len")?;

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
+use crate::offer::lifecycle::is_watched_for_reconcile;
 use crate::operator_log::{LogContext, COIN_WATCHLIST_UPDATED};
 use crate::storage::SqliteStore;
 
@@ -40,19 +41,9 @@ pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 ///
 /// Returns an error if the operation fails.
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
-    let tracked_states: HashSet<&str> = [
-        OfferLifecycleState::Open.as_str(),
-        OfferLifecycleState::RefreshDue.as_str(),
-        "unknown_orphaned",
-    ]
-    .into_iter()
-    .collect();
     let mut offer_ids = HashSet::default();
     for row in store.list_offer_state_details(market_id, 500)? {
-        let state = row.state.trim().to_ascii_lowercase();
-        if tracked_states.contains(state.as_str())
-            || state == OfferLifecycleState::MempoolObserved.as_str()
-        {
+        if is_watched_for_reconcile(&row.state) {
             offer_ids.insert(row.offer_id);
         }
     }

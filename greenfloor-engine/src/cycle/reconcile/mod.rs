@@ -56,7 +56,7 @@ pub fn resolve_missing_watched_offer_transition(
     current_state: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
-    let decision = if old_state.is_terminal() {
+    let decision = if old_state.is_terminal() || old_state.is_cancel_submitted() {
         missing_watched_offer_preserved(old_state.clone())
     } else {
         missing_watched_offer_expired()

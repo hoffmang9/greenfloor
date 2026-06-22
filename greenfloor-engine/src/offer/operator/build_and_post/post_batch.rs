@@ -253,9 +253,9 @@ fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
         "resolved_base_asset_id": record.resolved_base_asset_id,
         "resolved_quote_asset_id": record.resolved_quote_asset_id,
     });
-    if let Some(mode) = &record.cancel_fields.execution_mode {
+    if let Some(mode) = record.execution_mode {
         if let Value::Object(audit_obj) = &mut audit_event {
-            audit_obj.insert("execution_mode".to_string(), json!(mode));
+            audit_obj.insert("execution_mode".to_string(), json!(mode.to_string()));
         }
     }
     audit_event
@@ -264,7 +264,7 @@ fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::types::PresplitCancelFields;
+    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
     use serde_json::json;
 
     #[test]
@@ -278,10 +278,8 @@ mod tests {
             resolved_base_asset_id: "a1".to_string(),
             resolved_quote_asset_id: "xch".to_string(),
             created_extra: json!({}),
-            cancel_fields: PresplitCancelFields {
-                execution_mode: Some("direct".to_string()),
-                ..PresplitCancelFields::default()
-            },
+            cancel_fields: PresplitCancelFields::default(),
+            execution_mode: Some(OfferExecutionMode::Direct),
         };
         let payload = strategy_offer_execution_payload(&record);
         assert_eq!(

@@ -383,6 +383,16 @@ const MISSING_WATCHED_CASES: &[MissingWatchedCase] = &[
         expected_reason: REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
         expected_signal_source: SIGNAL_SOURCE_DEXIE_GET_OFFER_404,
     },
+    MissingWatchedCase {
+        label: "missing_watched_offer_preserves_cancel_submitted",
+        current_state: "cancel_submitted",
+        expected_new_state: "cancel_submitted",
+        expected_changed: false,
+        expected_immediate_requeue: false,
+        expected_signal: None,
+        expected_reason: REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
+        expected_signal_source: SIGNAL_SOURCE_DEXIE_GET_OFFER_404,
+    },
 ];
 
 #[test]

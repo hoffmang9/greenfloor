@@ -8,7 +8,7 @@ use super::harness::{
     fetch_cat_from_sim, fetch_cat_from_sim_by_id, fetch_vault_from_sim, SimChain,
 };
 use crate::coinset::coin_select::{finalize_selected_cats, SelectedCats};
-use crate::coinset::OfferCoinsetBackend;
+use crate::coinset::{OfferCoinsetBackend, OfferInputCatLookup};
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 
@@ -118,21 +118,20 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         .map_err(SignerError::Other)
     }
 
-    async fn fetch_unspent_offer_input_cat(
-        &self,
-        coin_id: Bytes32,
-        inner_puzzle_hash: Option<Bytes32>,
-        amount: Option<u64>,
-    ) -> SignerResult<Cat> {
-        match self.fetch_by_id(coin_id) {
-            Ok(cat) => Ok(cat),
-            Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
-                let (Some(inner_puzzle_hash), Some(amount)) = (inner_puzzle_hash, amount) else {
-                    return Err(SignerError::PresplitCoinNotFound);
-                };
-                self.fetch_by_inner_puzzle(inner_puzzle_hash, amount)
-            }
-            Err(err) => Err(err),
+    async fn fetch_offer_input_cat(&self, lookup: OfferInputCatLookup) -> SignerResult<Cat> {
+        match lookup {
+            OfferInputCatLookup::ByCoinId(coin_id) => match self.fetch_by_id(coin_id) {
+                Ok(cat) => Ok(cat),
+                Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
+                    Err(SignerError::PresplitCoinNotFound)
+                }
+                Err(err) => Err(err),
+            },
+            OfferInputCatLookup::ByCatFingerprint {
+                inner_puzzle_hash,
+                amount,
+                ..
+            } => self.fetch_by_inner_puzzle(inner_puzzle_hash, amount),
         }
     }
 

@@ -1,5 +1,4 @@
 const DEFAULT_CANCEL_MOVE_THRESHOLD_BPS: i64 = 500;
-const OPEN_DEXIE_OFFER_STATUS: i64 = 0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CancelPolicyDecision {
@@ -95,27 +94,10 @@ pub fn evaluate_cancel_policy_decision(
     }
 }
 
-fn open_offer_id_for_cancel(offer_id: &str, status: i64) -> Option<String> {
-    let normalized_id = offer_id.trim();
-    if normalized_id.is_empty() || status != OPEN_DEXIE_OFFER_STATUS {
-        return None;
-    }
-    Some(normalized_id.to_string())
-}
-
-#[must_use]
-pub fn collect_open_offer_ids_for_cancel(offers: &[(String, i64)]) -> Vec<String> {
-    offers
-        .iter()
-        .filter_map(|(offer_id, status)| open_offer_id_for_cancel(offer_id, *status))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
-        evaluate_cancel_policy_decision,
+        abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision,
     };
 
     #[test]
@@ -181,18 +163,5 @@ mod tests {
         );
         assert!(decision.triggered);
         assert_eq!(decision.threshold_bps, 100);
-    }
-
-    #[test]
-    fn collects_only_open_offers() {
-        let offers = vec![
-            ("o1".to_string(), 0),
-            ("o2".to_string(), 4),
-            ("  ".to_string(), 0),
-        ];
-        assert_eq!(
-            collect_open_offer_ids_for_cancel(&offers),
-            vec!["o1".to_string()]
-        );
     }
 }

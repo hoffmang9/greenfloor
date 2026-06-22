@@ -165,39 +165,39 @@ impl std::fmt::Display for OfferExecutionMode {
     }
 }
 
+impl OfferExecutionMode {
+    #[must_use]
+    pub fn parse_db(value: &str) -> Option<Self> {
+        match value.trim() {
+            "direct" => Some(Self::Direct),
+            "presplit_new" => Some(Self::PresplitNew),
+            "presplit_existing" => Some(Self::PresplitExisting),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct PresplitCancelFields {
     pub input_coin_id: Option<String>,
     pub fixed_delegated_puzzle_hash: Option<String>,
-    pub execution_mode: Option<String>,
 }
 
 impl PresplitCancelFields {
     #[must_use]
-    pub fn from_presplit_build(
-        input_coin_id: String,
-        fixed_delegated_puzzle_hash: String,
-        execution_mode: OfferExecutionMode,
-    ) -> Self {
+    pub fn from_presplit_build(input_coin_id: String, fixed_delegated_puzzle_hash: String) -> Self {
         Self {
             input_coin_id: Some(input_coin_id),
             fixed_delegated_puzzle_hash: Some(fixed_delegated_puzzle_hash),
-            execution_mode: Some(execution_mode.to_string()),
         }
     }
+}
 
-    #[must_use]
-    pub fn is_direct_execution(&self) -> bool {
-        matches!(self.execution_mode.as_deref(), Some("direct"))
-    }
-
-    #[must_use]
-    pub fn is_presplit_execution(&self) -> bool {
-        matches!(
-            self.execution_mode.as_deref(),
-            Some("presplit_new" | "presplit_existing")
-        )
-    }
+/// Cancel hints persisted at offer post time (`offer_state` row).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredOfferCancelMetadata {
+    pub fields: PresplitCancelFields,
+    pub execution_mode: Option<OfferExecutionMode>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

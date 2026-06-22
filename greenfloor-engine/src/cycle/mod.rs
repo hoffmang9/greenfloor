@@ -15,10 +15,7 @@ pub mod retry;
 pub mod strategy;
 pub mod strategy_action;
 
-pub use cancel::{
-    abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
-    evaluate_cancel_policy_decision, CancelPolicyDecision,
-};
+pub use cancel::{abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision, CancelPolicyDecision};
 pub use dispatch::{
     expiry_seconds_for_action, reservation_request_for_managed_offer,
     single_input_preferred_skip_reason, ManagedOfferReservationRequest, PlannedActionInput,

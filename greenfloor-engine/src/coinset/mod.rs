@@ -26,7 +26,7 @@ pub use api::{
 };
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
-pub use backend::{LiveCoinset, OfferCoinsetBackend};
+pub use backend::{LiveCoinset, OfferCoinsetBackend, OfferInputCatLookup};
 pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
 pub use cats::{
     cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats_by_ids,
@@ -48,7 +48,7 @@ pub use parse::{
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
     to_coinset_hex, u64_from_value,
 };
-pub use presplit::{fetch_unspent_offer_input_cat, wait_for_unspent_cat};
+pub use presplit::{fetch_offer_input_cat, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{
     with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,

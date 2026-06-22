@@ -4,6 +4,7 @@ mod alerts;
 mod audit;
 mod coin_ops;
 mod migrations;
+mod offer_cancel;
 mod offers;
 mod pricing;
 mod reservations;
@@ -17,7 +18,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::error::{SignerError, SignerResult};
-use crate::offer::types::PresplitCancelFields;
+use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
 
 use super::schema::SCHEMA;
 
@@ -32,9 +33,11 @@ pub struct OfferPostPersistRecord {
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
     pub cancel_fields: PresplitCancelFields,
+    pub execution_mode: Option<OfferExecutionMode>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
+pub use offer_cancel::OfferCancelWrite;
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,

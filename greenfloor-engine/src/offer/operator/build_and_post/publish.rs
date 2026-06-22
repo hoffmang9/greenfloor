@@ -5,7 +5,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::publish::{
     post_offer_phase_dexie, ExpectedPublishAssetFields, PostOfferPhaseDexieParams,
 };
-use crate::offer::types::CreateOfferResult;
+use crate::offer::types::{CreateOfferResult, OfferExecutionMode};
 use crate::storage::OfferPostPersistRecord;
 
 use super::context::ResolvedBuildAndPostContext;
@@ -85,12 +85,12 @@ pub(super) fn offer_post_persist_record(
         return None;
     }
     let offer_id = publish.offer_id.clone()?;
-    let mut cancel_fields = create_result
+    let cancel_fields = create_result
         .and_then(|result| result.presplit_cancel_fields.clone())
         .unwrap_or_default();
-    if cancel_fields.execution_mode.is_none() {
-        cancel_fields.execution_mode = Some(execution_mode.to_string());
-    }
+    let execution_mode = create_result
+        .map(|result| result.execution_mode)
+        .or_else(|| OfferExecutionMode::parse_db(execution_mode));
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.market.market_id.clone(),
@@ -101,5 +101,6 @@ pub(super) fn offer_post_persist_record(
         resolved_quote_asset_id: ctx.resolved_quote_asset_id.clone(),
         created_extra: json!({}),
         cancel_fields,
+        execution_mode,
     })
 }

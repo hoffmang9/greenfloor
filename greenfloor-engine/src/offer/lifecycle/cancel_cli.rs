@@ -10,6 +10,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::storage::{OfferStateListRow, SqliteStore};
 
 use super::cancel::{cancel_offers_on_chain, CancelOfferTarget};
+use super::cancel_eligibility::row_cancel_eligible;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OffersCancelCliItem {
@@ -30,6 +31,12 @@ pub struct OffersCancelCliResult {
     pub items: Vec<OffersCancelCliItem>,
 }
 
+#[derive(Debug, Clone)]
+struct CancelCliSelection {
+    target: CancelOfferTarget,
+    state: String,
+}
+
 fn fallback_market_id(default_market_id: Option<&str>) -> String {
     default_market_id
         .map(str::trim)
@@ -43,7 +50,7 @@ fn select_targets_for_cancel(
     offer_ids: &[String],
     cancel_open: bool,
     default_market_id: Option<&str>,
-) -> SignerResult<Vec<CancelOfferTarget>> {
+) -> SignerResult<Vec<CancelCliSelection>> {
     if cancel_open {
         return Ok(rows
             .iter()
@@ -53,14 +60,15 @@ fn select_targets_for_cancel(
                     return None;
                 }
                 let state = row.state.trim().to_ascii_lowercase();
-                if !matches!(state.as_str(), "open" | "pending_visibility") {
+                if !row_cancel_eligible(row) {
                     return None;
                 }
-                Some(CancelOfferTarget {
-                    offer_id: offer_id.to_string(),
-                    market_id: row.market_id.trim().to_string(),
+                Some(CancelCliSelection {
+                    target: CancelOfferTarget::Tracked {
+                        offer_id: offer_id.to_string(),
+                        market_id: row.market_id.trim().to_string(),
+                    },
                     state,
-                    offer_text: None,
                 })
             })
             .collect());
@@ -82,18 +90,20 @@ fn select_targets_for_cancel(
         .into_iter()
         .map(|offer_id| {
             if let Some(row) = row_by_id.get(&offer_id) {
-                CancelOfferTarget {
-                    offer_id: offer_id.clone(),
-                    market_id: row.market_id.trim().to_string(),
+                CancelCliSelection {
+                    target: CancelOfferTarget::Tracked {
+                        offer_id: offer_id.clone(),
+                        market_id: row.market_id.trim().to_string(),
+                    },
                     state: row.state.trim().to_ascii_lowercase(),
-                    offer_text: None,
                 }
             } else {
-                CancelOfferTarget {
-                    offer_id,
-                    market_id: fallback_market_id.clone(),
+                CancelCliSelection {
+                    target: CancelOfferTarget::Tracked {
+                        offer_id,
+                        market_id: fallback_market_id.clone(),
+                    },
                     state: "unknown".to_string(),
-                    offer_text: None,
                 }
             }
         })
@@ -144,18 +154,20 @@ fn offer_id_for_file(path_or_bech32: &str, idx: usize) -> String {
 fn targets_from_offer_files(
     offer_files: &[String],
     default_market_id: Option<&str>,
-) -> SignerResult<Vec<CancelOfferTarget>> {
+) -> SignerResult<Vec<CancelCliSelection>> {
     let market_id = fallback_market_id(default_market_id);
     offer_files
         .iter()
         .enumerate()
         .map(|(idx, path_or_bech32)| {
             let offer_text = load_offer_file_text(path_or_bech32)?;
-            Ok(CancelOfferTarget {
-                offer_id: offer_id_for_file(path_or_bech32, idx),
-                market_id: market_id.clone(),
+            Ok(CancelCliSelection {
+                target: CancelOfferTarget::LocalFile {
+                    offer_id: offer_id_for_file(path_or_bech32, idx),
+                    market_id: market_id.clone(),
+                    offer_text,
+                },
                 state: "local".to_string(),
-                offer_text: Some(offer_text),
             })
         })
         .collect()
@@ -206,27 +218,31 @@ pub async fn offers_cancel_cli(
         ));
     }
     let rows = load_rows_for_cancel(&store, &requested_offer_ids, request.cancel_open)?;
-    let mut targets = select_targets_for_cancel(
+    let mut selections = select_targets_for_cancel(
         &rows,
         &requested_offer_ids,
         request.cancel_open,
         request.market_id.as_deref(),
     )?;
-    targets.extend(targets_from_offer_files(
+    selections.extend(targets_from_offer_files(
         &request.offer_files,
         request.market_id.as_deref(),
     )?);
+    let targets: Vec<CancelOfferTarget> = selections
+        .iter()
+        .map(|selection| selection.target.clone())
+        .collect();
     let outcomes = cancel_offers_on_chain(&store, &dexie, signer_config, &targets).await?;
     let mut items = Vec::with_capacity(outcomes.len());
     let mut failures = 0u64;
-    for (outcome, target) in outcomes.into_iter().zip(targets) {
+    for (outcome, selection) in outcomes.into_iter().zip(selections) {
         if !outcome.success {
             failures += 1;
         }
         items.push(OffersCancelCliItem {
-            offer_id: target.offer_id,
-            market_id: target.market_id,
-            state: target.state,
+            offer_id: selection.target.offer_id().to_string(),
+            market_id: selection.target.normalized_market_id(),
+            state: selection.state,
             result: json!({
                 "success": outcome.success,
                 "operation_id": outcome.operation_id,
@@ -286,7 +302,7 @@ mod tests {
         let rows = load_rows_for_cancel(&store, &[], true).expect("rows");
         let selected = select_targets_for_cancel(&rows, &[], true, None).expect("selected");
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].offer_id, "offer-open");
+        assert_eq!(selected[0].target.offer_id(), "offer-open");
     }
 
     #[test]
@@ -295,8 +311,8 @@ mod tests {
             select_targets_for_cancel(&[], &["dexie-only-offer".to_string()], false, Some("m1"))
                 .expect("selected");
         assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].offer_id, "dexie-only-offer");
-        assert_eq!(selected[0].market_id, "m1");
+        assert_eq!(selected[0].target.offer_id(), "dexie-only-offer");
+        assert_eq!(selected[0].target.market_id(), "m1");
         assert_eq!(selected[0].state, "unknown");
     }
 
@@ -306,8 +322,9 @@ mod tests {
         let selected =
             targets_from_offer_files(&[offer.to_string()], Some("m1")).expect("selected");
         assert_eq!(selected.len(), 1);
-        assert!(selected[0].offer_text.as_deref().is_some());
-        assert_eq!(selected[0].market_id, "m1");
+        assert!(selected[0].target.offer_text().is_some());
+        assert_eq!(selected[0].target.market_id(), "m1");
+        assert!(!selected[0].target.persists_state());
     }
 
     #[test]

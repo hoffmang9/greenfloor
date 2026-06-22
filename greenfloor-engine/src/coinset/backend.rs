@@ -6,6 +6,17 @@ use super::{broadcast, coin_select, presplit, vault_fetch, CoinsetClient, Select
 use crate::error::SignerResult;
 use chia_sdk_driver::{Cat, Vault};
 
+/// Lookup strategy for an unspent offer-input CAT on Coinset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferInputCatLookup {
+    ByCoinId(Bytes32),
+    ByCatFingerprint {
+        asset_id: Bytes32,
+        inner_puzzle_hash: Bytes32,
+        amount: u64,
+    },
+}
+
 pub struct LiveCoinset<'a>(pub &'a CoinsetClient);
 
 pub trait OfferCoinsetBackend {
@@ -23,11 +34,9 @@ pub trait OfferCoinsetBackend {
         inner_puzzle_hash: TreeHash,
     ) -> impl std::future::Future<Output = SignerResult<Vault>> + Send;
 
-    fn fetch_unspent_offer_input_cat(
+    fn fetch_offer_input_cat(
         &self,
-        coin_id: Bytes32,
-        inner_puzzle_hash: Option<Bytes32>,
-        amount: Option<u64>,
+        lookup: OfferInputCatLookup,
     ) -> impl std::future::Future<Output = SignerResult<Cat>> + Send;
 
     fn wait_for_unspent_cat(
@@ -67,13 +76,8 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
         vault_fetch::fetch_latest_vault(self.0, launcher_id, inner_puzzle_hash).await
     }
 
-    async fn fetch_unspent_offer_input_cat(
-        &self,
-        coin_id: Bytes32,
-        inner_puzzle_hash: Option<Bytes32>,
-        amount: Option<u64>,
-    ) -> SignerResult<Cat> {
-        presplit::fetch_unspent_offer_input_cat(self.0, coin_id, inner_puzzle_hash, amount).await
+    async fn fetch_offer_input_cat(&self, lookup: OfferInputCatLookup) -> SignerResult<Cat> {
+        presplit::fetch_offer_input_cat(self.0, lookup).await
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {

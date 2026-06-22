@@ -11,7 +11,7 @@ use super::post_batch::{
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
-use crate::offer::types::PresplitCancelFields;
+use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 use crate::test_support::build_and_post::unused_post_iteration_request;
@@ -184,10 +184,8 @@ fn flush_post_batch_writes_offer_state() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields {
-                    execution_mode: Some("direct".to_string()),
-                    ..PresplitCancelFields::default()
-                },
+                cancel_fields: PresplitCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
             }],
             &[],
         )

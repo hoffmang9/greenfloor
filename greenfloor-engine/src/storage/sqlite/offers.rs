@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
+use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
-use crate::offer::types::PresplitCancelFields;
 use rusqlite::params;
 
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
@@ -18,6 +20,21 @@ impl SqliteStore {
         last_seen_status: Option<i64>,
     ) -> SignerResult<()> {
         self.upsert_offer_state_at(offer_id, market_id, state, last_seen_status, &utcnow_iso())
+    }
+
+    /// Upsert offer state using a typed reconcile state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn upsert_offer_reconcile_state(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        state: &ReconcileState,
+        last_seen_status: Option<i64>,
+    ) -> SignerResult<()> {
+        self.upsert_offer_state(offer_id, market_id, &state.as_str(), last_seen_status)
     }
 
     /// List a page of open (or pending visibility) offer states.
@@ -42,17 +59,26 @@ impl SqliteStore {
                 r"
                 SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
-                WHERE state IN ('open', 'pending_visibility')
+                WHERE state IN (?1, ?2)
                 ORDER BY offer_id ASC
-                LIMIT ?1 OFFSET ?2
+                LIMIT ?3 OFFSET ?4
                 ",
             )
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare open offer_state query: {err}"))
             })?;
-        let mut rows = stmt.query(params![limit_i64, offset]).map_err(|err| {
-            SignerError::Other(format!("failed to query open offer_state: {err}"))
-        })?;
+        let open_state = ReconcileState::Lifecycle(OfferLifecycleState::Open);
+        let pending_state = ReconcileState::PendingVisibility;
+        let mut rows = stmt
+            .query(params![
+                open_state.as_str(),
+                pending_state.as_str(),
+                limit_i64,
+                offset
+            ])
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query open offer_state: {err}"))
+            })?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(|err| {
             SignerError::Other(format!("failed to read open offer_state row: {err}"))
@@ -114,34 +140,43 @@ impl SqliteStore {
         &self,
         offer_ids: &[String],
     ) -> SignerResult<Vec<OfferStateListRow>> {
-        let mut out = Vec::new();
-        for offer_id in offer_ids {
-            let clean = offer_id.trim();
-            if clean.is_empty() {
-                continue;
-            }
-            let mut stmt = self
-                .conn
-                .prepare(
-                    r"
-                    SELECT offer_id, market_id, state, last_seen_status, updated_at
-                    FROM offer_state
-                    WHERE offer_id = ?1
-                    ",
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("failed to prepare offer_state by id query: {err}"))
-                })?;
-            let mut rows = stmt.query(params![clean]).map_err(|err| {
-                SignerError::Other(format!("failed to query offer_state by id: {err}"))
+        let clean_ids: Vec<String> = offer_ids
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
+        if clean_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders: Vec<String> =
+            (1..=clean_ids.len()).map(|idx| format!("?{idx}")).collect();
+        let query = format!(
+            r"
+            SELECT offer_id, market_id, state, last_seen_status, updated_at
+            FROM offer_state
+            WHERE offer_id IN ({})
+            ",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&query).map_err(|err| {
+            SignerError::Other(format!("failed to prepare offer_state by ids query: {err}"))
+        })?;
+        let mut rows = stmt
+            .query(rusqlite::params_from_iter(clean_ids.iter()))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query offer_state by ids: {err}"))
             })?;
-            if let Some(row) = rows.next().map_err(|err| {
-                SignerError::Other(format!("failed to read offer_state by id row: {err}"))
-            })? {
-                out.push(OfferStateListRow {
-                    offer_id: row.get(0).map_err(|err| {
-                        SignerError::Other(format!("failed to read offer_id: {err}"))
-                    })?,
+        let mut by_id = HashMap::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read offer_state by ids row: {err}"))
+        })? {
+            let offer_id: String = row
+                .get(0)
+                .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?;
+            by_id.insert(
+                offer_id.clone(),
+                OfferStateListRow {
+                    offer_id,
                     market_id: row.get(1).map_err(|err| {
                         SignerError::Other(format!("failed to read market_id: {err}"))
                     })?,
@@ -152,10 +187,13 @@ impl SqliteStore {
                     updated_at: row.get(4).map_err(|err| {
                         SignerError::Other(format!("failed to read updated_at: {err}"))
                     })?,
-                });
-            }
+                },
+            );
         }
-        Ok(out)
+        Ok(clean_ids
+            .into_iter()
+            .filter_map(|offer_id| by_id.get(&offer_id).cloned())
+            .collect())
     }
 
     /// List offer states.
@@ -327,115 +365,8 @@ impl SqliteStore {
             state,
             last_seen_status,
             updated_at,
-            None,
+            super::offer_cancel::OfferCancelWrite::default(),
         )
-    }
-
-    /// Upsert offer state and optional presplit cancel metadata captured at post time.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the operation fails.
-    pub fn upsert_offer_state_with_metadata_at(
-        &self,
-        offer_id: &str,
-        market_id: &str,
-        state: &str,
-        last_seen_status: Option<i64>,
-        updated_at: &str,
-        cancel_metadata: Option<&PresplitCancelFields>,
-    ) -> SignerResult<()> {
-        let (presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode) =
-            if let Some(fields) = cancel_metadata {
-                (
-                    fields.input_coin_id.as_deref(),
-                    fields.fixed_delegated_puzzle_hash.as_deref(),
-                    fields.execution_mode.as_deref(),
-                )
-            } else {
-                (None, None, None)
-            };
-        self.conn
-            .execute(
-                r"
-                INSERT INTO offer_state (
-                  offer_id,
-                  market_id,
-                  state,
-                  last_seen_status,
-                  updated_at,
-                  presplit_input_coin_id,
-                  fixed_delegated_puzzle_hash,
-                  execution_mode
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                ON CONFLICT(offer_id) DO UPDATE SET
-                  market_id = excluded.market_id,
-                  state = excluded.state,
-                  last_seen_status = excluded.last_seen_status,
-                  updated_at = excluded.updated_at,
-                  presplit_input_coin_id = COALESCE(excluded.presplit_input_coin_id, offer_state.presplit_input_coin_id),
-                  fixed_delegated_puzzle_hash = COALESCE(excluded.fixed_delegated_puzzle_hash, offer_state.fixed_delegated_puzzle_hash),
-                  execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode)
-                ",
-                params![
-                    offer_id,
-                    market_id,
-                    state,
-                    last_seen_status,
-                    updated_at,
-                    presplit_input_coin_id,
-                    fixed_delegated_puzzle_hash,
-                    execution_mode,
-                ],
-            )
-            .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
-        Ok(())
-    }
-
-    /// Load presplit cancel fields persisted at offer post time.
-    ///
-    /// Returns `None` when the offer id is absent from `offer_state`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the operation fails.
-    pub fn offer_cancel_fields_for_id(
-        &self,
-        offer_id: &str,
-    ) -> SignerResult<Option<PresplitCancelFields>> {
-        let clean = offer_id.trim();
-        if clean.is_empty() {
-            return Ok(None);
-        }
-        let mut stmt = self
-            .conn
-            .prepare(
-                r"
-                SELECT presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode
-                FROM offer_state
-                WHERE offer_id = ?1
-                ",
-            )
-            .map_err(|err| {
-                SignerError::Other(format!(
-                    "failed to prepare offer cancel fields query: {err}"
-                ))
-            })?;
-        let mut rows = stmt.query(params![clean]).map_err(|err| {
-            SignerError::Other(format!("failed to query offer cancel fields: {err}"))
-        })?;
-        let Some(row) = rows.next().map_err(|err| {
-            SignerError::Other(format!("failed to read offer cancel fields row: {err}"))
-        })?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(PresplitCancelFields {
-            input_coin_id: row.get(0).ok(),
-            fixed_delegated_puzzle_hash: row.get(1).ok(),
-            execution_mode: row.get(2).ok(),
-        }))
     }
 }
 
@@ -461,5 +392,38 @@ impl SqliteStore {
             return Ok(Some(state));
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod list_offer_states_tests {
+    use super::SqliteStore;
+
+    #[test]
+    fn list_offer_states_for_ids_returns_matches_in_input_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-a", "m1", "open", Some(0))
+            .expect("seed");
+        store
+            .upsert_offer_state("offer-b", "m1", "expired", Some(0))
+            .expect("seed");
+        store
+            .upsert_offer_state("offer-c", "m2", "open", Some(0))
+            .expect("seed");
+        let rows = store
+            .list_offer_states_for_ids(&[
+                "offer-c".to_string(),
+                "missing-offer".to_string(),
+                "offer-a".to_string(),
+                "offer-b".to_string(),
+            ])
+            .expect("rows");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].offer_id, "offer-c");
+        assert_eq!(rows[1].offer_id, "offer-a");
+        assert_eq!(rows[2].offer_id, "offer-b");
     }
 }
