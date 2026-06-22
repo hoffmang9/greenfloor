@@ -6,7 +6,8 @@ use super::types::{CapabilitiesReport, ProbeReport};
 use crate::cli_util::optional_trimmed;
 use crate::coinset::{to_coinset_hex, DirectCoinsetScanClient};
 use crate::error::SignerResult;
-use crate::vault::members::{hex_to_bytes32, singleton_member_puzzle_hash, tree_hash_to_hex};
+use crate::hex::{hex_to_bytes32, tree_hash_to_hex};
+use crate::vault::members::nonce_member_puzzle_hash;
 
 /// Build the Coinset capability probe report without emitting output.
 ///
@@ -17,7 +18,7 @@ pub async fn build_coinset_probe_report(args: CoinsetProbeCliArgs) -> SignerResu
     let resolved = args.resolve_launcher_id()?;
 
     let launcher_id = hex_to_bytes32(&resolved.launcher_id)?;
-    let p2_tree = singleton_member_puzzle_hash(launcher_id, args.nonce)?;
+    let p2_tree = nonce_member_puzzle_hash(launcher_id, args.nonce)?;
     let p2_hash = tree_hash_to_hex(p2_tree);
     let p2_coinset_hex = to_coinset_hex(p2_tree.to_bytes().as_ref());
 

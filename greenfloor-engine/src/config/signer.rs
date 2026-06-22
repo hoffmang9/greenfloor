@@ -5,9 +5,10 @@ use serde_json::Value;
 use super::program::read_program_yaml;
 use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes32;
 use crate::kms::KmsRuntime;
 use crate::vault::context::VaultCustodySnapshot;
-use crate::vault::members::{hex_to_bytes32, WalletKey};
+use crate::vault::members::WalletKey;
 use crate::vault::validate_vault_threshold;
 
 pub use crate::coinset::DEFAULT_MSP_BASE_URL;

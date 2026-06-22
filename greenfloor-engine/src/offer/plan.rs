@@ -7,11 +7,11 @@ use chia_sdk_driver::{AssetInfo, RequestedPayments};
 
 use crate::coinset::{OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes32;
 use crate::offer::presplit::{
     offer_nonce_from_cats, offer_nonce_from_coin_ids, PresplitOfferBinding,
 };
 use crate::offer::types::{OfferInput, OfferTerms};
-use crate::vault::members::hex_to_bytes32;
 
 use crate::coinset::is_xch_like_asset;
 

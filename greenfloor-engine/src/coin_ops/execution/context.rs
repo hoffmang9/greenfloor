@@ -6,10 +6,8 @@ use crate::coin_ops::SpendableCoin;
 use crate::coinset::{list_wallet_unspent_coins, spend_bundle_hash_from_hex};
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
-use crate::vault::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
-    MixedSplitRequest,
-};
+use crate::hex::hex_to_bytes32;
+use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 use super::helpers::wallet_coins_to_spendable;
 #[cfg(test)]

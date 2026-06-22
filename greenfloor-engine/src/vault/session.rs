@@ -100,7 +100,7 @@ mod tests {
             .expect("resolve vault session");
         assert_eq!(
             session.display.kms_public_key_hex,
-            crate::kms::normalize_hex(&kms_hex)
+            crate::hex::normalize_hex(&kms_hex)
         );
     }
 
@@ -122,7 +122,7 @@ mod tests {
         let session = build_vault_session(&config.vault, &kms_hex, &config).expect("session");
         assert_eq!(
             session.display.kms_public_key_hex,
-            crate::kms::normalize_hex(&kms_hex)
+            crate::hex::normalize_hex(&kms_hex)
         );
         assert_ne!(session.spend.launcher_id, Bytes32::default());
     }
