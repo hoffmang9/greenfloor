@@ -51,15 +51,21 @@ pub(crate) async fn cats_with_lineage_from_records(
     client: &CoinsetClient,
     records: &[CoinRecord],
 ) -> SignerResult<Vec<Cat>> {
-    let mut cats = Vec::with_capacity(records.len());
-    for record in records {
-        let Some(cat) = resolve::cat_from_record(client, record).await? else {
-            return Err(SignerError::CatLineageResolutionFailed(hex::encode(
-                record.coin.coin_id(),
-            )));
-        };
-        cats.push(cat);
+    if records.is_empty() {
+        return Ok(Vec::new());
     }
+    let cats = try_join_all(records.iter().copied().map(|record| {
+        let client = client.clone();
+        async move {
+            match resolve::cat_from_record(&client, &record).await? {
+                Some(cat) => Ok(cat),
+                None => Err(SignerError::CatLineageResolutionFailed(hex::encode(
+                    record.coin.coin_id(),
+                ))),
+            }
+        }
+    }))
+    .await?;
     Ok(cats)
 }
 
