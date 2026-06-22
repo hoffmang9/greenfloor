@@ -26,9 +26,10 @@ pub use gate::{
     CoinCombineGateResult, CoinSplitGateResult,
 };
 pub use input_selection::{
-    build_combine_prereq_plan, plan_auto_combine_inputs, plan_cli_auto_split_selection,
-    plan_daemon_auto_split_selection, CombineInputSelectionMode, SplitAutoSelectPlan,
-    SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason, SubCatChangeSkipData,
+    build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
+    plan_exact_amount_combine_inputs, plan_largest_combine_inputs, CliSplitSelection,
+    SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
+    SubCatChangeSkipData,
 };
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{

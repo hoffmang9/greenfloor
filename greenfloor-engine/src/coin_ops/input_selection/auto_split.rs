@@ -1,32 +1,35 @@
 use std::collections::HashSet;
 
-use super::combine_prereq_plan::build_combine_prereq_plan;
-use super::types::{SplitAutoSelectPlan, SplitCoinPlan, SplitSkipReason, SubCatChangeSkipData};
+use super::types::{
+    CliSplitSelection, SplitAutoSelectPlan, SplitCoinPlan, SplitSkipReason, SubCatChangeSkipData,
+};
 use crate::coin_ops::policy::coin_op_min_amount_mojos;
 use crate::coin_ops::selection::{
     select_largest_spendable_coin, split_would_create_sub_cat_change, SpendableCoin,
 };
 
-fn skip_no_spendable_coin() -> SplitAutoSelectPlan {
-    SplitAutoSelectPlan::Skip(SplitSkipReason::NoSpendableMeetsRequired)
+use super::combine_prereq_plan::build_combine_prereq_plan;
+
+fn skip_no_spendable_coin() -> SplitSkipReason {
+    SplitSkipReason::NoSpendableMeetsRequired
 }
 
-fn coin_plan(coin: &SpendableCoin) -> SplitAutoSelectPlan {
-    SplitAutoSelectPlan::Coin(SplitCoinPlan {
+fn coin_plan(coin: &SpendableCoin) -> SplitCoinPlan {
+    SplitCoinPlan {
         coin_id: coin.id.clone(),
         selected_amount_mojos: coin.amount,
-    })
+    }
 }
 
 /// CLI auto split: pick the largest spendable coin without enforcing required amount.
 #[must_use]
-pub fn plan_cli_auto_split_selection(candidate_spendable: &[SpendableCoin]) -> SplitAutoSelectPlan {
+pub fn plan_cli_auto_split_selection(candidate_spendable: &[SpendableCoin]) -> CliSplitSelection {
     if let Some(selected_coin) =
         select_largest_spendable_coin(candidate_spendable, 0, &HashSet::new())
     {
-        return coin_plan(selected_coin);
+        return CliSplitSelection::Coin(coin_plan(selected_coin));
     }
-    skip_no_spendable_coin()
+    CliSplitSelection::Skip(skip_no_spendable_coin())
 }
 
 /// Daemon auto split: enforce required amount, optional combine prereq, and sub-CAT dust checks.
@@ -64,7 +67,7 @@ pub fn plan_daemon_auto_split_selection(
                 },
             ));
         }
-        return coin_plan(selected_coin);
+        return SplitAutoSelectPlan::Coin(coin_plan(selected_coin));
     }
 
     if allow_combine_prereq && required_amount_mojos > 0 {
@@ -80,5 +83,5 @@ pub fn plan_daemon_auto_split_selection(
         }
     }
 
-    skip_no_spendable_coin()
+    SplitAutoSelectPlan::Skip(skip_no_spendable_coin())
 }

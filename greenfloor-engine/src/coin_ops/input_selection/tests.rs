@@ -16,8 +16,8 @@ fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
 fn cli_auto_picks_largest_without_required_enforcement() {
     let plan = plan_cli_auto_split_selection(&coins(&[("Coin_small", 100), ("Coin_big", 1500)]));
     match plan {
-        SplitAutoSelectPlan::Coin(coin) => assert_eq!(coin.coin_id, "Coin_big"),
-        other => panic!("unexpected plan: {other:?}"),
+        CliSplitSelection::Coin(coin) => assert_eq!(coin.coin_id, "Coin_big"),
+        CliSplitSelection::Skip(_) => panic!("unexpected skip"),
     }
 }
 
@@ -77,11 +77,11 @@ fn daemon_auto_returns_combine_prereq_when_aggregate_covers() {
 }
 
 #[test]
-fn cli_auto_does_not_return_combine_prereq() {
+fn cli_auto_picks_largest_when_no_single_coin_meets_required() {
     let plan = plan_cli_auto_split_selection(&coins(&[("Coin_a", 4000), ("Coin_b", 6000)]));
     match plan {
-        SplitAutoSelectPlan::Coin(coin) => assert_eq!(coin.coin_id, "Coin_b"),
-        other => panic!("unexpected plan: {other:?}"),
+        CliSplitSelection::Coin(coin) => assert_eq!(coin.coin_id, "Coin_b"),
+        CliSplitSelection::Skip(_) => panic!("unexpected skip"),
     }
 }
 
@@ -108,15 +108,7 @@ fn combine_exact_amount_skips_non_matching_denominations() {
         ("coin_b", 1000),
         ("coin_c", 1000),
     ]);
-    let ids = plan_auto_combine_inputs(
-        &spendable,
-        3,
-        CombineInputSelectionMode::ExactAmount,
-        Some(1000),
-        None::<&HashSet<String>>,
-        Some(3),
-    )
-    .expect("combine inputs");
+    let ids = plan_exact_amount_combine_inputs(&spendable, 3, 1000, None, Some(3));
     assert_eq!(ids, vec!["coin_a", "coin_b", "coin_c"]);
 }
 
@@ -124,15 +116,7 @@ fn combine_exact_amount_skips_non_matching_denominations() {
 fn combine_exact_amount_normalizes_exclude_ids() {
     let spendable = coins(&[("CoinA", 1000), ("coin_b", 1000), ("coin_c", 1000)]);
     let excluded = HashSet::from(["CoinA".to_string()]);
-    let ids = plan_auto_combine_inputs(
-        &spendable,
-        3,
-        CombineInputSelectionMode::ExactAmount,
-        Some(1000),
-        Some(&excluded),
-        Some(3),
-    )
-    .expect("combine inputs");
+    let ids = plan_exact_amount_combine_inputs(&spendable, 3, 1000, Some(&excluded), Some(3));
     assert_eq!(ids, vec!["coin_b", "coin_c"]);
 }
 
@@ -145,15 +129,7 @@ fn combine_largest_by_amount_picks_top_coins_respecting_exclude() {
         ("excluded", 2000),
     ]);
     let excluded = HashSet::from(["EXCLUDED".to_string()]);
-    let ids = plan_auto_combine_inputs(
-        &spendable,
-        2,
-        CombineInputSelectionMode::LargestByAmount,
-        None,
-        Some(&excluded),
-        None,
-    )
-    .expect("combine inputs");
+    let ids = plan_largest_combine_inputs(&spendable, 2, Some(&excluded), None);
     assert_eq!(ids, vec!["big", "medium"]);
 }
 
@@ -182,14 +158,18 @@ fn combine_prereq_plan_returns_none_for_single_coin() {
 }
 
 #[test]
-fn combine_prereq_plan_applies_cap_and_marks_partial_selection() {
+fn combine_prereq_plan_returns_none_when_cap_reduces_below_two_inputs() {
     let spendable = coins(&[("Coin_a", 4000), ("Coin_b", 6000)]);
-    let plan = build_combine_prereq_plan(&spendable, 10_000, 1).expect("prereq plan");
-    assert_eq!(plan.input_coin_ids.len(), 1);
+    assert!(build_combine_prereq_plan(&spendable, 10_000, 1).is_none());
+}
+
+#[test]
+fn combine_prereq_plan_applies_cap_while_keeping_two_inputs() {
+    let spendable = coins(&[("c5", 5000), ("c3", 3000), ("c2", 2000)]);
+    let plan = build_combine_prereq_plan(&spendable, 10_000, 2).expect("prereq plan");
+    assert_eq!(plan.input_coin_ids.len(), 2);
     assert!(plan.cap_applied);
-    assert_eq!(plan.selected_count_before_cap, 2);
-    assert!(!plan.exact_match);
-    assert!(plan.selected_total < 10_000);
+    assert_eq!(plan.selected_count_before_cap, 3);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode, SpendableCoin,
+    plan_exact_amount_combine_inputs, CoinOpPlan, SpendableCoin,
 };
 
 use super::items::{
@@ -80,22 +80,13 @@ async fn prepare_daemon_combine_inputs(
         i64_to_usize(capped_number_of_coins, "combine.capped_op_count"),
     )?;
 
-    let combine_input_coin_ids = match plan_auto_combine_inputs(
+    let combine_input_coin_ids = plan_exact_amount_combine_inputs(
         &spendable,
         requested_count,
-        CombineInputSelectionMode::ExactAmount,
-        Some(target_coin_amount_mojos),
+        target_coin_amount_mojos,
         Some(&ctx.watched_coin_ids),
         Some(capped_count),
-    ) {
-        Ok(ids) => ids,
-        Err(reason) => {
-            return Err((
-                vec![skip_item(op_type, size_base_units, op_count, reason)],
-                0,
-            ));
-        }
-    };
+    );
     if combine_input_coin_ids.len() < 2 {
         return Err((
             vec![skip_item(

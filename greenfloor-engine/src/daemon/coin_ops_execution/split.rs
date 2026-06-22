@@ -326,7 +326,7 @@ async fn execute_daemon_split_plan_inner(
             &split_ctx.op_type,
             split_ctx.size_base_units,
             split_ctx.op_count,
-            "no_spendable_split_coin_meets_required_amount",
+            SplitSkipReason::NoSpendableMeetsRequired.as_str(),
         )],
         0,
     ))

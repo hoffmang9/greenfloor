@@ -18,6 +18,9 @@ pub fn build_combine_prereq_plan(
 
     let cap = metric_non_negative_usize(combine_input_cap);
     let combine_input_coin_ids: Vec<String> = combine_coin_ids.iter().take(cap).cloned().collect();
+    if combine_input_coin_ids.len() < 2 {
+        return None;
+    }
     let selected_ids: HashSet<&str> = combine_input_coin_ids.iter().map(String::as_str).collect();
     let combine_selected_total: i64 = candidate_spendable
         .iter()

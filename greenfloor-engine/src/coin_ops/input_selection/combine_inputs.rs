@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use super::types::CombineInputSelectionMode;
 use crate::coin_ops::selection::{select_exact_amount_coin_ids, SpendableCoin};
 
 fn normalized_exclude_ids(exclude_coin_ids: Option<&HashSet<String>>) -> HashSet<String> {
@@ -9,41 +8,44 @@ fn normalized_exclude_ids(exclude_coin_ids: Option<&HashSet<String>>) -> HashSet
         .unwrap_or_default()
 }
 
-/// Plan auto combine inputs.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn plan_auto_combine_inputs(
+fn capped_count(number_of_coins: usize, max_count: Option<usize>) -> usize {
+    max_count.map_or(number_of_coins, |max| number_of_coins.min(max))
+}
+
+/// Select combine inputs that each match the target denomination.
+#[must_use]
+pub fn plan_exact_amount_combine_inputs(
     spendable_coins: &[SpendableCoin],
     number_of_coins: usize,
-    selection_mode: CombineInputSelectionMode,
-    target_amount_mojos: Option<i64>,
+    amount_mojos: i64,
     exclude_coin_ids: Option<&HashSet<String>>,
     max_count: Option<usize>,
-) -> Result<Vec<String>, &'static str> {
-    let capped_count = max_count.map_or(number_of_coins, |max| number_of_coins.min(max));
+) -> Vec<String> {
+    select_exact_amount_coin_ids(
+        spendable_coins,
+        amount_mojos,
+        &normalized_exclude_ids(exclude_coin_ids),
+        Some(capped_count(number_of_coins, max_count)),
+    )
+}
+
+/// Select the largest spendable combine inputs.
+#[must_use]
+pub fn plan_largest_combine_inputs(
+    spendable_coins: &[SpendableCoin],
+    number_of_coins: usize,
+    exclude_coin_ids: Option<&HashSet<String>>,
+    max_count: Option<usize>,
+) -> Vec<String> {
     let excluded = normalized_exclude_ids(exclude_coin_ids);
-
-    if selection_mode == CombineInputSelectionMode::ExactAmount {
-        let amount = target_amount_mojos
-            .ok_or("target_amount_mojos is required for exact-amount combine selection")?;
-        return Ok(select_exact_amount_coin_ids(
-            spendable_coins,
-            amount,
-            &excluded,
-            Some(capped_count),
-        ));
-    }
-
     let mut eligible: Vec<&SpendableCoin> = spendable_coins
         .iter()
         .filter(|coin| !coin.id.is_empty() && !excluded.contains(&coin.id.to_ascii_lowercase()))
         .collect();
     eligible.sort_by_key(|coin| std::cmp::Reverse(coin.amount));
-    Ok(eligible
+    eligible
         .iter()
-        .take(capped_count)
+        .take(capped_count(number_of_coins, max_count))
         .map(|coin| coin.id.clone())
-        .collect())
+        .collect()
 }

@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
-use crate::coin_ops::{plan_cli_auto_split_selection, SpendableCoin, SplitAutoSelectPlan};
+use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::{plan_cli_auto_split_selection, CliSplitSelection, SpendableCoin};
 use crate::error::SignerResult;
 
 use super::context::{enforce_split_lockup_guardrail, COIN_SPLIT_NO_SPENDABLE_ERROR};
@@ -44,30 +44,13 @@ pub(super) async fn run_split_iteration(
         });
     } else {
         match plan_cli_auto_split_selection(&spendable) {
-            SplitAutoSelectPlan::CombinePrereq(prereq) => {
-                let operation_id = submit_combine_prereq(ctx, &prereq.input_coin_ids).await?;
-                let operation = json!({
-                    "iteration": iteration,
-                    "op": "combine-prereq",
-                    "signature_request_id": operation_id,
-                    "input_coin_ids": prereq.input_coin_ids,
-                    "waited": !no_wait,
-                });
-                if no_wait {
-                    return Ok(LoopIterationOutcome::Break {
-                        operation: Some(operation),
-                        reason: "combine_prereq_submitted".to_string(),
-                    });
-                }
-                return Ok(LoopIterationOutcome::Continue { operation });
-            }
-            SplitAutoSelectPlan::Skip(reason) => {
+            CliSplitSelection::Skip(reason) => {
                 return Ok(LoopIterationOutcome::Exit {
                     code: 2,
                     payload: Some(json!({"error": reason.as_str()})),
                 });
             }
-            SplitAutoSelectPlan::Coin(plan) => vec![plan.coin_id],
+            CliSplitSelection::Coin(plan) => vec![plan.coin_id],
         }
     };
 

@@ -1,20 +1,3 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CombineInputSelectionMode {
-    LargestByAmount,
-    ExactAmount,
-}
-
-impl CombineInputSelectionMode {
-    #[must_use]
-    pub fn from_label(label: &str) -> Option<Self> {
-        match label {
-            "largest_by_amount" => Some(Self::LargestByAmount),
-            "exact_amount" => Some(Self::ExactAmount),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitCombinePrereqPlan {
     pub input_coin_ids: Vec<String>,
@@ -49,7 +32,7 @@ pub enum SplitSkipReason {
 
 impl SplitSkipReason {
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::NoSpendableMeetsRequired => "no_spendable_split_coin_meets_required_amount",
             Self::SubCatChange(_) => "split_would_create_sub_cat_change",
@@ -57,6 +40,14 @@ impl SplitSkipReason {
     }
 }
 
+/// CLI auto split selection: largest coin or typed skip only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliSplitSelection {
+    Coin(SplitCoinPlan),
+    Skip(SplitSkipReason),
+}
+
+/// Daemon auto split selection: coin, combine prereq, or typed skip.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SplitAutoSelectPlan {
     Coin(SplitCoinPlan),

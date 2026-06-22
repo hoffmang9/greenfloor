@@ -39,17 +39,8 @@ pub struct UntilReadyLoopConfig {
 }
 
 pub enum LoopIterationOutcome {
-    Continue {
-        operation: Value,
-    },
-    Break {
-        operation: Option<Value>,
-        reason: String,
-    },
-    Exit {
-        code: i32,
-        payload: Option<Value>,
-    },
+    Continue { operation: Value },
+    Exit { code: i32, payload: Option<Value> },
 }
 
 #[derive(Debug, Clone)]
@@ -140,13 +131,6 @@ where
         match run_iteration(iteration, spendable, gate_json).await? {
             LoopIterationOutcome::Continue { operation } => {
                 operations.push(operation);
-            }
-            LoopIterationOutcome::Break { operation, reason } => {
-                if let Some(operation) = operation {
-                    operations.push(operation);
-                }
-                stop_reason = reason;
-                break;
             }
             LoopIterationOutcome::Exit { code, payload } => {
                 return Ok((operations, UntilReadyCompletion::Exit { code, payload }));
