@@ -1,5 +1,7 @@
 //! Offer-creation gating after denomination bootstrap preflight.
 
+use super::phase::BootstrapPhaseSnapshot;
+
 const SKIP_CONTINUE_REASONS: &[&str] = &["already_ready", "dry_run"];
 
 fn normalized_reason(reason: &str) -> String {
@@ -11,8 +13,33 @@ fn normalized_reason(reason: &str) -> String {
     }
 }
 
-fn skip_allows_offer_creation(reason: &str) -> bool {
-    SKIP_CONTINUE_REASONS.contains(&normalized_reason(reason).as_str())
+/// Typed bootstrap phase status for offer-creation gating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BootstrapPhaseStatus {
+    Failed,
+    Executed,
+    Skipped,
+    Unknown,
+}
+
+impl BootstrapPhaseStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Executed => "executed",
+            Self::Skipped => "skipped",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub(crate) fn from_snapshot_status(status: &'static str) -> Self {
+        match status {
+            "failed" => Self::Failed,
+            "executed" => Self::Executed,
+            "skipped" => Self::Skipped,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// Typed bootstrap outcome for offer creation gating.
@@ -36,14 +63,30 @@ impl BootstrapOfferGate {
     }
 }
 
-/// Resolve whether offer creation should continue after bootstrap preflight.
+/// Resolve whether offer creation should continue after a typed phase snapshot.
 #[must_use]
-pub(crate) fn bootstrap_offer_gate(status: &str, reason: &str, ready: bool) -> BootstrapOfferGate {
+pub(crate) fn bootstrap_offer_gate_for_snapshot(
+    snapshot: &BootstrapPhaseSnapshot,
+) -> BootstrapOfferGate {
+    bootstrap_offer_gate_for_status(
+        BootstrapPhaseStatus::from_snapshot_status(snapshot.status),
+        &snapshot.reason,
+        snapshot.ready,
+    )
+}
+
+/// Resolve whether offer creation should continue after bootstrap preflight fields.
+#[must_use]
+pub(crate) fn bootstrap_offer_gate_for_status(
+    status: BootstrapPhaseStatus,
+    reason: &str,
+    ready: bool,
+) -> BootstrapOfferGate {
     let reason = normalized_reason(reason);
-    match status.trim() {
-        "failed" => BootstrapOfferGate::BlockFailed(reason),
-        "executed" if !ready => BootstrapOfferGate::BlockPending(reason),
-        "skipped" if !skip_allows_offer_creation(&reason) => {
+    match status {
+        BootstrapPhaseStatus::Failed => BootstrapOfferGate::BlockFailed(reason),
+        BootstrapPhaseStatus::Executed if !ready => BootstrapOfferGate::BlockPending(reason),
+        BootstrapPhaseStatus::Skipped if !SKIP_CONTINUE_REASONS.contains(&reason.as_str()) => {
             BootstrapOfferGate::BlockSkipped(reason)
         }
         _ => BootstrapOfferGate::Continue,

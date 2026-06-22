@@ -58,17 +58,13 @@ fn side_expectation_error(
     if asset_id.is_empty() {
         return None;
     }
-    let found = rows_contain_expected(
-        rows,
-        &asset_id.to_ascii_lowercase(),
-        &side.symbol.trim().to_ascii_lowercase(),
-    )?;
+    let expected_symbol = side.symbol.trim().to_ascii_lowercase();
+    let found = rows_contain_expected(rows, &asset_id.to_ascii_lowercase(), &expected_symbol)?;
     if found {
         return None;
     }
     Some(format!(
-        "{error_prefix}:expected_asset={asset_id}:expected_symbol={}",
-        side.symbol.trim()
+        "{error_prefix}:expected_asset={asset_id}:expected_symbol={expected_symbol}"
     ))
 }
 

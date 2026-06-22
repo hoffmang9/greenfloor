@@ -83,6 +83,26 @@ fn offered_asset_matches_by_code_or_name() {
 }
 
 #[test]
+fn error_symbol_is_lowercased_in_offered_missing_message() {
+    let offered = json!([{"id": "aaaa"}]);
+    let requested = json!([]);
+    let expected = ExpectedPublishAssetFields {
+        offered: PublishAssetSide {
+            asset_id: "bbbb".to_string(),
+            symbol: "B".to_string(),
+        },
+        requested: PublishAssetSide {
+            asset_id: String::new(),
+            symbol: String::new(),
+        },
+    };
+    assert_eq!(
+        dexie_offer_asset_expectation_error(&offered, &requested, &expected),
+        Some("dexie_offer_offered_asset_missing:expected_asset=bbbb:expected_symbol=b".to_string())
+    );
+}
+
+#[test]
 fn returns_offered_error_when_expected_asset_missing() {
     let offered = json!([{"id": "aaaa"}]);
     let requested = json!([]);

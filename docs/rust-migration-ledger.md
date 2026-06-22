@@ -71,5 +71,6 @@ Global flags on `greenfloor-manager`:
 | 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`)          | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first |
 | 2026-06-17 | Python `config/models.py` deleted; script config via manager field CLIs          | Call `greenfloor-manager` field commands; do not walk operator YAML for policy   |
 | 2026-06-17 | `markets-fields` exports `markets` (all) and `enabled_markets`                   | Scripts needing disabled-market metadata use `markets`; operators use `enabled`  |
+| 2026-06-21 | Removed `offer::` bootstrap/publish wrapper re-exports (library consumers)       | Use `BootstrapPhaseResult::offer_creation_block_error()`; see ADR 0014           |
 
 Add a row here for every intentional operator-facing break during the migration.

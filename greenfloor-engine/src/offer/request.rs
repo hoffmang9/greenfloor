@@ -47,7 +47,7 @@ pub fn offer_asset_ids_for_side(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OfferSideAssets {
+pub(crate) struct OfferSideAssets {
     pub offered_asset_id: String,
     pub requested_asset_id: String,
     pub offered_symbol: String,
@@ -56,7 +56,7 @@ pub struct OfferSideAssets {
 
 /// Normalized offered/requested asset ids and display symbols for an action side.
 #[must_use]
-pub fn offer_side_assets_for_side(
+pub(crate) fn offer_side_assets_for_side(
     action_side: &str,
     base_symbol: &str,
     quote_asset: &str,

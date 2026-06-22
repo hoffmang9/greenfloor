@@ -16,6 +16,14 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-21 — Offer publish module decomposed; bootstrap gate collapsed
+
+Split `offer/publish/mod.rs` into venue-focused `publish/dexie/` and `publish/assets/`
+(expectations + Dexie visibility). Bootstrap offer-creation gating moved to
+`offer/bootstrap/gate.rs` with typed `BootstrapPhaseStatus`. Operator block checks use
+`BootstrapPhaseResult::offer_creation_block_error()`; removed wrapper re-exports from
+`offer::`. See ADR 0014 and `rust-migration-ledger.md` for library-only breaking changes.
+
 ### 2026-06-21 — Vault coinset scan checkpoint module decomposed
 
 Split the largest non-test Rust file into `checkpoint/{runtime,file,load,save}` with typed
