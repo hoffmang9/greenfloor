@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use crate::error::{SignerError, SignerResult};
-use crate::storage::{OfferReservationAcquireOutcome, SqliteStore};
+use crate::storage::{OfferReservationAcquireOutcome, OfferReservationRejectReason, SqliteStore};
 
 const DEFAULT_LEASE_SECONDS: i64 = 300;
 
@@ -50,16 +50,12 @@ impl OfferReservationCoordinator {
                 now: None,
             },
         )? {
-            OfferReservationAcquireOutcome::Acquired => Ok(ReservationAcquireResult {
-                ok: true,
-                reservation_id: Some(reservation_id),
-                error: None,
-            }),
-            OfferReservationAcquireOutcome::Rejected(reason) => Ok(ReservationAcquireResult {
-                ok: false,
-                reservation_id: None,
-                error: Some(reason),
-            }),
+            OfferReservationAcquireOutcome::Acquired => {
+                Ok(ReservationAcquireResult::Acquired { reservation_id })
+            }
+            OfferReservationAcquireOutcome::Rejected(reason) => {
+                Ok(ReservationAcquireResult::Rejected { reason })
+            }
         }
     }
 
@@ -80,8 +76,11 @@ impl OfferReservationCoordinator {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReservationAcquireResult {
-    pub ok: bool,
-    pub reservation_id: Option<String>,
-    pub error: Option<String>,
+pub enum ReservationAcquireResult {
+    Acquired {
+        reservation_id: String,
+    },
+    Rejected {
+        reason: OfferReservationRejectReason,
+    },
 }

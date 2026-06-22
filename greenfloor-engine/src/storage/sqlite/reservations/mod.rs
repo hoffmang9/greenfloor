@@ -11,13 +11,14 @@ use super::{sqlite_rows_changed, utcnow_iso, SqliteStore};
 
 pub use types::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
+    OfferReservationRejectReason,
 };
 
 use sql::{
     expire_stale_leases, insert_active_leases, list_leases, prune_inactive_leases,
     query_active_reserved_by_asset, release_lease,
 };
-use types::{first_insufficient_asset_error, NormalizeOutcome, NormalizedReservationLeaseRequest};
+use types::first_insufficient_asset;
 
 impl SqliteStore {
     /// Try acquire offer reservation lease.
@@ -29,37 +30,33 @@ impl SqliteStore {
         &self,
         request: &OfferReservationLeaseRequest<'_>,
     ) -> SignerResult<OfferReservationAcquireOutcome> {
-        match NormalizedReservationLeaseRequest::normalize(request)? {
-            NormalizeOutcome::Rejected(reason) => {
-                Ok(OfferReservationAcquireOutcome::Rejected(reason))
-            }
-            NormalizeOutcome::Ready(normalized) => {
-                self.immediate_transaction("reservation", |store| {
-                    expire_stale_leases(&store.conn, &normalized.now_iso)?;
-                    let reserved_by_asset = query_active_reserved_by_asset(
-                        &store.conn,
-                        normalized.wallet_id,
-                        &normalized.now_iso,
-                    )?;
-                    if let Some(reason) = first_insufficient_asset_error(
-                        &normalized.normalized_requests,
-                        &normalized.normalized_available,
-                        &reserved_by_asset,
-                    ) {
-                        return Ok(OfferReservationAcquireOutcome::Rejected(reason));
-                    }
-                    insert_active_leases(
-                        &store.conn,
-                        normalized.reservation_id,
-                        normalized.market_id,
-                        normalized.wallet_id,
-                        &normalized.normalized_requests,
-                        &normalized.now_iso,
-                        &normalized.expires_at_iso,
-                    )?;
-                    Ok(OfferReservationAcquireOutcome::Acquired)
-                })
-            }
+        match request.try_normalize()? {
+            Ok(normalized) => self.immediate_transaction("reservation", |store| {
+                expire_stale_leases(&store.conn, &normalized.now_iso)?;
+                let reserved_by_asset = query_active_reserved_by_asset(
+                    &store.conn,
+                    normalized.wallet_id,
+                    &normalized.now_iso,
+                )?;
+                if let Some(reason) = first_insufficient_asset(
+                    &normalized.normalized_requests,
+                    &normalized.normalized_available,
+                    &reserved_by_asset,
+                ) {
+                    return Ok(OfferReservationAcquireOutcome::Rejected(reason));
+                }
+                insert_active_leases(
+                    &store.conn,
+                    normalized.reservation_id,
+                    normalized.market_id,
+                    normalized.wallet_id,
+                    &normalized.normalized_requests,
+                    &normalized.now_iso,
+                    &normalized.expires_at_iso,
+                )?;
+                Ok(OfferReservationAcquireOutcome::Acquired)
+            }),
+            Err(reason) => Ok(OfferReservationAcquireOutcome::Rejected(reason)),
         }
     }
 
@@ -104,7 +101,11 @@ impl SqliteStore {
         list_leases(&self.conn, reservation_id)
     }
 
-    /// Get offer reserved amounts by asset.
+    /// Active reserved amounts for `wallet_id`, using the current wall clock.
+    ///
+    /// Unlike [`Self::try_acquire_offer_reservation_lease`], this read path does not
+    /// accept an injectable `now`; callers needing deterministic time should expire
+    /// stale leases first or query leases directly.
     ///
     /// # Errors
     ///

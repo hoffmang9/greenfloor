@@ -15,7 +15,7 @@ use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
 use crate::storage::SqliteStore;
 
-use super::coordinator::OfferReservationCoordinator;
+use super::coordinator::{OfferReservationCoordinator, ReservationAcquireResult};
 use super::managed_post::{post_managed_planned_action_owned, ManagedPostContext};
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
@@ -161,8 +161,7 @@ async fn run_parallel_post_jobs(
                 &job.available_amounts,
             );
             let counts_as_executed = match acquired {
-                Ok(acquired) if acquired.ok => {
-                    let reservation_id = acquired.reservation_id.expect("reservation id");
+                Ok(ReservationAcquireResult::Acquired { reservation_id }) => {
                     let action = job.action.clone();
                     let post_result =
                         post_managed_planned_action_owned(post_ctx, market, action).await?;
@@ -170,11 +169,8 @@ async fn run_parallel_post_jobs(
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
                 }
-                Ok(acquired) => {
-                    if let Some(error) = acquired.error {
-                        return Err(SignerError::ReservationContention(error));
-                    }
-                    false
+                Ok(ReservationAcquireResult::Rejected { reason }) => {
+                    return Err(SignerError::ReservationContention(reason.to_string()));
                 }
                 Err(err) => return Err(err),
             };

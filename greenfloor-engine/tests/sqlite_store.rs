@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use chrono::{Duration, Utc};
 use greenfloor_engine::storage::{
-    CoinOpLedgerEntry, OfferReservationAcquireOutcome, OfferReservationLeaseRequest, SqliteStore,
-    StoredAlertState,
+    CoinOpLedgerEntry, OfferReservationAcquireOutcome, OfferReservationLeaseRequest,
+    OfferReservationRejectReason, SqliteStore, StoredAlertState,
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -578,10 +578,18 @@ fn try_acquire_offer_reservation_lease_rejects_insufficient_capacity() {
             now: None,
         })
         .expect("try acquire");
-    let OfferReservationAcquireOutcome::Rejected(err) = outcome else {
+    let OfferReservationAcquireOutcome::Rejected(reason) = outcome else {
         panic!("expected rejection, got {outcome:?}");
     };
-    assert!(err.contains("reservation_insufficient_asset"));
+    assert_eq!(
+        reason,
+        OfferReservationRejectReason::InsufficientCapacity {
+            asset_id: "asset".to_string(),
+            available: 50,
+            reserved: 0,
+            needed: 100,
+        }
+    );
     assert!(store
         .list_offer_reservation_leases(Some("res-4"))
         .expect("rows")

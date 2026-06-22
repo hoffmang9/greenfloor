@@ -179,6 +179,20 @@ fn collect_lease_rows(rows: &mut Rows<'_>) -> SignerResult<Vec<OfferReservationL
     Ok(out)
 }
 
+fn query_lease_rows(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> SignerResult<Vec<OfferReservationLeaseRow>> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|err| db_err("failed to prepare reservation lease query", err))?;
+    let mut rows = stmt
+        .query(params)
+        .map_err(|err| db_err("failed to query reservation leases", err))?;
+    collect_lease_rows(&mut rows)
+}
+
 pub(super) fn list_leases(
     conn: &Connection,
     reservation_id: Option<&str>,
@@ -187,20 +201,8 @@ pub(super) fn list_leases(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     if let Some(reservation_id) = reservation_id {
-        let mut stmt = conn
-            .prepare(LIST_LEASES_BY_ID_SQL)
-            .map_err(|err| db_err("failed to prepare reservation lease query", err))?;
-        let mut rows = stmt
-            .query(params![reservation_id])
-            .map_err(|err| db_err("failed to query reservation leases", err))?;
-        collect_lease_rows(&mut rows)
+        query_lease_rows(conn, LIST_LEASES_BY_ID_SQL, params![reservation_id])
     } else {
-        let mut stmt = conn
-            .prepare(LIST_LEASES_SQL)
-            .map_err(|err| db_err("failed to prepare reservation lease query", err))?;
-        let mut rows = stmt
-            .query([])
-            .map_err(|err| db_err("failed to query reservation leases", err))?;
-        collect_lease_rows(&mut rows)
+        query_lease_rows(conn, LIST_LEASES_SQL, [])
     }
 }

@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use tempfile::tempdir;
 
-use super::super::coordinator::OfferReservationCoordinator;
+use super::super::coordinator::{OfferReservationCoordinator, ReservationAcquireResult};
+use crate::storage::OfferReservationRejectReason;
 
 #[test]
 fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
@@ -17,15 +18,15 @@ fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
     let first = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
         .expect("first acquire");
-    assert!(first.ok);
-    assert!(first.reservation_id.is_some());
+    assert!(matches!(first, ReservationAcquireResult::Acquired { .. }));
 
     let second = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
         .expect("second acquire");
-    assert!(!second.ok);
-    let error = second.error.expect("contention error");
-    assert!(error.contains("reservation_insufficient"));
+    let ReservationAcquireResult::Rejected { reason } = second else {
+        panic!("expected contention rejection");
+    };
+    assert!(reason.is_insufficient_capacity());
 }
 
 #[test]
@@ -41,7 +42,9 @@ fn coordinator_release_frees_capacity_for_next_acquire() {
     let acquired = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
         .expect("acquire");
-    let reservation_id = acquired.reservation_id.expect("reservation id");
+    let ReservationAcquireResult::Acquired { reservation_id } = acquired else {
+        panic!("expected acquire success");
+    };
     coordinator
         .release(&reservation_id, "released_success")
         .expect("release");
@@ -49,7 +52,10 @@ fn coordinator_release_frees_capacity_for_next_acquire() {
     let after_release = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
         .expect("acquire after release");
-    assert!(after_release.ok);
+    assert!(matches!(
+        after_release,
+        ReservationAcquireResult::Acquired { .. }
+    ));
 }
 
 #[test]
@@ -63,11 +69,18 @@ fn coordinator_partial_acquire_rejects_when_requested_exceeds_available() {
     let result = coordinator
         .try_acquire("m1", "wallet-1", &requested, &available)
         .expect("acquire");
-    assert!(!result.ok);
-    assert!(result
-        .error
-        .expect("error")
-        .contains("reservation_insufficient"));
+    let ReservationAcquireResult::Rejected { reason } = result else {
+        panic!("expected rejection");
+    };
+    assert_eq!(
+        reason,
+        OfferReservationRejectReason::InsufficientCapacity {
+            asset_id: "asset-a".to_string(),
+            available: 50,
+            reserved: 0,
+            needed: 80,
+        }
+    );
 }
 
 #[test]
@@ -81,13 +94,14 @@ fn coordinator_second_acquire_blocked_until_release() {
     let first = coordinator
         .try_acquire("m1", "wallet-1", &requested, &available)
         .expect("first acquire");
-    assert!(first.ok);
-    let reservation_id = first.reservation_id.expect("reservation id");
+    let ReservationAcquireResult::Acquired { reservation_id } = first else {
+        panic!("expected first acquire success");
+    };
 
     let blocked = coordinator
         .try_acquire("m1", "wallet-1", &requested, &available)
         .expect("blocked acquire");
-    assert!(!blocked.ok);
+    assert!(matches!(blocked, ReservationAcquireResult::Rejected { .. }));
 
     coordinator
         .release(&reservation_id, "released_success")
@@ -96,7 +110,10 @@ fn coordinator_second_acquire_blocked_until_release() {
     let after_release = coordinator
         .try_acquire("m1", "wallet-1", &requested, &available)
         .expect("acquire after release");
-    assert!(after_release.ok);
+    assert!(matches!(
+        after_release,
+        ReservationAcquireResult::Acquired { .. }
+    ));
 }
 
 #[test]
@@ -116,5 +133,5 @@ fn coordinator_multi_asset_acquire_requires_all_assets() {
     let result = coordinator
         .try_acquire("m1", "wallet-1", &requested, &available)
         .expect("acquire");
-    assert!(!result.ok);
+    assert!(matches!(result, ReservationAcquireResult::Rejected { .. }));
 }
