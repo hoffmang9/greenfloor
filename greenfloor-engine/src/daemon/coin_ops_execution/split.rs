@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_auto_split_selection, usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
-    SplitCombinePrereqPlan, SplitPlanningProfile,
+    plan_daemon_auto_split_selection, usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
+    SplitCombinePrereqPlan, SplitSkipReason,
 };
 
 use super::items::{
@@ -228,13 +228,12 @@ async fn attempt_daemon_split(
     attempted_coin_ids: &HashSet<String>,
 ) -> CoinOpSkipResult<DaemonSplitAttemptResult> {
     let candidate_spendable = split_candidate_spendable(ctx, split_ctx, attempted_coin_ids).await?;
-    let selection = plan_auto_split_selection(
+    let selection = plan_daemon_auto_split_selection(
         &candidate_spendable,
         split_ctx.required_amount,
         &split_ctx.canonical_asset_id,
-        SplitPlanningProfile::DaemonAuto,
         ctx.combine_input_cap,
-        Some(attempt_index == 0),
+        attempt_index == 0,
     );
 
     match selection {
@@ -248,8 +247,8 @@ async fn attempt_daemon_split(
             )
             .await?,
         )),
-        SplitAutoSelectPlan::Skip(skip) => {
-            if skip.reason == "no_spendable_split_coin_meets_required_amount" {
+        SplitAutoSelectPlan::Skip(reason) => {
+            if matches!(reason, SplitSkipReason::NoSpendableMeetsRequired) {
                 Ok(DaemonSplitAttemptResult::NoMatchingCoin)
             } else {
                 Ok(DaemonSplitAttemptResult::Finished((
@@ -257,7 +256,7 @@ async fn attempt_daemon_split(
                         &split_ctx.op_type,
                         split_ctx.size_base_units,
                         split_ctx.op_count,
-                        skip.reason,
+                        reason.as_str(),
                     )],
                     0,
                 )))

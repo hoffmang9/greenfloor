@@ -62,7 +62,6 @@ struct SplitLoopContext<'a> {
     common: super::loop_context::CoinOpLoopCommon<'a>,
     amount_per_coin: i64,
     number_of_coins: i64,
-    required_amount: i64,
     output_amounts: Vec<u64>,
     split_fee: u64,
     gating: CoinSplitGating,
@@ -108,7 +107,6 @@ async fn prepare_split_loop_context(
     }
     let amount_per_coin_mojos =
         amount_per_coin.saturating_mul(common.exec_ctx.base_unit_mojo_multiplier);
-    let required_amount = amount_per_coin_mojos.saturating_mul(number_of_coins);
     let output_count = i64_to_usize(number_of_coins, "split.number_of_coins")?;
     let amount_u64 =
         coin_op_non_negative_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos")?;
@@ -120,7 +118,6 @@ async fn prepare_split_loop_context(
         common,
         amount_per_coin,
         number_of_coins,
-        required_amount,
         output_amounts: vec![amount_u64; output_count],
         split_fee,
         gating,
@@ -134,7 +131,6 @@ async fn run_coin_split_from_context(
         common,
         amount_per_coin,
         number_of_coins,
-        required_amount,
         output_amounts,
         split_fee,
         gating,
@@ -180,7 +176,6 @@ async fn run_coin_split_from_context(
                 gate_json,
                 explicit_coin_ids,
                 coin_ids,
-                required_amount,
                 output_amounts: &output_amounts,
                 split_fee,
                 no_wait: wait.no_wait,
