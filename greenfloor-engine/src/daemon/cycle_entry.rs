@@ -217,15 +217,16 @@ fn trace_daemon_cycle_completed(exit_code: i32, summary: &DaemonCycleSummary, ma
     } else {
         Level::WARN
     };
-    crate::event_at_level!(
-        level,
-        service = LogContext::DAEMON_CYCLE.service,
-        event = DAEMON_CYCLE_COMPLETED,
-        phase = LogContext::DAEMON_CYCLE.phase,
-        exit_code = exit_code,
-        cycle_error_count = summary.error_count,
-        elapsed_ms = summary.duration_ms,
-        market_count = market_count,
+    crate::trace_event!(
+        level = level,
+        LogContext::DAEMON_CYCLE,
+        DAEMON_CYCLE_COMPLETED,
+        {
+            exit_code = exit_code,
+            cycle_error_count = summary.error_count,
+            elapsed_ms = summary.duration_ms,
+            market_count = market_count,
+        };
         "daemon cycle completed"
     );
 }

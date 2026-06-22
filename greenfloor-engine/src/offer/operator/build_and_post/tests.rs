@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::post_batch::{
-    apply_post_iteration_outcome, flush_post_batch, PostEmitTarget, PostFailureAudit,
+    apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostFailureAudit,
     PostIterationBatch,
 };
 use super::publish::offer_post_persist_record;
@@ -24,16 +24,17 @@ fn flush_post_batch_writes_failure_audit_event() {
     let db_path = state_db_path_for_home(&home);
     let store = SqliteStore::open(&db_path).expect("open");
     let ctx = sample_resolved_build_and_post_context();
-    flush_post_batch(
-        &store,
-        &ctx,
-        &[],
-        &[PostFailureAudit {
-            error: "dexie_http_error:500".to_string(),
-            offer_ref: None,
-        }],
-    )
-    .expect("persist failure");
+    let emitter = PostBatchEmitter::new(&ctx);
+    emitter
+        .flush(
+            &store,
+            &[],
+            &[PostFailureAudit {
+                error: "dexie_http_error:500".to_string(),
+                offer_ref: None,
+            }],
+        )
+        .expect("persist failure");
     let events = store
         .list_recent_audit_events(Some(&[OFFER_POST_FAILURE]), Some("m1"), 1)
         .expect("events");
@@ -48,6 +49,7 @@ fn flush_post_batch_writes_failure_audit_event() {
 fn dry_run_failure_traces_without_persisting() {
     let capture = crate::operator_log::TraceCapture::install();
     let ctx = sample_resolved_build_and_post_context();
+    let emitter = PostBatchEmitter::new(&ctx);
     let mut batch = PostIterationBatch {
         post_results: Vec::new(),
         built_offers_preview: Vec::new(),
@@ -58,7 +60,7 @@ fn dry_run_failure_traces_without_persisting() {
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceOnly,
-        &ctx,
+        &emitter,
         super::types::PostIterationOutcome::Failure(PostFailure {
             error: "dexie_http_error:500".to_string(),
             started: Instant::now(),
@@ -84,6 +86,7 @@ fn persist_path_defers_failure_trace_until_flush() {
     let db_path = state_db_path_for_home(&home);
     let store = SqliteStore::open(&db_path).expect("open");
     let ctx = sample_resolved_build_and_post_context();
+    let emitter = PostBatchEmitter::new(&ctx);
     let mut batch = PostIterationBatch {
         post_results: Vec::new(),
         built_offers_preview: Vec::new(),
@@ -94,7 +97,7 @@ fn persist_path_defers_failure_trace_until_flush() {
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceAndStore,
-        &ctx,
+        &emitter,
         super::types::PostIterationOutcome::Failure(PostFailure {
             error: "dexie_http_error:500".to_string(),
             started: Instant::now(),
@@ -106,7 +109,9 @@ fn persist_path_defers_failure_trace_until_flush() {
     );
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
     assert_eq!(batch.failure_audits.len(), 1);
-    flush_post_batch(&store, &ctx, &[], &batch.failure_audits).expect("persist");
+    emitter
+        .flush(&store, &[], &batch.failure_audits)
+        .expect("persist");
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }
 
@@ -163,22 +168,23 @@ fn flush_post_batch_writes_offer_state() {
     let db_path = state_db_path_for_home(Path::new(&home));
     let store = SqliteStore::open(&db_path).expect("open");
     let ctx = sample_resolved_build_and_post_context();
-    flush_post_batch(
-        &store,
-        &ctx,
-        &[crate::storage::OfferPostPersistRecord {
-            offer_id: "offer-abc".to_string(),
-            market_id: "m1".to_string(),
-            side: "sell".to_string(),
-            size_base_units: 5,
-            publish_venue: "dexie".to_string(),
-            resolved_base_asset_id: "a1".to_string(),
-            resolved_quote_asset_id: "xch".to_string(),
-            created_extra: json!({"execution_mode": "direct"}),
-        }],
-        &[],
-    )
-    .expect("persist");
+    let emitter = PostBatchEmitter::new(&ctx);
+    emitter
+        .flush(
+            &store,
+            &[crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-abc".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "dexie".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({"execution_mode": "direct"}),
+            }],
+            &[],
+        )
+        .expect("persist");
 
     assert_eq!(
         store

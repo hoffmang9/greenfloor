@@ -15,23 +15,55 @@ use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::strategy_phase::run_strategy_phase;
 
+#[derive(Clone, Copy)]
+enum MarketPhaseTraceOutcome {
+    Started,
+    Failed,
+    Completed,
+}
+
+impl MarketPhaseTraceOutcome {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+        }
+    }
+}
+
 fn trace_market_phase(
     market_id: &str,
     market_phase: &str,
-    outcome: &str,
+    outcome: MarketPhaseTraceOutcome,
     level: Level,
-    message: &'static str,
 ) {
-    crate::event_at_level!(
-        level,
-        service = LogContext::MARKET_CYCLE.service,
-        event = MARKET_PHASE,
-        phase = LogContext::MARKET_CYCLE.phase,
-        market_id = market_id,
-        market_phase = market_phase,
-        outcome = outcome,
-        message
-    );
+    macro_rules! emit {
+        ($msg:literal) => {
+            crate::trace_event!(
+                level = level,
+                LogContext::MARKET_CYCLE,
+                MARKET_PHASE,
+                {
+                    market_id = market_id,
+                    market_phase = market_phase,
+                    outcome = outcome.label(),
+                };
+                $msg
+            );
+        };
+    }
+    match outcome {
+        MarketPhaseTraceOutcome::Started => {
+            emit!("market phase started");
+        }
+        MarketPhaseTraceOutcome::Failed => {
+            emit!("market phase failed");
+        }
+        MarketPhaseTraceOutcome::Completed => {
+            emit!("market phase completed");
+        }
+    }
 }
 
 async fn run_logged_market_phase<F, T>(
@@ -45,26 +77,23 @@ where
     trace_market_phase(
         market_id,
         market_phase,
-        "started",
+        MarketPhaseTraceOutcome::Started,
         Level::DEBUG,
-        "market phase started",
     );
     let result = body.await;
     if result.is_err() {
         trace_market_phase(
             market_id,
             market_phase,
-            "failed",
+            MarketPhaseTraceOutcome::Failed,
             Level::WARN,
-            "market phase failed",
         );
     } else {
         trace_market_phase(
             market_id,
             market_phase,
-            "completed",
+            MarketPhaseTraceOutcome::Completed,
             Level::DEBUG,
-            "market phase completed",
         );
     }
     result

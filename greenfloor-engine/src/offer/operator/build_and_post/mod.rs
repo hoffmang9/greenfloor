@@ -21,8 +21,7 @@ use crate::storage::{state_db_path_for_home, SqliteStore};
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
 use post_batch::{
-    apply_post_iteration_outcome, flush_post_batch, trace_offer_post_completed, PostEmitTarget,
-    PostIterationBatch,
+    apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostIterationBatch,
 };
 use types::build_and_post_exit_code;
 
@@ -145,10 +144,11 @@ async fn run_post_iterations(
         persist_records: Vec::new(),
         failure_audits: Vec::new(),
     };
+    let emitter = PostBatchEmitter::new(ctx);
     for _ in 0..request.repeat {
         let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
         batch.bootstrap_actions.push(bootstrap_action);
-        apply_post_iteration_outcome(target, ctx, iteration, &mut batch);
+        apply_post_iteration_outcome(target, &emitter, iteration, &mut batch);
     }
     Ok(batch)
 }
@@ -208,12 +208,13 @@ async fn build_and_post_offer_async(
         None
     };
 
+    let emitter = PostBatchEmitter::new(&ctx);
     let batch =
         run_post_iterations(&request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
 
     if target == PostEmitTarget::TraceAndStore {
         let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
-        flush_post_batch(&store, &ctx, &batch.persist_records, &batch.failure_audits)?;
+        emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
     }
 
     let payload = build_and_post_payload(&request, &ctx, &batch);
@@ -226,9 +227,8 @@ async fn build_and_post_offer_async(
     } else {
         "partial_failure"
     };
-    trace_offer_post_completed(
+    emitter.trace_completed(
         outcome,
-        ctx.market.market_id.as_str(),
         batch.post_results.len(),
         batch.publish_failures,
         request.run.dry_run,
