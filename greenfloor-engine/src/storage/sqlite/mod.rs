@@ -17,6 +17,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::error::{SignerError, SignerResult};
+use crate::offer::types::PresplitCancelFields;
 
 use super::schema::SCHEMA;
 
@@ -30,16 +31,7 @@ pub struct OfferPostPersistRecord {
     pub resolved_base_asset_id: String,
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
-    pub presplit_input_coin_id: Option<String>,
-    pub fixed_delegated_puzzle_hash: Option<String>,
-    pub execution_mode: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct OfferCancelMetadataRow {
-    pub presplit_input_coin_id: Option<String>,
-    pub fixed_delegated_puzzle_hash: Option<String>,
-    pub execution_mode: Option<String>,
+    pub cancel_fields: PresplitCancelFields,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};

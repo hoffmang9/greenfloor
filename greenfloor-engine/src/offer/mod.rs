@@ -47,4 +47,4 @@ pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     signer_split_asset_id, SignerOfferLegAmounts,
 };
-pub use types::{CreateOfferRequest, CreateOfferResult, OfferExecutionMode};
+pub use types::{CreateOfferRequest, CreateOfferResult, OfferExecutionMode, PresplitCancelFields};

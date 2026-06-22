@@ -59,19 +59,12 @@ async fn execute_on_chain_cancellations(
     market: &MarketConfig,
     target_offer_ids: &[String],
 ) -> SignerResult<(i64, Vec<Value>)> {
-    let receive_address = market.receive_address.trim();
-    if receive_address.is_empty() {
-        return Err(crate::error::SignerError::Other(format!(
-            "missing receive_address for market {}",
-            market.market_id
-        )));
-    }
     let targets: Vec<CancelOfferTarget> = target_offer_ids
         .iter()
         .map(|offer_id| CancelOfferTarget {
             offer_id: offer_id.clone(),
             market_id: market.market_id.clone(),
-            receive_address: receive_address.to_string(),
+            state: "open".to_string(),
             offer_text: None,
         })
         .collect();

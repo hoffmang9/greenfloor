@@ -85,14 +85,12 @@ pub(super) fn offer_post_persist_record(
         return None;
     }
     let offer_id = publish.offer_id.clone()?;
-    let (presplit_input_coin_id, fixed_delegated_puzzle_hash) = create_result
-        .and_then(|result| result.presplit_cancel_metadata.as_ref())
-        .map_or((None, None), |metadata| {
-            (
-                Some(metadata.input_coin_id.clone()),
-                Some(metadata.fixed_delegated_puzzle_hash.clone()),
-            )
-        });
+    let mut cancel_fields = create_result
+        .and_then(|result| result.presplit_cancel_fields.clone())
+        .unwrap_or_default();
+    if cancel_fields.execution_mode.is_none() {
+        cancel_fields.execution_mode = Some(execution_mode.to_string());
+    }
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.market.market_id.clone(),
@@ -101,9 +99,7 @@ pub(super) fn offer_post_persist_record(
         publish_venue: ctx.publish_venue.clone(),
         resolved_base_asset_id: ctx.resolved_base_asset_id.clone(),
         resolved_quote_asset_id: ctx.resolved_quote_asset_id.clone(),
-        created_extra: json!({"execution_mode": execution_mode}),
-        presplit_input_coin_id,
-        fixed_delegated_puzzle_hash,
-        execution_mode: Some(execution_mode.to_string()),
+        created_extra: json!({}),
+        cancel_fields,
     })
 }

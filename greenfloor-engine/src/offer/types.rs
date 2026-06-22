@@ -165,10 +165,39 @@ impl std::fmt::Display for OfferExecutionMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct PresplitCancelMetadata {
-    pub input_coin_id: String,
-    pub fixed_delegated_puzzle_hash: String,
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PresplitCancelFields {
+    pub input_coin_id: Option<String>,
+    pub fixed_delegated_puzzle_hash: Option<String>,
+    pub execution_mode: Option<String>,
+}
+
+impl PresplitCancelFields {
+    #[must_use]
+    pub fn from_presplit_build(
+        input_coin_id: String,
+        fixed_delegated_puzzle_hash: String,
+        execution_mode: OfferExecutionMode,
+    ) -> Self {
+        Self {
+            input_coin_id: Some(input_coin_id),
+            fixed_delegated_puzzle_hash: Some(fixed_delegated_puzzle_hash),
+            execution_mode: Some(execution_mode.to_string()),
+        }
+    }
+
+    #[must_use]
+    pub fn is_direct_execution(&self) -> bool {
+        matches!(self.execution_mode.as_deref(), Some("direct"))
+    }
+
+    #[must_use]
+    pub fn is_presplit_execution(&self) -> bool {
+        matches!(
+            self.execution_mode.as_deref(),
+            Some("presplit_new" | "presplit_existing")
+        )
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -184,7 +213,7 @@ pub struct CreateOfferResult {
     pub presplit_coin_id: Option<String>,
     pub split_broadcast_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub presplit_cancel_metadata: Option<PresplitCancelMetadata>,
+    pub presplit_cancel_fields: Option<PresplitCancelFields>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,7 +236,7 @@ impl CreateOfferResult {
         execution_mode: OfferExecutionMode,
         core: OfferArtifacts,
         presplit: PresplitArtifacts,
-        presplit_cancel_metadata: Option<PresplitCancelMetadata>,
+        presplit_cancel_fields: Option<PresplitCancelFields>,
     ) -> Self {
         Self {
             execution_mode,
@@ -218,7 +247,7 @@ impl CreateOfferResult {
             split_spend_bundle_hex: presplit.split_spend_bundle_hex,
             presplit_coin_id: presplit.presplit_coin_id,
             split_broadcast_status: presplit.split_broadcast_status,
-            presplit_cancel_metadata,
+            presplit_cancel_fields,
         }
     }
 }

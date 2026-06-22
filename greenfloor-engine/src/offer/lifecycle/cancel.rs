@@ -4,7 +4,8 @@ use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::dexie_payload::DexieOfferPayload;
-use crate::offer::reclaim::{build_offer_cancel_spend_bundle, OfferCancelSpendHints};
+use crate::offer::reclaim::build_offer_cancel_spend_bundle;
+use crate::offer::types::PresplitCancelFields;
 use crate::storage::SqliteStore;
 use crate::vault::session::resolve_vault_spend_context;
 
@@ -12,7 +13,7 @@ use crate::vault::session::resolve_vault_spend_context;
 pub struct CancelOfferTarget {
     pub offer_id: String,
     pub market_id: String,
-    pub receive_address: String,
+    pub state: String,
     /// When set, skip Dexie fetch and cancel from this offer file text directly.
     pub offer_text: Option<String>,
 }
@@ -29,12 +30,11 @@ pub struct CancelOfferOutcome {
 #[derive(Debug, Clone)]
 pub struct CancelOfferOnChainParams<'a> {
     pub offer_id: &'a str,
-    pub receive_address: &'a str,
     pub signer_config: SignerConfig,
     pub dexie: &'a DexieClient,
     pub fee_mojos: u64,
     pub offer_text: Option<String>,
-    pub cancel_hints: Option<OfferCancelSpendHints>,
+    pub cancel_fields: Option<PresplitCancelFields>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +83,7 @@ pub async fn cancel_offer_on_chain(
         &mut vault_ctx,
         &backend,
         &offer_text,
-        params.cancel_hints.as_ref(),
+        params.cancel_fields.as_ref(),
     )
     .await?;
     let broadcast = coinset::broadcast_spend_bundle(&coinset_client, spend_bundle).await?;
@@ -113,19 +113,14 @@ pub async fn cancel_offers_on_chain(
         } else {
             target.market_id.clone()
         };
-        let cancel_hints = store
-            .offer_cancel_metadata_for_id(&target.offer_id)
-            .ok()
-            .flatten()
-            .map(|metadata| OfferCancelSpendHints::from_metadata(&metadata));
+        let cancel_fields = store.offer_cancel_fields_for_id(&target.offer_id)?;
         match cancel_offer_on_chain(CancelOfferOnChainParams {
             offer_id: &target.offer_id,
-            receive_address: &target.receive_address,
             signer_config: signer_config.clone(),
             dexie,
             fee_mojos: 0,
             offer_text: target.offer_text.clone(),
-            cancel_hints,
+            cancel_fields,
         })
         .await
         {
@@ -162,14 +157,14 @@ mod tests {
     use super::CancelOfferTarget;
 
     #[test]
-    fn cancel_target_carries_receive_address() {
+    fn cancel_target_carries_market_and_state() {
         let target = CancelOfferTarget {
             offer_id: "offer-1".to_string(),
             market_id: "m1".to_string(),
-            receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w"
-                .to_string(),
+            state: "open".to_string(),
             offer_text: None,
         };
-        assert!(!target.receive_address.is_empty());
+        assert_eq!(target.market_id, "m1");
+        assert_eq!(target.state, "open");
     }
 }

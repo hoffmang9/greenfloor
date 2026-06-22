@@ -1,4 +1,5 @@
 use crate::error::{SignerError, SignerResult};
+use crate::offer::types::PresplitCancelFields;
 use rusqlite::params;
 
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
@@ -342,14 +343,14 @@ impl SqliteStore {
         state: &str,
         last_seen_status: Option<i64>,
         updated_at: &str,
-        cancel_metadata: Option<&super::OfferCancelMetadataRow>,
+        cancel_metadata: Option<&PresplitCancelFields>,
     ) -> SignerResult<()> {
         let (presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode) =
-            if let Some(metadata) = cancel_metadata {
+            if let Some(fields) = cancel_metadata {
                 (
-                    metadata.presplit_input_coin_id.as_deref(),
-                    metadata.fixed_delegated_puzzle_hash.as_deref(),
-                    metadata.execution_mode.as_deref(),
+                    fields.input_coin_id.as_deref(),
+                    fields.fixed_delegated_puzzle_hash.as_deref(),
+                    fields.execution_mode.as_deref(),
                 )
             } else {
                 (None, None, None)
@@ -392,15 +393,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Load presplit cancel metadata persisted at offer post time.
+    /// Load presplit cancel fields persisted at offer post time.
+    ///
+    /// Returns `None` when the offer id is absent from `offer_state`.
     ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn offer_cancel_metadata_for_id(
+    pub fn offer_cancel_fields_for_id(
         &self,
         offer_id: &str,
-    ) -> SignerResult<Option<super::OfferCancelMetadataRow>> {
+    ) -> SignerResult<Option<PresplitCancelFields>> {
         let clean = offer_id.trim();
         if clean.is_empty() {
             return Ok(None);
@@ -416,20 +419,20 @@ impl SqliteStore {
             )
             .map_err(|err| {
                 SignerError::Other(format!(
-                    "failed to prepare offer cancel metadata query: {err}"
+                    "failed to prepare offer cancel fields query: {err}"
                 ))
             })?;
         let mut rows = stmt.query(params![clean]).map_err(|err| {
-            SignerError::Other(format!("failed to query offer cancel metadata: {err}"))
+            SignerError::Other(format!("failed to query offer cancel fields: {err}"))
         })?;
         let Some(row) = rows.next().map_err(|err| {
-            SignerError::Other(format!("failed to read offer cancel metadata row: {err}"))
+            SignerError::Other(format!("failed to read offer cancel fields row: {err}"))
         })?
         else {
             return Ok(None);
         };
-        Ok(Some(super::OfferCancelMetadataRow {
-            presplit_input_coin_id: row.get(0).ok(),
+        Ok(Some(PresplitCancelFields {
+            input_coin_id: row.get(0).ok(),
             fixed_delegated_puzzle_hash: row.get(1).ok(),
             execution_mode: row.get(2).ok(),
         }))

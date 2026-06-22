@@ -1,4 +1,4 @@
-use super::sqlite::{OfferCancelMetadataRow, OfferPostPersistRecord, SqliteStore};
+use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 
@@ -11,18 +11,13 @@ pub fn upsert_offer_post_record(
     store: &SqliteStore,
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
-    let cancel_metadata = OfferCancelMetadataRow {
-        presplit_input_coin_id: record.presplit_input_coin_id.clone(),
-        fixed_delegated_puzzle_hash: record.fixed_delegated_puzzle_hash.clone(),
-        execution_mode: record.execution_mode.clone(),
-    };
     store.upsert_offer_state_with_metadata_at(
         &record.offer_id,
         &record.market_id,
         OfferLifecycleState::Open.as_str(),
         None,
         &super::sqlite::utcnow_iso(),
-        Some(&cancel_metadata),
+        Some(&record.cancel_fields),
     )
 }
 
@@ -44,6 +39,7 @@ pub fn persist_offer_post_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offer::types::PresplitCancelFields;
     use serde_json::json;
 
     #[test]
@@ -62,10 +58,11 @@ mod tests {
                 publish_venue: "dexie".to_string(),
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
-                created_extra: json!({"execution_mode": "direct"}),
-                presplit_input_coin_id: None,
-                fixed_delegated_puzzle_hash: None,
-                execution_mode: Some("direct".to_string()),
+                created_extra: json!({}),
+                cancel_fields: PresplitCancelFields {
+                    execution_mode: Some("direct".to_string()),
+                    ..PresplitCancelFields::default()
+                },
             }],
         )
         .expect("persist");
@@ -80,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    fn persist_offer_post_records_writes_presplit_cancel_metadata() {
+    fn persist_offer_post_records_writes_presplit_cancel_fields() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
         let store = SqliteStore::open(&db_path).expect("open");
@@ -95,29 +92,28 @@ mod tests {
                 publish_venue: "dexie".to_string(),
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
-                created_extra: json!({"execution_mode": "presplit_existing"}),
-                presplit_input_coin_id: Some("c".repeat(64)),
-                fixed_delegated_puzzle_hash: Some("d".repeat(64)),
-                execution_mode: Some("presplit_existing".to_string()),
+                created_extra: json!({}),
+                cancel_fields: PresplitCancelFields {
+                    input_coin_id: Some("c".repeat(64)),
+                    fixed_delegated_puzzle_hash: Some("d".repeat(64)),
+                    execution_mode: Some("presplit_existing".to_string()),
+                },
             }],
         )
         .expect("persist");
 
-        let metadata = store
-            .offer_cancel_metadata_for_id("offer-presplit")
-            .expect("metadata")
+        let fields = store
+            .offer_cancel_fields_for_id("offer-presplit")
+            .expect("fields")
             .expect("row");
         assert_eq!(
-            metadata.presplit_input_coin_id.as_deref(),
+            fields.input_coin_id.as_deref(),
             Some("c".repeat(64).as_str())
         );
         assert_eq!(
-            metadata.fixed_delegated_puzzle_hash.as_deref(),
+            fields.fixed_delegated_puzzle_hash.as_deref(),
             Some("d".repeat(64).as_str())
         );
-        assert_eq!(
-            metadata.execution_mode.as_deref(),
-            Some("presplit_existing")
-        );
+        assert_eq!(fields.execution_mode.as_deref(), Some("presplit_existing"));
     }
 }
