@@ -1,6 +1,9 @@
 ---
-# Lint/type/fmt/clippy gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
-# Test (ubuntu/arm/macOS) jobs run `cargo nextest run` in parallel with lint.
+# Lint/type/fmt gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
+# Clippy runs on ubuntu in the Test job (`shared-key: test` cache). That job must not
+# share the lint job's `shared-key: coverage` cache: clippy rebuilds target/ without
+# instrumentation and would invalidate llvm-cov artifacts saved on the lint runner.
+# Test jobs run full `cargo nextest run` in parallel with lint.
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml  (CI: cargo nextest run)
 #

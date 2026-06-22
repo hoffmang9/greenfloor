@@ -15,6 +15,7 @@ dev = [
   "pyright==1.1.408",
   "yamllint==1.35.1",
   "coverage>=7.6",
+  "diff-cover>=9.0",
 ]
 
 [build-system]
@@ -33,7 +34,6 @@ source = ["greenfloor_scripts"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 76
 include = ["greenfloor_scripts/*"]
 
 [tool.ruff]

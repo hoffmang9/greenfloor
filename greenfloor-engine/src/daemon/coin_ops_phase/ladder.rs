@@ -66,8 +66,6 @@ pub(super) fn build_valid_sell_ladder(
     market: &MarketConfig,
     sell_ladder: &[LadderEntry],
 ) -> SignerResult<Vec<LadderEntry>> {
-    // Production CAT ladders (1 unit × 1000 mojos = minimum) never hit sub-minimum audit;
-    // classify tests pass an explicit multiplier to exercise the reject path.
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let (valid_ladder, invalid_buckets) =
         classify_sell_ladder_entries(market.base_asset.trim(), base_unit_multiplier, sell_ladder);

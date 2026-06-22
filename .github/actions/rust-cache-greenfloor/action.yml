@@ -7,6 +7,12 @@ inputs:
     description: Save the Cargo cache at job end (lint+coverage and test jobs populate it).
     required: false
     default: "true"
+  shared-key:
+    description: >-
+      Swatinem/rust-cache shared-key namespace. Use `coverage` on the lint job so
+      instrumented llvm-cov artifacts are not overwritten by test/clippy builds.
+    required: false
+    default: "test"
   install-nextest:
     description: Install cargo-nextest (disable on jobs that only build or lint).
     required: false
@@ -21,9 +27,7 @@ runs:
 
     - uses: Swatinem/rust-cache@v2
       with:
-        # Match the legacy test-job cache key (`v0-rust-test-…`) so lint reuses
-        # existing main-branch caches instead of starting a new key namespace.
-        shared-key: test
+        shared-key: ${{ inputs.shared-key }}
         workspaces: |
           greenfloor-engine -> target
         cache-workspace-crates: true

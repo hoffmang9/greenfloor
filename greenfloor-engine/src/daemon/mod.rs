@@ -33,6 +33,8 @@ mod strategy_phase;
 mod strategy_support;
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(test)]
+pub use coin_ops_phase::harness::CoinOpsPhaseHarness;
 pub mod watchlist;
 
 pub use crate::coin_ops::execution::CoinOpExecContext;

@@ -24,6 +24,7 @@ name: Live Testnet E2E (Optional)
 jobs:
   live-testnet-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       TESTNET_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
       GREENFLOOR_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}

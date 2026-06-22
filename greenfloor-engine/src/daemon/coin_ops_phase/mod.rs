@@ -28,6 +28,9 @@ mod ladder;
 use ladder::build_valid_sell_ladder;
 
 #[cfg(test)]
+pub(crate) mod harness;
+
+#[cfg(test)]
 mod tests;
 
 struct CoinOpsPlanningResult {
