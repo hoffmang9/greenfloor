@@ -3,7 +3,7 @@ use tracing::Level;
 
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_row_defer_dual, emit_deferred_dual_traces, offer_log_ref, DeferredDualAudit, LogContext,
+    audit_row_defer_dual, emit_deferred_dual_traces, offer_log_ref, DeferredDualEmit, LogContext,
     OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION, STRATEGY_OFFER_EXECUTION,
 };
 use crate::storage::{upsert_offer_post_record, OfferPostPersistRecord, SqliteStore};
@@ -63,7 +63,7 @@ pub fn flush_post_batch(
             audit_row_defer_dual(
                 &mut deferred_traces,
                 store,
-                DeferredDualAudit {
+                DeferredDualEmit {
                     ctx: LogContext::OFFER_POST,
                     level: Level::WARN,
                     trace_message: "offer post failed",
@@ -78,7 +78,7 @@ pub fn flush_post_batch(
             audit_row_defer_dual(
                 &mut deferred_traces,
                 store,
-                DeferredDualAudit {
+                DeferredDualEmit {
                     ctx: LogContext::MARKET_CYCLE,
                     level: Level::INFO,
                     trace_message: "strategy offer executed",
@@ -218,16 +218,17 @@ pub fn trace_offer_post_completed(
         "failure" => Level::ERROR,
         _ => Level::WARN,
     };
-    crate::event_at_level!(
+    crate::trace_event_at_level!(
         level,
-        service = LogContext::OFFER_POST.service,
-        event = OFFER_POST_COMPLETED,
-        phase = LogContext::OFFER_POST.phase,
-        market_id = market_id,
-        outcome = outcome,
-        publish_attempts = publish_attempts,
-        publish_failures = publish_failures,
-        dry_run = dry_run,
+        LogContext::OFFER_POST,
+        OFFER_POST_COMPLETED,
+        {
+            market_id = market_id,
+            outcome = outcome,
+            publish_attempts = publish_attempts,
+            publish_failures = publish_failures,
+            dry_run = dry_run,
+        };
         "build-and-post-offer completed"
     );
 }
