@@ -53,8 +53,11 @@ pub async fn list_wallet_unspent_coins(
     network: &str,
     receive_address: &str,
     asset_id: &str,
+    msp_base_url: Option<&str>,
 ) -> SignerResult<Vec<WalletUnspentCoin>> {
-    let client = msp::client_for_network(network)?;
+    let client = msp::MspCoinset::for_network(network, msp_base_url)?
+        .client()
+        .clone();
     if is_xch_like_asset(asset_id) {
         let coins = list_unspent_xch(&client, receive_address).await?;
         return Ok(coins

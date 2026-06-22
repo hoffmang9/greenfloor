@@ -1,0 +1,3 @@
+[report]
+ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|/bin/|/main\\.rs$)"
+fail-under-lines = 68

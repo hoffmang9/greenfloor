@@ -13,6 +13,7 @@ use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, Pu
 use crate::cli_util::{format_json, format_json_value};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::test_support::build_and_post::unused_post_iteration_request;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
 };
@@ -308,4 +309,30 @@ async fn dry_run_returns_preview_payload_in_process() {
         .and_then(Value::as_array)
         .is_some_and(|rows| !rows.is_empty()));
     assert_eq!(response.payload.get("results"), Some(&json!([])));
+}
+
+#[tokio::test]
+async fn run_post_iteration_dry_run_skips_bootstrap_and_returns_preview() {
+    let mut ctx = sample_resolved_build_and_post_context();
+    ctx.test_overrides.offer_text = Some("offer1dryrunpreviewstub".to_string());
+    let request = unused_post_iteration_request(true, Some("offer1dryrunpreviewstub"));
+
+    let (bootstrap_action, outcome) =
+        super::iteration::run_post_iteration(&request, &ctx, None, None)
+            .await
+            .expect("iteration");
+
+    assert_eq!(
+        bootstrap_action.get("reason").and_then(Value::as_str),
+        Some("dry_run")
+    );
+    match outcome {
+        super::types::PostIterationOutcome::Preview(preview) => {
+            assert_eq!(
+                preview.get("offer_length").and_then(Value::as_str),
+                Some("23")
+            );
+        }
+        _other => panic!("expected preview outcome"),
+    }
 }

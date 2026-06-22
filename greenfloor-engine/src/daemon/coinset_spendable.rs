@@ -12,7 +12,8 @@ pub async fn list_spendable_base_unit_amounts(
     resolved_asset_id: &str,
     base_unit_multiplier: i64,
 ) -> SignerResult<Vec<i64>> {
-    let coins = list_wallet_unspent_coins(network, receive_address, resolved_asset_id).await?;
+    let coins =
+        list_wallet_unspent_coins(network, receive_address, resolved_asset_id, None).await?;
     let multiplier = base_unit_multiplier.max(1);
     Ok(coins
         .into_iter()
@@ -51,7 +52,8 @@ pub async fn coinset_spendable_profiles_by_asset(
     }
     for asset_id in asset_ids {
         let profile = profiles.get_mut(asset_id).expect("profile");
-        let Ok(coins) = list_wallet_unspent_coins(network, receive_address, asset_id).await else {
+        let Ok(coins) = list_wallet_unspent_coins(network, receive_address, asset_id, None).await
+        else {
             continue;
         };
         for coin in coins {

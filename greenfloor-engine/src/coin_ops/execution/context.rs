@@ -40,6 +40,7 @@ impl CoinOpExecContext {
             &self.program.network,
             &self.market.receive_address,
             &self.resolved_base_asset_id,
+            None,
         )
         .await?;
         Ok(wallet_coins_to_spendable(

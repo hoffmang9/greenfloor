@@ -8,7 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from greenfloor_scripts.binaries import cargo_target_directory
+from greenfloor_scripts.binaries import (
+    GreenfloorEngineBinaryError,
+    cargo_target_directory,
+)
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
     record_from_cli,
@@ -181,6 +184,43 @@ class ScriptAdapterTests(unittest.TestCase):
                 Path("/repo/greenfloor-engine/target"),
             )
         mock_run.assert_called_once()
+
+    def test_cargo_target_directory_requires_manifest(self) -> None:
+        cargo_target_directory.cache_clear()
+        with patch("greenfloor_scripts.binaries._engine_manifest") as mock_manifest:
+            mock_manifest.return_value = Path("/missing/greenfloor-engine/Cargo.toml")
+            with self.assertRaises(GreenfloorEngineBinaryError):
+                cargo_target_directory()
+
+    def test_cargo_target_directory_requires_target_directory_field(self) -> None:
+        cargo_target_directory.cache_clear()
+        with patch("greenfloor_scripts.binaries.subprocess.run") as mock_run:
+            mock_run.return_value = SimpleNamespace(
+                stdout='{"packages":[]}',
+                stderr="",
+                returncode=0,
+            )
+            with self.assertRaises(GreenfloorEngineBinaryError):
+                cargo_target_directory()
+
+    def test_resolve_greenfloor_engine_binary_honors_env_override(self) -> None:
+        from greenfloor_scripts.binaries import resolve_greenfloor_engine_binary
+
+        with patch.dict("os.environ", {"GREENFLOOR_ENGINE_BIN": __file__}, clear=False):
+            self.assertEqual(
+                resolve_greenfloor_engine_binary(build_if_missing=False), Path(__file__)
+            )
+
+    def test_resolve_greenfloor_engine_binary_rejects_missing_override(self) -> None:
+        from greenfloor_scripts.binaries import resolve_greenfloor_engine_binary
+
+        with patch.dict(
+            "os.environ",
+            {"GREENFLOOR_ENGINE_BIN": "/tmp/does-not-exist-greenfloor-engine"},
+            clear=False,
+        ):
+            with self.assertRaises(GreenfloorEngineBinaryError):
+                resolve_greenfloor_engine_binary(build_if_missing=False)
 
     def test_kms_subprocess_reads_public_key_field(self) -> None:
         with patch("greenfloor_scripts.kms_subprocess.run_engine_json") as mock_run:

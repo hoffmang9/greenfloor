@@ -59,6 +59,7 @@ async fn load_coin_list_snapshot(
         &program.network,
         receive_address,
         &list_asset_id,
+        None,
     )
     .await?;
     let min_amount = crate::coin_ops::coin_op_min_amount_mojos(market.base_asset.trim());

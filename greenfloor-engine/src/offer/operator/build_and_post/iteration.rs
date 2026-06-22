@@ -195,3 +195,31 @@ pub(super) async fn run_post_iteration(
 
     Ok((bootstrap_action, outcome))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::offer::operator::build_and_post::context::sample_resolved_build_and_post_context;
+    use crate::test_support::build_and_post::unused_post_iteration_request;
+
+    #[tokio::test]
+    async fn create_offer_for_post_rejects_unverifiable_offer_text() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.test_overrides.offer_text = Some("not-an-offer".to_string());
+        let request = unused_post_iteration_request(false, Some("not-an-offer"));
+
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now())
+            .await
+            .expect("iteration result")
+            .expect_err("verify failure");
+
+        match outcome {
+            PostIterationOutcome::Failure(failure) => {
+                assert!(failure.error.contains("offer"));
+            }
+            _ => panic!("expected verify failure"),
+        }
+    }
+}

@@ -265,6 +265,29 @@ async fn execute_daemon_split_plan_skips_when_amount_below_minimum() {
 }
 
 #[tokio::test]
+async fn execute_daemon_split_plan_submits_when_spendable_coin_available() {
+    let mut market = sample_market("xch1test");
+    market.base_asset = test_coin_id('f');
+    let ctx = test_exec_context(
+        market,
+        vec![SpendableCoin {
+            id: test_coin_id('a'),
+            amount: 100_000,
+        }],
+        Some("split-op-test"),
+    );
+    let plan = sample_plan(CoinOpKind::Split);
+
+    let (items, executed) = execute_daemon_split_plan(&ctx, &plan).await;
+
+    assert_eq!(executed, 1);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].status, "executed");
+    assert_eq!(items[0].reason, "signer_split_submitted");
+    assert_eq!(items[0].operation_id.as_deref(), Some("split-op-test"));
+}
+
+#[tokio::test]
 async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     let ctx = test_exec_context(
         sample_market("xch1test"),

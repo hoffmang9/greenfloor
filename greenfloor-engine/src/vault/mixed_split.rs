@@ -204,4 +204,16 @@ mod tests {
             SignerError::MixedSplitVaultWithFeeNotSupported
         ));
     }
+
+    #[test]
+    fn rejects_empty_output_amounts() {
+        let err = validate_mixed_split_request(&sample_request(vec![], false)).unwrap_err();
+        assert!(matches!(err, SignerError::MissingOutputAmounts));
+    }
+
+    #[test]
+    fn rejects_zero_output_amount() {
+        let err = validate_mixed_split_request(&sample_request(vec![1000, 0], false)).unwrap_err();
+        assert!(matches!(err, SignerError::InvalidOutputAmount));
+    }
 }

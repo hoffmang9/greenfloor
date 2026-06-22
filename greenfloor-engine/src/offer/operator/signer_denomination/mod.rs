@@ -54,7 +54,7 @@ async fn load_asset_scoped_coins(
     receive_address: &str,
     split_asset_id: &str,
 ) -> Result<Vec<WalletUnspentCoin>, BootstrapPhaseResult> {
-    list_wallet_unspent_coins(&program.network, receive_address, split_asset_id)
+    list_wallet_unspent_coins(&program.network, receive_address, split_asset_id, None)
         .await
         .map_err(|err| {
             BootstrapPhaseResult::failed(BootstrapPhaseFailure::new(
@@ -172,6 +172,7 @@ async fn prepare_bootstrap_split_plan(
         &program.network,
         program.coin_ops_minimum_fee_mojos,
         bootstrap_plan.output_amounts_base_units.len(),
+        None,
     )
     .await;
     if fee_mojos > 0 {
@@ -244,6 +245,7 @@ async fn execute_bootstrap_split_and_wait(
         &split_asset_id,
         &existing_coin_ids,
         program.runtime_offer_bootstrap_wait_timeout_seconds,
+        None,
     )
     .await
     {
@@ -264,7 +266,8 @@ async fn execute_bootstrap_split_and_wait(
     };
 
     let refreshed_asset_coins =
-        list_wallet_unspent_coins(&program.network, &receive_address, &split_asset_id).await?;
+        list_wallet_unspent_coins(&program.network, &receive_address, &split_asset_id, None)
+            .await?;
     let refreshed_spendable = spendable_bootstrap_coins(&refreshed_asset_coins);
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos,
@@ -400,5 +403,45 @@ mod tests {
         assert_eq!(result.split_result["operation_id"], "split-1");
         assert_eq!(result.wait_events.len(), 1);
         assert!(result.plan.is_some());
+    }
+
+    #[tokio::test]
+    async fn run_signer_denomination_phase_skips_missing_receive_address() {
+        use crate::config::ManagerProgramConfig;
+        use crate::test_support::ladder::market_with_side_ladder;
+        use crate::test_support::signer_config::test_signer_config;
+
+        let mut market = market_with_side_ladder("", "sell", 10, 2);
+        market.receive_address.clear();
+        let program = ManagerProgramConfig::default();
+        let signer = test_signer_config("https://example.test");
+
+        let result = super::run_signer_denomination_phase(
+            &program, &market, &signer, "xch", "xch", 1.0, "sell",
+        )
+        .await
+        .expect("phase");
+
+        assert_eq!(result.reason, "missing_receive_address_for_bootstrap");
+        assert!(!result.ready);
+    }
+
+    #[tokio::test]
+    async fn run_signer_denomination_phase_skips_missing_sell_ladder() {
+        use crate::config::ManagerProgramConfig;
+        use crate::test_support::ladder::empty_ladders_market;
+        use crate::test_support::signer_config::test_signer_config;
+
+        let market = empty_ladders_market("xch1test");
+        let program = ManagerProgramConfig::default();
+        let signer = test_signer_config("https://example.test");
+
+        let result = super::run_signer_denomination_phase(
+            &program, &market, &signer, "xch", "xch", 1.0, "sell",
+        )
+        .await
+        .expect("phase");
+
+        assert_eq!(result.reason, "missing_sell_ladder");
     }
 }
