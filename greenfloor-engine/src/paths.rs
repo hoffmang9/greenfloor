@@ -18,6 +18,45 @@ pub fn expand_home(path: impl AsRef<Path>) -> PathBuf {
     path.to_path_buf()
 }
 
+const DEFAULT_TESTNET_MARKETS_CONFIG: &str = "~/.greenfloor/config/testnet-markets.yaml";
+
+/// Default testnet markets overlay when `~/.greenfloor/config/testnet-markets.yaml` exists.
+#[must_use]
+pub fn default_testnet_markets_config_path() -> Option<PathBuf> {
+    let home_default = expand_home(Path::new(DEFAULT_TESTNET_MARKETS_CONFIG));
+    home_default.exists().then_some(home_default)
+}
+
+/// How operator entrypoints resolve `--testnet-markets-config` / `testnet_markets_path`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestnetMarketsPathPolicy {
+    /// Daemon CLI: empty → `None`; explicit path → `Some` only when the file exists.
+    RequireExistingFile,
+    /// Manager CLI: empty → [`default_testnet_markets_config_path`]; explicit path → always `Some`.
+    CliWithDefault,
+}
+
+/// Resolve a testnet markets config path for the given entrypoint policy.
+#[must_use]
+pub fn resolve_testnet_markets_path(
+    raw: &str,
+    policy: TestnetMarketsPathPolicy,
+) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return match policy {
+            TestnetMarketsPathPolicy::RequireExistingFile => None,
+            TestnetMarketsPathPolicy::CliWithDefault => default_testnet_markets_config_path(),
+        };
+    }
+
+    let path = PathBuf::from(trimmed);
+    match policy {
+        TestnetMarketsPathPolicy::RequireExistingFile => path.exists().then_some(path),
+        TestnetMarketsPathPolicy::CliWithDefault => Some(path),
+    }
+}
+
 /// Walk upward from `start` until a directory contains `config/cats.yaml`.
 #[must_use]
 pub fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
@@ -70,6 +109,37 @@ mod tests {
                 PathBuf::from(home).join(".greenfloor")
             );
         }
+    }
+
+    #[test]
+    fn resolve_testnet_markets_path_cli_with_default_uses_explicit_without_exists_check() {
+        let path = resolve_testnet_markets_path(
+            "/tmp/nonexistent-testnet-markets.yaml",
+            TestnetMarketsPathPolicy::CliWithDefault,
+        )
+        .expect("explicit cli path");
+        assert_eq!(path, PathBuf::from("/tmp/nonexistent-testnet-markets.yaml"));
+    }
+
+    #[test]
+    fn resolve_testnet_markets_path_require_existing_file_rejects_missing_explicit() {
+        assert!(resolve_testnet_markets_path(
+            "/tmp/nonexistent-testnet-markets.yaml",
+            TestnetMarketsPathPolicy::RequireExistingFile,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn resolve_testnet_markets_path_empty_input_follows_policy() {
+        assert!(
+            resolve_testnet_markets_path("", TestnetMarketsPathPolicy::RequireExistingFile)
+                .is_none()
+        );
+        assert_eq!(
+            resolve_testnet_markets_path("", TestnetMarketsPathPolicy::CliWithDefault),
+            default_testnet_markets_config_path(),
+        );
     }
 
     #[test]

@@ -5,31 +5,22 @@ use serde_json::Value;
 
 use crate::cli_util::optional_trimmed;
 use crate::error::{SignerError, SignerResult};
+use crate::paths::{expand_home, resolve_testnet_markets_path, TestnetMarketsPathPolicy};
 
 use super::cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 use super::daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 use super::lock::DaemonInstanceLock;
-use super::logging::{initialize_daemon_file_logging, warn_if_log_level_auto_healed};
+use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
 
-fn parse_key_ids(raw: &str) -> Option<Vec<String>> {
-    let ids: Vec<String> = raw
-        .split(',')
+fn parse_key_ids(raw: &str) -> Vec<String> {
+    raw.split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .collect();
-    if ids.is_empty() {
-        None
-    } else {
-        Some(ids)
-    }
-}
-
-fn resolve_testnet_markets_path(raw: &str) -> Option<PathBuf> {
-    super::program_runtime::resolve_testnet_markets_path(raw)
+        .collect()
 }
 
 #[derive(Debug, Args)]
@@ -58,7 +49,7 @@ pub struct DaemonCliArgs {
 ///
 /// Returns an error if the operation fails.
 pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
-    let state_dir = args.state_dir.expanduser();
+    let state_dir = expand_home(&args.state_dir);
     let mode = if args.once { "once" } else { "loop" };
     let lock = match DaemonInstanceLock::acquire(&state_dir, mode) {
         Ok(lock) => lock,
@@ -68,11 +59,14 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
     let _guard = lock;
 
     let runtime = load_daemon_program_runtime(&args.program_config)?;
-    initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
+    sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
     warn_if_log_level_auto_healed(runtime.app_log_level_was_missing, &args.program_config);
 
-    let testnet_markets_path = resolve_testnet_markets_path(&args.testnet_markets_config);
-    let allowed_key_ids = parse_key_ids(&args.key_ids).unwrap_or_default();
+    let testnet_markets_path = resolve_testnet_markets_path(
+        &args.testnet_markets_config,
+        TestnetMarketsPathPolicy::RequireExistingFile,
+    );
+    let allowed_key_ids = parse_key_ids(&args.key_ids);
     let state_db_override = optional_trimmed(&args.state_db);
 
     if args.once {
@@ -161,25 +155,4 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
         crate::cli_util::print_json_value(&encoded, true)?;
     }
     Ok(response.exit_code)
-}
-
-trait PathExt {
-    fn expanduser(self) -> PathBuf;
-}
-
-impl PathExt for PathBuf {
-    fn expanduser(self) -> PathBuf {
-        let raw = self.to_string_lossy();
-        if raw == "~" {
-            if let Ok(home) = std::env::var("HOME") {
-                return PathBuf::from(home);
-            }
-        }
-        if let Some(stripped) = raw.strip_prefix("~/") {
-            if let Ok(home) = std::env::var("HOME") {
-                return PathBuf::from(home).join(stripped);
-            }
-        }
-        self
-    }
 }

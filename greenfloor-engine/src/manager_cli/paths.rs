@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-pub use crate::paths::{expand_home, resolve_repo_root};
+pub use crate::paths::{default_testnet_markets_config_path, expand_home, resolve_repo_root};
 
 #[must_use]
 pub fn default_program_config_path() -> PathBuf {
@@ -29,15 +29,6 @@ pub fn default_markets_config_path() -> PathBuf {
         return home_default;
     }
     PathBuf::from("config/markets.yaml")
-}
-
-#[must_use]
-pub fn default_testnet_markets_config_path() -> Option<PathBuf> {
-    let home_default = expand_home(Path::new("~/.greenfloor/config/testnet-markets.yaml"));
-    if home_default.exists() {
-        return Some(home_default);
-    }
-    None
 }
 
 #[must_use]

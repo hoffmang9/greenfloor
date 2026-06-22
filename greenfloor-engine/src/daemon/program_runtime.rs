@@ -39,28 +39,3 @@ pub fn websocket_capture_enabled(tx_block_trigger_mode: &str) -> bool {
         .trim()
         .eq_ignore_ascii_case("websocket")
 }
-
-#[must_use]
-pub fn resolve_testnet_markets_path(raw: &str) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let path = PathBuf::from(trimmed);
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
-#[must_use]
-pub fn default_testnet_markets_path() -> Option<PathBuf> {
-    let candidate = PathBuf::from("~/.greenfloor/config/testnet-markets.yaml");
-    let expanded = crate::paths::expand_home(candidate);
-    if expanded.exists() {
-        Some(expanded)
-    } else {
-        None
-    }
-}
