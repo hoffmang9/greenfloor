@@ -4,10 +4,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use greenfloor_engine::coinset::{coin_id_from_record, to_coinset_hex};
+use greenfloor_engine::hex::hex_to_bytes32;
 use greenfloor_engine::hex::normalize_hex_id;
-use greenfloor_engine::vault::members::{
-    hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
-};
+use greenfloor_engine::vault::members::nonce_member_puzzle_hash_hex_from_launcher_id;
 use greenfloor_engine::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
 use greenfloor_engine::vault_coinset_scan::ScanState;
@@ -16,8 +15,7 @@ use serde_json::json;
 
 fn member_p2_hash(launcher_hex: &str, nonce: u32) -> String {
     normalize_hex_id(
-        &singleton_member_puzzle_hash_hex_from_launcher_id(launcher_hex, nonce)
-            .expect("member hash"),
+        &nonce_member_puzzle_hash_hex_from_launcher_id(launcher_hex, nonce).expect("member hash"),
     )
 }
 

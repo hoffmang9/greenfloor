@@ -16,7 +16,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
         signer_config.clone(),
         MixedSplitRequest {
             receive_address: receive_address.to_string(),
-            asset_id: crate::vault::members::hex_to_bytes32(split_asset_id)?,
+            asset_id: crate::hex::hex_to_bytes32(split_asset_id)?,
             output_amounts: bootstrap_plan
                 .output_amounts_base_units
                 .iter()

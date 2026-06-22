@@ -71,8 +71,8 @@ use clvm_utils::TreeHash;
 use clvmr::{serde::node_from_bytes, Allocator};
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
-use crate::vault::members::hex_to_bytes32;
 
 pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
 

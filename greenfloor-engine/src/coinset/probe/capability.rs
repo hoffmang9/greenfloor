@@ -5,7 +5,7 @@ use serde_json::Value;
 use super::types::{HeightWindowCapability, ProbedHeightWindowCapability, ScanWindow};
 use crate::coinset::{coin_id_from_record, to_coinset_hex, DirectCoinsetScanClient};
 use crate::error::SignerResult;
-use crate::vault::members::hex_to_bytes32;
+use crate::hex::hex_to_bytes32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProbeAttempt {

@@ -4,10 +4,8 @@ use serde_json::Value;
 
 use crate::coinset::{coin_id_from_record, to_coinset_hex, u64_from_value};
 use crate::error::SignerResult;
-use crate::hex::normalize_hex_id;
-use crate::vault::members::{
-    hex_to_bytes32, singleton_member_hash, tree_hash_to_hex, MemberConfig,
-};
+use crate::hex::{hex_to_bytes32, normalize_hex_id};
+use crate::vault::members::nonce_member_puzzle_hash_hex;
 use crate::vault_coinset_scan::types::{CoinKind, CoinRow, DiscoverySource, ScanStopReason};
 
 use super::ScanState;
@@ -90,11 +88,7 @@ impl ScanState {
     fn build_batch_nonce_p2(&mut self, batch_nonces: &[u32]) -> SignerResult<HashMap<u32, String>> {
         let mut batch_nonce_p2 = HashMap::new();
         for nonce in batch_nonces {
-            let config = MemberConfig::default()
-                .with_top_level(true)
-                .with_nonce(*nonce);
-            let p2_hash =
-                tree_hash_to_hex(singleton_member_hash(&config, self.launcher_bytes, false)?);
+            let p2_hash = nonce_member_puzzle_hash_hex(self.launcher_bytes, *nonce)?;
             let normalized = normalize_hex_id(&p2_hash);
             if !normalized.is_empty() {
                 batch_nonce_p2.insert(*nonce, normalized.clone());

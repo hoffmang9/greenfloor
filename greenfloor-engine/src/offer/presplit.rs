@@ -12,10 +12,7 @@ use clvmr::{Allocator, NodePtr};
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend};
 use crate::error::{SignerError, SignerResult};
 use crate::vault::materialize::build_vault_cat_inner_spend;
-use crate::vault::members::{
-    custom_member_hash, m_of_n_hash, p2_conditions_or_singleton_puzzle_hash, singleton_member_hash,
-    MemberConfig,
-};
+use crate::vault::members::{nonce_member_puzzle_hash, p2_conditions_or_singleton_puzzle_hash};
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 #[must_use]
@@ -71,15 +68,11 @@ pub fn build_presplit_conditions_inner_spend(
     fixed_spend: Spend,
     launcher_id: Bytes32,
 ) -> SignerResult<Spend> {
-    let member_config = MemberConfig::default();
-    let fixed_conditions_hash =
-        custom_member_hash(&member_config, ctx.tree_hash(fixed_spend.puzzle))?;
-    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false)?;
-    let full_puzzle_hash = m_of_n_hash(
-        &member_config.with_top_level(true),
-        1,
-        vec![fixed_conditions_hash, p2_singleton_hash],
-    )?;
+    let hashes =
+        p2_conditions_or_singleton_puzzle_hash(ctx.tree_hash(fixed_spend.puzzle), launcher_id)?;
+    let fixed_conditions_hash = hashes.fixed_conditions_hash;
+    let p2_singleton_hash = hashes.p2_singleton_hash;
+    let full_puzzle_hash = hashes.puzzle_hash;
 
     let nil_spend = Spend::new(NodePtr::NIL, NodePtr::NIL);
     let mut mips_spend = MipsSpend::new(nil_spend);
@@ -111,12 +104,7 @@ pub fn predict_presplit_cat(source_cat: &Cat, p2_puzzle_hash: Bytes32, offer_amo
 ///
 /// Returns an error if the operation fails.
 pub fn vault_change_puzzle_hash(launcher_id: Bytes32) -> SignerResult<Bytes32> {
-    Ok(singleton_member_hash(
-        &MemberConfig::default().with_top_level(true),
-        launcher_id,
-        false,
-    )?
-    .into())
+    Ok(nonce_member_puzzle_hash(launcher_id, 0)?.into())
 }
 
 #[derive(Debug, Clone)]

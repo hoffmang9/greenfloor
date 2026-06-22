@@ -120,9 +120,7 @@ where
 {
     let raw: Vec<String> = Vec::deserialize(deserializer)?;
     raw.into_iter()
-        .map(|value| {
-            crate::vault::members::hex_to_bytes32(&value).map_err(serde::de::Error::custom)
-        })
+        .map(|value| crate::hex::hex_to_bytes32(&value).map_err(serde::de::Error::custom))
         .collect()
 }
 
@@ -131,7 +129,7 @@ where
     D: Deserializer<'de>,
 {
     let raw = String::deserialize(deserializer)?;
-    crate::vault::members::hex_to_bytes32(&raw).map_err(serde::de::Error::custom)
+    crate::hex::hex_to_bytes32(&raw).map_err(serde::de::Error::custom)
 }
 
 pub(crate) fn serialize_coin_ids<S>(values: &[Bytes32], serializer: S) -> Result<S::Ok, S::Error>

@@ -7,7 +7,7 @@ use crate::coinset::{
     post_coinset_coin_records, post_coinset_record, resolve_direct_client, with_script_retries,
 };
 use crate::error::SignerResult;
-use crate::vault::members::hex_to_bytes32;
+use crate::hex::hex_to_bytes32;
 
 fn apply_height_fields(body: &mut Value, start_height: Option<u64>, end_height: Option<u64>) {
     if let Some(obj) = body.as_object_mut() {

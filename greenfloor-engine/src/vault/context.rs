@@ -4,10 +4,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::{bytes32_to_hex, hex_to_bytes32, tree_hash_nil, tree_hash_to_hex};
 use crate::vault::members::{
-    bytes32_to_hex, force_1_of_2_restriction, hex_to_bytes32, m_of_n_hash, member_hash_for_key,
-    prevent_vault_side_effects_restriction, singleton_member_hash, timelock_restriction,
-    tree_hash_nil, tree_hash_to_hex, MemberConfig, WalletKey,
+    force_1_of_2_restriction, m_of_n_hash, member_hash_for_key, nonce_member_puzzle_hash,
+    prevent_vault_side_effects_restriction, timelock_restriction, MemberConfig, WalletKey,
 };
 use crate::vault::validate_vault_threshold;
 
@@ -152,11 +152,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
         1,
         vec![custody_hash, recovery_hash],
     )?;
-    let p2_singleton_message_hash = singleton_member_hash(
-        &MemberConfig::default().with_top_level(true),
-        snapshot.launcher_id,
-        false,
-    )?;
+    let p2_singleton_message_hash = nonce_member_puzzle_hash(snapshot.launcher_id, 0)?;
 
     Ok(VaultComputedHashes {
         inner_puzzle_hash,
@@ -181,10 +177,10 @@ pub fn compute_vault_context_from_hashes(
         .custody_keys
         .iter()
         .filter(|key| key.curve.trim().eq_ignore_ascii_case("SECP256R1"))
-        .map(|key| crate::kms::normalize_hex(&key.public_key_hex))
+        .map(|key| crate::hex::normalize_hex(&key.public_key_hex))
         .collect::<Vec<_>>();
 
-    let normalized_kms = crate::kms::normalize_hex(kms_public_key_hex);
+    let normalized_kms = crate::hex::normalize_hex(kms_public_key_hex);
     let kms_custody_key_match =
         secp256r1_custody_keys.len() == 1 && normalized_kms == secp256r1_custody_keys[0];
 
@@ -245,7 +241,7 @@ fn extract_wallet_keys(connection: Option<&Value>) -> Vec<WalletKey> {
         let public_key = node
             .get("publicKey")
             .and_then(Value::as_str)
-            .map(crate::kms::normalize_hex)
+            .map(crate::hex::normalize_hex)
             .unwrap_or_default();
         let curve = node
             .get("curve")

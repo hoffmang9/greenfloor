@@ -7,8 +7,8 @@ use crate::coinset::{
     coin_spend_from_solution_payload, to_coinset_hex, u64_from_value, DirectCoinsetScanClient,
 };
 use crate::error::SignerResult;
+use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
-use crate::vault::members::hex_to_bytes32;
 use crate::vault_coinset_scan::checkpoint::ParentLineageEntry;
 use crate::vault_coinset_scan::types::{CoinKind, CoinRow};
 

@@ -9,12 +9,12 @@ use greenfloor_engine::daemon::{
     run_daemon_command, run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
 };
 use greenfloor_engine::error::SignerError;
+use greenfloor_engine::hex::hex_to_bytes32;
 use greenfloor_engine::hex_cli::{run_hex_command, HexCliArgs};
 use greenfloor_engine::kms_cli::{run_kms_public_key_compressed_hex, KmsPublicKeyArgs};
 use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
 use greenfloor_engine::vault::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
-    MixedSplitRequest,
+    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest,
 };
 use greenfloor_engine::vault_coinset_scan::{
     run_vault_coinset_scan_command, VaultCoinsetScanCliArgs,

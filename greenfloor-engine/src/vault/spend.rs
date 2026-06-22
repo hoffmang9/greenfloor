@@ -8,9 +8,10 @@ use clvm_utils::TreeHash;
 
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes;
 use crate::kms::{self, KmsRuntime};
 use crate::vault::context::{VaultComputedHashes, VaultContext, VaultCustodySnapshot};
-use crate::vault::members::{hex_to_bytes, singleton_member_puzzle_hash};
+use crate::vault::members::nonce_member_puzzle_hash;
 
 #[derive(Debug, Clone)]
 pub struct KmsSigner {
@@ -95,7 +96,7 @@ impl VaultSpendContext {
             return Some(*cached);
         }
         for nonce in 0..=self.max_nonce_probe {
-            let Ok(candidate) = singleton_member_puzzle_hash(self.launcher_id, nonce) else {
+            let Ok(candidate) = nonce_member_puzzle_hash(self.launcher_id, nonce) else {
                 continue;
             };
             if Bytes32::from(candidate) == p2_puzzle_hash {
@@ -205,7 +206,7 @@ pub(crate) async fn sign_vault_fast_forward_digest(
         &hex::encode(signature_message),
     )
     .await?;
-    let signature_bytes = hex::decode(kms::normalize_hex(&signature_hex))
+    let signature_bytes = hex::decode(crate::hex::normalize_hex(&signature_hex))
         .map_err(|err| SignerError::Kms(format!("invalid signature hex: {err}")))?;
     let signature_array: [u8; 64] = signature_bytes
         .try_into()
@@ -239,7 +240,7 @@ mod tests {
             #[cfg(test)]
             local_fast_forward_signer: None,
         };
-        let target = crate::vault::members::singleton_member_puzzle_hash(launcher_id, 7)
+        let target = crate::vault::members::nonce_member_puzzle_hash(launcher_id, 7)
             .expect("singleton hash");
         let inferred = vault_ctx
             .infer_nonce_for_p2_hash(target.into())

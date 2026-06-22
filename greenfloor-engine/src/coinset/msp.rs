@@ -179,7 +179,7 @@ async fn resolve_one_asset(msp: &MspCoinset, raw: &str) -> SignerResult<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::members::hex_to_bytes32;
+    use crate::hex::hex_to_bytes32;
 
     #[test]
     fn normalize_asset_id_accepts_xch_and_hex() {

@@ -2,12 +2,12 @@ use crate::async_boundary::BuildVaultCatOfferFuture;
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend};
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
+use crate::hex::hex_to_bytes32;
 use crate::offer::assemble::{
     execute_direct_offer, execute_existing_presplit_offer, execute_presplit_new_offer,
 };
 use crate::offer::plan::{plan_vault_cat_offer, validate_offer_input, OfferPlan};
 use crate::offer::types::{CreateOfferRequest, CreateOfferResult, OfferInput};
-use crate::vault::members::hex_to_bytes32;
 use crate::vault::session::resolve_vault_session;
 use crate::vault::spend::VaultSpendContext;
 

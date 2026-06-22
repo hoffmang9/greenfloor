@@ -7,7 +7,7 @@ use crate::coinset::{
 };
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::vault::members::hex_to_bytes32;
+use crate::hex::hex_to_bytes32;
 use crate::vault::mixed_split::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };

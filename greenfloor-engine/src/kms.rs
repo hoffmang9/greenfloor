@@ -2,6 +2,7 @@ use aws_sdk_kms::primitives::Blob;
 use sha2::{Digest, Sha256};
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex;
 
 mod runtime;
 
@@ -162,11 +163,6 @@ fn read_der_integer(data: &[u8], offset: usize) -> SignerResult<(Vec<u8>, usize)
         raw.remove(0);
     }
     Ok((raw, offset + length))
-}
-
-pub fn normalize_hex(value: &str) -> String {
-    let raw = value.trim().trim_start_matches("0x").to_ascii_lowercase();
-    raw.chars().filter(char::is_ascii_hexdigit).collect()
 }
 
 #[cfg(test)]

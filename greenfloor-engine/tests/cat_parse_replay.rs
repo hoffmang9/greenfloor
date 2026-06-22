@@ -8,8 +8,7 @@ use clvmr::serde::node_from_bytes;
 use clvmr::{Allocator, NodePtr};
 use greenfloor_engine::coinset;
 use greenfloor_engine::error::SignerResult;
-use greenfloor_engine::hex::normalize_hex_id;
-use greenfloor_engine::vault::members::hex_to_bytes32;
+use greenfloor_engine::hex::{hex_to_bytes32, normalize_hex_id};
 use serde_json::Value;
 
 fn load_case_paths(root: &Path) -> Vec<PathBuf> {

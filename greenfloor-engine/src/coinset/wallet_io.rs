@@ -11,8 +11,8 @@ use crate::coinset::{
     list_unspent_xch,
 };
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
-use crate::vault::members::hex_to_bytes32;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WalletUnspentCoin {

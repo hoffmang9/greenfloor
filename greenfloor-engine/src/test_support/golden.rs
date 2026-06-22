@@ -14,7 +14,8 @@ pub const RECOVERY_HASH_HEX: &str =
 
 // Keep in sync with tests/fixtures/vault_hash_golden.json.
 pub fn golden_snapshot() -> crate::vault::context::VaultCustodySnapshot {
-    use crate::vault::members::{hex_to_bytes32, WalletKey};
+    use crate::hex::hex_to_bytes32;
+    use crate::vault::members::WalletKey;
 
     crate::vault::context::VaultCustodySnapshot {
         launcher_id: hex_to_bytes32(LAUNCHER_ID_HEX).expect("launcher id"),

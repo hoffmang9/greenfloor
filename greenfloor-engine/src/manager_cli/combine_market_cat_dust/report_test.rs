@@ -6,13 +6,13 @@ use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{load_program_config, parse_program_config, read_program_yaml};
+use crate::hex::hex_to_bytes32;
 use crate::manager_cli::combine_market_cat_dust::jobs::CatDustJob;
 use crate::manager_cli::test_support::{
     pop_json, write_combine_test_configs, ManagerContextBuilder,
 };
 use crate::minimal_program_template::{materialize_minimal_program_text, MinimalProgramParams};
 use crate::test_support::simulator::harness::fetch_cat_from_sim_by_id;
-use crate::vault::members::hex_to_bytes32;
 use serde_json::json;
 
 const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";

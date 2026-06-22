@@ -8,17 +8,16 @@ use greenfloor_engine::coinset::probe::{
     build_coinset_probe_report, CoinsetProbeCliArgs, ProbeReport,
 };
 use greenfloor_engine::coinset::to_coinset_hex;
+use greenfloor_engine::hex::hex_to_bytes32;
 use greenfloor_engine::hex::normalize_hex_id;
-use greenfloor_engine::vault::members::{
-    hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
-};
+use greenfloor_engine::vault::members::nonce_member_puzzle_hash_hex_from_launcher_id;
 
 fn launcher_id() -> String {
     "ab".repeat(32)
 }
 
 fn p2_coinset_hex(launcher: &str, nonce: u32) -> String {
-    let hash = singleton_member_puzzle_hash_hex_from_launcher_id(launcher, nonce).expect("p2 hash");
+    let hash = nonce_member_puzzle_hash_hex_from_launcher_id(launcher, nonce).expect("p2 hash");
     let bytes = hex_to_bytes32(&hash).expect("p2 bytes");
     to_coinset_hex(bytes.as_ref())
 }
@@ -94,7 +93,7 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
     let p2_hex = p2_coinset_hex(&launcher, 0);
     let sample_coin_id = "cd".repeat(32);
     let expected_p2_hash =
-        singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
+        nonce_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
 
     let mocks = ProbeServerMockConfig::operator_contract(&sample_coin_id);
     let mut server = mockito::Server::new_async().await;

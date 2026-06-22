@@ -3,8 +3,8 @@ use chia_protocol::CoinSpend;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
-use crate::vault::members::hex_to_bytes32;
 
 fn coinset_rpc_failure_detail(payload: &Value) -> String {
     for key in ["error", "error_message", "message"] {
