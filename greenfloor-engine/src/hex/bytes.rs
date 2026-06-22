@@ -35,6 +35,18 @@ pub fn hex_to_bytes32(value: &str) -> SignerResult<Bytes32> {
     Ok(Bytes32::new(out))
 }
 
+/// Parse coin ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn parse_coin_ids(raw_values: &[String]) -> SignerResult<Vec<Bytes32>> {
+    raw_values
+        .iter()
+        .map(|value| hex_to_bytes32(value))
+        .collect()
+}
+
 /// Copy *bytes* into a fixed-size array when the length matches.
 ///
 /// # Errors

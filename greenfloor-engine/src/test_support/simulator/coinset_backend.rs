@@ -7,7 +7,8 @@ use clvm_utils::TreeHash;
 use super::harness::{
     fetch_cat_from_sim, fetch_cat_from_sim_by_id, fetch_vault_from_sim, SimChain,
 };
-use crate::coinset::{finalize_selected_cats, OfferCoinsetBackend, SelectedCats};
+use crate::coinset::coin_select::{finalize_selected_cats, SelectedCats};
+use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 

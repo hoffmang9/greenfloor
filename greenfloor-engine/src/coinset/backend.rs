@@ -2,7 +2,7 @@ use chia_protocol::Bytes32;
 use chia_protocol::SpendBundle;
 use clvm_utils::TreeHash;
 
-use super::{broadcast_spend_bundle, fetch_latest_vault, presplit, CoinsetClient, SelectedCats};
+use super::{broadcast, coin_select, presplit, vault_fetch, CoinsetClient, SelectedCats};
 use crate::error::SignerResult;
 use chia_sdk_driver::{Cat, Vault};
 
@@ -47,7 +47,7 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
         explicit_coin_ids: &[Bytes32],
         target_amount: u64,
     ) -> SignerResult<SelectedCats> {
-        super::select_cats_for_spend(
+        coin_select::select_cats_for_spend(
             self.0,
             receive_address,
             asset_id,
@@ -62,7 +62,7 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
         launcher_id: Bytes32,
         inner_puzzle_hash: TreeHash,
     ) -> SignerResult<Vault> {
-        fetch_latest_vault(self.0, launcher_id, inner_puzzle_hash).await
+        vault_fetch::fetch_latest_vault(self.0, launcher_id, inner_puzzle_hash).await
     }
 
     async fn fetch_presplit_cat_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
@@ -74,6 +74,8 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
     }
 
     async fn broadcast_spend_bundle(&self, spend_bundle: SpendBundle) -> SignerResult<String> {
-        Ok(broadcast_spend_bundle(self.0, spend_bundle).await?.status)
+        Ok(broadcast::broadcast_spend_bundle(self.0, spend_bundle)
+            .await?
+            .status)
     }
 }

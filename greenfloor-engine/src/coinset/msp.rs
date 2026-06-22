@@ -94,6 +94,26 @@ impl MspCoinset {
     }
 }
 
+/// Client for network.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
+    Ok(MspCoinset::for_network(network, None)?.client().clone())
+}
+
+/// Client for config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn client_for_config(config: &crate::config::SignerConfig) -> SignerResult<CoinsetClient> {
+    Ok(MspCoinset::new(&config.coinset_msp_base_url)
+        .client()
+        .clone())
+}
+
 #[derive(Debug, Clone)]
 pub struct SingletonInfo {
     pub launcher_id: String,

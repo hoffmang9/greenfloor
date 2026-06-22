@@ -6,9 +6,10 @@ use chia_sdk_driver::decode_offer;
 use chia_traits::Streamable;
 use serde::Serialize;
 
-use crate::coinset::{
-    client_for_network, decode_receive_address, is_xch_like_asset, list_unspent_cats,
-    list_unspent_xch,
+use super::{
+    cats::{self, list_unspent_cats},
+    is_xch_like_asset, msp,
+    xch::list_unspent_xch,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
@@ -32,6 +33,17 @@ fn wallet_coin_from_id(coin_id: impl AsRef<[u8]>, amount: u64) -> WalletUnspentC
     }
 }
 
+/// Spend bundle hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
+    Ok(hex::encode(spend_bundle.to_bytes().map_err(|err| {
+        SignerError::Other(format!("failed to serialize spend bundle: {err}"))
+    })?))
+}
+
 /// List wallet unspent coins.
 ///
 /// # Errors
@@ -42,7 +54,7 @@ pub async fn list_wallet_unspent_coins(
     receive_address: &str,
     asset_id: &str,
 ) -> SignerResult<Vec<WalletUnspentCoin>> {
-    let client = client_for_network(network)?;
+    let client = msp::client_for_network(network)?;
     if is_xch_like_asset(asset_id) {
         let coins = list_unspent_xch(&client, receive_address).await?;
         return Ok(coins
@@ -82,7 +94,7 @@ pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String
 ///
 /// Returns an error if the operation fails.
 pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResult<String> {
-    let puzzle_hash = decode_receive_address(receive_address)?;
+    let puzzle_hash = cats::decode_receive_address(receive_address)?;
     Ok(format!("0x{}", hex::encode(puzzle_hash)))
 }
 
@@ -92,7 +104,7 @@ pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResul
 ///
 /// Returns an error if the operation fails.
 pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> SignerResult<String> {
-    let puzzle_hash = decode_receive_address(receive_address)?;
+    let puzzle_hash = cats::decode_receive_address(receive_address)?;
     let asset_bytes = hex_to_bytes32(asset_id)?;
     let cat_outer: [u8; 32] = CatArgs::curry_tree_hash(asset_bytes, puzzle_hash.into()).into();
     Ok(format!("0x{}", hex::encode(cat_outer)))

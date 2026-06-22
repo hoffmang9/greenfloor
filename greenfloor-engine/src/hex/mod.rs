@@ -5,7 +5,7 @@ mod clvm;
 
 use crate::coinset::is_canonical_xch_asset;
 
-pub use bytes::{fixed_bytes, hex_to_bytes, hex_to_bytes32};
+pub use bytes::{fixed_bytes, hex_to_bytes, hex_to_bytes32, parse_coin_ids};
 pub use clvm::{bytes32_to_hex, tree_hash_nil, tree_hash_to_hex};
 
 const CANONICAL_XCH_MOJOS: i64 = 1_000_000_000_000;
