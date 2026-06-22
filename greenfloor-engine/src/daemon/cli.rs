@@ -11,7 +11,7 @@ use super::daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 use super::lock::DaemonInstanceLock;
 use super::logging::{initialize_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
-use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequestBody};
+use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
 
 fn parse_key_ids(raw: &str) -> Option<Vec<String>> {
@@ -77,7 +77,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     if args.once {
         let use_websocket_capture = use_websocket_capture_for_once(&runtime);
-        let body = DaemonRunOnceRequestBody {
+        let request = DaemonRunOnceRequest {
             program_path: args.program_config,
             markets_path: args.markets_config,
             testnet_markets_path,
@@ -89,8 +89,8 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
+            coin_watchlist: CoinWatchlistCache::new(),
         };
-        let request = body.into_engine(CoinWatchlistCache::new());
         let response = run_daemon_cycle_once(&request).await?;
         return Ok(response.exit_code);
     }
@@ -115,9 +115,12 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 pub async fn run_daemon_cycle_once_from_json(
     value: Value,
 ) -> SignerResult<DaemonCycleOnceResponse> {
-    let request =
-        super::run_once::DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())?;
+    let request = parse_daemon_run_once_request(value)?;
     run_daemon_cycle_once(&request).await
+}
+
+fn parse_daemon_run_once_request(value: Value) -> SignerResult<DaemonRunOnceRequest> {
+    DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())
 }
 
 /// Run daemon loop from json.
@@ -149,10 +152,9 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
         .map_err(|err| SignerError::Other(format!("read request json: {err}")))?;
     let value: Value = serde_json::from_str(&raw)
         .map_err(|err| SignerError::Other(format!("parse request json: {err}")))?;
-    let body: DaemonRunOnceRequestBody = serde_json::from_value(value.clone())
-        .map_err(|err| SignerError::Other(format!("parse daemon once request: {err}")))?;
-    body.test_controls.ensure_allowed()?;
-    let response = run_daemon_cycle_once_from_json(value).await?;
+    let request = parse_daemon_run_once_request(value)?;
+    request.test_controls.ensure_allowed()?;
+    let response = run_daemon_cycle_once(&request).await?;
     if args.json {
         let encoded =
             serde_json::to_value(&response).map_err(|err| SignerError::Other(err.to_string()))?;

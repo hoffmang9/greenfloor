@@ -3,9 +3,9 @@
 use std::path::Path;
 
 use serde_json::{json, Value as JsonValue};
-use serde_yaml::Value as YamlValue;
 
-use crate::error::{SignerError, SignerResult};
+use crate::config::yaml_file::{read_yaml_file_labeled, write_yaml_file};
+use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
 
 /// Load cats catalog.
@@ -17,33 +17,24 @@ pub fn load_cats_catalog(path: &Path) -> SignerResult<Vec<JsonValue>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|err| SignerError::Other(format!("failed to read {}: {err}", path.display())))?;
-    let parsed: YamlValue = serde_yaml::from_str(&raw)
-        .map_err(|err| SignerError::Other(format!("failed to parse {}: {err}", path.display())))?;
-    let rows = parsed
+    let parsed = read_yaml_file_labeled(path, "cats config")?;
+    Ok(parsed
         .get("cats")
-        .and_then(YamlValue::as_sequence)
+        .and_then(JsonValue::as_array)
         .cloned()
-        .unwrap_or_default();
-    rows.into_iter()
-        .map(|row| {
-            serde_json::to_value(row)
-                .map_err(|err| SignerError::Other(format!("cats row encode failed: {err}")))
-        })
-        .collect()
+        .unwrap_or_default())
 }
 
 pub fn write_cats_catalog(path: &Path, catalog: &[JsonValue]) -> SignerResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| {
-            SignerError::Other(format!("failed to create {}: {err}", parent.display()))
+            crate::error::SignerError::Other(format!(
+                "failed to create {}: {err}",
+                parent.display()
+            ))
         })?;
     }
-    let text = serde_yaml::to_string(&json!({"cats": catalog}))
-        .map_err(|err| SignerError::Other(format!("yaml encode failed: {err}")))?;
-    std::fs::write(path, text)
-        .map_err(|err| SignerError::Other(format!("failed to write {}: {err}", path.display())))
+    write_yaml_file(path, &json!({"cats": catalog}))
 }
 
 pub fn resolve_asset_id_from_catalog(catalog: &[JsonValue], ticker: &str) -> Option<String> {
