@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use chia_protocol::Bytes32;
 
@@ -7,7 +7,7 @@ use crate::config::build_cat_ticker_index_lenient;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::vault::members::hex_to_bytes32;
-use crate::vault_coinset_scan::checkpoint::{load_scan_checkpoint, LoadedCheckpoint};
+use crate::vault_coinset_scan::checkpoint::{load_scan_checkpoint, LoadCheckpointResult};
 use crate::vault_coinset_scan::metadata::resolve_requested_cat_ids;
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
@@ -84,21 +84,13 @@ pub(super) fn load_checkpoint_or_default(
     request: &ScanRequest,
     network: &str,
     launcher_id: &str,
-) -> SignerResult<LoadedCheckpoint> {
+) -> SignerResult<LoadCheckpointResult> {
     let checkpoint_enabled = request.checkpoint_file.is_some();
     if checkpoint_enabled && !request.checkpoint.no_resume_checkpoint {
         let checkpoint_file = request.checkpoint_file.as_ref().expect("checkpoint file");
         load_scan_checkpoint(checkpoint_file, network, launcher_id, request.include_spent)
     } else {
-        Ok(LoadedCheckpoint {
-            start_nonce: 0,
-            nonce_to_p2: HashMap::new(),
-            by_coin_id: HashMap::new(),
-            cat_asset_cache: HashMap::new(),
-            parent_lineage_cache: HashMap::new(),
-            last_synced_height: None,
-            discarded_mismatch: false,
-        })
+        Ok(LoadCheckpointResult::empty())
     }
 }
 

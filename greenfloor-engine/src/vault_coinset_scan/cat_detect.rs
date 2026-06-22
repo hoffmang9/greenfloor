@@ -307,7 +307,7 @@ pub fn classify_xch_or_other(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -338,7 +338,7 @@ mod tests {
                 parent_id.clone(),
                 ParentLineageEntry {
                     spent_height: 10,
-                    child_asset_ids: BTreeMap::new(),
+                    child_asset_ids: HashMap::new(),
                 },
             )]),
         );

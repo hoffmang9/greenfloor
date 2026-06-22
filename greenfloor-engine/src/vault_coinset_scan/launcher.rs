@@ -5,7 +5,6 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::default_program_config_path;
 use crate::paths::expand_home;
-use crate::vault_coinset_scan::checkpoint::{read_launcher_id_file, write_launcher_id_file};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LauncherIdSource {
@@ -135,4 +134,61 @@ pub fn cache_resolved_launcher_id(
     }
     write_launcher_id_file(&path, launcher_id)
         .map_err(|err| SignerError::Other(format!("write launcher id file: {err}")))
+}
+
+/// Write launcher id file.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn write_launcher_id_file(path: &Path, launcher_id: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, format!("{launcher_id}\n"))
+}
+
+/// Read launcher id file.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn read_launcher_id_file(path: &Path) -> SignerResult<String> {
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    let raw = std::fs::read_to_string(path).map_err(|err| {
+        SignerError::Other(format!("read launcher id file {}: {err}", path.display()))
+    })?;
+    Ok(normalize_hex_id(raw.trim()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_launcher_id_file_errors_when_unreadable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("launcher.txt");
+        std::fs::write(&path, "ab".repeat(32)).expect("write launcher id");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).expect("metadata").permissions();
+            perms.set_mode(0o000);
+            std::fs::set_permissions(&path, perms).expect("chmod");
+            let err = read_launcher_id_file(&path).expect_err("unreadable launcher id file");
+            assert!(err.to_string().contains("read launcher id file"));
+        }
+    }
+
+    #[test]
+    fn read_launcher_id_file_returns_empty_when_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("missing.txt");
+        assert!(read_launcher_id_file(&path)
+            .expect("missing file")
+            .is_empty());
+    }
 }
