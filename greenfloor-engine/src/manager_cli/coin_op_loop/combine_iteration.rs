@@ -4,8 +4,7 @@ use std::collections::HashSet;
 use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::i64_to_usize;
 use crate::coin_ops::{
-    combine_output_amounts, plan_auto_combine_inputs, total_for_coin_ids,
-    CombineInputSelectionMode, SpendableCoin,
+    combine_output_amounts, plan_exact_amount_combine_inputs, total_for_coin_ids, SpendableCoin,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -40,19 +39,18 @@ pub(super) async fn run_combine_iteration(
     let requested_count = i64_to_usize(number_of_coins, "combine.number_of_coins")?;
     let capped_count = i64_to_usize(ctx.combine_input_cap, "combine.input_cap")?;
     let input_coin_ids = if coin_ids.is_empty() {
-        plan_auto_combine_inputs(
+        if target_coin_amount_mojos <= 0 {
+            return Err(SignerError::Other(
+                "target_coin_amount_mojos must be positive for auto combine selection".to_string(),
+            ));
+        }
+        plan_exact_amount_combine_inputs(
             &spendable,
             requested_count,
-            CombineInputSelectionMode::ExactAmount,
-            if target_coin_amount_mojos > 0 {
-                Some(target_coin_amount_mojos)
-            } else {
-                None
-            },
+            target_coin_amount_mojos,
             None::<&HashSet<String>>,
             Some(capped_count),
         )
-        .map_err(|reason| SignerError::Other(reason.to_string()))?
     } else {
         coin_ids.to_vec()
     };

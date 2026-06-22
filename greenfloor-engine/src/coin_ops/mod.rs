@@ -7,12 +7,12 @@ mod effective_counts;
 pub mod execution;
 mod fee_budget;
 mod gate;
+mod input_selection;
 mod inventory;
 mod plan;
 mod policy;
 mod scalars;
 mod selection;
-mod split_planning;
 mod wallet_coin;
 
 pub use amounts::{combine_output_amounts, total_for_coin_ids};
@@ -24,6 +24,12 @@ pub use fee_budget::{
 pub use gate::{
     coin_op_should_stop, evaluate_coin_combine_gate, evaluate_coin_split_gate,
     CoinCombineGateResult, CoinSplitGateResult,
+};
+pub use input_selection::{
+    build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
+    plan_exact_amount_combine_inputs, plan_largest_combine_inputs, CliSplitSelection,
+    SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
+    SubCatChangeSkipData,
 };
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{
@@ -38,10 +44,5 @@ pub use scalars::{
 pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
     select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
-};
-pub use split_planning::{
-    build_combine_prereq_plan, plan_auto_combine_inputs, plan_auto_split_selection,
-    CombineInputSelectionMode, SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan,
-    SplitPlanningProfile, SplitSkipPlan, SubCatChangeSkipData,
 };
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};
