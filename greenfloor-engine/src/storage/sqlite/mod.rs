@@ -32,7 +32,10 @@ pub struct OfferPostPersistRecord {
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
-pub use reservations::{OfferReservationLeaseRequest, OfferReservationLeaseRow};
+pub use reservations::{
+    OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
+    OfferReservationRejectReason,
+};
 
 pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {
     u64::try_from(changed).map_err(|_| {
