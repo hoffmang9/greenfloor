@@ -27,10 +27,7 @@ impl OfferCoinsetBackend for EmptyOfferCoinset {
         Err(SignerError::Other("unused".to_string()))
     }
 
-    async fn fetch_offer_input_cat(
-        &self,
-        _lookup: OfferInputCatLookup,
-    ) -> SignerResult<Cat> {
+    async fn fetch_offer_input_cat(&self, _lookup: OfferInputCatLookup) -> SignerResult<Cat> {
         Err(SignerError::Other("unused".to_string()))
     }
 

@@ -163,7 +163,8 @@ pub async fn run_reconcile_market_cycle(
         let current_state = state_by_offer_id
             .get(&offer_id)
             .map_or("open", String::as_str);
-        let (transition, status) = transition_from_list_offer_payload(store, current_state, raw)?;
+        let (transition, status) =
+            transition_from_list_offer_payload(store, &offer_id, current_state, raw)?;
         apply_reconcile_transition(ReconcileTransitionParams {
             store,
             market_id,

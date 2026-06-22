@@ -6,6 +6,28 @@ use rusqlite::params;
 
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
 
+fn read_offer_state_list_row(row: &rusqlite::Row<'_>) -> SignerResult<OfferStateListRow> {
+    Ok(OfferStateListRow {
+        offer_id: row
+            .get(0)
+            .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?,
+        market_id: row
+            .get(1)
+            .map_err(|err| SignerError::Other(format!("failed to read market_id: {err}")))?,
+        state: row
+            .get(2)
+            .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+        last_seen_status: row.get(3).ok(),
+        updated_at: row
+            .get(4)
+            .map_err(|err| SignerError::Other(format!("failed to read updated_at: {err}")))?,
+        cancel_submitted_tx_id: row.get(5).ok(),
+    })
+}
+
+const OFFER_STATE_LIST_COLUMNS: &str =
+    "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id";
+
 impl SqliteStore {
     /// Upsert offer state.
     ///
@@ -55,15 +77,15 @@ impl SqliteStore {
         })?;
         let mut stmt = self
             .conn
-            .prepare(
+            .prepare(&format!(
                 r"
-                SELECT offer_id, market_id, state, last_seen_status, updated_at
+                SELECT {OFFER_STATE_LIST_COLUMNS}
                 FROM offer_state
                 WHERE state IN (?1, ?2)
                 ORDER BY offer_id ASC
                 LIMIT ?3 OFFSET ?4
-                ",
-            )
+                "
+            ))
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare open offer_state query: {err}"))
             })?;
@@ -83,21 +105,7 @@ impl SqliteStore {
         while let Some(row) = rows.next().map_err(|err| {
             SignerError::Other(format!("failed to read open offer_state row: {err}"))
         })? {
-            out.push(OfferStateListRow {
-                offer_id: row
-                    .get(0)
-                    .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?,
-                market_id: row.get(1).map_err(|err| {
-                    SignerError::Other(format!("failed to read market_id: {err}"))
-                })?,
-                state: row
-                    .get(2)
-                    .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
-                last_seen_status: row.get(3).ok(),
-                updated_at: row.get(4).map_err(|err| {
-                    SignerError::Other(format!("failed to read updated_at: {err}"))
-                })?,
-            });
+            out.push(read_offer_state_list_row(row)?);
         }
         Ok(out)
     }
@@ -152,7 +160,7 @@ impl SqliteStore {
             (1..=clean_ids.len()).map(|idx| format!("?{idx}")).collect();
         let query = format!(
             r"
-            SELECT offer_id, market_id, state, last_seen_status, updated_at
+            SELECT {OFFER_STATE_LIST_COLUMNS}
             FROM offer_state
             WHERE offer_id IN ({})
             ",
@@ -173,22 +181,7 @@ impl SqliteStore {
             let offer_id: String = row
                 .get(0)
                 .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?;
-            by_id.insert(
-                offer_id.clone(),
-                OfferStateListRow {
-                    offer_id,
-                    market_id: row.get(1).map_err(|err| {
-                        SignerError::Other(format!("failed to read market_id: {err}"))
-                    })?,
-                    state: row.get(2).map_err(|err| {
-                        SignerError::Other(format!("failed to read state: {err}"))
-                    })?,
-                    last_seen_status: row.get(3).ok(),
-                    updated_at: row.get(4).map_err(|err| {
-                        SignerError::Other(format!("failed to read updated_at: {err}"))
-                    })?,
-                },
-            );
+            by_id.insert(offer_id.clone(), read_offer_state_list_row(row)?);
         }
         Ok(clean_ids
             .into_iter()
@@ -216,15 +209,15 @@ impl SqliteStore {
         if let Some(market_id) = market_id.map(str::trim).filter(|value| !value.is_empty()) {
             let mut stmt = self
                 .conn
-                .prepare(
+                .prepare(&format!(
                     r"
-                SELECT offer_id, market_id, state, last_seen_status, updated_at
+                SELECT {OFFER_STATE_LIST_COLUMNS}
                 FROM offer_state
                 WHERE market_id = ?1
                 ORDER BY updated_at DESC
                 LIMIT ?2
-                ",
-                )
+                "
+                ))
                 .map_err(|err| {
                     SignerError::Other(format!("failed to prepare offer_state query: {err}"))
                 })?;
@@ -234,33 +227,19 @@ impl SqliteStore {
             while let Some(row) = rows.next().map_err(|err| {
                 SignerError::Other(format!("failed to read offer_state row: {err}"))
             })? {
-                out.push(OfferStateListRow {
-                    offer_id: row.get(0).map_err(|err| {
-                        SignerError::Other(format!("failed to read offer_id: {err}"))
-                    })?,
-                    market_id: row.get(1).map_err(|err| {
-                        SignerError::Other(format!("failed to read market_id: {err}"))
-                    })?,
-                    state: row.get(2).map_err(|err| {
-                        SignerError::Other(format!("failed to read state: {err}"))
-                    })?,
-                    last_seen_status: row.get(3).ok(),
-                    updated_at: row.get(4).map_err(|err| {
-                        SignerError::Other(format!("failed to read updated_at: {err}"))
-                    })?,
-                });
+                out.push(read_offer_state_list_row(row)?);
             }
         } else {
             let mut stmt = self
                 .conn
-                .prepare(
+                .prepare(&format!(
                     r"
-                SELECT offer_id, market_id, state, last_seen_status, updated_at
+                SELECT {OFFER_STATE_LIST_COLUMNS}
                 FROM offer_state
                 ORDER BY updated_at DESC
                 LIMIT ?1
-                ",
-                )
+                "
+                ))
                 .map_err(|err| {
                     SignerError::Other(format!("failed to prepare offer_state query: {err}"))
                 })?;
@@ -270,21 +249,7 @@ impl SqliteStore {
             while let Some(row) = rows.next().map_err(|err| {
                 SignerError::Other(format!("failed to read offer_state row: {err}"))
             })? {
-                out.push(OfferStateListRow {
-                    offer_id: row.get(0).map_err(|err| {
-                        SignerError::Other(format!("failed to read offer_id: {err}"))
-                    })?,
-                    market_id: row.get(1).map_err(|err| {
-                        SignerError::Other(format!("failed to read market_id: {err}"))
-                    })?,
-                    state: row.get(2).map_err(|err| {
-                        SignerError::Other(format!("failed to read state: {err}"))
-                    })?,
-                    last_seen_status: row.get(3).ok(),
-                    updated_at: row.get(4).map_err(|err| {
-                        SignerError::Other(format!("failed to read updated_at: {err}"))
-                    })?,
-                });
+                out.push(read_offer_state_list_row(row)?);
             }
         }
         Ok(out)

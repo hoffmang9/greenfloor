@@ -45,36 +45,46 @@ async fn fetch_input_cat_by_coin_id<C: OfferCoinsetBackend>(
     backend: &C,
     coin_id: Bytes32,
     offered_amount: u64,
-) -> Option<Cat> {
+) -> SignerResult<Option<Cat>> {
     let cat = backend
         .fetch_offer_input_cat(OfferInputCatLookup::ByCoinId(coin_id))
-        .await
-        .ok()?;
+        .await?;
     if cat.coin.amount == offered_amount {
-        Some(cat)
+        Ok(Some(cat))
     } else {
-        None
+        Ok(None)
     }
 }
 
-async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
-    backend: &C,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfferInputCatResolution {
+    StoredCoinId(Bytes32),
+    ScanOfferSpends,
+}
+
+fn offer_input_cat_resolution(
     spend_bundle: &SpendBundle,
     offered: &Cat,
     metadata: Option<&StoredOfferCancelMetadata>,
-) -> SignerResult<Cat> {
-    let fields = metadata.map(|value| &value.fields);
-    if let Some(coin_id_hex) = fields
-        .and_then(|value| value.input_coin_id.as_deref())
+) -> SignerResult<OfferInputCatResolution> {
+    if let Some(coin_id_hex) = metadata
+        .and_then(|value| value.fields.input_coin_id.as_deref())
+        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        if let Ok(coin_id) = hex_to_bytes32(coin_id_hex.trim()) {
-            if let Some(cat) = fetch_input_cat_by_coin_id(backend, coin_id, offered.coin.amount).await
-            {
-                return Ok(cat);
-            }
-        }
+        return Ok(OfferInputCatResolution::StoredCoinId(hex_to_bytes32(
+            coin_id_hex,
+        )?));
     }
+    let _ = (spend_bundle, offered);
+    Ok(OfferInputCatResolution::ScanOfferSpends)
+}
+
+async fn resolve_by_scanning_offer_spends<C: OfferCoinsetBackend>(
+    backend: &C,
+    spend_bundle: &SpendBundle,
+    offered: &Cat,
+) -> SignerResult<Option<Cat>> {
     let mut coin_ids = vec![offered.coin.coin_id()];
     for coin_spend in &spend_bundle.coin_spends {
         if coin_spend.coin.amount == offered.coin.amount {
@@ -84,9 +94,32 @@ async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
     coin_ids.sort_unstable();
     coin_ids.dedup();
     for coin_id in coin_ids {
-        if let Some(cat) = fetch_input_cat_by_coin_id(backend, coin_id, offered.coin.amount).await {
-            return Ok(cat);
+        match fetch_input_cat_by_coin_id(backend, coin_id, offered.coin.amount).await {
+            Ok(Some(cat)) => return Ok(Some(cat)),
+            Ok(None) | Err(SignerError::PresplitCoinNotFound) => {}
+            Err(err) => return Err(err),
         }
+    }
+    Ok(None)
+}
+
+async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
+    backend: &C,
+    spend_bundle: &SpendBundle,
+    offered: &Cat,
+    metadata: Option<&StoredOfferCancelMetadata>,
+) -> SignerResult<Cat> {
+    if let OfferInputCatResolution::StoredCoinId(coin_id) =
+        offer_input_cat_resolution(spend_bundle, offered, metadata)?
+    {
+        match fetch_input_cat_by_coin_id(backend, coin_id, offered.coin.amount).await {
+            Ok(Some(cat)) => return Ok(cat),
+            Ok(None) | Err(SignerError::PresplitCoinNotFound) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    if let Some(cat) = resolve_by_scanning_offer_spends(backend, spend_bundle, offered).await? {
+        return Ok(cat);
     }
     backend
         .fetch_offer_input_cat(OfferInputCatLookup::ByCatFingerprint {

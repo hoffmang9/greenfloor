@@ -22,7 +22,9 @@ pub async fn fetch_offer_input_cat(
     lookup: OfferInputCatLookup,
 ) -> SignerResult<Cat> {
     match lookup {
-        OfferInputCatLookup::ByCoinId(coin_id) => fetch_unspent_offer_input_cat_by_id(client, coin_id).await,
+        OfferInputCatLookup::ByCoinId(coin_id) => {
+            fetch_unspent_offer_input_cat_by_id(client, coin_id).await
+        }
         OfferInputCatLookup::ByCatFingerprint {
             asset_id,
             inner_puzzle_hash,
@@ -64,8 +66,7 @@ async fn fetch_unspent_offer_input_cat_by_inner_puzzle(
     inner_puzzle_hash: Bytes32,
     amount: u64,
 ) -> SignerResult<Cat> {
-    let cat_outer_puzzle_hash =
-        CatArgs::curry_tree_hash(asset_id, inner_puzzle_hash.into()).into();
+    let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, inner_puzzle_hash.into()).into();
     let response = with_coinset_client_retries(|| async {
         client
             .get_coin_records_by_puzzle_hash(cat_outer_puzzle_hash, None, None, Some(false), None)

@@ -4,6 +4,7 @@
 //! cycle reconcile lives in `daemon::reconcile_market_cycle`.
 
 mod builders;
+mod cancel_submitted_policy;
 mod decision;
 mod metadata;
 mod state;
@@ -12,6 +13,10 @@ mod transition;
 #[cfg(test)]
 mod tests;
 
+pub use cancel_submitted_policy::{
+    filter_defer_cancel_submitted_targets, preserve_cancel_submitted_on_missing_offer,
+    CancelSubmittedContext, CoinsetOfferSignals,
+};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
@@ -56,7 +61,9 @@ pub fn resolve_missing_watched_offer_transition(
     current_state: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
-    let decision = if old_state.is_terminal() || old_state.is_cancel_submitted() {
+    let decision = if old_state.is_terminal()
+        || (old_state.is_cancel_submitted() && preserve_cancel_submitted_on_missing_offer())
+    {
         missing_watched_offer_preserved(old_state.clone())
     } else {
         missing_watched_offer_expired()
@@ -75,6 +82,7 @@ pub fn resolve_watched_offer_transition_from_signals(
     coinset_tx_ids: Vec<String>,
     coinset_confirmed_tx_ids: Vec<String>,
     coinset_mempool_tx_ids: Vec<String>,
+    cancel_submitted: Option<&CancelSubmittedContext>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
     Ok(resolve_watched_offer_decision(
@@ -83,6 +91,7 @@ pub fn resolve_watched_offer_transition_from_signals(
         &coinset_tx_ids,
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
+        cancel_submitted,
     )
     .into_cycle_transition(
         old_state,

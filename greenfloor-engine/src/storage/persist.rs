@@ -20,6 +20,7 @@ pub fn upsert_offer_post_record(
         super::sqlite::OfferCancelWrite {
             fields: Some(&record.cancel_fields),
             execution_mode: record.execution_mode,
+            ..Default::default()
         },
     )
 }

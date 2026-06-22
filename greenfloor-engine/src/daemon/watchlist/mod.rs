@@ -8,9 +8,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::cycle::OfferLifecycleState;
+use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::SignerResult;
-use crate::offer::lifecycle::is_watched_for_reconcile;
 use crate::operator_log::{LogContext, COIN_WATCHLIST_UPDATED};
 use crate::storage::SqliteStore;
 
@@ -43,7 +42,7 @@ pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let mut offer_ids = HashSet::default();
     for row in store.list_offer_state_details(market_id, 500)? {
-        if is_watched_for_reconcile(&row.state) {
+        if ReconcileState::parse(&row.state).is_ok_and(|state| state.is_watched_for_reconcile()) {
             offer_ids.insert(row.offer_id);
         }
     }

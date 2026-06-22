@@ -1,9 +1,10 @@
 use crate::cycle::lifecycle::OfferSignal;
 
 use super::metadata::{
-    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
-    REASON_DEXIE_OFFER_NOT_FOUND, REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
-    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
+    REASON_COINSET_UNAVAILABLE, REASON_DEXIE_OFFER_NOT_FOUND,
+    REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL, REASON_MISSING_STATUS, REASON_OK,
+    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
     SIGNAL_SOURCE_DEXIE_GET_OFFER_404, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
     TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
@@ -13,6 +14,7 @@ use super::{
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
     unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
 };
+use crate::cycle::reconcile::CancelSubmittedContext;
 
 fn state(raw: &str) -> ReconcileState {
     ReconcileState::parse(raw).expect("valid reconcile state")
@@ -167,17 +169,43 @@ const DISPATCH_CASES: &[DispatchCase] = &[
         expected_taker_diagnostic: TAKER_NONE,
     },
     DispatchCase {
-        label: "cancel_submitted_preserves_state_on_mempool_signal",
+        label: "cancel_submitted_moves_to_mempool_observed_on_mempool_signal",
         current_state: "cancel_submitted",
         status: Some(0),
         coinset: CoinsetFixture::Mempool,
-        expected_new_state: "cancel_submitted",
+        expected_new_state: "mempool_observed",
         expected_reason: REASON_COINSET_MEMPOOL,
         expected_signal_source: SIGNAL_SOURCE_COINSET_MEMPOOL,
-        expected_signal: None,
-        expected_changed: false,
+        expected_signal: Some(OfferSignal::MempoolSeen),
+        expected_changed: true,
         expected_taker_signal: TAKER_NONE,
         expected_taker_diagnostic: TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
+    },
+    DispatchCase {
+        label: "cancel_submitted_coinset_confirmed_moves_to_tx_block_confirmed",
+        current_state: "cancel_submitted",
+        status: Some(0),
+        coinset: CoinsetFixture::Confirmed,
+        expected_new_state: "tx_block_confirmed",
+        expected_reason: REASON_COINSET_CONFIRMED,
+        expected_signal_source: SIGNAL_SOURCE_COINSET_WEBHOOK,
+        expected_signal: Some(OfferSignal::TxConfirmed),
+        expected_changed: true,
+        expected_taker_signal: TAKER_COINSET_TX_BLOCK_WEBHOOK,
+        expected_taker_diagnostic: TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    },
+    DispatchCase {
+        label: "cancel_submitted_dexie_open_resets_to_open_for_cancel_retry",
+        current_state: "cancel_submitted",
+        status: Some(0),
+        coinset: CoinsetFixture::Absent,
+        expected_new_state: "open",
+        expected_reason: REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
+        expected_signal_source: SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
+        expected_signal: None,
+        expected_changed: true,
+        expected_taker_signal: TAKER_NONE,
+        expected_taker_diagnostic: TAKER_NONE,
     },
     DispatchCase {
         label: "decision_preserves_terminal_state_on_mempool_signal",
@@ -242,6 +270,7 @@ fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
         &coinset_tx_ids,
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
+        None,
     )
     .into_cycle_transition_no_coinset(current)
 }
@@ -304,6 +333,7 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
             coinset_tx_ids,
             coinset_confirmed_tx_ids,
             coinset_mempool_tx_ids,
+            None,
         )
         .unwrap_or_else(|err| panic!("{}: valid reconcile state: {err}", case.label));
         assert_eq!(
@@ -484,6 +514,31 @@ fn entry_point_factory_matrix() {
 }
 
 #[test]
+fn cancel_submitted_preserves_when_cancel_tx_pending() {
+    use crate::storage::TxSignalStateRow;
+
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some("tx-pending".to_string()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+            tx_block_confirmed_at: None,
+        }),
+        submitted_at: None,
+    };
+    let transition = resolve_watched_offer_decision(
+        &ReconcileState::CancelSubmitted,
+        Some(0),
+        &[],
+        &[],
+        &[],
+        Some(&ctx),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert!(!transition.changed);
+}
+
+#[test]
 fn unknown_reconcile_state_is_rejected() {
     let err = resolve_watched_offer_transition_from_signals(
         "not_a_real_state",
@@ -491,6 +546,7 @@ fn unknown_reconcile_state_is_rejected() {
         vec![],
         vec![],
         vec![],
+        None,
     )
     .expect_err("unknown state should fail");
     assert_eq!(

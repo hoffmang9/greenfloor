@@ -9,15 +9,12 @@ use super::SqliteStore;
 pub struct OfferCancelWrite<'a> {
     pub fields: Option<&'a PresplitCancelFields>,
     pub execution_mode: Option<OfferExecutionMode>,
+    pub cancel_submitted_tx_id: Option<&'a str>,
 }
 
 pub(crate) fn cancel_metadata_params(
     cancel: OfferCancelWrite<'_>,
-) -> (
-    Option<&str>,
-    Option<&str>,
-    Option<String>,
-) {
+) -> (Option<&str>, Option<&str>, Option<String>) {
     let execution_mode_str = cancel.execution_mode.map(|mode| mode.to_string());
     if let Some(fields) = cancel.fields {
         (
@@ -58,9 +55,10 @@ impl SqliteStore {
                   updated_at,
                   presplit_input_coin_id,
                   fixed_delegated_puzzle_hash,
-                  execution_mode
+                  execution_mode,
+                  cancel_submitted_tx_id
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
@@ -68,7 +66,12 @@ impl SqliteStore {
                   updated_at = excluded.updated_at,
                   presplit_input_coin_id = COALESCE(excluded.presplit_input_coin_id, offer_state.presplit_input_coin_id),
                   fixed_delegated_puzzle_hash = COALESCE(excluded.fixed_delegated_puzzle_hash, offer_state.fixed_delegated_puzzle_hash),
-                  execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode)
+                  execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode),
+                  cancel_submitted_tx_id = CASE
+                    WHEN excluded.state = 'cancel_submitted'
+                      THEN COALESCE(excluded.cancel_submitted_tx_id, offer_state.cancel_submitted_tx_id)
+                    ELSE NULL
+                  END
                 ",
                 params![
                     offer_id,
@@ -79,6 +82,7 @@ impl SqliteStore {
                     presplit_input_coin_id,
                     fixed_delegated_puzzle_hash,
                     execution_mode_str.as_deref(),
+                    cancel.cancel_submitted_tx_id,
                 ],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
@@ -134,5 +138,93 @@ impl SqliteStore {
                 .flatten()
                 .and_then(|value| OfferExecutionMode::parse_db(&value)),
         }))
+    }
+
+    /// Load cancel-submit tracking fields for reconcile policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn cancel_submitted_tracking_for_id(
+        &self,
+        offer_id: &str,
+    ) -> SignerResult<Option<super::OfferCancelSubmittedTracking>> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(None);
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+            SELECT cancel_submitted_tx_id, updated_at
+            FROM offer_state
+            WHERE offer_id = ?1 AND state = 'cancel_submitted'
+            ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to prepare cancel_submitted tracking query: {err}"
+                ))
+            })?;
+        let mut rows = stmt.query(params![clean]).map_err(|err| {
+            SignerError::Other(format!("failed to query cancel_submitted tracking: {err}"))
+        })?;
+        let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!(
+                "failed to read cancel_submitted tracking row: {err}"
+            ))
+        })?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(super::OfferCancelSubmittedTracking {
+            cancel_tx_id: row.get(0).ok(),
+            updated_at: row.get(1).map_err(|err| {
+                SignerError::Other(format!("failed to read cancel_submitted updated_at: {err}"))
+            })?,
+        }))
+    }
+
+    /// Persist `cancel_submitted` and the submitted cancel transaction id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn upsert_offer_cancel_submitted(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        cancel_tx_id: &str,
+        last_seen_status: Option<i64>,
+    ) -> SignerResult<()> {
+        self.upsert_offer_cancel_submitted_at(
+            offer_id,
+            market_id,
+            cancel_tx_id,
+            last_seen_status,
+            &super::utcnow_iso(),
+        )
+    }
+
+    pub(crate) fn upsert_offer_cancel_submitted_at(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        cancel_tx_id: &str,
+        last_seen_status: Option<i64>,
+        updated_at: &str,
+    ) -> SignerResult<()> {
+        self.upsert_offer_state_with_metadata_at(
+            offer_id,
+            market_id,
+            "cancel_submitted",
+            last_seen_status,
+            updated_at,
+            OfferCancelWrite {
+                cancel_submitted_tx_id: Some(cancel_tx_id),
+                ..OfferCancelWrite::default()
+            },
+        )
     }
 }

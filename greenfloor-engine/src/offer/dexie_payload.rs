@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::cycle::lifecycle::OfferSignal;
 
+pub const DEXIE_STATUS_OPEN: i64 = 0;
 pub const DEXIE_STATUS_CANCELLED: i64 = 3;
 pub const DEXIE_STATUS_CONFIRMED: i64 = 4;
 pub const DEXIE_STATUS_ACTIVE: i64 = 5;

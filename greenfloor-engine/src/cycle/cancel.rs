@@ -96,9 +96,7 @@ pub fn evaluate_cancel_policy_decision(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision,
-    };
+    use super::{abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision};
 
     #[test]
     fn abs_move_bps_positive_move() {

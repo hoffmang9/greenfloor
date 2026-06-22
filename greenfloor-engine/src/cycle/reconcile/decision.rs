@@ -1,3 +1,6 @@
+use super::cancel_submitted_policy::{
+    resolve_cancel_submitted_transition, CancelSubmittedContext, CoinsetOfferSignals,
+};
 use crate::cycle::lifecycle::OfferSignal;
 use crate::offer::dexie_payload::{
     is_dexie_pattern_fallback_status, reconcile_from_dexie_status, DexieStatusReconcile,
@@ -55,8 +58,7 @@ fn dispatch(
 ) -> ReconcileDispatch {
     let confirmed_eligible = coinset.has_confirmed
         && !matches!(status, StatusClass::Known(DEXIE_STATUS_CANCELLED))
-        && !current.is_cancelled()
-        && !current.is_cancel_submitted();
+        && !current.is_cancelled();
     if confirmed_eligible {
         return ReconcileDispatch::CoinsetConfirmed;
     }
@@ -81,7 +83,7 @@ impl ReconcileDispatch {
                 TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
             ),
             Self::CoinsetMempool => {
-                if current_state.is_terminal() || current_state.is_cancel_submitted() {
+                if current_state.is_terminal() {
                     preserve_mempool_observation(current_state)
                 } else {
                     open_signal_transition(
@@ -125,7 +127,20 @@ pub(crate) fn resolve_watched_offer_decision(
     coinset_tx_ids: &[String],
     coinset_confirmed_tx_ids: &[String],
     coinset_mempool_tx_ids: &[String],
+    cancel_submitted: Option<&CancelSubmittedContext>,
 ) -> ReconcileTransition {
+    if current_state.is_cancel_submitted() {
+        let ctx = cancel_submitted.cloned().unwrap_or_default();
+        return resolve_cancel_submitted_transition(
+            status,
+            CoinsetOfferSignals {
+                has_tx_ids: !coinset_tx_ids.is_empty(),
+                has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
+                has_mempool: !coinset_mempool_tx_ids.is_empty(),
+            },
+            &ctx,
+        );
+    }
     let coinset = CoinsetPresence {
         has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
         has_mempool: !coinset_mempool_tx_ids.is_empty(),

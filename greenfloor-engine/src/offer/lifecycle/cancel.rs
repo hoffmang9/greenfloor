@@ -1,9 +1,7 @@
 use crate::adapters::DexieClient;
 use crate::coinset::{self, client_for_config, LiveCoinset};
 use crate::config::SignerConfig;
-use crate::cycle::ReconcileState;
 use crate::error::{SignerError, SignerResult};
-use crate::hex::normalize_hex_id;
 use crate::offer::dexie_payload::DexieOfferPayload;
 use crate::offer::reclaim::build_offer_cancel_spend_bundle;
 use crate::offer::types::StoredOfferCancelMetadata;
@@ -86,10 +84,6 @@ pub struct CancelOfferOnChainResult {
     pub operation_id: String,
 }
 
-fn normalize_cancel_tx_id(operation_id: &str) -> String {
-    normalize_hex_id(operation_id)
-}
-
 async fn fetch_dexie_offer_text(dexie: &DexieClient, offer_id: &str) -> SignerResult<String> {
     let response = dexie.get_offer(offer_id).await?;
     if response.is_explicit_failure() {
@@ -169,15 +163,11 @@ pub async fn cancel_offers_on_chain(
         .await
         {
             Ok(result) => {
-                let tx_id = normalize_cancel_tx_id(&result.operation_id);
-                if !tx_id.is_empty() {
-                    store.observe_mempool_tx_ids(std::slice::from_ref(&tx_id))?;
-                }
                 if target.persists_state() {
-                    store.upsert_offer_reconcile_state(
+                    store.upsert_offer_cancel_submitted(
                         target.offer_id(),
                         &market_id,
-                        &ReconcileState::CancelSubmitted,
+                        &result.operation_id,
                         None,
                     )?;
                 }

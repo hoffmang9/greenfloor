@@ -10,9 +10,6 @@ use crate::coinset::test_support::{
 use crate::error::SignerError;
 use crate::test_support::simulator::harness::SimulatorVaultHarness;
 
-const STATIC_RECEIVE_ADDRESS: &str =
-    "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-
 fn parent_spent_block_index(sim: &Simulator, parent_coin_id: Bytes32) -> u32 {
     sim.coin_state(parent_coin_id)
         .and_then(|state| state.spent_height)
@@ -158,63 +155,46 @@ fn finalize_selected_cats_uses_explicit_sum_for_fixed_ids() {
 }
 
 #[tokio::test]
-async fn select_cats_for_spend_resolves_lineage_only_for_selected_coins() {
-    let list_body = r#"{
-            "success": true,
-            "coin_records": [
-                {
-                    "coin": {
-                        "parent_coin_info": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                        "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                        "amount": 2000
-                    },
-                    "coinbase": false,
-                    "confirmed_block_index": 1,
-                    "spent": false,
-                    "spent_block_index": 0,
-                    "timestamp": 1
-                },
-                {
-                    "coin": {
-                        "parent_coin_info": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                        "amount": 10000
-                    },
-                    "coinbase": false,
-                    "confirmed_block_index": 1,
-                    "spent": false,
-                    "spent_block_index": 0,
-                    "timestamp": 1
-                },
-                {
-                    "coin": {
-                        "parent_coin_info": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                        "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                        "amount": 50000
-                    },
-                    "coinbase": false,
-                    "confirmed_block_index": 1,
-                    "spent": false,
-                    "spent_block_index": 0,
-                    "timestamp": 1
-                }
-            ]
-        }"#;
-    let parent_body = r#"{
-            "success": true,
-            "coin_record": {
-                "coin": {
-                    "parent_coin_info": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-                    "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                    "amount": 1
-                },
-                "coinbase": false,
-                "confirmed_block_index": 1,
-                "spent": true,
-                "spent_block_index": 0,
-                "timestamp": 1
-            }
-        }"#;
+async fn select_cats_for_spend_skips_unresolvable_coins_before_selection() {
+    let mut harness = SimulatorVaultHarness::new();
+    let _cat_small = harness.fund_vault_cat(2000);
+    let _cat_target = harness.fund_vault_cat(10_000);
+    let cat_large = harness.fund_vault_cat(50_000);
+    let receive_address = simulator_receive_address(&harness);
+    let asset_id = harness.chain.asset_id;
+    let broken_parent = Bytes32::new([0xbb; 32]);
+    let broken_coin = cat_large.coin;
+    let broken_record = chia_sdk_coinset::CoinRecord {
+        coin: chia_protocol::Coin {
+            parent_coin_info: broken_parent,
+            puzzle_hash: broken_coin.puzzle_hash,
+            amount: 2000,
+        },
+        confirmed_block_index: 1,
+        spent: false,
+        coinbase: false,
+        spent_block_index: 0,
+        timestamp: 1,
+    };
+    let list_body =
+        mock_get_coin_records_by_puzzle_hash_body(&[broken_record.coin, cat_large.coin]);
+
+    let (parent_body, puzzle_body) = {
+        let sim = harness.chain.sim.lock().expect("sim lock");
+        let parent = sim
+            .coin_spend(cat_large.coin.parent_coin_info)
+            .expect("parent spend");
+        let spent_block_index = parent_spent_block_index(&sim, parent.coin.coin_id());
+        let parent_spend = CoinSpend {
+            coin: parent.coin,
+            puzzle_reveal: parent.puzzle_reveal.clone(),
+            solution: parent.solution.clone(),
+        };
+        (
+            mock_get_coin_record_by_name_body(&parent.coin, spent_block_index),
+            mock_get_puzzle_and_solution_body(&parent_spend),
+        )
+    };
 
     let mut server = mockito::Server::new_async().await;
     let list_mock = server
@@ -224,38 +204,46 @@ async fn select_cats_for_spend_resolves_lineage_only_for_selected_coins() {
         .expect(1)
         .create_async()
         .await;
-    let lineage_mock = server
+    let parent_mock = server
         .mock("POST", "/get_coin_record_by_name")
         .with_status(200)
         .with_body(parent_body)
         .expect(1)
         .create_async()
         .await;
+    let puzzle_mock = server
+        .mock("POST", "/get_puzzle_and_solution")
+        .with_status(200)
+        .with_body(puzzle_body)
+        .expect(1)
+        .create_async()
+        .await;
 
     let client = CoinsetClient::new(server.url());
-    let asset_id = Bytes32::new([0xae; 32]);
-    let err = select_cats_for_spend(&client, STATIC_RECEIVE_ADDRESS, asset_id, &[], 10_000)
+    let selected = select_cats_for_spend(&client, &receive_address, asset_id, &[], 12_000)
         .await
-        .expect_err("lineage fails after single parent lookup");
-    assert!(matches!(err, SignerError::CatLineageResolutionFailed(_)));
+        .expect("skips broken lineage and selects spendable cover coin");
+    assert_eq!(selected.selected.len(), 1);
+    assert_eq!(
+        selected.selected[0].coin.coin_id(),
+        cat_large.coin.coin_id()
+    );
+    assert_eq!(selected.offered_total, 50_000);
 
     list_mock.assert_async().await;
-    lineage_mock.assert_async().await;
+    parent_mock.assert_async().await;
+    puzzle_mock.assert_async().await;
 }
 
 #[tokio::test]
 async fn select_cats_for_spend_resolves_lineage_happy_path_for_selected_coin() {
     let mut harness = SimulatorVaultHarness::new();
-    let cat_small = harness.fund_vault_cat(2000);
+    let _cat_small = harness.fund_vault_cat(2000);
     let cat_target = harness.fund_vault_cat(10_000);
-    let cat_large = harness.fund_vault_cat(50_000);
+    let _cat_large = harness.fund_vault_cat(50_000);
     let receive_address = simulator_receive_address(&harness);
     let asset_id = harness.chain.asset_id;
-    let list_body = mock_get_coin_records_by_puzzle_hash_body(&[
-        cat_small.coin,
-        cat_target.coin,
-        cat_large.coin,
-    ]);
+    let list_body = mock_get_coin_records_by_puzzle_hash_body(&[cat_target.coin]);
 
     let (parent_body, puzzle_body) = {
         let sim = harness.chain.sim.lock().expect("sim lock");

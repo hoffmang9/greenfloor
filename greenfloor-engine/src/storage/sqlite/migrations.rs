@@ -53,5 +53,6 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
         "TEXT NULL",
     )?;
     add_column_if_missing(conn, "offer_state", "execution_mode", "TEXT NULL")?;
+    add_column_if_missing(conn, "offer_state", "cancel_submitted_tx_id", "TEXT NULL")?;
     Ok(())
 }

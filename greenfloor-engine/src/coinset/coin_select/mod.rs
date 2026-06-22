@@ -1,12 +1,13 @@
 //! Coin listing and selection (CAT; shared by vault and BLS paths).
 
+use std::collections::HashSet;
+
 use chia_protocol::Bytes32;
 use chia_sdk_coinset::{CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
 
 use super::cats::{
-    cats_with_lineage_from_records, coin_records_for_cat_outer_puzzle_hash,
-    list_unspent_cats_by_ids,
+    cat_from_record, coin_records_for_cat_outer_puzzle_hash, list_unspent_cats_by_ids,
 };
 use super::parse::unspent_coin_records;
 use crate::error::{SignerError, SignerResult};
@@ -146,24 +147,6 @@ pub(crate) fn finalize_selected_cats(
     })
 }
 
-async fn finalize_selected_coin_records(
-    client: &CoinsetClient,
-    records: Vec<CoinRecord>,
-    explicit_coin_ids: &[Bytes32],
-    target_amount: u64,
-) -> SignerResult<SelectedCats> {
-    let (selected_records, offered_total) =
-        finalize_amount_selection(records, explicit_coin_ids, target_amount, |record| {
-            record.coin.amount
-        })?;
-    let selected = cats_with_lineage_from_records(client, &selected_records).await?;
-    Ok(SelectedCats {
-        change_amount: offered_total.saturating_sub(target_amount),
-        selected,
-        offered_total,
-    })
-}
-
 pub(crate) async fn select_cats_for_spend(
     client: &CoinsetClient,
     receive_address: &str,
@@ -172,15 +155,50 @@ pub(crate) async fn select_cats_for_spend(
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
     if explicit_coin_ids.is_empty() {
-        let records = unspent_coin_records(
+        let records: Vec<CoinRecord> = unspent_coin_records(
             coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?,
         )
         .collect();
-        return finalize_selected_coin_records(client, records, explicit_coin_ids, target_amount)
-            .await;
+        return select_cats_for_spend_from_records(client, records, target_amount).await;
     }
     let cats = list_unspent_cats_by_ids(client, explicit_coin_ids).await?;
     finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+}
+
+async fn select_cats_for_spend_from_records(
+    client: &CoinsetClient,
+    records: Vec<CoinRecord>,
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    let mut excluded = HashSet::new();
+    loop {
+        let available: Vec<CoinRecord> = records
+            .iter()
+            .copied()
+            .filter(|record| !excluded.contains(&record.coin.coin_id()))
+            .collect();
+        let (selected_records, offered_total) =
+            finalize_amount_selection(available, &[], target_amount, |record| record.coin.amount)?;
+        let mut selected = Vec::with_capacity(selected_records.len());
+        let mut unresolvable = Vec::new();
+        for record in selected_records {
+            match cat_from_record(client, &record).await? {
+                Some(cat) => selected.push(cat),
+                None => unresolvable.push(record.coin.coin_id()),
+            }
+        }
+        if unresolvable.is_empty() {
+            return Ok(SelectedCats {
+                change_amount: offered_total.saturating_sub(target_amount),
+                selected,
+                offered_total,
+            });
+        }
+        excluded.extend(unresolvable);
+        if excluded.len() >= records.len() {
+            return Err(SignerError::InsufficientCatCoins);
+        }
+    }
 }
 
 #[cfg(test)]

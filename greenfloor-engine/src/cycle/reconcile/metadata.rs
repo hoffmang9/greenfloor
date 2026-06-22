@@ -7,6 +7,8 @@ pub(crate) const SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK: &str = "dexie_status_fallb
 pub(crate) const SIGNAL_SOURCE_DEXIE_GET_OFFER_404: &str = "dexie_get_offer_404";
 
 pub(crate) const REASON_OK: &str = "ok";
+pub(crate) const REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN: &str =
+    "cancel_submitted_stale_dexie_still_open";
 pub(crate) const REASON_MISSING_STATUS: &str = "missing_status";
 pub(crate) const REASON_COINSET_UNAVAILABLE: &str = "coinset_signal_unavailable_for_offer";
 pub(crate) const REASON_COINSET_CONFIRMED: &str = "coinset_tx_block_webhook_confirmed";

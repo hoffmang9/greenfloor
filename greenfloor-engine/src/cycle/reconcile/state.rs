@@ -114,9 +114,7 @@ impl ReconcileState {
             | Self::PendingVisibility
             | Self::CancelSubmitted
             | Self::UnknownOrphaned => true,
-            Self::Lifecycle(_)
-            | Self::Cancelled
-            | Self::UnsupportedVenue => false,
+            Self::Lifecycle(_) | Self::Cancelled | Self::UnsupportedVenue => false,
         }
     }
 }

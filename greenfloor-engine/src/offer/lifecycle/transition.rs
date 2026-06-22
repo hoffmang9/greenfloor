@@ -4,10 +4,11 @@
 use serde_json::Value;
 
 use crate::adapters::DexieClient;
+use crate::cycle::reconcile::CancelSubmittedContext;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CycleOfferTransition,
+    unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
 };
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::{
@@ -40,6 +41,31 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
+fn cancel_submitted_context_for_offer(
+    store: &SqliteStore,
+    offer_id: &str,
+    current_state: &str,
+) -> SignerResult<Option<CancelSubmittedContext>> {
+    if !ReconcileState::parse(current_state).is_ok_and(|state| state.is_cancel_submitted()) {
+        return Ok(None);
+    }
+    let Some(tracking) = store.cancel_submitted_tracking_for_id(offer_id)? else {
+        return Ok(None);
+    };
+    let cancel_tx_signal = match tracking.cancel_tx_id.as_deref() {
+        Some(tx_id) => store
+            .get_tx_signal_state(&[tx_id.to_string()])?
+            .get(tx_id)
+            .cloned(),
+        None => None,
+    };
+    Ok(Some(CancelSubmittedContext {
+        cancel_tx_id: tracking.cancel_tx_id,
+        cancel_tx_signal,
+        submitted_at: Some(tracking.updated_at),
+    }))
+}
+
 /// Transition from dexie offer payload.
 ///
 /// # Errors
@@ -47,6 +73,7 @@ fn coinset_signal_lists(
 /// Returns an error if the operation fails.
 pub fn transition_from_dexie_offer_payload(
     store: &SqliteStore,
+    offer_id: &str,
     current_state: &str,
     offer_payload: &Value,
 ) -> SignerResult<CycleOfferTransition> {
@@ -54,12 +81,14 @@ pub fn transition_from_dexie_offer_payload(
     let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
     let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
         coinset_signal_lists(store, &coinset_tx_ids)?;
+    let cancel_submitted = cancel_submitted_context_for_offer(store, offer_id, current_state)?;
     resolve_watched_offer_transition_from_signals(
         current_state,
         status,
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
+        cancel_submitted.as_ref(),
     )
     .map_err(|err| crate::error::SignerError::Other(err.to_string()))
 }
@@ -83,11 +112,13 @@ fn missing_watched_offer_transition(current_state: &str) -> SignerResult<CycleOf
 
 fn transition_from_offer_body(
     store: &SqliteStore,
+    offer_id: &str,
     current_state: &str,
     offer_body: &Value,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
     let status = dexie_offer_status(offer_body);
-    let transition = transition_from_dexie_offer_payload(store, current_state, offer_body)?;
+    let transition =
+        transition_from_dexie_offer_payload(store, offer_id, current_state, offer_body)?;
     Ok((transition, status))
 }
 
@@ -98,11 +129,12 @@ fn transition_from_offer_body(
 /// Returns an error if the operation fails.
 pub fn transition_from_list_offer_payload(
     store: &SqliteStore,
+    offer_id: &str,
     current_state: &str,
     offer_payload: &Value,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
     let offer = DexieOfferPayload::new(offer_payload.clone());
-    transition_from_offer_body(store, current_state, offer.body())
+    transition_from_offer_body(store, offer_id, current_state, offer.body())
 }
 
 /// Resolve a lifecycle transition by fetching a single offer from Dexie.
@@ -125,7 +157,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
             }
             let offer_body = payload.get("offer").unwrap_or(payload);
             let (transition, status) =
-                transition_from_offer_body(store, current_state, offer_body)?;
+                transition_from_offer_body(store, offer_id, current_state, offer_body)?;
             Ok((transition, status, None))
         }
         Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
