@@ -2,7 +2,7 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 
 use super::poll::{run_poll_loop, PollConfig};
-use super::{cat_from_record, CoinsetClient};
+use super::{cats, CoinsetClient};
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::Cat;
 
@@ -28,7 +28,7 @@ pub async fn fetch_presplit_cat_by_id(
     if record.spent_block_index != 0 {
         return Err(SignerError::PresplitCoinNotFound);
     }
-    cat_from_record(client, &record)
+    cats::cat_from_record(client, &record)
         .await?
         .ok_or(SignerError::PresplitCoinNotFound)
 }
@@ -51,7 +51,7 @@ pub async fn wait_for_unspent_cat(client: &CoinsetClient, coin_id: Bytes32) -> S
             if record.spent_block_index != 0 {
                 return Ok(None);
             }
-            cat_from_record(client, &record).await
+            cats::cat_from_record(client, &record).await
         },
         coin_id,
         PollConfig::from_seconds(PRESPLIT_CONFIRM_TIMEOUT_SECS, PRESPLIT_POLL_INTERVAL_SECS),

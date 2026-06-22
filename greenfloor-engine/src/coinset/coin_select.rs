@@ -1,10 +1,37 @@
 //! Coin listing and selection (CAT; shared by vault and BLS paths).
 
 use chia_protocol::Bytes32;
+use chia_sdk_coinset::CoinsetClient;
 use chia_sdk_driver::Cat;
 
-use super::{select_cats_smallest_first, SelectedCats};
+use super::cats::{list_unspent_cats, list_unspent_cats_by_ids};
 use crate::error::{SignerError, SignerResult};
+
+/// Minimum CAT output amount for offer/dust policy (1000 mojos = 1 CAT unit).
+pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
+
+#[derive(Debug, Clone)]
+pub struct SelectedCats {
+    pub selected: Vec<Cat>,
+    pub offered_total: u64,
+    pub change_amount: u64,
+}
+
+#[must_use]
+pub fn select_cats_smallest_first(cats: Vec<Cat>, target_total: u64) -> Vec<Cat> {
+    let mut sorted = cats;
+    sorted.sort_by_key(|cat| cat.coin.amount);
+    let mut selected = Vec::new();
+    let mut running = 0u64;
+    for cat in sorted {
+        running = running.saturating_add(cat.coin.amount);
+        selected.push(cat);
+        if running >= target_total {
+            return selected;
+        }
+    }
+    Vec::new()
+}
 
 /// How to reduce a CAT list to the coins that cover *`target_amount`*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +97,21 @@ pub(crate) fn finalize_selected_cats(
         selected,
         offered_total,
     })
+}
+
+pub(crate) async fn select_cats_for_spend(
+    client: &CoinsetClient,
+    receive_address: &str,
+    asset_id: Bytes32,
+    explicit_coin_ids: &[Bytes32],
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    let cats = if explicit_coin_ids.is_empty() {
+        list_unspent_cats(client, receive_address, asset_id).await?
+    } else {
+        list_unspent_cats_by_ids(client, explicit_coin_ids).await?
+    };
+    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
 }
 
 #[cfg(test)]

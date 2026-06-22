@@ -1,9 +1,10 @@
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 use serde_json::Value;
 
-use crate::coinset::{
-    client_for_network, coin_records_from_payload, direct_api, record_from_payload,
-    resolve_direct_client, MspCoinset,
+use super::super::{
+    direct_api,
+    msp::{self, MspCoinset},
+    parse::{coin_records_from_payload, record_from_payload},
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -13,7 +14,7 @@ use crate::error::{SignerError, SignerResult};
 ///
 /// Returns an error if the operation fails.
 pub fn direct_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
-    let resolved = resolve_direct_client(network, base_url);
+    let resolved = direct_api::resolve_direct_client(network, base_url);
     Ok(CoinsetClient::new(resolved.base_url))
 }
 
@@ -23,7 +24,7 @@ fn msp_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<Coi
             .client()
             .clone())
     } else {
-        client_for_network(network)
+        msp::client_for_network(network)
     }
 }
 

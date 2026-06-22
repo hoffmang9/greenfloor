@@ -2,8 +2,8 @@ use chia_protocol::SpendBundle;
 use chia_traits::Streamable;
 use serde_json::{json, Value};
 
+use super::super::broadcast::broadcast_spend_bundle;
 use super::rpc::{direct_coinset_client, post_msp_coinset_rpc};
-use crate::coinset::broadcast_spend_bundle;
 use crate::error::{SignerError, SignerResult};
 
 /// Get fee estimate.

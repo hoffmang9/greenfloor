@@ -1,10 +1,53 @@
 use chia_protocol::Coin;
 use chia_protocol::CoinSpend;
+use chia_sdk_coinset::{CoinRecord, GetCoinRecordsResponse, PushTxResponse};
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
+
+pub(crate) trait CoinsetRpcResponse {
+    fn is_success(&self) -> bool;
+    fn error_message(&self) -> Option<&str>;
+}
+
+impl CoinsetRpcResponse for GetCoinRecordsResponse {
+    fn is_success(&self) -> bool {
+        self.success
+    }
+
+    fn error_message(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+}
+
+impl CoinsetRpcResponse for PushTxResponse {
+    fn is_success(&self) -> bool {
+        self.success
+    }
+
+    fn error_message(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+}
+
+pub(crate) fn ensure_coinset_typed_rpc_success<T: CoinsetRpcResponse>(
+    response: &T,
+    failure_default: &str,
+) -> SignerResult<()> {
+    if response.is_success() {
+        return Ok(());
+    }
+    Err(SignerError::Coinset(response.error_message().map_or_else(
+        || failure_default.to_string(),
+        str::to_string,
+    )))
+}
+
+pub(crate) fn unspent_coin_records(records: Vec<CoinRecord>) -> impl Iterator<Item = CoinRecord> {
+    records.into_iter().filter(|record| !record.spent)
+}
 
 fn coinset_rpc_failure_detail(payload: &Value) -> String {
     for key in ["error", "error_message", "message"] {
@@ -16,6 +59,13 @@ fn coinset_rpc_failure_detail(payload: &Value) -> String {
         }
     }
     "coinset rpc returned success=false".to_string()
+}
+
+pub(crate) fn coin_records_from_response(
+    response: GetCoinRecordsResponse,
+) -> SignerResult<Vec<CoinRecord>> {
+    ensure_coinset_typed_rpc_success(&response, "coinset request failed")?;
+    Ok(response.coin_records.unwrap_or_default())
 }
 
 /// Ensure coinset rpc success.

@@ -1,10 +1,11 @@
+use super::super::parse::to_coinset_hex;
+use super::super::scan_client::DirectCoinsetScanClient;
 use super::capability::{
     probe_height_window, probe_names, sample_coin_id_from_records, scan_window_from_peak,
 };
 use super::cli::CoinsetProbeCliArgs;
 use super::types::{CapabilitiesReport, ProbeReport};
 use crate::cli_util::optional_trimmed;
-use crate::coinset::{to_coinset_hex, DirectCoinsetScanClient};
 use crate::error::SignerResult;
 use crate::hex::{hex_to_bytes32, tree_hash_to_hex};
 use crate::vault::members::nonce_member_puzzle_hash;
