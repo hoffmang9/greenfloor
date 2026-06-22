@@ -182,21 +182,25 @@ async fn run_signer_denomination_phase_rejects_nonzero_bootstrap_fee() {
     use crate::test_support::signer_config::test_signer_config;
 
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-    let coin_body = r#"{
+    const MOJO_PER_XCH: u64 = 1_000_000_000_000;
+    let coin_body = format!(
+        r#"{{
         "success": true,
-        "coin_records": [{
-            "coin": {
+        "coin_records": [{{
+            "coin": {{
                 "parent_coin_info": "c325057d788bee13367cb8e2d71ff3e209b5e94b31b296322ba1a143053fef5b",
                 "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                "amount": 1000
-            },
+                "amount": {}
+            }},
             "coinbase": false,
             "confirmed_block_index": 1,
             "spent": false,
             "spent_block_index": 0,
             "timestamp": 1
-        }]
-    }"#;
+        }}]
+    }}"#,
+        MOJO_PER_XCH * 1000
+    );
     let mut server = mockito::Server::new_async().await;
     let _coin_mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
@@ -233,47 +237,53 @@ async fn run_signer_denomination_phase_skips_when_ladder_already_ready() {
     use crate::test_support::signer_config::test_signer_config;
 
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-    let coin_body = r#"{
+    const MOJO_PER_XCH: u64 = 1_000_000_000_000;
+    let coin_body = format!(
+        r#"{{
         "success": true,
         "coin_records": [
-            {
-                "coin": {
+            {{
+                "coin": {{
                     "parent_coin_info": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                    "amount": 10
-                },
+                    "amount": {}
+                }},
                 "coinbase": false,
                 "confirmed_block_index": 1,
                 "spent": false,
                 "spent_block_index": 0,
                 "timestamp": 1
-            },
-            {
-                "coin": {
+            }},
+            {{
+                "coin": {{
                     "parent_coin_info": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                    "amount": 10
-                },
+                    "amount": {}
+                }},
                 "coinbase": false,
                 "confirmed_block_index": 1,
                 "spent": false,
                 "spent_block_index": 0,
                 "timestamp": 1
-            },
-            {
-                "coin": {
+            }},
+            {{
+                "coin": {{
                     "parent_coin_info": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                     "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                    "amount": 10
-                },
+                    "amount": {}
+                }},
                 "coinbase": false,
                 "confirmed_block_index": 1,
                 "spent": false,
                 "spent_block_index": 0,
                 "timestamp": 1
-            }
+            }}
         ]
-    }"#;
+    }}"#,
+        MOJO_PER_XCH * 10,
+        MOJO_PER_XCH * 10,
+        MOJO_PER_XCH * 10
+    );
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
@@ -303,21 +313,25 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
     use crate::test_support::signer_config::test_signer_config;
 
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-    let coin_body = r#"{
+    const MOJO_PER_XCH: u64 = 1_000_000_000_000;
+    let coin_body = format!(
+        r#"{{
         "success": true,
-        "coin_records": [{
-            "coin": {
+        "coin_records": [{{
+            "coin": {{
                 "parent_coin_info": "c325057d788bee13367cb8e2d71ff3e209b5e94b31b296322ba1a143053fef5b",
                 "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                "amount": 1000
-            },
+                "amount": {}
+            }},
             "coinbase": false,
             "confirmed_block_index": 1,
             "spent": false,
             "spent_block_index": 0,
             "timestamp": 1
-        }]
-    }"#;
+        }}]
+    }}"#,
+        MOJO_PER_XCH * 1000
+    );
     let mut server = mockito::Server::new_async().await;
     let _coin_mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")

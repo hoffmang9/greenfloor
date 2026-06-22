@@ -3,7 +3,6 @@ mod asset;
 mod backend;
 mod broadcast;
 mod cats;
-mod client_retry;
 pub(crate) mod coin_select;
 mod direct_api;
 mod msp;
@@ -31,7 +30,7 @@ pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
 pub use cats::{
     cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, decode_receive_address,
-    list_unspent_cats, list_unspent_cats_by_ids, require_cat_from_parent_spend,
+    list_unspent_cats_by_ids, require_cat_from_parent_spend,
 };
 pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{
@@ -51,7 +50,10 @@ pub use parse::{
 };
 pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
-pub use retry::{with_script_retries, with_script_retries_with_policy, ScriptRetryPolicy};
+pub use retry::{
+    with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,
+    with_script_retries_with_policy, ScriptRetryPolicy,
+};
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;

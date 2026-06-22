@@ -7,7 +7,7 @@ use chia_sdk_coinset::{
 use chia_sdk_driver::{Cat, Puzzle};
 use clvmr::{serde::node_from_bytes, Allocator};
 
-use crate::coinset::client_retry::with_client_retries;
+use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 
@@ -15,7 +15,7 @@ pub(crate) async fn cat_from_record(
     client: &CoinsetClient,
     record: &CoinRecord,
 ) -> SignerResult<Option<Cat>> {
-    let parent_response: GetCoinRecordResponse = with_client_retries(|| async {
+    let parent_response: GetCoinRecordResponse = with_coinset_client_retries(|| async {
         client
             .get_coin_record_by_name(record.coin.parent_coin_info)
             .await
@@ -29,7 +29,7 @@ pub(crate) async fn cat_from_record(
     }
     let parent_coin_id = parent_record.coin.coin_id();
     let spent_block_index = parent_record.spent_block_index;
-    let solution_response: GetPuzzleAndSolutionResponse = with_client_retries(|| async {
+    let solution_response: GetPuzzleAndSolutionResponse = with_coinset_client_retries(|| async {
         client
             .get_puzzle_and_solution(parent_coin_id, Some(spent_block_index))
             .await
