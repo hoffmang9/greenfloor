@@ -2,13 +2,20 @@ use std::future::Future;
 
 use serde_json::Value;
 
-use super::types::{HeightWindowCapability, ProbeAttempt, ScanWindow};
+use super::types::{HeightWindowCapability, ProbedHeightWindowCapability, ScanWindow};
 use crate::coinset::{coin_id_from_record, to_coinset_hex, DirectCoinsetScanClient};
 use crate::error::SignerResult;
 use crate::vault::members::hex_to_bytes32;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProbeAttempt {
+    supported: bool,
+    error: Option<String>,
+    count: Option<usize>,
+}
+
 impl ProbeAttempt {
-    pub async fn run<F, Fut>(fetch: F) -> (Self, Option<Vec<Value>>)
+    async fn run<F, Fut>(fetch: F) -> (Self, Option<Vec<Value>>)
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = SignerResult<Vec<Value>>>,
@@ -37,9 +44,26 @@ impl ProbeAttempt {
     }
 }
 
+fn probed_from_attempts(
+    all: ProbeAttempt,
+    range: ProbeAttempt,
+    sample_name: Option<String>,
+) -> HeightWindowCapability {
+    HeightWindowCapability::Probed(ProbedHeightWindowCapability {
+        sample_name,
+        all_supported: all.supported,
+        all_error: all.error,
+        all_count: all.count,
+        range_supported: range.supported,
+        range_error: range.error,
+        range_count: range.count,
+    })
+}
+
 pub async fn probe_height_window<F, Fut>(
     start_height: u64,
     end_height: u64,
+    sample_name: Option<String>,
     fetch: F,
 ) -> (HeightWindowCapability, Option<Vec<Value>>)
 where
@@ -48,10 +72,7 @@ where
 {
     let (all, records) = ProbeAttempt::run(|| fetch(None, None)).await;
     let (range, _) = ProbeAttempt::run(|| fetch(Some(start_height), Some(end_height))).await;
-    (
-        HeightWindowCapability::from_attempts(all, range, None),
-        records,
-    )
+    (probed_from_attempts(all, range, sample_name), records)
 }
 
 pub async fn probe_names(
@@ -67,13 +88,13 @@ pub async fn probe_names(
         return HeightWindowCapability::invalid_sample(sample_name, "invalid sample coin id hex");
     };
     let names = vec![to_coinset_hex(sample_bytes.as_ref())];
-    let (mut capability, _) = probe_height_window(start_height, end_height, |start, end| {
-        client.by_names(&names, true, start, end)
-    })
+    let (capability, _) = probe_height_window(
+        start_height,
+        end_height,
+        Some(sample_name.to_string()),
+        |start, end| client.by_names(&names, true, start, end),
+    )
     .await;
-    if let HeightWindowCapability::Probed(ref mut probed) = capability {
-        probed.sample_name = Some(sample_name.to_string());
-    }
     capability
 }
 
@@ -137,7 +158,7 @@ mod tests {
 
     #[test]
     fn height_window_capability_from_attempts_maps_fields() {
-        let capability = HeightWindowCapability::from_attempts(
+        let capability = probed_from_attempts(
             ProbeAttempt {
                 supported: true,
                 error: None,

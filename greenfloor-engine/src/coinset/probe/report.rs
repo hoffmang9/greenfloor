@@ -32,10 +32,10 @@ pub async fn build_coinset_probe_report(args: CoinsetProbeCliArgs) -> SignerResu
     let p2_hashes = [p2_coinset_hex];
 
     let ((puzzle_hashes, puzzle_records), (hints, _)) = tokio::join!(
-        probe_height_window(start_height, end_height, |start, end| {
+        probe_height_window(start_height, end_height, None, |start, end| {
             client.by_puzzle_hashes(&p2_hashes, true, start, end)
         }),
-        probe_height_window(start_height, end_height, |start, end| {
+        probe_height_window(start_height, end_height, None, |start, end| {
             client.by_hints(&p2_hashes, true, start, end)
         }),
     );

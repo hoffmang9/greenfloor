@@ -2,13 +2,6 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeAttempt {
-    pub supported: bool,
-    pub error: Option<String>,
-    pub count: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbedHeightWindowCapability {
     pub sample_name: Option<String>,
     pub all_supported: bool,
@@ -32,41 +25,20 @@ pub enum HeightWindowCapability {
 impl HeightWindowCapability {
     #[must_use]
     pub fn probed_counts(all_count: usize, range_count: usize) -> Self {
-        Self::from_attempts(
-            ProbeAttempt {
-                supported: true,
-                error: None,
-                count: Some(all_count),
-            },
-            ProbeAttempt {
-                supported: true,
-                error: None,
-                count: Some(range_count),
-            },
-            None,
-        )
+        Self::Probed(ProbedHeightWindowCapability {
+            sample_name: None,
+            all_supported: true,
+            all_error: None,
+            all_count: Some(all_count),
+            range_supported: true,
+            range_error: None,
+            range_count: Some(range_count),
+        })
     }
 
     #[must_use]
     pub fn skipped() -> Self {
         Self::Skipped
-    }
-
-    #[must_use]
-    pub fn from_attempts(
-        all: ProbeAttempt,
-        range: ProbeAttempt,
-        sample_name: Option<String>,
-    ) -> Self {
-        Self::Probed(ProbedHeightWindowCapability {
-            sample_name,
-            all_supported: all.supported,
-            all_error: all.error,
-            all_count: all.count,
-            range_supported: range.supported,
-            range_error: range.error,
-            range_count: range.count,
-        })
     }
 
     #[must_use]
