@@ -180,6 +180,36 @@ pub enum SignerError {
     Other(String),
 }
 
+fn is_parallel_dispatch_transient_class(exception_class: &str) -> bool {
+    matches!(
+        exception_class.trim(),
+        "ReservationContentionError" | "ManagedUpstreamTransientError" | "TimeoutError"
+    )
+}
+
+fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "timed out",
+        "timeout",
+        "temporary unavailable",
+        "temporarily unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "service unavailable",
+        "connection reset",
+        "connection refused",
+        "managed_offer_http_error:502",
+        "managed_offer_http_error:503",
+        "managed_offer_http_error:504",
+        "managed_offer_network_error",
+        "signer_http_error:502",
+        "signer_http_error:503",
+        "signer_http_error:504",
+    ];
+    let normalized = error_text.trim().to_ascii_lowercase();
+    MARKERS.iter().any(|marker| normalized.contains(marker))
+}
+
 impl SignerError {
     #[must_use]
     pub fn is_parallel_dispatch_transient(&self) -> bool {
@@ -189,12 +219,11 @@ impl SignerError {
             | Self::DatabaseLocked => true,
             Self::Other(message) => {
                 let message = message.as_str();
-                if message.contains("database is locked") {
-                    return true;
-                }
-                let class = message.split(':').next().unwrap_or(message).trim();
-                crate::cycle::is_parallel_dispatch_transient_error(class, message)
-                    || crate::cycle::is_transient_managed_upstream_error_text(message)
+                message.contains("database is locked")
+                    || is_parallel_dispatch_transient_class(
+                        message.split(':').next().unwrap_or(message).trim(),
+                    )
+                    || is_transient_managed_upstream_error_text(message)
             }
             _ => false,
         }
@@ -259,5 +288,32 @@ mod tests {
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn transient_error_text_detects_timeout_markers() {
+        assert!(
+            SignerError::Other("managed_offer_network_error: connection reset".to_string())
+                .is_parallel_dispatch_transient()
+        );
+        assert!(!SignerError::Other("invalid offer".to_string()).is_parallel_dispatch_transient());
+    }
+
+    #[test]
+    fn parallel_dispatch_transient_matches_upstream_and_contention_classes() {
+        assert!(SignerError::Other("TimeoutError: timed out".to_string())
+            .is_parallel_dispatch_transient());
+        assert!(
+            SignerError::Other("ManagedUpstreamTransientError: timeout".to_string())
+                .is_parallel_dispatch_transient()
+        );
+        assert!(
+            SignerError::Other("ReservationContentionError: busy".to_string())
+                .is_parallel_dispatch_transient()
+        );
+        assert!(
+            !SignerError::Other("PermanentOfferBuildFailure: bad puzzle".to_string())
+                .is_parallel_dispatch_transient()
+        );
     }
 }

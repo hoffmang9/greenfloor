@@ -1,13 +1,14 @@
 use serde_json::json;
 
 use crate::adapters::{DexieClient, DexieResponse};
-use crate::cycle::{
-    dexie_invalid_offer_retry_sleep, dexie_invalid_offer_should_retry,
-    is_transient_dexie_visibility_404_error,
-};
+use crate::cycle::{dexie_invalid_offer_retry_sleep, dexie_invalid_offer_should_retry};
 use crate::error::SignerResult;
 
 use super::{dexie_offer_asset_expectation_error, ExpectedPublishAssetFields};
+
+mod visibility;
+
+use visibility::is_transient_dexie_visibility_404_error;
 
 const DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS: u32 = 4;
 const DEXIE_INVALID_OFFER_RETRY_INITIAL_SLEEP_SECONDS: f64 = 1.0;

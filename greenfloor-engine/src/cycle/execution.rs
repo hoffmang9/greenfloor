@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
 use super::dispatch::{
-    reservation_request_for_managed_offer, ManagedOfferReservationRequest, SpendableAssetProfile,
+    reservation_request_for_managed_offer, single_input_preferred_skip_reason,
+    ManagedOfferReservationRequest, SpendableAssetProfile,
 };
-use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
 use crate::error::SignerResult;
 
@@ -38,6 +38,41 @@ struct ParallelReservationEntry {
 struct ParallelReservationPrep {
     entries: Vec<ParallelReservationEntry>,
     asset_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParallelSubmissionDecision {
+    Proceed {
+        available_amounts: BTreeMap<String, i64>,
+    },
+    Skip {
+        reason: String,
+    },
+}
+
+fn prepare_parallel_managed_submission_decision(
+    requested_amounts: &BTreeMap<String, i64>,
+    spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
+) -> ParallelSubmissionDecision {
+    if requested_amounts.is_empty() {
+        return ParallelSubmissionDecision::Skip {
+            reason: "reservation_invalid_request".to_string(),
+        };
+    }
+    if let Some(reason) = single_input_preferred_skip_reason(requested_amounts, spendable_profiles)
+    {
+        return ParallelSubmissionDecision::Skip { reason };
+    }
+    let available_amounts = requested_amounts
+        .keys()
+        .map(|asset_id| {
+            let total = spendable_profiles
+                .get(asset_id)
+                .map_or(0, |profile| profile.total);
+            (asset_id.clone(), total)
+        })
+        .collect();
+    ParallelSubmissionDecision::Proceed { available_amounts }
 }
 
 fn build_parallel_reservation_prep(
@@ -195,6 +230,20 @@ mod tests {
             quote_unit_mojo_multiplier: 1000,
             quote_price: 1.5,
         }
+    }
+
+    #[test]
+    fn prepare_parallel_submission_skips_invalid_request() {
+        let decision = prepare_parallel_managed_submission_decision(
+            &BTreeMap::default(),
+            &BTreeMap::default(),
+        );
+        assert!(matches!(
+            decision,
+            ParallelSubmissionDecision::Skip {
+                reason
+            } if reason == "reservation_invalid_request"
+        ));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 mod coordinator;
 mod managed_post;
 mod parallel;
+mod policy;
 mod reservation_ctx;
 mod sequential;
 #[cfg(test)]
@@ -18,10 +19,12 @@ use tracing::Level;
 
 use crate::async_boundary::StrategyDispatchFuture;
 use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
-use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
+use crate::cycle::{expand_planned_actions, PlannedAction};
+
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
 use crate::storage::SqliteStore;
+use policy::parallel_managed_dispatch_enabled;
 
 use super::market_context::MarketCycleContext;
 
@@ -29,10 +32,6 @@ use super::market_context::MarketCycleContext;
 pub struct OfferDispatchOutput {
     pub executed_count: u64,
     pub newly_executed_sell_counts: BTreeMap<i64, i64>,
-}
-
-pub(crate) fn is_parallel_dispatch_transient_signer_error(err: &SignerError) -> bool {
-    err.is_parallel_dispatch_transient()
 }
 
 /// Outcome of a parallel managed-offer dispatch attempt.
@@ -47,7 +46,7 @@ pub(crate) fn classify_parallel_dispatch(
 ) -> ParallelDispatchDecision {
     match result {
         Ok(output) => ParallelDispatchDecision::Success(output),
-        Err(err) if is_parallel_dispatch_transient_signer_error(&err) => {
+        Err(err) if err.is_parallel_dispatch_transient() => {
             ParallelDispatchDecision::FallbackTransient(err)
         }
         Err(err) => ParallelDispatchDecision::Fatal(err),
