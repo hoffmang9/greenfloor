@@ -11,10 +11,13 @@ use crate::storage::resolve_state_db_path;
 use super::coinset_ws::start_coinset_websocket_loop;
 use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
-use super::program_runtime::load_daemon_program_runtime;
+use super::program_runtime::{load_daemon_program_runtime, DaemonProgramRuntime};
 use super::reload::handle_reload_marker_if_present;
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
+
+#[cfg(test)]
+use super::loop_harness::DaemonLoopTestHarness;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonLoopRequest {
@@ -27,10 +30,44 @@ pub struct DaemonLoopRequest {
     pub allowed_key_ids: Vec<String>,
 }
 
+fn loop_cycle_test_controls(
+    #[cfg(test)] harness: Option<&DaemonLoopTestHarness>,
+) -> DaemonCycleTestControls {
+    #[cfg(test)]
+    if let Some(harness) = harness {
+        return harness.cycle_test_controls.clone();
+    }
+    DaemonCycleTestControls::default()
+}
+
+fn loop_sleep_after_cycle(
+    runtime: &DaemonProgramRuntime,
+    #[cfg(test)] harness: Option<&DaemonLoopTestHarness>,
+) -> Duration {
+    #[cfg(test)]
+    if let Some(harness) = harness {
+        return harness.cycle_sleep;
+    }
+    Duration::from_secs(runtime.runtime_loop_interval_seconds.max(1))
+}
+
+fn loop_should_continue(
+    cycles_completed: usize,
+    #[cfg(test)] harness: Option<&DaemonLoopTestHarness>,
+) -> bool {
+    #[cfg(test)]
+    if let Some(harness) = harness {
+        return cycles_completed < harness.max_cycles;
+    }
+    let _ = cycles_completed;
+    true
+}
+
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
     coin_watchlist: Arc<CoinWatchlistCache>,
+    test_controls: DaemonCycleTestControls,
 ) -> SignerResult<i32> {
     let once_request = DaemonRunOnceRequest {
         program_path: request.program_path.clone(),
@@ -43,7 +80,7 @@ async fn run_one_loop_cycle(
         use_websocket_capture: false,
         allowed_key_ids: request.allowed_key_ids.clone(),
         dispatch_state: dispatch_state.clone(),
-        test_controls: DaemonCycleTestControls::default(),
+        test_controls,
         coin_watchlist,
     };
     let response = run_daemon_cycle_once(&once_request).await?;
@@ -51,12 +88,10 @@ async fn run_one_loop_cycle(
     Ok(response.exit_code)
 }
 
-/// Run daemon loop.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
+async fn run_daemon_loop_inner(
+    request: DaemonLoopRequest,
+    #[cfg(test)] harness: Option<DaemonLoopTestHarness>,
+) -> SignerResult<i32> {
     let runtime = load_daemon_program_runtime(&request.program_path)?;
     sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
     warn_if_log_level_auto_healed(runtime.app_log_level_was_missing, &request.program_path);
@@ -72,22 +107,66 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
     );
 
     let mut dispatch_state = DaemonDispatchState::default();
+    let mut cycles_completed = 0usize;
+    #[cfg(test)]
+    let harness_ref = harness.as_ref();
 
     loop {
         let runtime = load_daemon_program_runtime(&request.program_path)?;
         sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
 
-        let _exit_code =
-            run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
+        let exit_code = run_one_loop_cycle(
+            &request,
+            &mut dispatch_state,
+            coin_watchlist.clone(),
+            loop_cycle_test_controls(
+                #[cfg(test)]
+                harness_ref,
+            ),
+        )
+        .await?;
 
         handle_reload_marker_if_present(
             &request.state_dir,
             &resolve_state_db_path(&runtime.home_dir, request.state_db_override.as_deref()),
         );
 
-        tokio::time::sleep(Duration::from_secs(
-            runtime.runtime_loop_interval_seconds.max(1),
+        cycles_completed += 1;
+        if !loop_should_continue(
+            cycles_completed,
+            #[cfg(test)]
+            harness_ref,
+        ) {
+            return Ok(exit_code);
+        }
+
+        tokio::time::sleep(loop_sleep_after_cycle(
+            &runtime,
+            #[cfg(test)]
+            harness_ref,
         ))
         .await;
     }
+}
+
+/// Run daemon loop.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
+    run_daemon_loop_inner(
+        request,
+        #[cfg(test)]
+        None,
+    )
+    .await
+}
+
+#[cfg(test)]
+pub(crate) async fn run_daemon_loop_with_harness(
+    request: DaemonLoopRequest,
+    harness: DaemonLoopTestHarness,
+) -> SignerResult<i32> {
+    run_daemon_loop_inner(request, Some(harness)).await
 }

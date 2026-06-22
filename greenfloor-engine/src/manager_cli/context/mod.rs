@@ -7,12 +7,13 @@ use serde_json::Value;
 
 use crate::cli_util::optional_str;
 use crate::error::SignerResult;
+use crate::paths::{resolve_testnet_markets_path, TestnetMarketsPathPolicy};
 
 use super::commands::{ManagerCli, ManagerCommands};
 use super::json::ManagerOutput;
 use super::paths::{
     default_cats_config_path, default_markets_config_path, default_program_config_path,
-    default_testnet_markets_config_path, resolve_cli_config_path,
+    resolve_cli_config_path,
 };
 use super::runtime::ManagerRuntime;
 
@@ -43,7 +44,10 @@ impl ManagerContext {
             dexie_base_url,
             command,
         } = cli;
-        let testnet_markets_path = resolve_testnet_markets_path(&testnet_markets_config);
+        let testnet_markets_path = resolve_testnet_markets_path(
+            &testnet_markets_config,
+            TestnetMarketsPathPolicy::CliWithDefault,
+        );
         (
             Self {
                 output: ManagerOutput::new(json),
@@ -95,12 +99,4 @@ impl ManagerContext {
     pub fn emit_serialized<T: Serialize>(&self, value: &T) -> SignerResult<()> {
         self.output.emit_serialized(value)
     }
-}
-
-fn resolve_testnet_markets_path(testnet_markets_config: &str) -> Option<PathBuf> {
-    let explicit = testnet_markets_config.trim();
-    if !explicit.is_empty() {
-        return Some(PathBuf::from(explicit));
-    }
-    default_testnet_markets_config_path()
 }

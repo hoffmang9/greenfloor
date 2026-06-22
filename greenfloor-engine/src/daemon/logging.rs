@@ -24,17 +24,6 @@ pub fn sync_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResul
     file_logging::sync_service_file_logging(&LOG_STATE, SERVICE_NAME, home_dir, log_level)
 }
 
-/// Initialize daemon file logging once per process.
-///
-/// Alias for [`sync_daemon_file_logging`] for call sites that only run at startup.
-///
-/// # Errors
-///
-/// Returns an error if initialization fails.
-pub fn initialize_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
-    sync_daemon_file_logging(home_dir, log_level)
-}
-
 #[must_use]
 pub fn default_log_level() -> &'static str {
     DEFAULT_LOG_LEVEL

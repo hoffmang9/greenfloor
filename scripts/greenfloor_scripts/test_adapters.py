@@ -23,7 +23,12 @@ from greenfloor_scripts.engine_subprocess import (
     run_engine_json,
     structured_cli_error_from_detail,
 )
-from greenfloor_scripts.hex_subprocess import normalize_hex_id
+from greenfloor_scripts.hex_subprocess import (
+    default_mojo_multiplier_for_asset,
+    is_hex_id,
+    normalize_hex_id,
+    normalize_hex_ids,
+)
 from greenfloor_scripts.kms_subprocess import get_public_key_compressed_hex
 
 ENGINE_CLI_JSON_COINSET_503 = json.dumps(
@@ -170,6 +175,46 @@ class ScriptAdapterTests(unittest.TestCase):
         mock_run.assert_called_once()
         argv = mock_run.call_args.args[0]
         self.assertEqual(argv[:2], ["hex", "normalize-batch"])
+
+    def test_is_hex_id_delegates_to_engine_hex_cli(self) -> None:
+        with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
+            mock_run.return_value = {"is_hex_id": True}
+            self.assertTrue(is_hex_id("0xabc"))
+        mock_run.assert_called_once()
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            ["hex", "is-id", "--value", "0xabc"],
+        )
+
+    def test_default_mojo_multiplier_for_asset_delegates_to_engine_hex_cli(self) -> None:
+        with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
+            mock_run.return_value = {"multiplier": 1000}
+            self.assertEqual(default_mojo_multiplier_for_asset("0xasset"), 1000)
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            ["hex", "default-mojo-multiplier", "--asset-id", "0xasset"],
+        )
+
+    def test_hex_subprocess_rejects_invalid_engine_response(self) -> None:
+        with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
+            mock_run.return_value = ["not", "a", "dict"]
+            with self.assertRaises(RuntimeError) as ctx:
+                is_hex_id("0xabc")
+            self.assertEqual(str(ctx.exception), "hex_cli_invalid_response")
+
+    def test_hex_subprocess_rejects_invalid_normalized_batch(self) -> None:
+        with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
+            mock_run.return_value = {"normalized": ["only-one"]}
+            with self.assertRaises(RuntimeError) as ctx:
+                normalize_hex_ids(["0x01", "0x02"])
+            self.assertEqual(str(ctx.exception), "hex_cli_invalid_normalized_batch")
+
+    def test_hex_subprocess_rejects_missing_multiplier(self) -> None:
+        with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
+            mock_run.return_value = {"multiplier": "1000"}
+            with self.assertRaises(RuntimeError) as ctx:
+                default_mojo_multiplier_for_asset("0xasset")
+            self.assertEqual(str(ctx.exception), "hex_cli_missing_multiplier")
 
     def test_cargo_target_directory_reads_metadata(self) -> None:
         cargo_target_directory.cache_clear()

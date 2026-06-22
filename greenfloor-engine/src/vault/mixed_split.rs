@@ -217,4 +217,28 @@ mod tests {
         let err = validate_mixed_split_request(&sample_request(vec![1000, 0], false)).unwrap_err();
         assert!(matches!(err, SignerError::InvalidOutputAmount));
     }
+
+    #[tokio::test]
+    async fn build_mixed_split_spend_bundle_materializes_via_simulator() {
+        use crate::test_support::simulator::harness::SimulatorVaultHarness;
+        use crate::test_support::simulator::SimulatorOfferCoinset;
+
+        let mut harness = SimulatorVaultHarness::new();
+        let cat = harness.fund_vault_cat(5_000);
+        let coinset = SimulatorOfferCoinset::new(&harness.chain);
+        coinset.register_cat(cat);
+        let receive_puzzle_hash = harness.chain.p2_message_hash;
+        let spend_bundle = super::build_vault_cat_mixed_split_spend_bundle(
+            &mut harness.vault_ctx,
+            &coinset,
+            vec![cat],
+            receive_puzzle_hash,
+            harness.chain.asset_id,
+            &[1_000, 2_000],
+            2_000,
+        )
+        .await
+        .expect("mixed split bundle");
+        assert!(!spend_bundle.coin_spends.is_empty());
+    }
 }

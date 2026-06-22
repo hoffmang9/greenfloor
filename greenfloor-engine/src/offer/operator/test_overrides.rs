@@ -14,9 +14,6 @@ pub struct BuildOfferTestOverrides {
 #[cfg(test)]
 impl BuildOfferTestOverrides {
     pub(crate) fn stub_offer_text(&self) -> Option<&str> {
-        self.offer_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+        self.offer_text.as_deref()
     }
 }
