@@ -1,4 +1,5 @@
 signer:
+  coinset_msp_base_url: "__COINSET_MSP_BASE_URL__"
   kms_key_id: arn:aws:kms:us-west-2:123:key/abc
   kms_region: us-west-2
 vault:

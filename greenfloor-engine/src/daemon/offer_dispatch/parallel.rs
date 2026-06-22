@@ -24,7 +24,7 @@ use super::reservation_ctx::{
 };
 use super::OfferDispatchOutput;
 
-use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
+use crate::daemon::coinset_spendable::coinset_spendable_profiles_for_signer;
 
 struct ParallelPostJob {
     action: PlannedAction,
@@ -50,8 +50,14 @@ async fn resolve_parallel_spendable_profiles(
         return Ok(profiles.clone());
     }
     let asset_ids = parallel_reservation_asset_ids(reservation_ctx);
-    coinset_spendable_profiles_by_asset(&ctx.resources.network, &market.receive_address, &asset_ids)
-        .await
+    let signer = ctx.resources.signer_for_execution()?;
+    coinset_spendable_profiles_for_signer(
+        &ctx.resources.network,
+        signer,
+        &market.receive_address,
+        &asset_ids,
+    )
+    .await
 }
 
 fn prepare_parallel_dispatch(

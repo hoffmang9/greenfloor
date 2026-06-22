@@ -143,6 +143,7 @@ pub fn run_materialize_minimal_program(request: MaterializeMinimalProgramRequest
         dry_run: request.features.dry_run,
         low_inventory_alerts_enabled: request.features.low_inventory_alerts_enabled,
         pushover_enabled: request.features.pushover_enabled,
+        coinset_msp_base_url: None,
     };
     if request.with_signer {
         write_minimal_program_with_signer(request.output, params);

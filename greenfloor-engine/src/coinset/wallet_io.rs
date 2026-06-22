@@ -170,6 +170,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn msp_base_url_for_signer_returns_none_when_unconfigured() {
+        use crate::test_support::signer_config::test_signer_config;
+
+        let signer = test_signer_config("");
+        assert!(msp_base_url_for_signer(&signer).is_none());
+        let signer = test_signer_config("https://msp.example.test");
+        assert_eq!(
+            msp_base_url_for_signer(&signer),
+            Some("https://msp.example.test")
+        );
+    }
+
+    #[test]
     fn spend_bundle_hash_from_hex_rejects_garbage() {
         let err = spend_bundle_hash_from_hex("not-hex").expect_err("invalid hex");
         assert!(err.to_string().contains("invalid spend_bundle_hex"));

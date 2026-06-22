@@ -15,6 +15,7 @@ pub struct MinimalProgramParams<'a> {
     pub dry_run: bool,
     pub low_inventory_alerts_enabled: bool,
     pub pushover_enabled: bool,
+    pub coinset_msp_base_url: Option<&'a str>,
 }
 
 impl Default for MinimalProgramParams<'_> {
@@ -26,6 +27,7 @@ impl Default for MinimalProgramParams<'_> {
             dry_run: false,
             low_inventory_alerts_enabled: false,
             pushover_enabled: false,
+            coinset_msp_base_url: None,
         }
     }
 }
@@ -79,7 +81,14 @@ pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramPara
     let launcher_id = "aa".repeat(32);
     let mut contents = materialize_minimal_program_text(params);
     contents.push('\n');
-    contents.push_str(&MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &launcher_id));
+    let mut signer_append = MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &launcher_id);
+    if let Some(msp_base_url) = params.coinset_msp_base_url {
+        signer_append = signer_append.replace("__COINSET_MSP_BASE_URL__", msp_base_url);
+    } else {
+        signer_append =
+            signer_append.replace("  coinset_msp_base_url: \"__COINSET_MSP_BASE_URL__\"\n", "");
+    }
+    contents.push_str(&signer_append);
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("write signer program {}: {err}", path.display()));
 }

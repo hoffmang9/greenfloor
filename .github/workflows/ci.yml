@@ -107,7 +107,7 @@ jobs:
           done
           if [ "${{ steps.scope.outputs.run_rust_cov }}" = "true" ]; then
             (
-              cargo llvm-cov nextest run \
+              cargo llvm-cov nextest \
                 --manifest-path "${{ env.CARGO_MANIFEST }}"
               cargo llvm-cov report \
                 --manifest-path "${{ env.CARGO_MANIFEST }}" \
@@ -143,6 +143,7 @@ jobs:
               --include-untracked \
               --exclude '**/tests/**' '**/test_support/**' '**/test_env/**' \
               --exclude '**/test_overrides/**' '**/bin/**' '**/main.rs' \
+              --exclude '**/*_tests.rs' '**/tests.rs' \
               || status=1
           fi
           if [ "${{ steps.scope.outputs.run_py_cov }}" = "true" ]; then

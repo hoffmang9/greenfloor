@@ -7,12 +7,12 @@ use super::{apply_overflow_plan_skips, skipped_coin_ops_result};
 use crate::coin_ops::{CoinOpKind, CoinOpPlan};
 use crate::config::{LadderEntry, ManagerProgramConfig};
 use crate::daemon::coin_ops_execution::CoinOpExecutionResult;
+use crate::daemon::CoinOpsPhaseHarness;
 use crate::operator_log::{
     COIN_OPS_NO_PLANS, COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN,
     COIN_OPS_SKIPPED_FEE_BUDGET, COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
 };
 use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SqliteStore};
-use crate::test_support::coin_ops_phase::CoinOpsPhaseHarness;
 use crate::test_support::ladder::market_with_side_ladder;
 use crate::test_support::market_config::sample_market;
 

@@ -4,8 +4,6 @@
 #[cfg(test)]
 pub mod build_and_post;
 #[cfg(test)]
-pub mod coin_ops_phase;
-#[cfg(test)]
 mod export_fixtures_test;
 #[cfg(test)]
 pub mod golden;

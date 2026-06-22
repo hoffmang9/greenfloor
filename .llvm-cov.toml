@@ -1,2 +1,2 @@
 [report]
-ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|/bin/|/main\\.rs$)"
+ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|_tests\\.rs$|/tests\\.rs$|/bin/|/main\\.rs$)"
