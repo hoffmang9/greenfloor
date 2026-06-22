@@ -20,7 +20,7 @@ use crate::offer::bootstrap::{
 };
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
-pub use types::{bootstrap_blocks_offer, BootstrapPhaseResult};
+pub use types::BootstrapPhaseResult;
 
 use futures::SignerDenominationPhaseFuture;
 use planning::{

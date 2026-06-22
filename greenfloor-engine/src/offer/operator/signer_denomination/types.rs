@@ -2,8 +2,8 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::offer::bootstrap::bootstrap_offer_gate;
 use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPlan};
-use crate::offer::publish::{bootstrap_offer_gate, BootstrapOfferGate};
 
 #[derive(Debug, Clone)]
 pub struct BootstrapPhaseResult {
@@ -118,9 +118,10 @@ impl BootstrapPhaseResult {
         }
     }
 
+    /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
     #[must_use]
-    pub fn offer_creation_gate(&self) -> BootstrapOfferGate {
-        bootstrap_offer_gate(&self.status, &self.reason, self.ready)
+    pub fn offer_creation_block_error(&self) -> Option<String> {
+        bootstrap_offer_gate(&self.status, &self.reason, self.ready).block_error()
     }
 
     pub(super) fn failed(failure: BootstrapPhaseFailure) -> Self {
@@ -183,9 +184,4 @@ impl BootstrapPhaseFailure {
         self.split_result = split_result;
         self
     }
-}
-
-#[must_use]
-pub fn bootstrap_blocks_offer(result: &BootstrapPhaseResult) -> Option<String> {
-    result.offer_creation_gate().block_error(&result.reason)
 }

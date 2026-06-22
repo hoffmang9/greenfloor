@@ -3,14 +3,18 @@ use serde_json::json;
 
 use super::{poll_dexie_offer_visibility_once, post_offer_phase_dexie, PostOfferPhaseDexieParams};
 use crate::adapters::DexieClient;
-use crate::offer::publish::ExpectedPublishAssetFieldsRef;
+use crate::offer::publish::{ExpectedPublishAssetFields, PublishAssetSide};
 
-fn expected_fields<'a>() -> ExpectedPublishAssetFieldsRef<'a> {
-    ExpectedPublishAssetFieldsRef {
-        expected_offered_asset_id: "basecat",
-        expected_offered_symbol: "A1",
-        expected_requested_asset_id: "xch",
-        expected_requested_symbol: "xch",
+fn expected_fields() -> ExpectedPublishAssetFields {
+    ExpectedPublishAssetFields {
+        offered: PublishAssetSide {
+            asset_id: "basecat".to_string(),
+            symbol: "A1".to_string(),
+        },
+        requested: PublishAssetSide {
+            asset_id: "xch".to_string(),
+            symbol: "xch".to_string(),
+        },
     }
 }
 
@@ -41,12 +45,13 @@ async fn post_offer_phase_posts_and_verifies_visibility() {
         .await;
 
     let dexie = DexieClient::new(server.url());
+    let expected = expected_fields();
     let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
         dexie: &dexie,
         offer_text: "offer1test",
         drop_only: true,
         claim_rewards: false,
-        expected: expected_fields(),
+        expected: &expected,
     })
     .await
     .expect("post");
@@ -81,12 +86,13 @@ async fn post_offer_phase_fails_on_asset_mismatch() {
         .await;
 
     let dexie = DexieClient::new(server.url());
+    let expected = expected_fields();
     let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
         dexie: &dexie,
         offer_text: "offer1test",
         drop_only: true,
         claim_rewards: false,
-        expected: expected_fields(),
+        expected: &expected,
     })
     .await
     .expect("post");
@@ -133,12 +139,13 @@ async fn post_offer_phase_reposts_on_transient_visibility_404() {
         .await;
 
     let dexie = DexieClient::new(server.url());
+    let expected = expected_fields();
     let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
         dexie: &dexie,
         offer_text: "offer1test",
         drop_only: true,
         claim_rewards: false,
-        expected: expected_fields(),
+        expected: &expected,
     })
     .await
     .expect("post");
@@ -158,7 +165,8 @@ async fn poll_visibility_once_retries_on_http_error_payload() {
         .await;
 
     let dexie = DexieClient::new(server.url());
-    let poll = poll_dexie_offer_visibility_once(&dexie, offer_id, expected_fields()).await;
+    let expected = expected_fields();
+    let poll = poll_dexie_offer_visibility_once(&dexie, offer_id, &expected).await;
     match poll {
         super::OfferVisibilityPoll::Retry(error) => {
             assert!(error.contains("dexie_http_error:404"));

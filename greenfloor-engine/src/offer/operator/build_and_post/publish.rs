@@ -3,47 +3,37 @@ use serde_json::{json, Value};
 use crate::adapters::{dexie_offer_view_url, DexieClient, SplashClient};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::publish::{
-    post_offer_phase_dexie, ExpectedPublishAssetFieldsRef, PostOfferPhaseDexieParams,
+    post_offer_phase_dexie, ExpectedPublishAssetFields, PostOfferPhaseDexieParams,
 };
 use crate::storage::OfferPostPersistRecord;
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PublishResult;
 
-pub(super) struct PublishOfferParams<'a> {
-    pub publish_venue: &'a str,
-    pub dexie: Option<&'a DexieClient>,
-    pub splash: Option<&'a SplashClient>,
-    pub offer_text: &'a str,
-    pub drop_only: bool,
-    pub claim_rewards: bool,
-    pub expected: ExpectedPublishAssetFieldsRef<'a>,
-}
-
-pub(super) async fn publish_offer(params: PublishOfferParams<'_>) -> SignerResult<PublishResult> {
-    let PublishOfferParams {
-        publish_venue,
-        dexie,
-        splash,
-        offer_text,
-        drop_only,
-        claim_rewards,
-        expected,
-    } = params;
+pub(super) async fn publish_offer(
+    publish_venue: &str,
+    dexie: Option<&DexieClient>,
+    splash: Option<&SplashClient>,
+    offer_text: &str,
+    drop_only: bool,
+    claim_rewards: bool,
+    expected: &ExpectedPublishAssetFields,
+) -> SignerResult<PublishResult> {
     match publish_venue {
         "dexie" => {
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
-            let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
-                dexie,
-                offer_text,
-                drop_only,
-                claim_rewards,
-                expected,
-            })
-            .await?;
-            Ok(PublishResult::from_dexie_response(result))
+            Ok(PublishResult::from_dexie_response(
+                post_offer_phase_dexie(PostOfferPhaseDexieParams {
+                    dexie,
+                    offer_text,
+                    drop_only,
+                    claim_rewards,
+                    expected,
+                })
+                .await?,
+            ))
         }
         "splash" => {
             let splash = splash.ok_or_else(|| {
