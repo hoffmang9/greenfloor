@@ -63,3 +63,88 @@ pub async fn fetch_latest_vault(
         VaultInfo::new(launcher_id, inner_puzzle_hash),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use chia_protocol::Bytes32;
+    use chia_sdk_coinset::CoinsetClient;
+    use clvm_utils::TreeHash;
+
+    use super::fetch_latest_vault;
+    use crate::error::SignerError;
+
+    fn hex32(byte: u8) -> String {
+        format!("0x{}", hex::encode([byte; 32]))
+    }
+
+    fn coin_record_json(
+        parent_coin_info: &str,
+        puzzle_hash: &str,
+        amount: u64,
+        confirmed_block_index: u32,
+    ) -> String {
+        format!(
+            r#"{{"coin":{{"parent_coin_info":"{parent_coin_info}","puzzle_hash":"{puzzle_hash}","amount":{amount}}},"confirmed_block_index":{confirmed_block_index},"spent":false,"spent_block_index":0,"coinbase":false,"timestamp":0}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn fetch_latest_vault_returns_vault_singleton_not_found_when_launcher_has_no_children() {
+        let launcher_id = Bytes32::new([0x11; 32]);
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_records_by_parent_ids")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_records":[]}"#)
+            .create_async()
+            .await;
+
+        let client = CoinsetClient::new(server.url());
+        let err = fetch_latest_vault(&client, launcher_id, TreeHash::new([0x22; 32]))
+            .await
+            .expect_err("missing launcher child");
+        assert!(matches!(err, SignerError::VaultSingletonNotFound));
+    }
+
+    #[tokio::test]
+    async fn fetch_latest_vault_builds_eve_proof_when_parent_is_launcher() {
+        let launcher_id = Bytes32::new([0x11; 32]);
+        let singleton_ph = hex32(0x22);
+        let leaf_parent = hex32(0x11);
+        let leaf_ph = hex32(0x33);
+        let parent_parent = hex32(0x44);
+        let launcher_child = coin_record_json(&hex32(0x11), &singleton_ph, 1, 1);
+        let leaf = coin_record_json(&leaf_parent, &leaf_ph, 2, 100);
+        let parent = coin_record_json(&parent_parent, &singleton_ph, 1, 99);
+
+        let mut server = mockito::Server::new_async().await;
+        let _parent_ids = server
+            .mock("POST", "/get_coin_records_by_parent_ids")
+            .with_status(200)
+            .with_body(format!(
+                r#"{{"success":true,"coin_records":[{launcher_child}]}}"#
+            ))
+            .create_async()
+            .await;
+        let _puzzle_hash = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(format!(r#"{{"success":true,"coin_records":[{leaf}]}}"#))
+            .create_async()
+            .await;
+        let _parent = server
+            .mock("POST", "/get_coin_record_by_name")
+            .with_status(200)
+            .with_body(format!(r#"{{"success":true,"coin_record":{parent}}}"#))
+            .create_async()
+            .await;
+
+        let client = CoinsetClient::new(server.url());
+        let vault = fetch_latest_vault(&client, launcher_id, TreeHash::new([0x55; 32]))
+            .await
+            .expect("vault");
+        assert_eq!(vault.info.launcher_id, launcher_id);
+        assert_eq!(vault.coin.amount, 2);
+        assert!(matches!(vault.proof, chia_puzzle_types::Proof::Eve(_)));
+    }
+}

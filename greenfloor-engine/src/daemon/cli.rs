@@ -98,7 +98,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
         state_dir,
         allowed_key_ids,
     };
-    run_daemon_loop(request).await
+    Box::pin(run_daemon_loop(request)).await
 }
 
 /// Run daemon cycle once from json.
@@ -125,7 +125,7 @@ fn parse_daemon_run_once_request(value: Value) -> SignerResult<DaemonRunOnceRequ
 pub async fn run_daemon_loop_from_json(value: Value) -> SignerResult<i32> {
     let request: DaemonLoopRequest =
         serde_json::from_value(value).map_err(|err| SignerError::Other(err.to_string()))?;
-    run_daemon_loop(request).await
+    Box::pin(run_daemon_loop(request)).await
 }
 
 #[derive(Debug, Args)]
@@ -155,4 +155,51 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
         crate::cli_util::print_json_value(&encoded, true)?;
     }
     Ok(response.exit_code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_daemon_run_once_request, parse_key_ids, DaemonRunOnceRequest};
+    use crate::daemon::watchlist::cache::CoinWatchlistCache;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[test]
+    fn parse_key_ids_splits_and_trims_csv_values() {
+        assert_eq!(
+            parse_key_ids(" key-a , ,key-b"),
+            vec!["key-a".to_string(), "key-b".to_string()]
+        );
+        assert!(parse_key_ids(" , ").is_empty());
+    }
+
+    #[test]
+    fn parse_daemon_run_once_request_reads_testnet_markets_path() {
+        let value = json!({
+            "program_path": "config/program.yaml",
+            "markets_path": "config/markets.yaml",
+            "testnet_markets_path": "/tmp/testnet-markets.yaml",
+            "coinset_base_url": "https://api.coinset.org",
+            "state_dir": "/tmp/state",
+        });
+        let request = parse_daemon_run_once_request(value).expect("parse request");
+        assert_eq!(
+            request.testnet_markets_path.as_deref(),
+            Some(std::path::Path::new("/tmp/testnet-markets.yaml"))
+        );
+    }
+
+    #[test]
+    fn daemon_run_once_request_json_attaches_watchlist_cache() {
+        let value = json!({
+            "program_path": "config/program.yaml",
+            "markets_path": "config/markets.yaml",
+            "coinset_base_url": "https://api.coinset.org",
+            "state_dir": "/tmp/state",
+        });
+        let watchlist = CoinWatchlistCache::new();
+        let request =
+            DaemonRunOnceRequest::from_json_value(value, watchlist.clone()).expect("request");
+        assert!(Arc::ptr_eq(&request.coin_watchlist, &watchlist));
+    }
 }

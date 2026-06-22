@@ -226,4 +226,45 @@ mod tests {
             _ => panic!("expected verify failure"),
         }
     }
+
+    #[tokio::test]
+    async fn create_offer_for_post_rejects_empty_offer_text() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.test_overrides.offer_text = Some(String::new());
+        let request = unused_post_iteration_request(false, None);
+
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now())
+            .await
+            .expect("iteration result")
+            .expect_err("empty offer");
+
+        match outcome {
+            PostIterationOutcome::Failure(failure) => {
+                assert_eq!(failure.error, "signer_offer_text_unavailable");
+            }
+            _ => panic!("expected empty-offer failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_post_iteration_blocks_when_bootstrap_not_ready() {
+        let ctx = sample_resolved_build_and_post_context();
+        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+
+        let (_bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
+            .await
+            .expect("iteration");
+
+        match outcome {
+            PostIterationOutcome::Failure(failure) => {
+                assert!(
+                    failure.error.contains("missing_sell_ladder"),
+                    "unexpected error: {}",
+                    failure.error
+                );
+                assert!(failure.create_phase_ms.is_none());
+            }
+            _ => panic!("expected bootstrap block failure"),
+        }
+    }
 }

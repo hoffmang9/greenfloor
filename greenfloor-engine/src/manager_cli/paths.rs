@@ -2,42 +2,36 @@
 
 use std::path::{Path, PathBuf};
 
-pub use crate::paths::{default_testnet_markets_config_path, expand_home, resolve_repo_root};
+pub use crate::paths::{
+    default_home_or_repo_config_path, default_testnet_markets_config_path, expand_home,
+    resolve_config_path_from_optional, resolve_repo_root, resolve_vault_scan_testnet_markets_path,
+};
+
+const HOME_PROGRAM_CONFIG: &str = "~/.greenfloor/config/program.yaml";
+const REPO_PROGRAM_CONFIG: &str = "config/program.yaml";
+const HOME_MARKETS_CONFIG: &str = "~/.greenfloor/config/markets.yaml";
+const REPO_MARKETS_CONFIG: &str = "config/markets.yaml";
+const HOME_CATS_CONFIG: &str = "~/.greenfloor/config/cats.yaml";
+const REPO_CATS_CONFIG: &str = "config/cats.yaml";
 
 #[must_use]
 pub fn default_program_config_path() -> PathBuf {
-    let home_default = expand_home(Path::new("~/.greenfloor/config/program.yaml"));
-    if home_default.exists() {
-        return home_default;
-    }
-    PathBuf::from("config/program.yaml")
+    default_home_or_repo_config_path(HOME_PROGRAM_CONFIG, REPO_PROGRAM_CONFIG)
 }
 
 #[must_use]
 pub fn program_config_path_from_optional(raw: &str) -> PathBuf {
-    if raw.trim().is_empty() {
-        default_program_config_path()
-    } else {
-        expand_home(Path::new(raw.trim()))
-    }
+    resolve_config_path_from_optional(raw, default_program_config_path)
 }
 
 #[must_use]
 pub fn default_markets_config_path() -> PathBuf {
-    let home_default = expand_home(Path::new("~/.greenfloor/config/markets.yaml"));
-    if home_default.exists() {
-        return home_default;
-    }
-    PathBuf::from("config/markets.yaml")
+    default_home_or_repo_config_path(HOME_MARKETS_CONFIG, REPO_MARKETS_CONFIG)
 }
 
 #[must_use]
 pub fn default_cats_config_path() -> PathBuf {
-    let home_default = expand_home(Path::new("~/.greenfloor/config/cats.yaml"));
-    if home_default.exists() {
-        return home_default;
-    }
-    PathBuf::from("config/cats.yaml")
+    default_home_or_repo_config_path(HOME_CATS_CONFIG, REPO_CATS_CONFIG)
 }
 
 #[must_use]
@@ -56,11 +50,10 @@ pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
 #[must_use]
 pub fn default_vault_scan_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
     if let Some(repo_root) = resolve_repo_root() {
-        let testnet = repo_root.join("config/testnet-markets.yaml");
         return (
             repo_root.join("config/cats.yaml"),
             repo_root.join("config/markets.yaml"),
-            testnet.exists().then_some(testnet),
+            resolve_vault_scan_testnet_markets_path(),
         );
     }
     default_metadata_config_paths()
@@ -139,8 +132,9 @@ mod tests {
             find_repo_root_from(&engine_dir),
             Some(repo_root.to_path_buf())
         );
-        let (cats, markets, _) = default_vault_scan_metadata_config_paths();
+        let (cats, markets, testnet) = default_vault_scan_metadata_config_paths();
         assert_eq!(cats, repo_root.join("config/cats.yaml"));
         assert_eq!(markets, repo_root.join("config/markets.yaml"));
+        assert_eq!(testnet, resolve_vault_scan_testnet_markets_path());
     }
 }

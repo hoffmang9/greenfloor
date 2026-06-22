@@ -365,4 +365,55 @@ mod tests {
             &[0]
         ));
     }
+
+    #[tokio::test]
+    async fn classify_coin_rows_applies_cached_cat_metadata_without_network() {
+        use std::collections::BTreeMap;
+
+        use crate::coinset::DirectCoinsetScanClient;
+
+        let coin_id = "b".repeat(64);
+        let asset_id = "a".repeat(64);
+        let mut rows = HashMap::from([(
+            coin_id.clone(),
+            CoinRow {
+                coin_id: coin_id.clone(),
+                puzzle_hash: "c".repeat(64),
+                parent_coin_info: String::new(),
+                amount: 1000,
+                confirmed_block_index: 1,
+                spent_block_index: 0,
+                discovered_nonces: vec![99],
+                discovered_by_puzzle_hash: true,
+                discovered_by_hint: false,
+                kind: CoinKind::Unknown,
+                cat_asset_id: None,
+                cat_symbols: vec![],
+            },
+        )]);
+        let mut caches = CatDetectCaches::new(
+            HashMap::from([(coin_id.clone(), asset_id.clone())]),
+            HashMap::new(),
+        );
+        let scanner = DirectCoinsetScanClient::new("mainnet", None);
+        let asset_id_to_symbols = BTreeMap::from([(asset_id.clone(), vec!["TST".to_string()])]);
+
+        classify_coin_rows(
+            &scanner,
+            &mut rows,
+            &HashMap::new(),
+            &asset_id_to_symbols,
+            32,
+            &mut caches,
+        )
+        .await
+        .expect("classify");
+
+        assert_eq!(rows[&coin_id].kind, CoinKind::Cat);
+        assert_eq!(
+            rows[&coin_id].cat_asset_id.as_deref(),
+            Some(asset_id.as_str())
+        );
+        assert_eq!(rows[&coin_id].cat_symbols, vec!["TST".to_string()]);
+    }
 }

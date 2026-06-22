@@ -16,6 +16,8 @@ mod dispatch_test_controls;
 mod inventory_phase;
 mod lock;
 mod logging;
+#[cfg(test)]
+mod loop_harness;
 mod market_context;
 mod market_cycle;
 mod market_dispatch;

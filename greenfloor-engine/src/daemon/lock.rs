@@ -9,6 +9,7 @@ use crate::error::{SignerError, SignerResult};
 
 const LOCK_FILENAME: &str = "daemon.lock";
 
+#[derive(Debug)]
 pub struct DaemonInstanceLock {
     lock_file: File,
     path: PathBuf,
@@ -119,3 +120,28 @@ fn lock_exclusive_nonblocking(_file: &File) -> Result<(), std::io::Error> {
 
 #[cfg(not(unix))]
 fn unlock(_file: &File) {}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonInstanceLock;
+    use crate::error::SignerError;
+
+    #[test]
+    fn acquire_writes_lock_metadata_and_releases_on_drop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = DaemonInstanceLock::acquire(dir.path(), "once").expect("acquire");
+        let metadata = std::fs::read_to_string(lock.path()).expect("read lock");
+        assert!(metadata.contains("\"mode\":\"once\""));
+        assert!(metadata.contains("\"pid\":"));
+        drop(lock);
+        assert!(dir.path().join("daemon.lock").exists());
+    }
+
+    #[test]
+    fn second_acquire_in_same_process_returns_daemon_already_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _first = DaemonInstanceLock::acquire(dir.path(), "loop").expect("first acquire");
+        let err = DaemonInstanceLock::acquire(dir.path(), "loop").expect_err("contention");
+        assert!(matches!(err, SignerError::DaemonAlreadyRunning { .. }));
+    }
+}

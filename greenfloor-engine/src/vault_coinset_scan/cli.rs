@@ -8,10 +8,9 @@ use crate::cli_util::{optional_trimmed, print_json_value};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::{
-    default_testnet_markets_config_path, default_vault_scan_metadata_config_paths, optional_path,
-    program_config_path_from_optional,
+    default_vault_scan_metadata_config_paths, optional_path, program_config_path_from_optional,
 };
-use crate::paths::expand_home;
+use crate::paths::{expand_home, resolve_config_path_from_optional};
 use crate::vault_coinset_scan::launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, ResolveLauncherIdParams,
 };
@@ -149,17 +148,9 @@ impl VaultCoinsetScanCliArgs {
         let (default_cats, default_markets, default_testnet) =
             default_vault_scan_metadata_config_paths();
         (
-            if self.cats_config.trim().is_empty() {
-                default_cats
-            } else {
-                expand_home(std::path::Path::new(self.cats_config.trim()))
-            },
-            if self.markets_config.trim().is_empty() {
-                default_markets
-            } else {
-                expand_home(std::path::Path::new(self.markets_config.trim()))
-            },
-            default_testnet.or_else(default_testnet_markets_config_path),
+            resolve_config_path_from_optional(&self.cats_config, || default_cats),
+            resolve_config_path_from_optional(&self.markets_config, || default_markets),
+            default_testnet,
         )
     }
 
@@ -329,5 +320,16 @@ mod tests {
             results.get(&missing.display().to_string()),
             Some(&"not_found".to_string())
         );
+    }
+
+    #[test]
+    fn metadata_config_paths_use_vault_scan_defaults() {
+        let args = VaultCoinsetScanCliArgs::try_parse_from(["scan"]).expect("parse defaults");
+        let (default_cats, default_markets, default_testnet) =
+            default_vault_scan_metadata_config_paths();
+        let (cats, markets, testnet) = args.metadata_config_paths();
+        assert_eq!(cats, default_cats);
+        assert_eq!(markets, default_markets);
+        assert_eq!(testnet, default_testnet);
     }
 }
