@@ -2,10 +2,10 @@
 
 use serde_json::{json, Value};
 
-use crate::coinset::parse::{chunk_values, coin_id_from_record, to_coinset_hex, u64_from_value};
-use crate::coinset::{
-    post_coinset_coin_records, post_coinset_record, resolve_direct_client, with_script_retries,
-};
+use super::api::{post_coinset_coin_records, post_coinset_record};
+use super::direct_api::resolve_direct_client;
+use super::parse::{chunk_values, coin_id_from_record, to_coinset_hex, u64_from_value};
+use super::retry::with_script_retries;
 use crate::error::SignerResult;
 use crate::hex::hex_to_bytes32;
 

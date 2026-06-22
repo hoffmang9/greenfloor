@@ -2,10 +2,9 @@ use chia_protocol::Bytes32;
 use chia_puzzle_types::cat::CatArgs;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
+use futures_util::future::try_join_all;
 
-use super::super::parse::{coin_records_from_response, unspent_coin_records};
-use super::puzzle_hash::decode_receive_address;
-use super::resolve;
+use super::{coin_records_from_response, decode_receive_address, resolve, unspent_coin_records};
 use crate::error::SignerResult;
 
 async fn unspent_cats_from_records(
@@ -49,15 +48,22 @@ pub async fn list_unspent_cats_by_ids(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],
 ) -> SignerResult<Vec<Cat>> {
-    let mut records = Vec::with_capacity(coin_ids.len());
-    for coin_id in coin_ids {
-        let response = client
-            .get_coin_record_by_name(*coin_id)
-            .await
-            .map_err(crate::error::SignerError::from)?;
-        if let Some(record) = response.coin_record {
-            records.push(record);
-        }
+    if coin_ids.is_empty() {
+        return Ok(Vec::new());
     }
+    let responses = try_join_all(coin_ids.iter().copied().map(|coin_id| {
+        let client = client.clone();
+        async move {
+            client
+                .get_coin_record_by_name(coin_id)
+                .await
+                .map_err(crate::error::SignerError::from)
+        }
+    }))
+    .await?;
+    let records = responses
+        .into_iter()
+        .filter_map(|response| response.coin_record)
+        .collect();
     unspent_cats_from_records(client, records).await
 }

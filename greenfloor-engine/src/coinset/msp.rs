@@ -2,7 +2,8 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use serde::Deserialize;
 
-use crate::coinset::is_xch_like_asset;
+use super::asset::is_xch_like_asset;
+use super::direct_api;
 use crate::error::{SignerError, SignerResult};
 
 pub const DEFAULT_MSP_BASE_URL: &str = "https://api-msp.coinset.org";
@@ -25,7 +26,7 @@ impl MspCoinset {
     ///
     /// Returns an error if the operation fails.
     pub fn for_network(network: &str, base_url: Option<&str>) -> SignerResult<Self> {
-        let network = crate::coinset::direct_api::normalize_coinset_network(network);
+        let network = direct_api::normalize_coinset_network(network);
         let url = base_url
             .map(str::trim)
             .filter(|value| !value.is_empty())
