@@ -61,11 +61,11 @@ pub fn load_markets_config_with_overlay(
     base_path: &Path,
     overlay_path: Option<&Path>,
 ) -> SignerResult<MarketsConfig> {
-    let mut raw = read_yaml_mapping(base_path)?;
+    let mut raw = super::yaml_file::read_yaml_file_labeled(base_path, "markets config")?;
     validate_base_markets_no_testnet_receive_addresses(base_path, &raw)?;
     if let Some(overlay) = overlay_path {
         if overlay.exists() {
-            let overlay_raw = read_yaml_mapping(overlay)?;
+            let overlay_raw = super::yaml_file::read_yaml_file_labeled(overlay, "markets config")?;
             let base_markets = raw
                 .get("markets")
                 .and_then(Value::as_array)
@@ -121,21 +121,6 @@ fn validate_base_markets_no_testnet_receive_addresses(
         path.display(),
         bad_ids.join(",")
     )))
-}
-
-fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!(
-            "failed to read markets config {}: {err}",
-            path.display()
-        ))
-    })?;
-    serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!(
-            "failed to parse markets config {}: {err}",
-            path.display()
-        ))
-    })
 }
 
 /// Parse markets config.

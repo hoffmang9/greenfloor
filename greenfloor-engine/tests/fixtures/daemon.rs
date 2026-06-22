@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use greenfloor_engine::daemon::run_daemon_cycle_once_from_json;
-use greenfloor_engine::daemon::DaemonRunOnceRequestBody;
+use greenfloor_engine::daemon::run_daemon_cycle_once;
+use greenfloor_engine::daemon::watchlist::CoinWatchlistCache;
+use greenfloor_engine::daemon::DaemonRunOnceRequest;
 use serde_json::{json, Value};
 
 #[path = "program.rs"]
@@ -30,14 +31,16 @@ mod env_fixture;
 
 use env_fixture::EnvRestoreGuard;
 
-pub async fn run_daemon_once_async(request: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
+pub async fn run_daemon_once_async(request_json: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
     let _env = EnvRestoreGuard::set(env);
-    let body: DaemonRunOnceRequestBody =
-        serde_json::from_value(request.clone()).expect("parse daemon once request");
-    body.test_controls
+    let request =
+        DaemonRunOnceRequest::from_json_value(request_json.clone(), CoinWatchlistCache::new())
+            .expect("parse daemon once request");
+    request
+        .test_controls
         .ensure_allowed()
         .expect("daemon test controls");
-    let response = run_daemon_cycle_once_from_json(request.clone())
+    let response = run_daemon_cycle_once(&request)
         .await
         .expect("daemon once in process");
     let response_json = serde_json::to_value(&response).expect("encode daemon once response");

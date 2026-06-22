@@ -28,7 +28,7 @@ pub struct StaleSweepHit {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StaleSweepProgress {
     pub checked_offer_count: usize,
     pub requeue_market_ids: Vec<String>,

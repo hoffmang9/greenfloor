@@ -98,6 +98,29 @@ pub fn optional_str(map: &serde_json::Map<String, Value>, key: &str, default: &s
         .map_or_else(|| default.to_string(), str::to_string)
 }
 
+pub fn optional_str_section(
+    section: Option<&serde_json::Map<String, Value>>,
+    key: &str,
+    default: &str,
+) -> String {
+    match section {
+        Some(map) => optional_str(map, key, default),
+        None => default.to_string(),
+    }
+}
+
+pub fn optional_trimmed_str_section(
+    section: Option<&serde_json::Map<String, Value>>,
+    key: &str,
+) -> String {
+    section
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string()
+}
+
 pub fn optional_i64(
     map: &serde_json::Map<String, Value>,
     key: &str,

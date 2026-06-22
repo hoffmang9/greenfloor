@@ -7,6 +7,7 @@ mod program;
 mod program_parse;
 mod signer;
 mod yaml_fields;
+pub(crate) mod yaml_file;
 
 pub use cat_ticker_index::{
     build_cat_ticker_index, build_cat_ticker_index_lenient, normalize_label, CatTickerIndex,

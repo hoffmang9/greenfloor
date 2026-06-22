@@ -2,11 +2,12 @@
 name: CI
 
 "on":
-  # opened/reopened/ready_for_review: first CI when a PR is created or marked ready.
-  # Branch updates use push below so workflow-only commits still trigger CI and we
-  # avoid duplicate push + pull_request synchronize runs on every commit.
+  # Branch pushes run CI for every commit (including before a PR exists). When the PR is
+  # opened, GitHub attaches those commit checks to the PR — do not also run on opened
+  # (that duplicates push and cancel-in-progress kills the in-flight push run).
+  # reopened / ready_for_review cover draft→ready and re-open without a new push.
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [reopened, ready_for_review]
   push:
     branches:
       - main
@@ -14,7 +15,7 @@ name: CI
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:

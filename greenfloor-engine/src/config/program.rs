@@ -175,12 +175,7 @@ pub use super::program_parse::parse_program_config;
 ///
 /// Returns an error if the operation fails.
 pub fn read_program_yaml(path: &Path) -> SignerResult<Value> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read config {}: {err}", path.display()))
-    })?;
-    serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })
+    super::yaml_file::read_yaml_file_labeled(path, "config")
 }
 
 /// Load program config.
