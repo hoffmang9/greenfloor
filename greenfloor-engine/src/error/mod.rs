@@ -316,4 +316,25 @@ mod tests {
                 .is_parallel_dispatch_transient()
         );
     }
+
+    #[test]
+    fn parallel_dispatch_transient_rejects_non_transient_variants() {
+        assert!(
+            !SignerError::Driver("invalid mod hash".to_string()).is_parallel_dispatch_transient()
+        );
+        assert!(!SignerError::InsufficientCatCoins.is_parallel_dispatch_transient());
+    }
+
+    #[test]
+    fn driver_error_maps_chia_driver_failures() {
+        use super::driver_error;
+        use chia_sdk_driver::DriverError;
+
+        let mapped = driver_error(&DriverError::InvalidModHash);
+        assert!(matches!(mapped, SignerError::Driver(_)));
+        assert!(mapped.to_string().contains("invalid mod hash"));
+
+        let from_impl: SignerError = DriverError::InvalidModHash.into();
+        assert_eq!(from_impl.to_string(), mapped.to_string());
+    }
 }

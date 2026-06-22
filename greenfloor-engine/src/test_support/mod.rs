@@ -8,8 +8,12 @@ pub mod golden;
 #[cfg(test)]
 pub mod injections;
 #[cfg(test)]
+pub mod market_config;
+#[cfg(test)]
 pub mod minimal_program;
 #[cfg(test)]
 pub mod noop_coinset;
+#[cfg(test)]
+pub mod signer_config;
 #[cfg(test)]
 pub mod simulator;

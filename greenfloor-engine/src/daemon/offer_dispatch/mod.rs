@@ -3,7 +3,6 @@
 mod coordinator;
 mod managed_post;
 mod parallel;
-mod policy;
 mod reservation_ctx;
 mod sequential;
 #[cfg(test)]
@@ -18,15 +17,35 @@ use serde_json::json;
 use tracing::Level;
 
 use crate::async_boundary::StrategyDispatchFuture;
-use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
+use crate::config::{
+    is_signer_execution_soft_skip, signer_execution_skip_reason, ManagerProgramConfig, MarketConfig,
+};
 use crate::cycle::{expand_planned_actions, PlannedAction};
 
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
 use crate::storage::SqliteStore;
-use policy::parallel_managed_dispatch_enabled;
 
 use super::market_context::MarketCycleContext;
+
+#[must_use]
+fn parallel_managed_dispatch_enabled(program: &ManagerProgramConfig) -> bool {
+    program.runtime_offer_parallelism_enabled && !program.runtime_dry_run
+}
+
+#[must_use]
+pub(super) fn parallel_max_workers(submission_count: usize, configured_max: usize) -> usize {
+    submission_count.min(configured_max.max(1))
+}
+
+#[must_use]
+pub(super) fn reservation_release_status(is_executed: bool) -> &'static str {
+    if is_executed {
+        "released_success"
+    } else {
+        "released_failed"
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {

@@ -7,6 +7,8 @@ mod split;
 mod tests;
 
 pub use items::{CoinOpExecItem, CoinOpExecutionResult};
+#[cfg(test)]
+pub use runner::execute_managed_coin_op_plans_with_test_overrides;
 pub use runner::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
 };

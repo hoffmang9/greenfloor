@@ -10,7 +10,7 @@ use crate::cycle::{
     SpendableAssetProfile, StrategyActionSellCountInput,
 };
 
-use super::policy::{parallel_max_workers, reservation_release_status};
+use super::{parallel_max_workers, reservation_release_status};
 use crate::daemon::market_context::MarketCycleContext;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
