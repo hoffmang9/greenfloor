@@ -22,6 +22,7 @@ impl std::error::Error for ReconcileStateError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileState {
     Lifecycle(OfferLifecycleState),
+    CancelSubmitted,
     Cancelled,
     UnsupportedVenue,
 }
@@ -36,6 +37,9 @@ impl ReconcileState {
         let trimmed = raw.trim();
         if trimmed == "cancelled" {
             return Ok(Self::Cancelled);
+        }
+        if trimmed == "cancel_submitted" {
+            return Ok(Self::CancelSubmitted);
         }
         if trimmed == STATE_UNSUPPORTED_VENUE {
             return Ok(Self::UnsupportedVenue);
@@ -56,6 +60,7 @@ impl ReconcileState {
     pub fn as_str(&self) -> Cow<'_, str> {
         match self {
             Self::Lifecycle(state) => Cow::Borrowed(state.as_str()),
+            Self::CancelSubmitted => Cow::Borrowed("cancel_submitted"),
             Self::Cancelled => Cow::Borrowed("cancelled"),
             Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
         }
@@ -71,6 +76,10 @@ impl ReconcileState {
 
     pub(crate) fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
+    }
+
+    pub(crate) fn is_cancel_submitted(&self) -> bool {
+        matches!(self, Self::CancelSubmitted)
     }
 }
 

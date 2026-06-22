@@ -38,6 +38,8 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
         }
         ManagerCommands::OffersCancel {
             offer_id,
+            offer_file,
+            market_id,
             cancel_open,
             venue,
         } => {
@@ -45,6 +47,8 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                 ctx,
                 OffersCancelCliArgs {
                     offer_id,
+                    offer_file,
+                    market_id,
                     cancel_open,
                     venue,
                 },

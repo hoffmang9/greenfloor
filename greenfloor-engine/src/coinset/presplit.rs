@@ -9,12 +9,30 @@ use chia_sdk_driver::Cat;
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
-/// Fetch presplit cat by id.
+/// Fetch an unspent offer-input CAT by coin id, with optional inner-puzzle fallback.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn fetch_presplit_cat_by_id(
+pub async fn fetch_unspent_offer_input_cat(
+    client: &CoinsetClient,
+    coin_id: Bytes32,
+    inner_puzzle_hash: Option<Bytes32>,
+    amount: Option<u64>,
+) -> SignerResult<Cat> {
+    match fetch_unspent_offer_input_cat_by_id(client, coin_id).await {
+        Ok(cat) => Ok(cat),
+        Err(SignerError::PresplitCoinNotFound) => {
+            let (Some(inner_puzzle_hash), Some(amount)) = (inner_puzzle_hash, amount) else {
+                return Err(SignerError::PresplitCoinNotFound);
+            };
+            fetch_unspent_offer_input_cat_by_inner_puzzle(client, inner_puzzle_hash, amount)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn fetch_unspent_offer_input_cat_by_id(
     client: &CoinsetClient,
     coin_id: Bytes32,
 ) -> SignerResult<Cat> {
@@ -31,6 +49,14 @@ pub async fn fetch_presplit_cat_by_id(
     cats::cat_from_record(client, &record)
         .await?
         .ok_or(SignerError::PresplitCoinNotFound)
+}
+
+fn fetch_unspent_offer_input_cat_by_inner_puzzle(
+    _client: &CoinsetClient,
+    _inner_puzzle_hash: Bytes32,
+    _amount: u64,
+) -> SignerResult<Cat> {
+    Err(SignerError::PresplitCoinNotFound)
 }
 
 /// Wait for unspent cat.

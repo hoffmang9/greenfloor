@@ -16,6 +16,7 @@ pub mod plan;
 pub mod presplit;
 pub mod pricing;
 pub mod publish;
+pub mod reclaim;
 pub mod request;
 pub mod types;
 

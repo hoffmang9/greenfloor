@@ -83,8 +83,17 @@ Optional developer bootstrap for testnet markets:
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
 - Cancel offers when policy requires it (on-chain via Coinset; Dexie is only used to fetch the offer file):
-  - `greenfloor-manager offers-cancel --offer-id <id>`
+  - `greenfloor-manager offers-cancel --offer-id <id>` (Dexie fetch; DB row optional)
+  - Cancel from local offer file: `greenfloor-manager offers-cancel --offer-file <path-or-offer1>`
   - Cancel all open offers tracked in state DB: `greenfloor-manager offers-cancel --cancel-open`
+  - When canceling by id without a DB row, pass `--market-id <id>` so post-cancel state uses the correct market
+  - JSON output (`--json`): `selected_count`, `submitted_count` (successful on-chain submits),
+    `failed_count`, and per-item `result.operation_id` when submit succeeds.
+  - Successful submit sets DB state to `cancel_submitted` (not `cancelled`); run
+    `offers-reconcile` or wait for daemon cycles to promote to `cancelled` after chain/Dexie
+    confirmation.
+  - `--cancel-open` includes all `open` and `pending_visibility` rows (paginated, not recency-capped)
+    and skips offers already in `cancel_submitted`.
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 
@@ -142,7 +151,12 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - `reservation_expired`: stale reservation leases reclaimed at cycle start.
   - stale-cleanup now also prunes older inactive reservation rows to control ledger growth.
 - `offer_cancel_policy`: cancel eligibility and triggered/non-triggered reasons.
-- `offer_lifecycle_transition`: offer state transitions from Dexie status.
+  - On successful on-chain submit, item `status` is `cancel_submitted` with
+    `reason: "cancel_submitted_on_strong_unstable_move"` and `operation_id` (cancel tx id).
+  - `executed_count` in the policy payload counts successful submits for the cycle (not
+    confirmed cancels).
+- `offer_lifecycle_transition`: offer state transitions from Dexie status and Coinset signals
+  (includes `cancel_submitted` → `cancelled`).
 - `coin_ops_plan` and `coin_op_*`: split/combine planning and execution outcomes.
 - `taker_detection`: canonical taker transition events produced by `offers-reconcile`.
 
@@ -152,7 +166,11 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
 - **Offer backend:** `build-and-post-offer` and daemon managed post require vault KMS signer config (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0013.
 - **Dexie post issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
-- **Offer cancel failures:** look for `offer_cancel_policy` items with `cancel_failed:*`, `offer_cancel_dexie_offer_not_found`, or `offer_cancel_input_coin_already_spent`.
+- **Offer cancel failures:** look for `offer_cancel_policy` items with `cancel_failed:*`,
+  `offer_cancel_dexie_offer_not_found`, or `offer_cancel_input_coin_already_spent`.
+  - A row stuck in `cancel_submitted` means submit succeeded but confirmation is pending;
+    check Coinset mempool/confirmation and Dexie status before retrying cancel.
+  - `submitted_count` in `offers-cancel` JSON counts submits, not confirmed cancels.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:
   - `error: "coinset_fee_preflight_failed:endpoint_validation_failed"` means endpoint routing/configuration failure (invalid/misrouted `GREENFLOOR_COINSET_BASE_URL`, wrong-network endpoint, DNS/TLS/connectivity issues).

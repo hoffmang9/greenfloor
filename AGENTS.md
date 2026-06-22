@@ -31,6 +31,7 @@ Severity tags:
 - `[SHOULD]` When debugging, prefer the existing log pipeline: set the host log level to `DEBUG` in `program.yaml` and use the service logs instead of adding ad hoc debug code or one-off debug files.
 - `[MUST]` Do not create new markdown, scripts, or notes outside `docs/`, `.cursor/`, or paths the user requested. Prefer editing existing project files.
 - `[SHOULD]` Offer cancellation is exceptional (stable-vs-unstable only, and only on strong unstable-side moves).
+- `[SHOULD]` On-chain cancel submit records `cancel_submitted`; reconcile promotes to `cancelled` on confirmation — do not treat successful submit as terminal cancel.
 - `[MUST]` All posted offers must include expiry; stable-vs-unstable pairs should use shorter expiries.
 
 ## Architecture Boundaries

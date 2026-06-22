@@ -5,13 +5,14 @@ accepted decision** when onboarding.
 
 ## Current (operator + engine)
 
-| ADR                                                              | Topic                                                              |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [0014](decisions/0014-offer-publish-module-decomposition.md)     | **Offer publish decomposition** — bootstrap gate + publish assets  |
-| [0013](decisions/0013-rust-cli-daemon-native-cutover.md)         | **Native Rust CLI/daemon** — production operator path              |
-| [0010](decisions/0010-rust-engine-crate-naming.md)               | Crate and module naming (`greenfloor-engine`, `greenfloor_engine`) |
-| [0007](decisions/0007-rust-signer-and-coinset-io.md)             | Vault KMS signing and Coinset IO in Rust                           |
-| [0003](decisions/0003-parallel-offer-reservation-coordinator.md) | Parallel managed-post reservation leases                           |
+| ADR                                                              | Topic                                                                   |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [0015](decisions/0015-on-chain-offer-cancel.md)                  | **On-chain offer cancel** — reclaim spend, `cancel_submitted` lifecycle |
+| [0014](decisions/0014-offer-publish-module-decomposition.md)     | **Offer publish decomposition** — bootstrap gate + publish assets       |
+| [0013](decisions/0013-rust-cli-daemon-native-cutover.md)         | **Native Rust CLI/daemon** — production operator path                   |
+| [0010](decisions/0010-rust-engine-crate-naming.md)               | Crate and module naming (`greenfloor-engine`, `greenfloor_engine`)      |
+| [0007](decisions/0007-rust-signer-and-coinset-io.md)             | Vault KMS signing and Coinset IO in Rust                                |
+| [0003](decisions/0003-parallel-offer-reservation-coordinator.md) | Parallel managed-post reservation leases                                |
 
 ## Superseded ADRs (removed from tree; see git history)
 

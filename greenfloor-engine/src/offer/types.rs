@@ -165,6 +165,12 @@ impl std::fmt::Display for OfferExecutionMode {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PresplitCancelMetadata {
+    pub input_coin_id: String,
+    pub fixed_delegated_puzzle_hash: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CreateOfferResult {
     pub offer: String,
@@ -177,6 +183,8 @@ pub struct CreateOfferResult {
     /// Presplit offer coin ID for presplit-new and presplit-existing paths.
     pub presplit_coin_id: Option<String>,
     pub split_broadcast_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presplit_cancel_metadata: Option<PresplitCancelMetadata>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +207,7 @@ impl CreateOfferResult {
         execution_mode: OfferExecutionMode,
         core: OfferArtifacts,
         presplit: PresplitArtifacts,
+        presplit_cancel_metadata: Option<PresplitCancelMetadata>,
     ) -> Self {
         Self {
             execution_mode,
@@ -209,6 +218,7 @@ impl CreateOfferResult {
             split_spend_bundle_hex: presplit.split_spend_bundle_hex,
             presplit_coin_id: presplit.presplit_coin_id,
             split_broadcast_status: presplit.split_broadcast_status,
+            presplit_cancel_metadata,
         }
     }
 }

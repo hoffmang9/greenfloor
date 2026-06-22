@@ -6,6 +6,7 @@ use clvmr::Allocator;
 
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
+use crate::hex::tree_hash_to_hex;
 use crate::offer::plan::{
     build_offer_payment_bundle, build_offer_request_conditions, plan_presplit_binding,
 };
@@ -15,6 +16,7 @@ use crate::offer::presplit::{
 };
 use crate::offer::types::{
     CreateOfferResult, OfferArtifacts, OfferExecutionMode, OfferInput, PresplitArtifacts,
+    PresplitCancelMetadata,
 };
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::spend::VaultSpendContext;
@@ -96,6 +98,11 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
 
     let presplit_cat =
         resolve_presplit_cat_after_split(coinset, *broadcast_split, predicted_presplit_cat).await?;
+    let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
+    let cancel_metadata = Some(PresplitCancelMetadata {
+        input_coin_id: presplit_coin_id_hex.clone(),
+        fixed_delegated_puzzle_hash: tree_hash_to_hex(binding.fixed_conditions_tree_hash),
+    });
     let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
         presplit_cat,
         vault_ctx.launcher_id,
@@ -120,9 +127,10 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
         },
         PresplitArtifacts {
             split_spend_bundle_hex: Some(split_spend_bundle_hex),
-            presplit_coin_id: Some(hex::encode(presplit_cat.coin.coin_id())),
+            presplit_coin_id: Some(presplit_coin_id_hex),
             split_broadcast_status,
         },
+        cancel_metadata,
     ))
 }
 
@@ -144,7 +152,9 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
         ));
     };
 
-    let presplit_cat = coinset.fetch_presplit_cat_by_id(*presplit_coin_id).await?;
+    let presplit_cat = coinset
+        .fetch_unspent_offer_input_cat(*presplit_coin_id, None, None)
+        .await?;
     validate_existing_presplit_cat(&presplit_cat, offer_asset_id, terms.offer_amount)?;
     let binding = plan_presplit_binding(
         terms,
@@ -154,6 +164,10 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
     )?;
     verify_presplit_cat_offer_binding(&presplit_cat, &binding)?;
     let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
+    let cancel_metadata = Some(PresplitCancelMetadata {
+        input_coin_id: presplit_coin_id_hex.clone(),
+        fixed_delegated_puzzle_hash: tree_hash_to_hex(binding.fixed_conditions_tree_hash),
+    });
     let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
         presplit_cat,
         vault_ctx.launcher_id,
@@ -176,6 +190,7 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
             presplit_coin_id: Some(presplit_coin_id_hex),
             ..PresplitArtifacts::default()
         },
+        cancel_metadata,
     ))
 }
 
@@ -258,6 +273,7 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
                 .collect(),
         },
         PresplitArtifacts::default(),
+        None,
     ))
 }
 

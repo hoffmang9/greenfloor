@@ -127,6 +127,7 @@ async fn publish_created_offer(
         &created.execution_mode,
         ctx,
         request.size_base_units,
+        created.create_result.as_ref(),
     );
     let publish_success = publish.success;
     let result_payload = finalize_publish_payload(
@@ -145,12 +146,14 @@ async fn publish_created_offer(
         },
     );
 
-    Ok(PostIterationOutcome::Success(PostAttemptSuccess {
-        publish_venue: ctx.publish_venue.clone(),
-        result: result_payload,
-        success: publish_success,
-        persist_record,
-    }))
+    Ok(PostIterationOutcome::Success(Box::new(
+        PostAttemptSuccess {
+            publish_venue: ctx.publish_venue.clone(),
+            result: result_payload,
+            success: publish_success,
+            persist_record,
+        },
+    )))
 }
 
 pub(super) async fn run_post_iteration(

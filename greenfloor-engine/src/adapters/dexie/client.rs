@@ -129,27 +129,6 @@ impl DexieClient {
         Ok(object_rows_from_payload(&payload, "tickers"))
     }
 
-    /// Cancel offer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the operation fails.
-    pub async fn cancel_offer(&self, offer_id: &str) -> SignerResult<DexieResponse> {
-        let clean_offer_id = offer_id.trim();
-        if clean_offer_id.is_empty() {
-            return Err(SignerError::Other("offer_id is required".to_string()));
-        }
-        let encoded = urlencoding::encode(clean_offer_id);
-        self.post_json(
-            &format!("/v1/offers/{encoded}/cancel"),
-            json!({"id": clean_offer_id}),
-            20,
-            "dexie_cancel_offer_error",
-        )
-        .await
-        .map(DexieResponse::from_value)
-    }
-
     async fn get_json(
         &self,
         path: &str,

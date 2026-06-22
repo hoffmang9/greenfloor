@@ -23,9 +23,11 @@ pub trait OfferCoinsetBackend {
         inner_puzzle_hash: TreeHash,
     ) -> impl std::future::Future<Output = SignerResult<Vault>> + Send;
 
-    fn fetch_presplit_cat_by_id(
+    fn fetch_unspent_offer_input_cat(
         &self,
         coin_id: Bytes32,
+        inner_puzzle_hash: Option<Bytes32>,
+        amount: Option<u64>,
     ) -> impl std::future::Future<Output = SignerResult<Cat>> + Send;
 
     fn wait_for_unspent_cat(
@@ -65,8 +67,13 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
         vault_fetch::fetch_latest_vault(self.0, launcher_id, inner_puzzle_hash).await
     }
 
-    async fn fetch_presplit_cat_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        presplit::fetch_presplit_cat_by_id(self.0, coin_id).await
+    async fn fetch_unspent_offer_input_cat(
+        &self,
+        coin_id: Bytes32,
+        inner_puzzle_hash: Option<Bytes32>,
+        amount: Option<u64>,
+    ) -> SignerResult<Cat> {
+        presplit::fetch_unspent_offer_input_cat(self.0, coin_id, inner_puzzle_hash, amount).await
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {

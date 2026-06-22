@@ -30,6 +30,34 @@ fn condition_has_offer_expiration(condition: &Condition<NodePtr>) -> bool {
     )
 }
 
+fn expires_at_seconds_from_condition(condition: &Condition<NodePtr>) -> Option<u64> {
+    match condition {
+        Condition::AssertBeforeSecondsAbsolute(seconds) => Some(seconds.seconds),
+        Condition::AssertBeforeSecondsRelative(seconds) => Some(seconds.seconds),
+        _ => None,
+    }
+}
+
+fn parse_expires_at_seconds_from_coin_spend(
+    coin_spend: &chia_protocol::CoinSpend,
+) -> SignerResult<Option<u64>> {
+    let mut allocator = Allocator::new();
+    let puzzle = node_from_bytes(&mut allocator, coin_spend.puzzle_reveal.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let solution = node_from_bytes(&mut allocator, coin_spend.solution.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let output = run_puzzle(&mut allocator, puzzle, solution)
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let conditions = Conditions::<NodePtr>::from_clvm(&allocator, output)
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    for condition in conditions.iter() {
+        if let Some(seconds) = expires_at_seconds_from_condition(condition) {
+            return Ok(Some(seconds));
+        }
+    }
+    Ok(None)
+}
+
 fn coin_spend_has_expiration_condition(
     coin_spend: &chia_protocol::CoinSpend,
 ) -> SignerResult<bool> {
@@ -48,6 +76,34 @@ fn coin_spend_has_expiration_condition(
         }
     }
     Ok(false)
+}
+
+/// Extract offer expiry seconds from a coin spend's emitted conditions.
+///
+/// # Errors
+///
+/// Returns an error if puzzle execution fails.
+pub fn expires_at_seconds_from_coin_spend(
+    coin_spend: &chia_protocol::CoinSpend,
+) -> SignerResult<Option<u64>> {
+    parse_expires_at_seconds_from_coin_spend(coin_spend)
+}
+
+/// Extract offer expiry seconds from the offered coin's spend inside a bundle.
+///
+/// # Errors
+///
+/// Returns an error if the coin spend is missing or puzzle execution fails.
+pub fn expires_at_seconds_from_offer_spend(
+    spend_bundle: &SpendBundle,
+    coin_id: Bytes32,
+) -> SignerResult<Option<u64>> {
+    let coin_spend = spend_bundle
+        .coin_spends
+        .iter()
+        .find(|spend| spend.coin.coin_id() == coin_id)
+        .ok_or(SignerError::OfferCancelNoSpendableInput)?;
+    expires_at_seconds_from_coin_spend(coin_spend)
 }
 
 /// Offer has expiration condition.

@@ -51,11 +51,12 @@ impl StatusClass {
 fn dispatch(
     coinset: CoinsetPresence,
     status: StatusClass,
-    current_is_cancelled: bool,
+    current: &ReconcileState,
 ) -> ReconcileDispatch {
     let confirmed_eligible = coinset.has_confirmed
         && !matches!(status, StatusClass::Known(DEXIE_STATUS_CANCELLED))
-        && !current_is_cancelled;
+        && !current.is_cancelled()
+        && !current.is_cancel_submitted();
     if confirmed_eligible {
         return ReconcileDispatch::CoinsetConfirmed;
     }
@@ -80,7 +81,7 @@ impl ReconcileDispatch {
                 TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
             ),
             Self::CoinsetMempool => {
-                if current_state.is_terminal() {
+                if current_state.is_terminal() || current_state.is_cancel_submitted() {
                     preserve_mempool_observation(current_state)
                 } else {
                     open_signal_transition(
@@ -130,5 +131,5 @@ pub(crate) fn resolve_watched_offer_decision(
         has_mempool: !coinset_mempool_tx_ids.is_empty(),
     };
     let status = StatusClass::from_option(status, !coinset_tx_ids.is_empty());
-    dispatch(coinset, status, current_state.is_cancelled()).apply(current_state)
+    dispatch(coinset, status, current_state).apply(current_state)
 }

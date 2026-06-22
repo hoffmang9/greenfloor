@@ -43,6 +43,46 @@ impl<'a> SimulatorOfferCoinset<'a> {
         }
         Ok(cats)
     }
+
+    fn fetch_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        if let Some(cat) = self
+            .known_cats
+            .lock()
+            .expect("known cats lock")
+            .get(&coin_id)
+            .copied()
+        {
+            return Ok(cat);
+        }
+        fetch_cat_from_sim_by_id(self.chain, coin_id).map_err(SignerError::Other)
+    }
+
+    fn fetch_by_inner_puzzle(&self, inner_puzzle_hash: Bytes32, amount: u64) -> SignerResult<Cat> {
+        let sim = self.chain.sim.lock().expect("sim lock");
+        for cat in self
+            .known_cats
+            .lock()
+            .expect("known cats lock")
+            .values()
+            .copied()
+        {
+            if cat.info.p2_puzzle_hash == inner_puzzle_hash
+                && cat.coin.amount == amount
+                && sim
+                    .coin_state(cat.coin.coin_id())
+                    .is_some_and(|state| state.spent_height.is_none())
+            {
+                return Ok(cat);
+            }
+        }
+        for coin in sim.unspent_coins(self.chain.p2_message_hash, false) {
+            let cat = fetch_cat_from_sim(&sim, coin).map_err(SignerError::Other)?;
+            if cat.info.p2_puzzle_hash == inner_puzzle_hash && cat.coin.amount == amount {
+                return Ok(cat);
+            }
+        }
+        Err(SignerError::PresplitCoinNotFound)
+    }
 }
 
 impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
@@ -58,7 +98,7 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         } else {
             let mut cats = Vec::new();
             for coin_id in explicit_coin_ids {
-                cats.push(self.fetch_presplit_cat_by_id(*coin_id).await?);
+                cats.push(self.fetch_by_id(*coin_id)?);
             }
             cats
         };
@@ -78,21 +118,26 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         .map_err(SignerError::Other)
     }
 
-    async fn fetch_presplit_cat_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        if let Some(cat) = self
-            .known_cats
-            .lock()
-            .expect("known cats lock")
-            .get(&coin_id)
-            .copied()
-        {
-            return Ok(cat);
+    async fn fetch_unspent_offer_input_cat(
+        &self,
+        coin_id: Bytes32,
+        inner_puzzle_hash: Option<Bytes32>,
+        amount: Option<u64>,
+    ) -> SignerResult<Cat> {
+        match self.fetch_by_id(coin_id) {
+            Ok(cat) => Ok(cat),
+            Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
+                let (Some(inner_puzzle_hash), Some(amount)) = (inner_puzzle_hash, amount) else {
+                    return Err(SignerError::PresplitCoinNotFound);
+                };
+                self.fetch_by_inner_puzzle(inner_puzzle_hash, amount)
+            }
+            Err(err) => Err(err),
         }
-        fetch_cat_from_sim_by_id(self.chain, coin_id).map_err(SignerError::Other)
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        self.fetch_presplit_cat_by_id(coin_id).await
+        self.fetch_by_id(coin_id)
     }
 
     async fn broadcast_spend_bundle(&self, spend_bundle: SpendBundle) -> SignerResult<String> {

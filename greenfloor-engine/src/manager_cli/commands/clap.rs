@@ -107,6 +107,10 @@ pub enum ManagerCommands {
     OffersCancel {
         #[arg(long, action = clap::ArgAction::Append)]
         offer_id: Vec<String>,
+        #[arg(long, action = clap::ArgAction::Append, value_name = "PATH_OR_BECH32")]
+        offer_file: Vec<String>,
+        #[arg(long, value_name = "MARKET_ID")]
+        market_id: Option<String>,
         #[arg(long)]
         cancel_open: bool,
         #[arg(long)]

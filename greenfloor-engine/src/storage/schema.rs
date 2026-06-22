@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS offer_state (
   market_id TEXT NOT NULL,
   state TEXT NOT NULL,
   last_seen_status INTEGER NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  presplit_input_coin_id TEXT NULL,
+  fixed_delegated_puzzle_hash TEXT NULL,
+  execution_mode TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS coin_op_ledger (

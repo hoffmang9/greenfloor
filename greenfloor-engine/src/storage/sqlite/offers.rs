@@ -19,17 +19,21 @@ impl SqliteStore {
         self.upsert_offer_state_at(offer_id, market_id, state, last_seen_status, &utcnow_iso())
     }
 
-    /// List open (or pending visibility) offer states for cancel-open flows.
+    /// List a page of open (or pending visibility) offer states.
     ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn list_open_offer_states(&self, limit: usize) -> SignerResult<Vec<OfferStateListRow>> {
+    pub fn list_open_offer_states_page(
+        &self,
+        limit: usize,
+        offset: i64,
+    ) -> SignerResult<Vec<OfferStateListRow>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
         let limit_i64 = i64::try_from(limit).map_err(|_| {
-            SignerError::Other("list_open_offer_states limit exceeds i64 max".to_string())
+            SignerError::Other("list_open_offer_states_page limit exceeds i64 max".to_string())
         })?;
         let mut stmt = self
             .conn
@@ -38,14 +42,14 @@ impl SqliteStore {
                 SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
                 WHERE state IN ('open', 'pending_visibility')
-                ORDER BY updated_at DESC
-                LIMIT ?1
+                ORDER BY offer_id ASC
+                LIMIT ?1 OFFSET ?2
                 ",
             )
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare open offer_state query: {err}"))
             })?;
-        let mut rows = stmt.query(params![limit_i64]).map_err(|err| {
+        let mut rows = stmt.query(params![limit_i64, offset]).map_err(|err| {
             SignerError::Other(format!("failed to query open offer_state: {err}"))
         })?;
         let mut out = Vec::new();
@@ -69,6 +73,35 @@ impl SqliteStore {
             });
         }
         Ok(out)
+    }
+
+    /// List all open (or pending visibility) offer states without recency bias.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_all_open_offer_states(&self) -> SignerResult<Vec<OfferStateListRow>> {
+        const PAGE_SIZE: usize = 1_000;
+        let mut all = Vec::new();
+        let mut offset = 0_i64;
+        loop {
+            let page = self.list_open_offer_states_page(PAGE_SIZE, offset)?;
+            if page.is_empty() {
+                break;
+            }
+            let count = i64::try_from(page.len()).map_err(|_| {
+                SignerError::Other("open offer_state page length exceeds i64 max".to_string())
+            })?;
+            all.extend(page);
+            if usize::try_from(count).map_err(|_| {
+                SignerError::Other("open offer_state page length exceeds usize max".to_string())
+            })? < PAGE_SIZE
+            {
+                break;
+            }
+            offset = offset.saturating_add(count);
+        }
+        Ok(all)
     }
 
     /// List offer states for explicit offer ids (order follows input ids).
@@ -287,21 +320,119 @@ impl SqliteStore {
         last_seen_status: Option<i64>,
         updated_at: &str,
     ) -> SignerResult<()> {
+        self.upsert_offer_state_with_metadata_at(
+            offer_id,
+            market_id,
+            state,
+            last_seen_status,
+            updated_at,
+            None,
+        )
+    }
+
+    /// Upsert offer state and optional presplit cancel metadata captured at post time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn upsert_offer_state_with_metadata_at(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        state: &str,
+        last_seen_status: Option<i64>,
+        updated_at: &str,
+        cancel_metadata: Option<&super::OfferCancelMetadataRow>,
+    ) -> SignerResult<()> {
+        let (presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode) =
+            if let Some(metadata) = cancel_metadata {
+                (
+                    metadata.presplit_input_coin_id.as_deref(),
+                    metadata.fixed_delegated_puzzle_hash.as_deref(),
+                    metadata.execution_mode.as_deref(),
+                )
+            } else {
+                (None, None, None)
+            };
         self.conn
             .execute(
                 r"
-                INSERT INTO offer_state (offer_id, market_id, state, last_seen_status, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5)
+                INSERT INTO offer_state (
+                  offer_id,
+                  market_id,
+                  state,
+                  last_seen_status,
+                  updated_at,
+                  presplit_input_coin_id,
+                  fixed_delegated_puzzle_hash,
+                  execution_mode
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
                   last_seen_status = excluded.last_seen_status,
-                  updated_at = excluded.updated_at
+                  updated_at = excluded.updated_at,
+                  presplit_input_coin_id = COALESCE(excluded.presplit_input_coin_id, offer_state.presplit_input_coin_id),
+                  fixed_delegated_puzzle_hash = COALESCE(excluded.fixed_delegated_puzzle_hash, offer_state.fixed_delegated_puzzle_hash),
+                  execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode)
                 ",
-                params![offer_id, market_id, state, last_seen_status, updated_at,],
+                params![
+                    offer_id,
+                    market_id,
+                    state,
+                    last_seen_status,
+                    updated_at,
+                    presplit_input_coin_id,
+                    fixed_delegated_puzzle_hash,
+                    execution_mode,
+                ],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
         Ok(())
+    }
+
+    /// Load presplit cancel metadata persisted at offer post time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn offer_cancel_metadata_for_id(
+        &self,
+        offer_id: &str,
+    ) -> SignerResult<Option<super::OfferCancelMetadataRow>> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(None);
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+                SELECT presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode
+                FROM offer_state
+                WHERE offer_id = ?1
+                ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to prepare offer cancel metadata query: {err}"
+                ))
+            })?;
+        let mut rows = stmt.query(params![clean]).map_err(|err| {
+            SignerError::Other(format!("failed to query offer cancel metadata: {err}"))
+        })?;
+        let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read offer cancel metadata row: {err}"))
+        })?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(super::OfferCancelMetadataRow {
+            presplit_input_coin_id: row.get(0).ok(),
+            fixed_delegated_puzzle_hash: row.get(1).ok(),
+            execution_mode: row.get(2).ok(),
+        }))
     }
 }
 
