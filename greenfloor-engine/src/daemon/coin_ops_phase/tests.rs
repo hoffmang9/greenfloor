@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use super::ladder::build_valid_sell_ladder;
 use super::ladder::classify_sell_ladder_entries;
+use super::ladder::record_sub_minimum_sell_ladder_skips;
 use super::{
-    apply_overflow_plan_skips, record_coin_ops_phase_audit, run_coin_ops_phase,
-    skipped_coin_ops_result, CoinOpsPlanningResult,
+    apply_overflow_plan_skips, record_coin_ops_phase_audit, skipped_coin_ops_result,
+    CoinOpsPlanningResult,
 };
 use crate::coin_ops::{CoinOpKind, CoinOpPlan};
 use crate::config::{LadderEntry, ManagerProgramConfig};
 use crate::daemon::coin_ops_execution::CoinOpExecutionResult;
-use crate::daemon::test_support::test_cycle_context;
 use crate::operator_log::{
     COIN_OPS_NO_PLANS, COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN,
     COIN_OPS_SKIPPED_FEE_BUDGET, COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
@@ -17,9 +17,91 @@ use crate::operator_log::{
 use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SqliteStore};
 use crate::test_support::ladder::market_with_sell_ladder;
 use crate::test_support::market_config::sample_market;
-use crate::test_support::minimal_program::{
-    write_minimal_program_with_signer, MinimalProgramParams,
-};
+
+mod fee_budget_harness {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use tempfile::TempDir;
+
+    use crate::config::{ManagerProgramConfig, MarketConfig};
+    use crate::daemon::coin_ops_phase::run_coin_ops_phase;
+    use crate::daemon::test_support::test_cycle_context;
+    use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SqliteStore};
+    use crate::test_support::ladder::market_with_sell_ladder;
+    use crate::test_support::market_config::sample_market;
+    use crate::test_support::minimal_program::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+
+    pub struct CoinOpsPhaseHarness {
+        pub store: SqliteStore,
+        _dir: TempDir,
+        ctx: crate::daemon::test_support::TestCycleContextBundle,
+    }
+
+    impl CoinOpsPhaseHarness {
+        pub fn open(
+            configure_program: impl FnOnce(&mut ManagerProgramConfig),
+            ledger_seed: Option<CoinOpLedgerEntry<'static>>,
+        ) -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let program_path: PathBuf = dir.path().join("program.yaml");
+            write_minimal_program_with_signer(
+                &program_path,
+                MinimalProgramParams {
+                    home_dir: dir.path(),
+                    ..Default::default()
+                },
+            );
+            let mut bundle = crate::config::load_program_bundle(&program_path).expect("bundle");
+            bundle.program.coin_ops_max_operations_per_run = 20;
+            configure_program(&mut bundle.program);
+            let db_path = state_db_path_for_home(dir.path());
+            let store = SqliteStore::open(&db_path).expect("open");
+            if let Some(entry) = ledger_seed {
+                store.add_coin_op_ledger_entry(&entry).expect("seed ledger");
+            }
+            let ctx =
+                test_cycle_context(&dir, &db_path, bundle.program.clone(), Some(bundle.signer));
+            Self {
+                store,
+                _dir: dir,
+                ctx,
+            }
+        }
+
+        pub async fn run_with_market(
+            &self,
+            market: &MarketConfig,
+            wallet_counts: &BTreeMap<i64, i64>,
+        ) {
+            run_coin_ops_phase(
+                &self.store,
+                &self.ctx.cycle_context(),
+                market,
+                &[],
+                wallet_counts,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .await
+            .expect("coin ops phase");
+        }
+
+        pub async fn run_with_sell_ladder(&self, wallet_counts: &BTreeMap<i64, i64>) {
+            let market = market_with_sell_ladder("xch1test", 10, 5);
+            self.run_with_market(&market, wallet_counts).await;
+        }
+
+        pub async fn run_empty_sell_ladder(&self) {
+            let market = sample_market("xch1test");
+            self.run_with_market(&market, &BTreeMap::new()).await;
+        }
+    }
+}
+
+use fee_budget_harness::CoinOpsPhaseHarness;
 
 #[test]
 fn classify_sell_ladder_entries_filters_zero_size_rows() {
@@ -56,6 +138,37 @@ fn classify_sell_ladder_entries_rejects_sub_minimum_cat_targets() {
     assert!(valid.is_empty());
     assert_eq!(invalid.len(), 1);
     assert_eq!(invalid[0]["target_amount_mojos"], 500);
+}
+
+#[test]
+fn sub_minimum_sell_ladder_skips_emit_audit_event() {
+    let cat_id = "b".repeat(64);
+    let ladder = vec![LadderEntry {
+        size_base_units: 1,
+        target_count: 1,
+        split_buffer_count: 0,
+        combine_when_excess_factor: 2.0,
+    }];
+    let (_, invalid) = classify_sell_ladder_entries(&cat_id, 500, &ladder);
+    assert_eq!(invalid.len(), 1);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&state_db_path_for_home(&home)).expect("open");
+    let mut market = sample_market("xch1test");
+    market.base_asset = cat_id;
+
+    record_sub_minimum_sell_ladder_skips(&store, &market, &invalid).expect("audit");
+
+    let events = store
+        .list_recent_audit_events(
+            Some(&[COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT]),
+            Some("m1"),
+            5,
+        )
+        .expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["invalid_bucket_count"].as_u64(), Some(1));
 }
 
 #[test]
@@ -140,35 +253,11 @@ fn skipped_coin_ops_result_marks_all_plans_skipped() {
 
 #[tokio::test]
 async fn run_coin_ops_phase_noops_on_empty_sell_ladder() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
-        },
-    );
-    let bundle = crate::config::load_program_bundle(&program_path).expect("bundle");
-    let db_path = state_db_path_for_home(dir.path());
-    let store = SqliteStore::open(&db_path).expect("open");
-    let bundle_ctx = test_cycle_context(&dir, &db_path, bundle.program, Some(bundle.signer));
-    let ctx = bundle_ctx.cycle_context();
-    let market = sample_market("xch1test");
+    let harness = CoinOpsPhaseHarness::open(|_| {}, None);
+    harness.run_empty_sell_ladder().await;
 
-    run_coin_ops_phase(
-        &store,
-        &ctx,
-        &market,
-        &[],
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .await
-    .expect("phase");
-
-    let events = store
+    let events = harness
+        .store
         .list_recent_audit_events(Some(&[COIN_OPS_NO_PLANS]), Some("m1"), 5)
         .expect("events");
     assert!(events.iter().any(|event| {
@@ -178,24 +267,13 @@ async fn run_coin_ops_phase_noops_on_empty_sell_ladder() {
 
 #[tokio::test]
 async fn run_coin_ops_phase_skips_execution_when_daily_fee_budget_exhausted() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
+    let harness = CoinOpsPhaseHarness::open(
+        |program| {
+            program.coin_ops_max_daily_fee_budget_mojos = 100;
+            program.coin_ops_split_fee_mojos = 10;
+            program.coin_ops_combine_fee_mojos = 0;
         },
-    );
-    let mut bundle = crate::config::load_program_bundle(&program_path).expect("bundle");
-    bundle.program.coin_ops_max_operations_per_run = 20;
-    bundle.program.coin_ops_max_daily_fee_budget_mojos = 100;
-    bundle.program.coin_ops_split_fee_mojos = 10;
-    bundle.program.coin_ops_combine_fee_mojos = 0;
-    let db_path = state_db_path_for_home(dir.path());
-    let store = SqliteStore::open(&db_path).expect("open");
-    store
-        .add_coin_op_ledger_entry(&CoinOpLedgerEntry {
+        Some(CoinOpLedgerEntry {
             market_id: "m1",
             op_type: "split",
             op_count: 1,
@@ -203,27 +281,13 @@ async fn run_coin_ops_phase_skips_execution_when_daily_fee_budget_exhausted() {
             status: "executed",
             reason: "seed_spent_today",
             operation_id: None,
-        })
-        .expect("seed ledger");
-    let bundle_ctx =
-        test_cycle_context(&dir, &db_path, bundle.program.clone(), Some(bundle.signer));
-    let ctx = bundle_ctx.cycle_context();
-    let market = market_with_sell_ladder("xch1test", 10, 5);
+        }),
+    );
     let wallet_counts = BTreeMap::from([(10_i64, 0_i64)]);
+    harness.run_with_sell_ladder(&wallet_counts).await;
 
-    run_coin_ops_phase(
-        &store,
-        &ctx,
-        &market,
-        &[],
-        &wallet_counts,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .await
-    .expect("phase");
-
-    let events = store
+    let events = harness
+        .store
         .list_recent_audit_events(
             Some(&[COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET]),
             Some("m1"),
@@ -238,41 +302,19 @@ async fn run_coin_ops_phase_skips_execution_when_daily_fee_budget_exhausted() {
 
 #[tokio::test]
 async fn run_coin_ops_phase_records_partial_fee_budget_overflow() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let program_path = dir.path().join("program.yaml");
-    write_minimal_program_with_signer(
-        &program_path,
-        MinimalProgramParams {
-            home_dir: dir.path(),
-            ..Default::default()
+    let harness = CoinOpsPhaseHarness::open(
+        |program| {
+            program.coin_ops_max_daily_fee_budget_mojos = 55;
+            program.coin_ops_split_fee_mojos = 10;
+            program.coin_ops_combine_fee_mojos = 0;
         },
+        None,
     );
-    let mut bundle = crate::config::load_program_bundle(&program_path).expect("bundle");
-    bundle.program.coin_ops_max_operations_per_run = 20;
-    bundle.program.coin_ops_max_daily_fee_budget_mojos = 55;
-    bundle.program.coin_ops_split_fee_mojos = 10;
-    bundle.program.coin_ops_combine_fee_mojos = 0;
-    let db_path = state_db_path_for_home(dir.path());
-    let store = SqliteStore::open(&db_path).expect("open");
-    let bundle_ctx =
-        test_cycle_context(&dir, &db_path, bundle.program.clone(), Some(bundle.signer));
-    let ctx = bundle_ctx.cycle_context();
-    let market = market_with_sell_ladder("xch1test", 10, 5);
     let wallet_counts = BTreeMap::from([(10_i64, 0_i64)]);
+    harness.run_with_sell_ladder(&wallet_counts).await;
 
-    run_coin_ops_phase(
-        &store,
-        &ctx,
-        &market,
-        &[],
-        &wallet_counts,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .await
-    .expect("phase");
-
-    let events = store
+    let events = harness
+        .store
         .list_recent_audit_events(
             Some(&[
                 COIN_OPS_PLAN,

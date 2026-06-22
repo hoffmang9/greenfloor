@@ -38,27 +38,39 @@ pub(super) fn classify_sell_ladder_entries(
     (valid_ladder, invalid_buckets)
 }
 
+pub(super) fn record_sub_minimum_sell_ladder_skips(
+    store: &SqliteStore,
+    market: &MarketConfig,
+    invalid_buckets: &[Value],
+) -> SignerResult<()> {
+    if invalid_buckets.is_empty() {
+        return Ok(());
+    }
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::WARN,
+        "coin ops skipped sub-minimum target amount",
+        COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
+        &json!({
+            "market_id": market.market_id,
+            "invalid_bucket_count": invalid_buckets.len(),
+            "invalid_buckets": invalid_buckets,
+        }),
+        Some(&market.market_id),
+    )?;
+    Ok(())
+}
+
 pub(super) fn build_valid_sell_ladder(
     store: &SqliteStore,
     market: &MarketConfig,
     sell_ladder: &[LadderEntry],
 ) -> SignerResult<Vec<LadderEntry>> {
+    // Production CAT ladders (1 unit × 1000 mojos = minimum) never hit sub-minimum audit;
+    // classify tests pass an explicit multiplier to exercise the reject path.
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let (valid_ladder, invalid_buckets) =
         classify_sell_ladder_entries(market.base_asset.trim(), base_unit_multiplier, sell_ladder);
-    if !invalid_buckets.is_empty() {
-        LogContext::MARKET_CYCLE.dual_audit(
-            store,
-            Level::WARN,
-            "coin ops skipped sub-minimum target amount",
-            COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
-            &json!({
-                "market_id": market.market_id,
-                "invalid_bucket_count": invalid_buckets.len(),
-                "invalid_buckets": invalid_buckets,
-            }),
-            Some(&market.market_id),
-        )?;
-    }
+    record_sub_minimum_sell_ladder_skips(store, market, &invalid_buckets)?;
     Ok(valid_ladder)
 }

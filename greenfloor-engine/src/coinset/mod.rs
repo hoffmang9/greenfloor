@@ -55,6 +55,7 @@ pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{
     cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, list_wallet_unspent_coins,
+    list_wallet_unspent_coins_for_signer, msp_base_url_for_signer,
     puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, spend_bundle_hex,
     WalletUnspentCoin,
 };

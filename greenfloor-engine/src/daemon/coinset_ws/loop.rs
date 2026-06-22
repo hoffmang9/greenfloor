@@ -233,6 +233,8 @@ mod tests {
 
     #[tokio::test]
     async fn run_loop_records_disconnect_audit_on_bad_endpoint() {
+        use std::time::Instant;
+
         use crate::operator_log::{COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED};
 
         let dir = tempdir().expect("tempdir");
@@ -262,22 +264,33 @@ mod tests {
                 stop_flag,
             ));
         });
-        std::thread::sleep(Duration::from_millis(750));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let events = store
+                .list_recent_audit_events(
+                    Some(&[COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED]),
+                    None,
+                    10,
+                )
+                .expect("events");
+            let event_types: std::collections::HashSet<&str> = events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect();
+            if event_types.contains(COINSET_WS_CONNECTING)
+                && event_types.contains(COINSET_WS_DISCONNECTED)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for websocket connect/disconnect audit events"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
         stop.store(true, Ordering::SeqCst);
         handle.join().expect("join");
-
-        let events = store
-            .list_recent_audit_events(
-                Some(&[COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED]),
-                None,
-                10,
-            )
-            .expect("events");
-        let event_types: std::collections::HashSet<&str> = events
-            .iter()
-            .map(|event| event.event_type.as_str())
-            .collect();
-        assert!(event_types.contains(COINSET_WS_CONNECTING));
-        assert!(event_types.contains(COINSET_WS_DISCONNECTED));
     }
 }

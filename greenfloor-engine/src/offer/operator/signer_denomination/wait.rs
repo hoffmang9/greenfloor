@@ -2,22 +2,36 @@ use std::collections::HashSet;
 
 use serde_json::{json, Value};
 
-use crate::coinset::list_wallet_unspent_coins;
+use crate::coinset::list_wallet_unspent_coins_for_signer;
+use crate::config::SignerConfig;
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
 use crate::error::{SignerError, SignerResult};
 
+pub(super) struct BootstrapWaitConfig<'a> {
+    pub network: &'a str,
+    pub signer: &'a SignerConfig,
+    pub receive_address: &'a str,
+    pub asset_id: &'a str,
+    pub initial_coin_ids: &'a HashSet<String>,
+    pub timeout_seconds: u64,
+    pub min_timeout_seconds: u64,
+}
+
 pub(super) async fn wait_for_coinset_confirmation(
-    network: &str,
-    receive_address: &str,
-    asset_id: &str,
-    initial_coin_ids: &HashSet<String>,
-    timeout_seconds: u64,
-    msp_base_url: Option<&str>,
+    config: BootstrapWaitConfig<'_>,
 ) -> SignerResult<Vec<Value>> {
+    let BootstrapWaitConfig {
+        network,
+        signer,
+        receive_address,
+        asset_id,
+        initial_coin_ids,
+        timeout_seconds,
+        min_timeout_seconds,
+    } = config;
     let start = std::time::Instant::now();
-    let min_timeout = if cfg!(test) { 1 } else { 10 };
     let timeout = crate::config::u64_to_i64(
-        timeout_seconds.max(min_timeout),
+        timeout_seconds.max(min_timeout_seconds.max(1)),
         "runtime.offer_bootstrap_wait_timeout_seconds",
     )?;
     let initial_sleep = 2.0f64;
@@ -37,7 +51,8 @@ pub(super) async fn wait_for_coinset_confirmation(
             return Err(SignerError::Other("confirmation_wait_timeout".to_string()));
         };
         let coins =
-            list_wallet_unspent_coins(network, receive_address, asset_id, msp_base_url).await?;
+            list_wallet_unspent_coins_for_signer(network, signer, receive_address, asset_id)
+                .await?;
         let new_confirmed: Vec<_> = coins
             .into_iter()
             .filter(|coin| !initial_coin_ids.contains(&coin.id))
@@ -63,8 +78,10 @@ mod tests {
 
     use super::*;
     use crate::coinset::coin_id_from_record;
+    use crate::test_support::signer_config::test_signer_config;
 
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+    const TEST_MIN_TIMEOUT_SECONDS: u64 = 1;
 
     #[tokio::test]
     async fn wait_for_coinset_confirmation_returns_new_coin_event() {
@@ -98,15 +115,17 @@ mod tests {
             .with_body(body)
             .create_async()
             .await;
+        let signer = test_signer_config(&server.url());
 
-        let events = wait_for_coinset_confirmation(
-            "mainnet",
-            RECEIVE_ADDRESS,
-            "xch",
-            &HashSet::new(),
-            5,
-            Some(&server.url()),
-        )
+        let events = wait_for_coinset_confirmation(BootstrapWaitConfig {
+            network: "mainnet",
+            signer: &signer,
+            receive_address: RECEIVE_ADDRESS,
+            asset_id: "xch",
+            initial_coin_ids: &HashSet::new(),
+            timeout_seconds: 5,
+            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+        })
         .await
         .expect("confirmed");
 
@@ -125,15 +144,17 @@ mod tests {
             .expect_at_least(1)
             .create_async()
             .await;
+        let signer = test_signer_config(&server.url());
 
-        let err = wait_for_coinset_confirmation(
-            "mainnet",
-            RECEIVE_ADDRESS,
-            "xch",
-            &HashSet::new(),
-            1,
-            Some(&server.url()),
-        )
+        let err = wait_for_coinset_confirmation(BootstrapWaitConfig {
+            network: "mainnet",
+            signer: &signer,
+            receive_address: RECEIVE_ADDRESS,
+            asset_id: "xch",
+            initial_coin_ids: &HashSet::new(),
+            timeout_seconds: 1,
+            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+        })
         .await
         .expect_err("timeout");
         assert_eq!(err.to_string(), "confirmation_wait_timeout");

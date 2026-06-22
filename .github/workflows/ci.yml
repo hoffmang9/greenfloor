@@ -173,7 +173,7 @@ jobs:
           cd scripts
           python -m coverage run -m unittest greenfloor_scripts.test_adapters
           python -m coverage xml -o ../coverage-python.xml
-          python -m coverage report
+          python -m coverage report --fail-under=76 --include='greenfloor_scripts/*'
 
       - name: Upload coverage artifacts
         if: matrix.os == 'ubuntu-latest'

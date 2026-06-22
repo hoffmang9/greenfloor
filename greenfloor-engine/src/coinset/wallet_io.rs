@@ -11,6 +11,7 @@ use super::{
     is_xch_like_asset, msp,
     xch::list_unspent_xch,
 };
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
@@ -42,6 +43,37 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
     Ok(hex::encode(spend_bundle.to_bytes().map_err(|err| {
         SignerError::Other(format!("failed to serialize spend bundle: {err}"))
     })?))
+}
+
+/// Resolve the MSP coinset base URL from signer config, if configured.
+#[must_use]
+pub fn msp_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
+    let url = signer.coinset_msp_base_url.trim();
+    if url.is_empty() {
+        None
+    } else {
+        Some(url)
+    }
+}
+
+/// List wallet unspent coins for a signer (uses `coinset_msp_base_url` when set).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn list_wallet_unspent_coins_for_signer(
+    network: &str,
+    signer: &SignerConfig,
+    receive_address: &str,
+    asset_id: &str,
+) -> SignerResult<Vec<WalletUnspentCoin>> {
+    list_wallet_unspent_coins(
+        network,
+        receive_address,
+        asset_id,
+        msp_base_url_for_signer(signer),
+    )
+    .await
 }
 
 /// List wallet unspent coins.
