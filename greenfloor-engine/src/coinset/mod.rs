@@ -7,6 +7,7 @@ mod msp;
 mod parse;
 mod poll;
 mod presplit;
+pub mod probe;
 mod spent_verify;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -31,8 +32,9 @@ pub use parse::{
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
     to_coinset_hex, u64_from_value,
 };
+pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{with_script_retries, with_script_retries_with_policy, ScriptRetryPolicy};
-pub use scan_client::DirectCoinsetScanClient;
+pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 
 pub(crate) use coin_select::finalize_selected_cats;
 

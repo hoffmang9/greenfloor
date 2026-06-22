@@ -8,8 +8,8 @@ use crate::cli_util::{optional_trimmed, print_json_value};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::{
-    default_program_config_path, default_testnet_markets_config_path,
-    default_vault_scan_metadata_config_paths, optional_path,
+    default_testnet_markets_config_path, default_vault_scan_metadata_config_paths, optional_path,
+    program_config_path_from_optional,
 };
 use crate::paths::expand_home;
 use crate::vault_coinset_scan::launcher::{
@@ -142,11 +142,7 @@ impl VaultCoinsetScanCliArgs {
     }
 
     fn program_config_path(&self) -> PathBuf {
-        if self.program_config.trim().is_empty() {
-            default_program_config_path()
-        } else {
-            expand_home(std::path::Path::new(self.program_config.trim()))
-        }
+        program_config_path_from_optional(&self.program_config)
     }
 
     fn metadata_config_paths(&self) -> (PathBuf, PathBuf, Option<PathBuf>) {

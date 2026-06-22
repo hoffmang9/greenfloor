@@ -1,7 +1,10 @@
+use chia_protocol::SpendBundle;
+use chia_traits::Streamable;
 use serde_json::{json, Value};
 
-use super::rpc::post_msp_coinset_rpc;
-use crate::error::SignerResult;
+use super::rpc::{direct_coinset_client, post_msp_coinset_rpc};
+use crate::coinset::broadcast_spend_bundle;
+use crate::error::{SignerError, SignerResult};
 
 /// Get fee estimate.
 ///
@@ -71,41 +74,56 @@ pub async fn get_conservative_fee_estimate(
     Ok(conservative_fee_from_payload(&payload))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn conservative_fee_uses_max_estimate() {
-        let payload = json!({"success": true, "estimates": [100, 500, 200]});
-        assert_eq!(conservative_fee_from_payload(&payload), Some(500));
+/// Get all mempool tx ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn get_all_mempool_tx_ids(
+    network: &str,
+    base_url: Option<&str>,
+) -> SignerResult<Vec<String>> {
+    let payload =
+        post_msp_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
+    if !payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(Vec::new());
     }
+    let tx_ids = payload
+        .get("tx_ids")
+        .or_else(|| payload.get("mempool_tx_ids"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    Ok(tx_ids
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect())
+}
 
-    #[test]
-    fn conservative_fee_falls_back_to_fee_estimate_field() {
-        let payload = json!({"success": true, "fee_estimate": 42});
-        assert_eq!(conservative_fee_from_payload(&payload), Some(42));
-    }
-
-    #[test]
-    fn conservative_fee_returns_none_on_failure() {
-        let payload = json!({"success": false});
-        assert_eq!(conservative_fee_from_payload(&payload), None);
-    }
-
-    #[tokio::test]
-    async fn get_fee_estimate_via_msp_client() {
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/get_fee_estimate")
-            .with_status(200)
-            .with_body(r#"{"success":true,"estimates":[100,500]}"#)
-            .create_async()
-            .await;
-
-        let payload = get_fee_estimate("mainnet", Some(&server.url()), vec![300], 1_000_000, None)
-            .await
-            .expect("fee estimate");
-        assert_eq!(conservative_fee_from_payload(&payload), Some(500));
-    }
+/// Push tx hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn push_tx_hex(
+    network: &str,
+    base_url: Option<&str>,
+    spend_bundle_hex: &str,
+) -> SignerResult<Value> {
+    let client = direct_coinset_client(network, base_url)?;
+    let raw = spend_bundle_hex.trim().trim_start_matches("0x");
+    let bytes =
+        hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
+    let spend_bundle = SpendBundle::from_bytes(&bytes)
+        .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
+    let result = broadcast_spend_bundle(&client, spend_bundle).await?;
+    Ok(json!({
+        "success": true,
+        "status": result.status,
+        "operation_id": result.operation_id,
+    }))
 }

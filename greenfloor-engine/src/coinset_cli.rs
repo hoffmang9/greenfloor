@@ -7,8 +7,8 @@ use crate::cli_util::{optional_trimmed, print_json_value};
 use crate::coinset::{
     coin_id_from_record, ensure_coinset_rpc_success, post_coinset_coin_records,
     post_coinset_record, post_coinset_rpc, push_tx_hex, resolve_direct_client,
+    run_coinset_probe_command, CoinsetProbeCliArgs,
 };
-use crate::coinset_probe::run_coinset_probe_command;
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Args)]
@@ -102,7 +102,7 @@ pub enum CoinsetCommands {
     #[command(name = "push-tx")]
     PushTx(CoinsetPushTxArgs),
     /// Probe Coinset height-window API support for vault scans.
-    Probe(crate::coinset_probe::CoinsetProbeCliArgs),
+    Probe(CoinsetProbeCliArgs),
 }
 
 #[derive(Debug, Args)]
