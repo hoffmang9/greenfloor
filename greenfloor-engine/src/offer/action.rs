@@ -115,7 +115,7 @@ pub async fn resolve_offer_assets_via_coinset(
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
+    let msp = MspCoinset::for_signer(config)?;
     resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
 }
 

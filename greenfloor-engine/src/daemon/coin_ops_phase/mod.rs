@@ -4,18 +4,16 @@ use serde_json::{json, Value};
 use tracing::Level;
 
 use crate::coin_ops::{
-    coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
-    partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
+    effective_sell_bucket_counts_for_coin_ops, partition_plans_by_budget, plan_coin_ops,
+    projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
 use crate::config::{
     signer_execution_skip_reason, LadderEntry, ManagerProgramConfig, MarketConfig,
 };
 use crate::error::SignerResult;
-use crate::hex::default_mojo_multiplier_for_asset;
 use crate::operator_log::{
     LogContext, COIN_OPS_EXECUTED, COIN_OPS_INVALID_LADDER_MATH, COIN_OPS_NO_PLANS,
     COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET,
-    COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
 };
 use crate::storage::SqliteStore;
 
@@ -25,51 +23,22 @@ use super::coin_ops_execution::{
 };
 use super::market_context::MarketCycleContext;
 
+mod ladder;
+
+use ladder::build_valid_sell_ladder;
+
+#[cfg(test)]
+pub(crate) mod harness;
+
+#[cfg(test)]
+mod tests;
+
 struct CoinOpsPlanningResult {
     plans: Vec<CoinOpPlan>,
     projected_fee: i64,
     spent_today: i64,
     executable_plans: Vec<CoinOpPlan>,
     overflow_plans: Vec<CoinOpPlan>,
-}
-
-fn build_valid_sell_ladder(
-    store: &SqliteStore,
-    market: &MarketConfig,
-    sell_ladder: &[LadderEntry],
-) -> SignerResult<Vec<LadderEntry>> {
-    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
-    let mut valid_ladder = Vec::new();
-    let mut invalid_buckets = Vec::new();
-    for entry in sell_ladder {
-        if entry.size_base_units <= 0 {
-            continue;
-        }
-        let target_amount_mojos = entry.size_base_units.saturating_mul(base_unit_multiplier);
-        if coin_op_target_amount_allowed(target_amount_mojos, market.base_asset.trim()) {
-            valid_ladder.push(entry.clone());
-            continue;
-        }
-        invalid_buckets.push(json!({
-            "size_base_units": entry.size_base_units,
-            "target_amount_mojos": target_amount_mojos,
-        }));
-    }
-    if !invalid_buckets.is_empty() {
-        LogContext::MARKET_CYCLE.dual_audit(
-            store,
-            Level::WARN,
-            "coin ops skipped sub-minimum target amount",
-            COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
-            &json!({
-                "market_id": market.market_id,
-                "invalid_bucket_count": invalid_buckets.len(),
-                "invalid_buckets": invalid_buckets,
-            }),
-            Some(&market.market_id),
-        )?;
-    }
-    Ok(valid_ladder)
 }
 
 fn plan_coin_ops_for_market(

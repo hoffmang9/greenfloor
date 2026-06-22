@@ -14,6 +14,8 @@ dev = [
   "ruff==0.9.10",
   "pyright==1.1.408",
   "yamllint==1.35.1",
+  "coverage>=7.6",
+  "diff-cover>=9.0",
 ]
 
 [build-system]
@@ -26,6 +28,13 @@ package-dir = {"" = "scripts"}
 [tool.setuptools.packages.find]
 where = ["scripts"]
 include = ["greenfloor_scripts*"]
+
+[tool.coverage.run]
+source = ["greenfloor_scripts"]
+branch = true
+
+[tool.coverage.report]
+include = ["greenfloor_scripts/*"]
 
 [tool.ruff]
 line-length = 100

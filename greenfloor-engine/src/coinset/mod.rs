@@ -21,8 +21,8 @@ mod xch;
 
 pub use api::{
     conservative_fee_from_payload, direct_coinset_client, get_all_mempool_tx_ids,
-    get_conservative_fee_estimate, get_fee_estimate, post_coinset_coin_records,
-    post_coinset_record, post_coinset_rpc, push_tx_hex,
+    get_conservative_fee_estimate, get_conservative_fee_estimate_for_signer, get_fee_estimate,
+    post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_tx_hex,
 };
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
@@ -39,8 +39,9 @@ pub use direct_api::{
     MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
 pub use msp::{
-    client_for_config, client_for_network, normalize_asset_id, resolve_offer_asset_ids, AssetInfo,
-    MspCoinset, SingletonInfo, DEFAULT_MSP_BASE_URL,
+    client_for_config, client_for_network, client_for_signer, msp_base_url_for_signer,
+    normalize_asset_id, resolve_offer_asset_ids, AssetInfo, MspCoinset, SingletonInfo,
+    DEFAULT_MSP_BASE_URL,
 };
 pub use parse::{
     chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,
@@ -54,9 +55,9 @@ pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{
-    cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, list_wallet_unspent_coins,
-    puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, spend_bundle_hex,
-    WalletUnspentCoin,
+    cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text,
+    list_wallet_unspent_coins_for_signer, puzzle_hash_hex_for_receive_address,
+    spend_bundle_hash_from_hex, spend_bundle_hex, WalletUnspentCoin,
 };
 pub use xch::list_unspent_xch;
 

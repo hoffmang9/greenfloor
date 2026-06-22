@@ -11,7 +11,7 @@ mod wait;
 
 use std::collections::HashSet;
 
-use crate::coinset::{list_wallet_unspent_coins, WalletUnspentCoin};
+use crate::coinset::{list_wallet_unspent_coins_for_signer, WalletUnspentCoin};
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
@@ -28,7 +28,9 @@ use planning::{
 };
 use split_submit::submit_bootstrap_mixed_split;
 use types::BootstrapPhaseFailure;
-use wait::wait_for_coinset_confirmation;
+use wait::{wait_for_coinset_confirmation, BootstrapWaitConfig};
+
+const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
 fn bootstrap_skipped(reason: impl Into<String>) -> BootstrapPhaseResult {
     BootstrapPhaseResult::skipped(reason)
@@ -51,19 +53,25 @@ fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> 
 
 async fn load_asset_scoped_coins(
     program: &ManagerProgramConfig,
+    signer_config: &SignerConfig,
     receive_address: &str,
     split_asset_id: &str,
 ) -> Result<Vec<WalletUnspentCoin>, BootstrapPhaseResult> {
-    list_wallet_unspent_coins(&program.network, receive_address, split_asset_id)
-        .await
-        .map_err(|err| {
-            BootstrapPhaseResult::failed(BootstrapPhaseFailure::new(
-                format!("bootstrap_coin_list_failed:{err}"),
-                0,
-                String::new(),
-                None,
-            ))
-        })
+    list_wallet_unspent_coins_for_signer(
+        &program.network,
+        signer_config,
+        receive_address,
+        split_asset_id,
+    )
+    .await
+    .map_err(|err| {
+        BootstrapPhaseResult::failed(BootstrapPhaseFailure::new(
+            format!("bootstrap_coin_list_failed:{err}"),
+            0,
+            String::new(),
+            None,
+        ))
+    })
 }
 
 struct ExecutedAfterSplitParams<'a> {
@@ -113,6 +121,7 @@ struct BootstrapSplitPlanContext {
 
 async fn prepare_bootstrap_split_plan(
     program: &ManagerProgramConfig,
+    signer_config: &SignerConfig,
     market: &MarketConfig,
     action_side: &str,
     resolved_base_asset_id: &str,
@@ -154,7 +163,9 @@ async fn prepare_bootstrap_split_plan(
     }
 
     let asset_scoped_coins =
-        match load_asset_scoped_coins(program, receive_address, &split_asset_id).await {
+        match load_asset_scoped_coins(program, signer_config, receive_address, &split_asset_id)
+            .await
+        {
             Ok(coins) => coins,
             Err(result) => return Ok(Err(result)),
         };
@@ -169,7 +180,7 @@ async fn prepare_bootstrap_split_plan(
     };
 
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
-        &program.network,
+        signer_config,
         program.coin_ops_minimum_fee_mojos,
         bootstrap_plan.output_amounts_base_units.len(),
     )
@@ -238,13 +249,15 @@ async fn execute_bootstrap_split_and_wait(
         }
     };
 
-    let wait_events = match wait_for_coinset_confirmation(
-        &program.network,
-        &receive_address,
-        &split_asset_id,
-        &existing_coin_ids,
-        program.runtime_offer_bootstrap_wait_timeout_seconds,
-    )
+    let wait_events = match wait_for_coinset_confirmation(BootstrapWaitConfig {
+        network: &program.network,
+        signer: signer_config,
+        receive_address: &receive_address,
+        asset_id: &split_asset_id,
+        initial_coin_ids: &existing_coin_ids,
+        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+    })
     .await
     {
         Ok(events) => events,
@@ -263,8 +276,13 @@ async fn execute_bootstrap_split_and_wait(
         }
     };
 
-    let refreshed_asset_coins =
-        list_wallet_unspent_coins(&program.network, &receive_address, &split_asset_id).await?;
+    let refreshed_asset_coins = list_wallet_unspent_coins_for_signer(
+        &program.network,
+        signer_config,
+        &receive_address,
+        &split_asset_id,
+    )
+    .await?;
     let refreshed_spendable = spendable_bootstrap_coins(&refreshed_asset_coins);
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos,
@@ -312,6 +330,7 @@ async fn run_signer_denomination_phase_async(
 ) -> SignerResult<BootstrapPhaseResult> {
     match prepare_bootstrap_split_plan(
         program,
+        signer_config,
         market,
         action_side,
         resolved_base_asset_id,
@@ -326,79 +345,4 @@ async fn run_signer_denomination_phase_async(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::coinset::WalletUnspentCoin;
-    use crate::offer::bootstrap::{BootstrapCoin, BootstrapPlan, PlannerLadderRow};
-
-    use super::{
-        bootstrap_skipped, executed_after_split, spendable_bootstrap_coins,
-        ExecutedAfterSplitParams,
-    };
-
-    #[test]
-    fn spendable_bootstrap_coins_filters_unconfirmed_wallet_rows() {
-        let coins = vec![
-            WalletUnspentCoin {
-                id: "confirmed".to_string(),
-                name: "confirmed".to_string(),
-                amount: 1000,
-                state: "CONFIRMED".to_string(),
-            },
-            WalletUnspentCoin {
-                id: "pending".to_string(),
-                name: "pending".to_string(),
-                amount: 2000,
-                state: "PENDING".to_string(),
-            },
-        ];
-
-        let spendable = spendable_bootstrap_coins(&coins);
-        assert_eq!(spendable.len(), 1);
-        assert_eq!(spendable[0].id, "confirmed");
-        assert_eq!(spendable[0].amount, 1000);
-    }
-
-    #[test]
-    fn bootstrap_skipped_marks_phase_not_ready() {
-        let result = bootstrap_skipped("missing_sell_ladder");
-        assert!(!result.ready);
-        assert_eq!(result.reason, "missing_sell_ladder");
-        assert!(result.offer_creation_block_error().is_some());
-    }
-
-    #[test]
-    fn executed_after_split_carries_fee_and_plan_metadata() {
-        let bootstrap_plan = BootstrapPlan {
-            source_coin_id: "coin-a".to_string(),
-            source_amount: 50_000,
-            output_amounts_base_units: vec![100, 100],
-            total_output_amount: 200,
-            change_amount: 49_800,
-            deficits: Vec::new(),
-        };
-        let ladder_entries = vec![PlannerLadderRow {
-            size_base_units: 100,
-            target_count: 2,
-            split_buffer_count: 0,
-        }];
-        let refreshed = vec![BootstrapCoin {
-            id: "coin-a".to_string(),
-            amount: 50_000,
-        }];
-
-        let result = executed_after_split(ExecutedAfterSplitParams {
-            fee_mojos: 0,
-            fee_source: String::new(),
-            fee_lookup_error: None,
-            split_result: serde_json::json!({"operation_id": "split-1"}),
-            wait_events: vec![serde_json::json!({"event": "confirmed"})],
-            bootstrap_plan,
-            ladder_entries: &ladder_entries,
-            refreshed_spendable: &refreshed,
-        });
-
-        assert_eq!(result.split_result["operation_id"], "split-1");
-        assert_eq!(result.wait_events.len(), 1);
-        assert!(result.plan.is_some());
-    }
-}
+mod tests;

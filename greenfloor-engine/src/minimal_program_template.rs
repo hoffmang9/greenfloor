@@ -6,6 +6,8 @@ const MINIMAL_PROGRAM_TEMPLATE: &str =
     include_str!("../../tests/fixtures/data/minimal_program.yaml");
 const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
     include_str!("../../tests/fixtures/data/minimal_program_signer_append.yaml");
+const MINIMAL_PROGRAM_SIGNER_APPEND_NO_MSP: &str =
+    include_str!("../../tests/fixtures/data/minimal_program_signer_append_no_msp.yaml");
 
 #[derive(Clone, Copy)]
 pub struct MinimalProgramParams<'a> {
@@ -15,6 +17,7 @@ pub struct MinimalProgramParams<'a> {
     pub dry_run: bool,
     pub low_inventory_alerts_enabled: bool,
     pub pushover_enabled: bool,
+    pub coinset_msp_base_url: Option<&'a str>,
 }
 
 impl Default for MinimalProgramParams<'_> {
@@ -26,6 +29,7 @@ impl Default for MinimalProgramParams<'_> {
             dry_run: false,
             low_inventory_alerts_enabled: false,
             pushover_enabled: false,
+            coinset_msp_base_url: None,
         }
     }
 }
@@ -79,7 +83,32 @@ pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramPara
     let launcher_id = "aa".repeat(32);
     let mut contents = materialize_minimal_program_text(params);
     contents.push('\n');
-    contents.push_str(&MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &launcher_id));
+    let signer_append = match params.coinset_msp_base_url {
+        Some(msp_base_url) => MINIMAL_PROGRAM_SIGNER_APPEND
+            .replace("__LAUNCHER_ID__", &launcher_id)
+            .replace("__COINSET_MSP_BASE_URL__", msp_base_url),
+        None => MINIMAL_PROGRAM_SIGNER_APPEND_NO_MSP.replace("__LAUNCHER_ID__", &launcher_id),
+    };
+    contents.push_str(&signer_append);
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("write signer program {}: {err}", path.display()));
+}
+
+/// Write a minimal signer program fixture with an explicit MSP base URL.
+///
+/// # Panics
+///
+/// Panics if the file cannot be written.
+pub fn write_minimal_program_with_signer_msp(
+    path: &Path,
+    msp_base_url: &str,
+    params: MinimalProgramParams<'_>,
+) {
+    write_minimal_program_with_signer(
+        path,
+        MinimalProgramParams {
+            coinset_msp_base_url: Some(msp_base_url),
+            ..params
+        },
+    );
 }

@@ -168,7 +168,8 @@ async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{validate_mixed_split_request, MixedSplitRequest};
+    use crate::error::SignerError;
     use chia_protocol::Bytes32;
 
     fn sample_request(output_amounts: Vec<u64>, allow_sub_cat_output: bool) -> MixedSplitRequest {
@@ -203,5 +204,17 @@ mod tests {
             err,
             SignerError::MixedSplitVaultWithFeeNotSupported
         ));
+    }
+
+    #[test]
+    fn rejects_empty_output_amounts() {
+        let err = validate_mixed_split_request(&sample_request(vec![], false)).unwrap_err();
+        assert!(matches!(err, SignerError::MissingOutputAmounts));
+    }
+
+    #[test]
+    fn rejects_zero_output_amount() {
+        let err = validate_mixed_split_request(&sample_request(vec![1000, 0], false)).unwrap_err();
+        assert!(matches!(err, SignerError::InvalidOutputAmount));
     }
 }

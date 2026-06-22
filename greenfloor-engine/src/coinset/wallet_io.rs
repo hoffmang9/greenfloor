@@ -11,6 +11,7 @@ use super::{
     is_xch_like_asset, msp,
     xch::list_unspent_xch,
 };
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
 use crate::hex::normalize_hex_id;
@@ -44,17 +45,40 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
     })?))
 }
 
+/// List wallet unspent coins for a signer (uses `coinset_msp_base_url` when set).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn list_wallet_unspent_coins_for_signer(
+    network: &str,
+    signer: &SignerConfig,
+    receive_address: &str,
+    asset_id: &str,
+) -> SignerResult<Vec<WalletUnspentCoin>> {
+    list_wallet_unspent_coins(
+        network,
+        receive_address,
+        asset_id,
+        msp::msp_base_url_for_signer(signer),
+    )
+    .await
+}
+
 /// List wallet unspent coins.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn list_wallet_unspent_coins(
+pub(crate) async fn list_wallet_unspent_coins(
     network: &str,
     receive_address: &str,
     asset_id: &str,
+    msp_base_url: Option<&str>,
 ) -> SignerResult<Vec<WalletUnspentCoin>> {
-    let client = msp::client_for_network(network)?;
+    let client = msp::MspCoinset::for_network(network, msp_base_url)?
+        .client()
+        .clone();
     if is_xch_like_asset(asset_id) {
         let coins = list_unspent_xch(&client, receive_address).await?;
         return Ok(coins

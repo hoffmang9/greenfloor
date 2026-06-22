@@ -133,6 +133,8 @@ async fn run_coinset_websocket_loop(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{atomic::AtomicBool, Arc};
+
     use super::super::capture::capture_coinset_websocket_once_with_timings;
     use super::super::once_timings::OnceCaptureTimings;
     use super::super::url::resolve_coinset_ws_url;
@@ -198,5 +200,97 @@ mod tests {
             .collect();
         assert!(event_types.contains("coinset_ws_once_started"));
         assert!(event_types.contains("coinset_ws_recovery_poll"));
+    }
+
+    #[test]
+    fn loop_handle_stop_joins_background_thread() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let program = sample_program();
+        let mut handle = start_coinset_websocket_loop(
+            db_path,
+            program,
+            "https://example.test".to_string(),
+            CoinWatchlistCache::new(),
+        );
+        handle.stop();
+    }
+
+    #[tokio::test]
+    async fn run_loop_exits_immediately_when_stop_requested() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let stop = Arc::new(AtomicBool::new(true));
+        run_coinset_websocket_loop(
+            db_path,
+            sample_program(),
+            "https://example.test".to_string(),
+            CoinWatchlistCache::new(),
+            stop,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn run_loop_records_disconnect_audit_on_bad_endpoint() {
+        use std::time::Instant;
+
+        use crate::operator_log::{COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED};
+
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = stop.clone();
+        let program = ManagerProgramConfig {
+            runtime_market_slot_count: 1,
+            runtime_offer_parallelism_max_workers: 2,
+            tx_block_websocket_url: "ws://127.0.0.1:1/ws".to_string(),
+            tx_block_websocket_reconnect_interval_seconds: 0,
+            tx_block_fallback_poll_interval_seconds: 0,
+            ..Default::default()
+        };
+
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            runtime.block_on(run_coinset_websocket_loop(
+                db_path,
+                program,
+                "https://example.test".to_string(),
+                CoinWatchlistCache::new(),
+                stop_flag,
+            ));
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let events = store
+                .list_recent_audit_events(
+                    Some(&[COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED]),
+                    None,
+                    10,
+                )
+                .expect("events");
+            let event_types: std::collections::HashSet<&str> = events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect();
+            if event_types.contains(COINSET_WS_CONNECTING)
+                && event_types.contains(COINSET_WS_DISCONNECTED)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for websocket connect/disconnect audit events"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        stop.store(true, Ordering::SeqCst);
+        handle.join().expect("join");
     }
 }

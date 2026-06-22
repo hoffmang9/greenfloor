@@ -12,7 +12,7 @@ use crate::offer::resolve_offer_assets_for_action;
 use crate::operator_log::{LogContext, INVENTORY_BUCKET_SCAN, INVENTORY_BUCKET_SCAN_ERROR};
 use crate::storage::SqliteStore;
 
-use super::coinset_spendable::list_spendable_base_unit_amounts;
+use super::coinset_spendable::list_spendable_base_unit_amounts_for_signer;
 use super::market_context::DaemonCycleResources;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
@@ -64,8 +64,9 @@ pub async fn run_inventory_phase(
         let (resolved_base_asset_id, _) =
             resolve_offer_assets_for_action(signer_config, market.base_asset.trim(), "xch").await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
-        let amounts = list_spendable_base_unit_amounts(
+        let amounts = list_spendable_base_unit_amounts_for_signer(
             &resources.network,
+            signer_config,
             &market.receive_address,
             &resolved_base_asset_id,
             base_unit_multiplier,

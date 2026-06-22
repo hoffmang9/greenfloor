@@ -1,0 +1,2 @@
+[report]
+ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|/tests\\.rs$|/bin/|/main\\.rs$)"

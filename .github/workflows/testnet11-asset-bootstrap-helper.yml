@@ -36,6 +36,7 @@ name: Testnet11 Asset Bootstrap Helper (G2)
 jobs:
   g2-discover-and-snippet:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 

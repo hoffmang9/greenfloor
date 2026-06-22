@@ -3,7 +3,9 @@ use chia_traits::Streamable;
 use serde_json::{json, Value};
 
 use super::super::broadcast::broadcast_spend_bundle;
+use super::super::msp::msp_base_url_for_signer;
 use super::rpc::{direct_coinset_client, post_msp_coinset_rpc};
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 
 /// Get fee estimate.
@@ -72,6 +74,25 @@ pub async fn get_conservative_fee_estimate(
     let payload =
         get_fee_estimate(network, base_url, vec![300, 600, 1200], cost, spend_count).await?;
     Ok(conservative_fee_from_payload(&payload))
+}
+
+/// Conservative fee estimate using the signer's MSP endpoint when configured.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn get_conservative_fee_estimate_for_signer(
+    signer: &SignerConfig,
+    cost: u64,
+    spend_count: Option<u64>,
+) -> SignerResult<Option<u64>> {
+    get_conservative_fee_estimate(
+        &signer.network,
+        msp_base_url_for_signer(signer),
+        cost,
+        spend_count,
+    )
+    .await
 }
 
 /// Get all mempool tx ids.

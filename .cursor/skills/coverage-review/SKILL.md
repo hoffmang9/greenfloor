@@ -23,7 +23,7 @@ Before running anything, determine the test framework, runner, and coverage tool
 - **JavaScript/TypeScript**: jest --coverage, vitest --coverage, c8, nyc/istanbul — check package.json scripts, config files, and dev dependencies for coverage providers (@vitest/coverage-v8, @vitest/coverage-istanbul, c8, nyc)
 - **Python**: pytest --cov, coverage.py — check pyproject.toml, setup.cfg, .coveragerc
 - **Go**: go test -cover, go test -coverprofile — built-in
-- **Rust**: cargo tarpaulin, cargo llvm-cov — check Cargo.toml dev-dependencies. If the project uses **cargo nextest** (check CI, Makefile, or docs), run coverage through nextest (for example `cargo llvm-cov nextest run`) rather than plain `cargo test`
+- **Rust**: cargo tarpaulin, cargo llvm-cov — check Cargo.toml dev-dependencies. If the project uses **cargo nextest** (check CI, Makefile, or docs), run coverage through nextest (for example `cargo llvm-cov nextest`) rather than plain `cargo test` or `cargo llvm-cov nextest run` (the trailing `run` is treated as a test-name filter).
 - **Java/Kotlin**: jacoco, cobertura — check pom.xml or build.gradle plugins
 - **Ruby**: simplecov — check Gemfile
 - **Elixir**: mix test --cover, excoveralls — check mix.exs
