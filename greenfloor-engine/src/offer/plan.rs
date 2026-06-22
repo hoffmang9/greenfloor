@@ -3,7 +3,7 @@ use chia_puzzle_types::{
     offer::{NotarizedPayment, Payment},
     Memos,
 };
-use chia_sdk_driver::{AssetInfo, RequestedPayments};
+use chia_sdk_driver::RequestedPayments;
 
 use crate::coinset::{OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
@@ -106,16 +106,7 @@ pub(crate) fn plan_presplit_binding(
     offer_nonce: Bytes32,
     launcher_id: Bytes32,
 ) -> SignerResult<PresplitOfferBinding> {
-    let mut ctx = chia_sdk_driver::SpendContext::new();
-    let requested_payments =
-        build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
-    PresplitOfferBinding::plan(
-        launcher_id,
-        requested_payments,
-        AssetInfo::new(),
-        terms.offer_amount,
-        terms.expires_at,
-    )
+    PresplitOfferBinding::plan(launcher_id, terms, receive_puzzle_hash, offer_nonce)
 }
 
 pub(crate) fn build_requested_payments(

@@ -2,6 +2,7 @@ use chia_protocol::Bytes32;
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{Action, AssetInfo, Id, Offer, Spends};
+use chia_sdk_types::conditions::AssertBeforeSecondsAbsolute;
 use clvmr::Allocator;
 
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
@@ -94,9 +95,15 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
 
     let presplit_cat =
         resolve_presplit_cat_after_split(coinset, *broadcast_split, predicted_presplit_cat).await?;
-    let (offer, spend_bundle_hex, offer_nonce_hex) =
-        build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, binding, offer_nonce)
-            .await?;
+    let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
+        presplit_cat,
+        vault_ctx.launcher_id,
+        binding,
+        terms,
+        receive_puzzle_hash,
+        offer_nonce,
+    )
+    .await?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitNew,
@@ -146,9 +153,15 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
     )?;
     verify_presplit_cat_offer_binding(&presplit_cat, &binding)?;
     let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
-    let (offer, spend_bundle_hex, offer_nonce_hex) =
-        build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, binding, offer_nonce)
-            .await?;
+    let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
+        presplit_cat,
+        vault_ctx.launcher_id,
+        binding,
+        terms,
+        receive_puzzle_hash,
+        offer_nonce,
+    )
+    .await?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitExisting,
@@ -198,14 +211,20 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
         ));
     }
 
-    let requested_payments =
+    let requested_payments_for_spend =
         build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
     let requested_asset_info = AssetInfo::new();
     spends.conditions.required = spends.conditions.required.extend(
-        requested_payments
+        requested_payments_for_spend
             .assertions(&mut ctx, &requested_asset_info)
             .map_err(SignerError::from)?,
     );
+    if let Some(seconds) = terms.expires_at {
+        spends.conditions.required = spends
+            .conditions
+            .required
+            .with(AssertBeforeSecondsAbsolute::new(seconds));
+    }
 
     let deltas = spends
         .apply(&mut ctx, &actions)
@@ -217,6 +236,10 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
     let input_spend_bundle =
         materialize_vault_cat_finished_spends(&mut ctx, vault_ctx, coinset, finished).await?;
 
+    let mut offer_ctx = chia_sdk_driver::SpendContext::new();
+    let requested_payments =
+        build_requested_payments(&mut offer_ctx, terms, receive_puzzle_hash, offer_nonce)?;
+
     let mut allocator = Allocator::new();
     let offer = Offer::from_input_spend_bundle(
         &mut allocator,
@@ -225,7 +248,9 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
         requested_asset_info,
     )
     .map_err(SignerError::from)?;
-    let offer_spend_bundle = offer.to_spend_bundle(&mut ctx).map_err(SignerError::from)?;
+    let offer_spend_bundle = offer
+        .to_spend_bundle(&mut offer_ctx)
+        .map_err(SignerError::from)?;
     let offer_text =
         chia_sdk_driver::encode_offer(&offer_spend_bundle).map_err(SignerError::from)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;

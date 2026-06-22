@@ -18,13 +18,14 @@ use crate::offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
     BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow,
 };
+use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
 pub use types::BootstrapPhaseResult;
 
 use futures::SignerDenominationPhaseFuture;
 use planning::{
-    bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
+    bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
 };
 use split_submit::submit_bootstrap_mixed_split;
 use types::BootstrapPhaseFailure;
@@ -32,23 +33,17 @@ use wait::{wait_for_coinset_confirmation, BootstrapWaitConfig};
 
 const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
+#[cfg(test)]
+fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
+    bootstrap_coins_in_base_units(coins, 1)
+}
+
 fn bootstrap_skipped(reason: impl Into<String>) -> BootstrapPhaseResult {
     BootstrapPhaseResult::skipped(reason)
 }
 
 fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
     BootstrapPhaseResult::failed(failure)
-}
-
-fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
-    coins
-        .iter()
-        .filter(|coin| wallet_coin_spendable(coin))
-        .map(|coin| BootstrapCoin {
-            id: coin.id.clone(),
-            amount: i64::try_from(coin.amount).unwrap_or(i64::MAX),
-        })
-        .collect()
 }
 
 async fn load_asset_scoped_coins(
@@ -110,6 +105,7 @@ fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseR
 
 struct BootstrapSplitPlanContext {
     split_asset_id: String,
+    split_asset_mojo_multiplier: i64,
     receive_address: String,
     bootstrap_plan: BootstrapPlan,
     ladder_entries: Vec<PlannerLadderRow>,
@@ -154,6 +150,13 @@ async fn prepare_bootstrap_split_plan(
             "missing_{side}_asset_for_bootstrap"
         ))));
     }
+    let mojo_field = if side == "buy" {
+        "quote_unit_mojo_multiplier"
+    } else {
+        "base_unit_mojo_multiplier"
+    };
+    let split_asset_mojo_multiplier =
+        mojo_multiplier_for_leg(&market.pricing, mojo_field, &split_asset_id).max(1);
 
     let receive_address = market.receive_address.trim();
     if receive_address.is_empty() {
@@ -170,7 +173,8 @@ async fn prepare_bootstrap_split_plan(
             Err(result) => return Ok(Err(result)),
         };
 
-    let spendable_coins = spendable_bootstrap_coins(&asset_scoped_coins);
+    let spendable_coins =
+        bootstrap_coins_in_base_units(&asset_scoped_coins, split_asset_mojo_multiplier);
     let outcome = plan_bootstrap_mixed_outputs(&ladder_entries, &spendable_coins);
     if let Some(early) = bootstrap_early_phase(&outcome) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));
@@ -201,6 +205,7 @@ async fn prepare_bootstrap_split_plan(
 
     Ok(Ok(BootstrapSplitPlanContext {
         split_asset_id,
+        split_asset_mojo_multiplier,
         receive_address: receive_address.to_string(),
         bootstrap_plan,
         ladder_entries,
@@ -218,6 +223,7 @@ async fn execute_bootstrap_split_and_wait(
 ) -> SignerResult<BootstrapPhaseResult> {
     let BootstrapSplitPlanContext {
         split_asset_id,
+        split_asset_mojo_multiplier,
         receive_address,
         bootstrap_plan,
         ladder_entries,
@@ -232,6 +238,7 @@ async fn execute_bootstrap_split_and_wait(
         &bootstrap_plan,
         &split_asset_id,
         &receive_address,
+        split_asset_mojo_multiplier,
     )
     .await
     {
@@ -283,7 +290,8 @@ async fn execute_bootstrap_split_and_wait(
         &split_asset_id,
     )
     .await?;
-    let refreshed_spendable = spendable_bootstrap_coins(&refreshed_asset_coins);
+    let refreshed_spendable =
+        bootstrap_coins_in_base_units(&refreshed_asset_coins, split_asset_mojo_multiplier);
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos,
         fee_source,

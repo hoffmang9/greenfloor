@@ -4,7 +4,7 @@ use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
 use crate::config::{LadderEntry, SignerConfig};
 use crate::error::SignerResult;
-use crate::offer::bootstrap::PlannerLadderRow;
+use crate::offer::bootstrap::{BootstrapCoin, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 use crate::offer::request::normalize_offer_side;
@@ -74,6 +74,26 @@ pub(super) fn wallet_coin_spendable(coin: &WalletUnspentCoin) -> bool {
     is_spendable_coin_state(&coin.state)
 }
 
+/// Map on-chain coin amounts (mojos) to ladder `size_base_units` for bootstrap planning.
+pub(super) fn bootstrap_coins_in_base_units(
+    coins: &[WalletUnspentCoin],
+    mojo_multiplier: i64,
+) -> Vec<BootstrapCoin> {
+    let multiplier = mojo_multiplier.max(1);
+    coins
+        .iter()
+        .filter(|coin| wallet_coin_spendable(coin))
+        .filter_map(|coin| {
+            let amount_mojos = i64::try_from(coin.amount).ok()?;
+            let base_units = amount_mojos / multiplier;
+            (base_units > 0).then(|| BootstrapCoin {
+                id: coin.id.clone(),
+                amount: base_units,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -119,6 +139,29 @@ mod tests {
         .expect("entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].size_base_units, 20_000);
+    }
+
+    #[test]
+    fn bootstrap_coins_in_base_units_divides_cat_mojos() {
+        use super::bootstrap_coins_in_base_units;
+
+        let coins = vec![
+            WalletUnspentCoin {
+                id: "a".repeat(64),
+                name: "a".repeat(64),
+                amount: 5_000,
+                state: "CONFIRMED".to_string(),
+            },
+            WalletUnspentCoin {
+                id: "b".repeat(64),
+                name: "b".repeat(64),
+                amount: 500,
+                state: "CONFIRMED".to_string(),
+            },
+        ];
+        let base = bootstrap_coins_in_base_units(&coins, 1_000);
+        assert_eq!(base.len(), 1);
+        assert_eq!(base[0].amount, 5);
     }
 
     #[test]

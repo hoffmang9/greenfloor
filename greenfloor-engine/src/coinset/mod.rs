@@ -3,6 +3,7 @@ mod asset;
 mod backend;
 mod broadcast;
 mod cats;
+mod client_retry;
 pub(crate) mod coin_select;
 mod direct_api;
 mod msp;

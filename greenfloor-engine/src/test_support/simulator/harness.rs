@@ -270,6 +270,7 @@ pub(crate) fn fetch_cat_from_sim_by_id(chain: &SimChain, coin_id: Bytes32) -> Re
     fetch_cat_from_sim(&sim, state.coin)
 }
 
+#[allow(dead_code)]
 pub(crate) fn xch_requested_payments(
     offer_nonce: Bytes32,
     receive_puzzle_hash: Bytes32,
