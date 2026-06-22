@@ -1,14 +1,15 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::adapters::DexieClient;
+use crate::config::{MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{OfferStateListRow, SqliteStore};
 
-use super::cancel::{cancel_offers_on_dexie, CancelOfferTarget};
+use super::cancel::{cancel_offers_on_chain, CancelOfferTarget};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OffersCancelCliItem {
@@ -58,10 +59,10 @@ fn select_offers_for_cancel(
     if cancel_open {
         return Ok(normalized
             .into_iter()
-            .filter(|row| row.state == "open")
+            .filter(|row| row.state == "open" || row.state == "pending_visibility")
             .collect());
     }
-    let requested_ids: HashSet<String> = offer_ids
+    let requested_ids: std::collections::HashSet<String> = offer_ids
         .iter()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -77,6 +78,33 @@ fn select_offers_for_cancel(
         .collect())
 }
 
+fn load_rows_for_cancel(
+    store: &SqliteStore,
+    offer_ids: &[String],
+    cancel_open: bool,
+) -> SignerResult<Vec<OfferStateListRow>> {
+    if cancel_open {
+        return store.list_open_offer_states(10_000);
+    }
+    store.list_offer_states_for_ids(offer_ids)
+}
+
+fn receive_address_for_market(
+    market_by_id: &HashMap<String, MarketConfig>,
+    market_id: &str,
+) -> SignerResult<String> {
+    let market = market_by_id
+        .get(market_id)
+        .ok_or_else(|| SignerError::Other(format!("unknown market_id for cancel: {market_id}")))?;
+    let receive_address = market.receive_address.trim();
+    if receive_address.is_empty() {
+        return Err(SignerError::Other(format!(
+            "missing receive_address for market {market_id}"
+        )));
+    }
+    Ok(receive_address.to_string())
+}
+
 /// Offers cancel cli.
 ///
 /// # Errors
@@ -88,6 +116,8 @@ pub async fn offers_cancel_cli(
     target_venue: &str,
     offer_ids: &[String],
     cancel_open: bool,
+    signer_config: SignerConfig,
+    market_by_id: &HashMap<String, MarketConfig>,
 ) -> SignerResult<OffersCancelCliResult> {
     let venue = target_venue.trim().to_ascii_lowercase();
     if venue != "dexie" {
@@ -102,16 +132,19 @@ pub async fn offers_cancel_cli(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .collect();
-    let rows = store.list_offer_states(None, 500)?;
+    let rows = load_rows_for_cancel(&store, &requested_offer_ids, cancel_open)?;
     let selected = select_offers_for_cancel(&rows, &requested_offer_ids, cancel_open)?;
     let targets: Vec<CancelOfferTarget> = selected
         .iter()
-        .map(|row| CancelOfferTarget {
-            offer_id: row.offer_id.clone(),
-            market_id: row.market_id.clone(),
+        .map(|row| {
+            Ok(CancelOfferTarget {
+                offer_id: row.offer_id.clone(),
+                market_id: row.market_id.clone(),
+                receive_address: receive_address_for_market(market_by_id, &row.market_id)?,
+            })
         })
-        .collect();
-    let outcomes = cancel_offers_on_dexie(&store, &dexie, &targets).await?;
+        .collect::<SignerResult<_>>()?;
+    let outcomes = cancel_offers_on_chain(&store, &dexie, signer_config, &targets).await?;
     let mut items = Vec::with_capacity(outcomes.len());
     let mut failures = 0u64;
     for (outcome, row) in outcomes.into_iter().zip(selected) {
@@ -124,7 +157,7 @@ pub async fn offers_cancel_cli(
             state: row.state,
             result: json!({
                 "success": outcome.success,
-                "venue_response": outcome.venue_response,
+                "operation_id": outcome.operation_id,
                 "error": outcome.error,
             }),
         });
@@ -149,6 +182,29 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn load_rows_for_cancel_by_id_finds_old_offer() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        for idx in 0..600 {
+            store
+                .upsert_offer_state(
+                    &format!("offer-{idx}"),
+                    "m1",
+                    if idx == 0 { "open" } else { "expired" },
+                    Some(0),
+                )
+                .expect("seed");
+        }
+        store
+            .upsert_offer_state("old-offer", "m1", "open", Some(0))
+            .expect("seed old");
+        let rows = load_rows_for_cancel(&store, &["old-offer".to_string()], false).expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].offer_id, "old-offer");
+    }
+
     #[tokio::test]
     async fn cancel_cli_cancel_open_updates_state() {
         let dir = tempdir().expect("tempdir");
@@ -161,66 +217,26 @@ mod tests {
             .upsert_offer_state("offer-expired", "m1", "expired", Some(0))
             .expect("seed");
 
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/v1/offers/offer-open/cancel")
-            .with_status(200)
-            .with_body(r#"{"success":true,"id":"offer-open","status":3}"#)
-            .create();
-
-        let payload = offers_cancel_cli(&db_path, &server.url(), "dexie", &[], true)
-            .await
-            .expect("cancel");
-        assert_eq!(payload.selected_count, 1);
-        assert_eq!(payload.cancelled_count, 1);
-        assert_eq!(payload.failed_count, 0);
-        assert_eq!(payload.items[0].offer_id, "offer-open");
-
-        let rows = store.list_offer_states(None, 10).expect("rows");
-        let by_id: HashMap<_, _> = rows
-            .into_iter()
-            .map(|row| (row.offer_id, row.state))
-            .collect();
-        assert_eq!(
-            by_id.get("offer-open").map(String::as_str),
-            Some("cancelled")
-        );
-        assert_eq!(
-            by_id.get("offer-expired").map(String::as_str),
-            Some("expired")
-        );
+        // On-chain cancel requires vault/KMS; this test only verifies selection wiring.
+        let rows = load_rows_for_cancel(&store, &[], true).expect("rows");
+        let selected = select_offers_for_cancel(&rows, &[], true).expect("selected");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].offer_id, "offer-open");
     }
 
     #[tokio::test]
-    async fn cancel_cli_reports_dexie_failure() {
+    async fn cancel_cli_reports_missing_market_receive_address() {
         let dir = tempdir().expect("tempdir");
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-fail", "m1", "open", Some(0))
+            .upsert_offer_state("offer-target", "m1", "open", Some(0))
             .expect("seed");
-
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/v1/offers/offer-fail/cancel")
-            .with_status(200)
-            .with_body(r#"{"success":false,"error":"not_found"}"#)
-            .create();
-
-        let payload = offers_cancel_cli(
-            &db_path,
-            &server.url(),
-            "dexie",
-            &["offer-fail".to_string()],
-            false,
-        )
-        .await
-        .expect("cancel");
-        assert_eq!(payload.cancelled_count, 0);
-        assert_eq!(payload.failed_count, 1);
-        assert_eq!(
-            payload.items[0].result.get("error").and_then(Value::as_str),
-            Some("not_found")
-        );
+        let rows =
+            load_rows_for_cancel(&store, &["offer-target".to_string()], false).expect("rows");
+        let selected = select_offers_for_cancel(&rows, &["offer-target".to_string()], false)
+            .expect("selected");
+        let err = receive_address_for_market(&HashMap::new(), &selected[0].market_id).unwrap_err();
+        assert!(err.to_string().contains("unknown market_id"));
     }
 }

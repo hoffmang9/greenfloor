@@ -19,6 +19,111 @@ impl SqliteStore {
         self.upsert_offer_state_at(offer_id, market_id, state, last_seen_status, &utcnow_iso())
     }
 
+    /// List open (or pending visibility) offer states for cancel-open flows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_open_offer_states(&self, limit: usize) -> SignerResult<Vec<OfferStateListRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit_i64 = i64::try_from(limit).map_err(|_| {
+            SignerError::Other("list_open_offer_states limit exceeds i64 max".to_string())
+        })?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+                SELECT offer_id, market_id, state, last_seen_status, updated_at
+                FROM offer_state
+                WHERE state IN ('open', 'pending_visibility')
+                ORDER BY updated_at DESC
+                LIMIT ?1
+                ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare open offer_state query: {err}"))
+            })?;
+        let mut rows = stmt.query(params![limit_i64]).map_err(|err| {
+            SignerError::Other(format!("failed to query open offer_state: {err}"))
+        })?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read open offer_state row: {err}"))
+        })? {
+            out.push(OfferStateListRow {
+                offer_id: row
+                    .get(0)
+                    .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?,
+                market_id: row.get(1).map_err(|err| {
+                    SignerError::Other(format!("failed to read market_id: {err}"))
+                })?,
+                state: row
+                    .get(2)
+                    .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                last_seen_status: row.get(3).ok(),
+                updated_at: row.get(4).map_err(|err| {
+                    SignerError::Other(format!("failed to read updated_at: {err}"))
+                })?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// List offer states for explicit offer ids (order follows input ids).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_offer_states_for_ids(
+        &self,
+        offer_ids: &[String],
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        let mut out = Vec::new();
+        for offer_id in offer_ids {
+            let clean = offer_id.trim();
+            if clean.is_empty() {
+                continue;
+            }
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r"
+                    SELECT offer_id, market_id, state, last_seen_status, updated_at
+                    FROM offer_state
+                    WHERE offer_id = ?1
+                    ",
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare offer_state by id query: {err}"))
+                })?;
+            let mut rows = stmt.query(params![clean]).map_err(|err| {
+                SignerError::Other(format!("failed to query offer_state by id: {err}"))
+            })?;
+            if let Some(row) = rows.next().map_err(|err| {
+                SignerError::Other(format!("failed to read offer_state by id row: {err}"))
+            })? {
+                out.push(OfferStateListRow {
+                    offer_id: row.get(0).map_err(|err| {
+                        SignerError::Other(format!("failed to read offer_id: {err}"))
+                    })?,
+                    market_id: row.get(1).map_err(|err| {
+                        SignerError::Other(format!("failed to read market_id: {err}"))
+                    })?,
+                    state: row.get(2).map_err(|err| {
+                        SignerError::Other(format!("failed to read state: {err}"))
+                    })?,
+                    last_seen_status: row.get(3).ok(),
+                    updated_at: row.get(4).map_err(|err| {
+                        SignerError::Other(format!("failed to read updated_at: {err}"))
+                    })?,
+                });
+            }
+        }
+        Ok(out)
+    }
+
     /// List offer states.
     ///
     /// # Errors

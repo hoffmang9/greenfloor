@@ -1,5 +1,7 @@
 use chia_protocol::{Bytes32, SpendBundle};
-use chia_sdk_driver::{decode_offer, AssetInfo, Offer, SpendContext};
+use chia_sdk_driver::{AssetInfo, Offer, SpendContext};
+
+use crate::bech32m::{decode_offer, encode_offer};
 use chia_sdk_types::{run_puzzle, Condition, Conditions};
 use chia_traits::Streamable;
 use clvm_traits::FromClvm;
@@ -140,7 +142,7 @@ pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
 pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> SignerResult<String> {
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
         .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
-    chia_sdk_driver::encode_offer(&spend_bundle).map_err(SignerError::from)
+    encode_offer(&spend_bundle)
 }
 
 /// From input spend bundle bytes.

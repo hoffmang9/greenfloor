@@ -130,7 +130,13 @@ async fn execute_post_reconcile_phases(
     let _cancel_payload = run_logged_market_phase(
         market.market_id.as_str(),
         "cancel",
-        run_market_cancel_phase(store, ctx, market, &ctx.reconcile.offers, cycle_state),
+        Box::pin(run_market_cancel_phase(
+            store,
+            ctx,
+            market,
+            &ctx.reconcile.offers,
+            cycle_state,
+        )),
     )
     .await?;
 
@@ -183,7 +189,13 @@ async fn run_post_reconcile_market_phases_async(
 
     let mut cycle_state = MarketCycleResultState::default();
 
-    execute_post_reconcile_phases(store, ctx, market, &mut cycle_state).await?;
+    Box::pin(execute_post_reconcile_phases(
+        store,
+        ctx,
+        market,
+        &mut cycle_state,
+    ))
+    .await?;
 
     crate::trace_event!(
         DEBUG,

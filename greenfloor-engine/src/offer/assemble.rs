@@ -242,8 +242,7 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
     )
     .map_err(SignerError::from)?;
     let offer_spend_bundle = offer.to_spend_bundle(&mut ctx).map_err(SignerError::from)?;
-    let offer_text =
-        chia_sdk_driver::encode_offer(&offer_spend_bundle).map_err(SignerError::from)?;
+    let offer_text = crate::bech32m::encode_offer(&offer_spend_bundle)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;
 
     Ok(CreateOfferResult::assembled(

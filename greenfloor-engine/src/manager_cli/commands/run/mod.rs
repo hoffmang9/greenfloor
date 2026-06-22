@@ -34,8 +34,10 @@ impl ManagerCommands {
             | ManagerCommands::SetLogLevel { .. }) => setup::run_command(cmd, ctx),
             ManagerCommands::BuildAndPostOffer { .. } => build_offer::run_command(self, ctx).await,
             cmd @ (ManagerCommands::OffersStatus { .. }
-            | ManagerCommands::OffersReconcile { .. }
-            | ManagerCommands::OffersCancel { .. }) => offers::run_command(cmd, ctx).await,
+            | ManagerCommands::OffersReconcile { .. }) => offers::run_command(cmd, ctx).await,
+            cmd @ ManagerCommands::OffersCancel { .. } => {
+                Box::pin(offers::run_command(cmd, ctx)).await
+            }
             cmd @ (ManagerCommands::CatsAdd { .. }
             | ManagerCommands::CatsList
             | ManagerCommands::CatsDelete { .. }) => cats::run_command(cmd, ctx).await,

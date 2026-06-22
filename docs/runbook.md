@@ -82,9 +82,9 @@ Optional developer bootstrap for testnet markets:
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Cancel offers when policy requires it:
+- Cancel offers when policy requires it (on-chain via Coinset; Dexie is only used to fetch the offer file):
   - `greenfloor-manager offers-cancel --offer-id <id>`
-  - Cancel all open offers for configured markets: `greenfloor-manager offers-cancel --cancel-open`
+  - Cancel all open offers tracked in state DB: `greenfloor-manager offers-cancel --cancel-open`
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 
@@ -151,7 +151,8 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
 - **Offer backend:** `build-and-post-offer` and daemon managed post require vault KMS signer config (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0013.
-- **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
+- **Dexie post issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
+- **Offer cancel failures:** look for `offer_cancel_policy` items with `cancel_failed:*`, `offer_cancel_dexie_offer_not_found`, or `offer_cancel_input_coin_already_spent`.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:
   - `error: "coinset_fee_preflight_failed:endpoint_validation_failed"` means endpoint routing/configuration failure (invalid/misrouted `GREENFLOOR_COINSET_BASE_URL`, wrong-network endpoint, DNS/TLS/connectivity issues).

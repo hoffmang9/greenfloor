@@ -149,6 +149,18 @@ pub enum SignerError {
     #[error("offer_duplicate_spent_coin_ids")]
     OfferDuplicateSpentCoinIds,
 
+    #[error("offer_cancel_dexie_offer_not_found")]
+    OfferCancelDexieOfferNotFound,
+
+    #[error("offer_cancel_offer_file_missing")]
+    OfferCancelOfferFileMissing,
+
+    #[error("offer_cancel_no_spendable_input")]
+    OfferCancelNoSpendableInput,
+
+    #[error("offer_cancel_input_coin_already_spent")]
+    OfferCancelInputCoinAlreadySpent,
+
     #[error("invalid_size_base_units")]
     InvalidSizeBaseUnits,
 
