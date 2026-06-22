@@ -24,8 +24,7 @@ pub use types::BootstrapPhaseResult;
 
 use futures::SignerDenominationPhaseFuture;
 use planning::{
-    bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee_for_signer,
-    wallet_coin_spendable,
+    bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
 };
 use split_submit::submit_bootstrap_mixed_split;
 use types::BootstrapPhaseFailure;
@@ -180,7 +179,7 @@ async fn prepare_bootstrap_split_plan(
         return Ok(Err(bootstrap_skipped("bootstrap_precheck_failed")));
     };
 
-    let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee_for_signer(
+    let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
         &program.network,
         signer_config,
         program.coin_ops_minimum_fee_mojos,

@@ -3,7 +3,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
-use crate::coinset::msp_base_url_for_signer;
+use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{
     load_markets_config_with_overlay, load_program_bundle_for_coin_list, ProgramConfigBundle,
 };
@@ -56,11 +56,11 @@ async fn load_coin_list_snapshot(
     } else {
         market.base_asset.clone()
     };
-    let coins = crate::coinset::list_wallet_unspent_coins(
+    let coins = list_wallet_unspent_coins_for_signer(
         &program.network,
+        &bundle.signer,
         receive_address,
         &list_asset_id,
-        msp_base_url_for_signer(&bundle.signer),
     )
     .await?;
     let min_amount = crate::coin_ops::coin_op_min_amount_mojos(market.base_asset.trim());

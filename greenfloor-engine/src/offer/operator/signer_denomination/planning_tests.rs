@@ -1,8 +1,7 @@
 use serde_json::json;
 
 use super::{
-    bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
-    resolve_bootstrap_split_fee_for_signer, wallet_coin_spendable,
+    bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
 };
 use crate::coinset::WalletUnspentCoin;
 use crate::config::LadderEntry;
@@ -72,26 +71,10 @@ async fn resolve_bootstrap_split_fee_uses_coinset_conservative_fee() {
         .create_async()
         .await;
 
-    let (fee_mojos, fee_source, lookup_error) =
-        resolve_bootstrap_split_fee("mainnet", 99, 2, Some(&server.url())).await;
-    assert_eq!(fee_mojos, 500);
-    assert_eq!(fee_source, "coinset_conservative_fee");
-    assert!(lookup_error.is_none());
-}
-
-#[tokio::test]
-async fn resolve_bootstrap_split_fee_for_signer_uses_signer_msp_base_url() {
-    let mut server = mockito::Server::new_async().await;
-    let _mock = server
-        .mock("POST", "/get_fee_estimate")
-        .with_status(200)
-        .with_body(r#"{"success":true,"estimates":[100,500]}"#)
-        .create_async()
-        .await;
     let signer = test_signer_config(&server.url());
 
     let (fee_mojos, fee_source, lookup_error) =
-        resolve_bootstrap_split_fee_for_signer("mainnet", &signer, 99, 2).await;
+        resolve_bootstrap_split_fee("mainnet", &signer, 99, 2).await;
     assert_eq!(fee_mojos, 500);
     assert_eq!(fee_source, "coinset_conservative_fee");
     assert!(lookup_error.is_none());
@@ -106,8 +89,10 @@ async fn resolve_bootstrap_split_fee_falls_back_on_lookup_failure() {
         .create_async()
         .await;
 
+    let signer = test_signer_config(&server.url());
+
     let (fee_mojos, fee_source, lookup_error) =
-        resolve_bootstrap_split_fee("mainnet", 99, 2, Some(&server.url())).await;
+        resolve_bootstrap_split_fee("mainnet", &signer, 99, 2).await;
     assert_eq!(fee_mojos, 99);
     assert_eq!(fee_source, "config_minimum_fee_fallback");
     assert!(lookup_error.is_some());
@@ -123,8 +108,10 @@ async fn resolve_bootstrap_split_fee_falls_back_when_estimate_empty() {
         .create_async()
         .await;
 
+    let signer = test_signer_config(&server.url());
+
     let (fee_mojos, fee_source, lookup_error) =
-        resolve_bootstrap_split_fee("mainnet", 99, 2, Some(&server.url())).await;
+        resolve_bootstrap_split_fee("mainnet", &signer, 99, 2).await;
     assert_eq!(fee_mojos, 99);
     assert_eq!(fee_source, "config_minimum_fee_fallback");
     assert!(lookup_error.is_none());

@@ -6,6 +6,8 @@ const MINIMAL_PROGRAM_TEMPLATE: &str =
     include_str!("../../tests/fixtures/data/minimal_program.yaml");
 const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
     include_str!("../../tests/fixtures/data/minimal_program_signer_append.yaml");
+const MINIMAL_PROGRAM_SIGNER_APPEND_NO_MSP: &str =
+    include_str!("../../tests/fixtures/data/minimal_program_signer_append_no_msp.yaml");
 
 #[derive(Clone, Copy)]
 pub struct MinimalProgramParams<'a> {
@@ -81,13 +83,12 @@ pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramPara
     let launcher_id = "aa".repeat(32);
     let mut contents = materialize_minimal_program_text(params);
     contents.push('\n');
-    let mut signer_append = MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &launcher_id);
-    if let Some(msp_base_url) = params.coinset_msp_base_url {
-        signer_append = signer_append.replace("__COINSET_MSP_BASE_URL__", msp_base_url);
-    } else {
-        signer_append =
-            signer_append.replace("  coinset_msp_base_url: \"__COINSET_MSP_BASE_URL__\"\n", "");
-    }
+    let signer_append = match params.coinset_msp_base_url {
+        Some(msp_base_url) => MINIMAL_PROGRAM_SIGNER_APPEND
+            .replace("__LAUNCHER_ID__", &launcher_id)
+            .replace("__COINSET_MSP_BASE_URL__", msp_base_url),
+        None => MINIMAL_PROGRAM_SIGNER_APPEND_NO_MSP.replace("__LAUNCHER_ID__", &launcher_id),
+    };
     contents.push_str(&signer_append);
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("write signer program {}: {err}", path.display()));

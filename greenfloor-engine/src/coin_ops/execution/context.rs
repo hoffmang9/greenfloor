@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chia_protocol::Bytes32;
 
 use crate::coin_ops::SpendableCoin;
-use crate::coinset::{list_wallet_unspent_coins, spend_bundle_hash_from_hex};
+use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::hex_to_bytes32;
@@ -36,11 +36,11 @@ impl CoinOpExecContext {
         if let Some(coins) = self.test_overrides.wallet_coins_override() {
             return Ok(coins.to_vec());
         }
-        let coins = list_wallet_unspent_coins(
+        let coins = list_wallet_unspent_coins_for_signer(
             &self.program.network,
+            &self.signer_config,
             &self.market.receive_address,
             &self.resolved_base_asset_id,
-            None,
         )
         .await?;
         Ok(wallet_coins_to_spendable(

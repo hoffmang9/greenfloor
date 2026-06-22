@@ -50,14 +50,19 @@ fn bootstrap_fee_cost_for_output_count(output_count: usize) -> u64 {
 
 pub(super) async fn resolve_bootstrap_split_fee(
     network: &str,
+    signer: &SignerConfig,
     minimum_fee_mojos: u64,
     output_count: usize,
-    coinset_base_url: Option<&str>,
 ) -> (u64, String, Option<String>) {
     let fee_cost = bootstrap_fee_cost_for_output_count(output_count);
     let spend_count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
-    match get_conservative_fee_estimate(network, coinset_base_url, fee_cost, Some(spend_count))
-        .await
+    match get_conservative_fee_estimate(
+        network,
+        msp_base_url_for_signer(signer),
+        fee_cost,
+        Some(spend_count),
+    )
+    .await
     {
         Ok(Some(fee_mojos)) => (fee_mojos, "coinset_conservative_fee".to_string(), None),
         Ok(None) => (
@@ -71,21 +76,6 @@ pub(super) async fn resolve_bootstrap_split_fee(
             Some(err.to_string()),
         ),
     }
-}
-
-pub(super) async fn resolve_bootstrap_split_fee_for_signer(
-    network: &str,
-    signer: &SignerConfig,
-    minimum_fee_mojos: u64,
-    output_count: usize,
-) -> (u64, String, Option<String>) {
-    resolve_bootstrap_split_fee(
-        network,
-        minimum_fee_mojos,
-        output_count,
-        msp_base_url_for_signer(signer),
-    )
-    .await
 }
 
 pub(super) fn wallet_coin_spendable(coin: &WalletUnspentCoin) -> bool {
