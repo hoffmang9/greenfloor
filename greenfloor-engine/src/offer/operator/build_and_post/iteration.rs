@@ -118,10 +118,7 @@ async fn publish_created_offer(
         offer_text: created.offer_text.trim(),
         drop_only: request.venue.drop_only,
         claim_rewards: request.venue.claim_rewards,
-        expected_offered_asset_id: &asset_fields.expected_offered_asset_id,
-        expected_offered_symbol: &asset_fields.expected_offered_symbol,
-        expected_requested_asset_id: &asset_fields.expected_requested_asset_id,
-        expected_requested_symbol: &asset_fields.expected_requested_symbol,
+        expected: (&asset_fields).into(),
     })
     .await?;
     let publish_ms = metric_millis_to_u64(publish_started.elapsed().as_millis());

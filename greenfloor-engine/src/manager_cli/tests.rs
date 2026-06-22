@@ -1,59 +1,9 @@
 use std::io::Write;
 
-use mockito::Matcher;
-use serde_json::json;
-
-use crate::adapters::{post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams};
 use crate::config::{
     load_markets_config, load_program_config, resolve_market_for_build,
     resolve_offer_publish_settings, ManagerProgramConfig,
 };
-
-#[tokio::test]
-async fn dexie_post_offer_phase_posts_and_verifies_visibility() {
-    let mut server = mockito::Server::new_async().await;
-    let offer_id = "offer-123";
-    let _post = server
-        .mock("POST", "/v1/offers")
-        .with_status(200)
-        .with_body(json!({"success": true, "id": offer_id}).to_string())
-        .create_async()
-        .await;
-    let _get = server
-        .mock("GET", Matcher::Regex(r"/v1/offers/.*".to_string()))
-        .with_status(200)
-        .with_body(
-            json!({
-                "offer": {
-                    "id": offer_id,
-                    "offered": [{"id": "basecat"}],
-                    "requested": [{"code": "xch"}],
-                }
-            })
-            .to_string(),
-        )
-        .create_async()
-        .await;
-
-    let dexie = DexieClient::new(server.url());
-    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
-        dexie: &dexie,
-        offer_text: "offer1test",
-        drop_only: true,
-        claim_rewards: false,
-        expected_offered_asset_id: "basecat",
-        expected_offered_symbol: "A1",
-        expected_requested_asset_id: "xch",
-        expected_requested_symbol: "xch",
-    })
-    .await
-    .expect("post");
-    assert_eq!(
-        result.get("success").and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(result.get("id").and_then(|v| v.as_str()), Some(offer_id));
-}
 
 #[test]
 fn manager_config_and_market_resolution() {

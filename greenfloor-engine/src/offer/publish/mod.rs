@@ -1,5 +1,9 @@
+mod dexie;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+pub use dexie::{post_offer_phase_dexie, PostOfferPhaseDexieParams};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExpectedPublishAssetFields {
@@ -7,6 +11,25 @@ pub struct ExpectedPublishAssetFields {
     pub expected_offered_symbol: String,
     pub expected_requested_asset_id: String,
     pub expected_requested_symbol: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExpectedPublishAssetFieldsRef<'a> {
+    pub expected_offered_asset_id: &'a str,
+    pub expected_offered_symbol: &'a str,
+    pub expected_requested_asset_id: &'a str,
+    pub expected_requested_symbol: &'a str,
+}
+
+impl<'a> From<&'a ExpectedPublishAssetFields> for ExpectedPublishAssetFieldsRef<'a> {
+    fn from(fields: &'a ExpectedPublishAssetFields) -> Self {
+        Self {
+            expected_offered_asset_id: &fields.expected_offered_asset_id,
+            expected_offered_symbol: &fields.expected_offered_symbol,
+            expected_requested_asset_id: &fields.expected_requested_asset_id,
+            expected_requested_symbol: &fields.expected_requested_symbol,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,11 +181,14 @@ fn rows_contain_expected(
 pub fn dexie_offer_asset_expectation_error(
     offered: &Value,
     requested: &Value,
-    expected_offered_asset_id: &str,
-    expected_offered_symbol: &str,
-    expected_requested_asset_id: &str,
-    expected_requested_symbol: &str,
+    expected: ExpectedPublishAssetFieldsRef<'_>,
 ) -> Option<String> {
+    let ExpectedPublishAssetFieldsRef {
+        expected_offered_asset_id,
+        expected_offered_symbol,
+        expected_requested_asset_id,
+        expected_requested_symbol,
+    } = expected;
     let expected_offered_asset = expected_offered_asset_id.trim().to_ascii_lowercase();
     let expected_offered_symbol = expected_offered_symbol.trim().to_ascii_lowercase();
     if !expected_offered_asset.is_empty() {
@@ -201,6 +227,7 @@ mod tests {
     use super::{
         bootstrap_block_error, bootstrap_offer_gate, dexie_offer_asset_expectation_error,
         expected_publish_asset_fields, BootstrapOfferGate, ExpectedPublishAssetFields,
+        ExpectedPublishAssetFieldsRef,
     };
     use serde_json::json;
 
@@ -306,7 +333,16 @@ mod tests {
         let offered = json!([{"id": "ABCD"}]);
         let requested = json!([]);
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "abcd", "", "", ""),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "abcd",
+                    expected_offered_symbol: "",
+                    expected_requested_asset_id: "",
+                    expected_requested_symbol: "",
+                }
+            ),
             None
         );
     }
@@ -316,11 +352,29 @@ mod tests {
         let offered = json!([{"code": "XCH"}, {"name": "txch"}]);
         let requested = json!([]);
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "ff", "xch", "", ""),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "ff",
+                    expected_offered_symbol: "xch",
+                    expected_requested_asset_id: "",
+                    expected_requested_symbol: "",
+                }
+            ),
             None
         );
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "ff", "txch", "", ""),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "ff",
+                    expected_offered_symbol: "txch",
+                    expected_requested_asset_id: "",
+                    expected_requested_symbol: "",
+                }
+            ),
             None
         );
     }
@@ -330,7 +384,16 @@ mod tests {
         let offered = json!([{"id": "aaaa"}]);
         let requested = json!([]);
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "bbbb", "b", "", ""),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "bbbb",
+                    expected_offered_symbol: "b",
+                    expected_requested_asset_id: "",
+                    expected_requested_symbol: "",
+                }
+            ),
             Some(
                 "dexie_offer_offered_asset_missing:expected_asset=bbbb:expected_symbol=b"
                     .to_string()
@@ -343,7 +406,16 @@ mod tests {
         let offered = json!([]);
         let requested = json!([{"id": "xch"}]);
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "", "", "cat", "cat"),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "",
+                    expected_offered_symbol: "",
+                    expected_requested_asset_id: "cat",
+                    expected_requested_symbol: "cat",
+                }
+            ),
             Some(
                 "dexie_offer_requested_asset_missing:expected_asset=cat:expected_symbol=cat"
                     .to_string()
@@ -356,7 +428,16 @@ mod tests {
         let offered = json!({"id": "xch"});
         let requested = json!({"id": "cat"});
         assert_eq!(
-            dexie_offer_asset_expectation_error(&offered, &requested, "xch", "xch", "cat", "cat"),
+            dexie_offer_asset_expectation_error(
+                &offered,
+                &requested,
+                ExpectedPublishAssetFieldsRef {
+                    expected_offered_asset_id: "xch",
+                    expected_offered_symbol: "xch",
+                    expected_requested_asset_id: "cat",
+                    expected_requested_symbol: "cat",
+                }
+            ),
             None
         );
     }
