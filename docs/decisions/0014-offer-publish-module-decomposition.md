@@ -33,15 +33,15 @@ status/reason mapping across string fields, snapshot helpers, and operator resul
 
 These symbols are no longer exported from `greenfloor_engine::offer`:
 
-| Removed symbol | Replacement |
-| -------------- | ----------- |
-| `bootstrap_block_error` | `BootstrapPhaseResult::offer_creation_block_error()` |
-| `bootstrap_offer_gate` | internal `offer::bootstrap::gate` (not public) |
-| `BootstrapOfferGate` | internal `offer::bootstrap::gate` (not public) |
-| `bootstrap_blocks_offer` | `BootstrapPhaseResult::offer_creation_block_error().is_some()` |
-| `ExpectedPublishAssetFieldsRef` | `ExpectedPublishAssetFields` (owned) |
-| `dexie_offer_asset_expectation_error` | `offer::publish::assets::visibility` (crate-internal) |
-| `OfferSideAssets`, `offer_side_assets_for_side` | crate-internal via `offer::request` |
+| Removed symbol                                  | Replacement                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| `bootstrap_block_error`                         | `BootstrapPhaseResult::offer_creation_block_error()`           |
+| `bootstrap_offer_gate`                          | internal `offer::bootstrap::gate` (not public)                 |
+| `BootstrapOfferGate`                            | internal `offer::bootstrap::gate` (not public)                 |
+| `bootstrap_blocks_offer`                        | `BootstrapPhaseResult::offer_creation_block_error().is_some()` |
+| `ExpectedPublishAssetFieldsRef`                 | `ExpectedPublishAssetFields` (owned)                           |
+| `dexie_offer_asset_expectation_error`           | `offer::publish::assets::visibility` (crate-internal)          |
+| `OfferSideAssets`, `offer_side_assets_for_side` | crate-internal via `offer::request`                            |
 
 Operator CLI JSON shapes are unchanged: bootstrap results still serialize `status` as
 `"failed"`, `"executed"`, or `"skipped"`.
