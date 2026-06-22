@@ -16,7 +16,6 @@ pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;
 pub mod coinset_cli;
-pub mod coinset_probe;
 pub mod config;
 pub mod cycle;
 pub mod daemon;

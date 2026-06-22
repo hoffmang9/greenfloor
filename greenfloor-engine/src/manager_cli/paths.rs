@@ -14,6 +14,15 @@ pub fn default_program_config_path() -> PathBuf {
 }
 
 #[must_use]
+pub fn program_config_path_from_optional(raw: &str) -> PathBuf {
+    if raw.trim().is_empty() {
+        default_program_config_path()
+    } else {
+        expand_home(Path::new(raw.trim()))
+    }
+}
+
+#[must_use]
 pub fn default_markets_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/markets.yaml"));
     if home_default.exists() {
@@ -94,6 +103,22 @@ pub fn optional_path(raw: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::paths::find_repo_root_from;
+
+    #[test]
+    fn program_config_path_from_optional_uses_default_when_empty() {
+        assert_eq!(
+            program_config_path_from_optional(""),
+            default_program_config_path()
+        );
+    }
+
+    #[test]
+    fn program_config_path_from_optional_expands_explicit_path() {
+        assert_eq!(
+            program_config_path_from_optional("~/custom/program.yaml"),
+            expand_home(Path::new("~/custom/program.yaml"))
+        );
+    }
 
     #[test]
     fn resolve_cli_config_path_uses_home_when_repo_default() {

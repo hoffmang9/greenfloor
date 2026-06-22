@@ -3,7 +3,9 @@
 use serde_json::{json, Value};
 
 use crate::coinset::parse::{chunk_values, coin_id_from_record, to_coinset_hex, u64_from_value};
-use crate::coinset::{post_coinset_coin_records, post_coinset_record, with_script_retries};
+use crate::coinset::{
+    post_coinset_coin_records, post_coinset_record, resolve_direct_client, with_script_retries,
+};
 use crate::error::SignerResult;
 use crate::vault::members::hex_to_bytes32;
 
@@ -24,6 +26,13 @@ pub struct DirectCoinsetScanClient {
     pub base_url: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedDirectScanClient {
+    pub network: String,
+    pub base_url: String,
+    pub client: DirectCoinsetScanClient,
+}
+
 impl DirectCoinsetScanClient {
     pub fn new(network: &str, base_url: Option<&str>) -> Self {
         Self {
@@ -32,6 +41,20 @@ impl DirectCoinsetScanClient {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),
+        }
+    }
+
+    /// Resolve normalized network/base URL and build a direct scan client.
+    #[must_use]
+    pub fn resolve(network: &str, base_url: Option<&str>) -> ResolvedDirectScanClient {
+        let resolved = resolve_direct_client(network, base_url);
+        let network = resolved.network.to_string();
+        let base_url = resolved.base_url.clone();
+        let client = Self::new(resolved.network, Some(resolved.base_url.as_str()));
+        ResolvedDirectScanClient {
+            network,
+            base_url,
+            client,
         }
     }
 

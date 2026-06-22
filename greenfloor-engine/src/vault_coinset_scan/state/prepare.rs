@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use chia_protocol::Bytes32;
 
-use crate::coinset::{resolve_direct_client, DirectCoinsetScanClient};
+use crate::coinset::DirectCoinsetScanClient;
 use crate::config::build_cat_ticker_index_lenient;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
@@ -26,8 +26,8 @@ pub(super) struct ResolvedScanClient {
 }
 
 pub(super) fn resolve_scan_client(request: &ScanRequest) -> SignerResult<ResolvedScanClient> {
-    let resolved = resolve_direct_client(&request.network, request.coinset_base_url.as_deref());
-    let scanner = DirectCoinsetScanClient::new(resolved.network, Some(resolved.base_url.as_str()));
+    let resolved =
+        DirectCoinsetScanClient::resolve(&request.network, request.coinset_base_url.as_deref());
 
     let launcher_id = normalize_hex_id(&request.launcher_id);
     if launcher_id.is_empty() {
@@ -36,7 +36,7 @@ pub(super) fn resolve_scan_client(request: &ScanRequest) -> SignerResult<Resolve
     let launcher_bytes = hex_to_bytes32(&launcher_id)?;
 
     Ok(ResolvedScanClient {
-        scanner,
+        scanner: resolved.client,
         launcher_id,
         launcher_bytes,
     })

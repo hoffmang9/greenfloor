@@ -4,8 +4,10 @@
 mod coinset_probe_mocks;
 
 use coinset_probe_mocks::{mount_probe_server, HttpMockBody, NamesMockMode, ProbeServerMockConfig};
+use greenfloor_engine::coinset::probe::{
+    build_coinset_probe_report, CoinsetProbeCliArgs, ProbeReport,
+};
 use greenfloor_engine::coinset::to_coinset_hex;
-use greenfloor_engine::coinset_probe::{build_coinset_probe_report, CoinsetProbeCliArgs};
 use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
@@ -35,7 +37,7 @@ fn probe_args(server_url: String, launcher: String, height_window: u64) -> Coins
 }
 
 fn assert_operator_probe_report_contract(
-    report: &greenfloor_engine::coinset_probe::ProbeReport,
+    report: &ProbeReport,
     mocks: &ProbeServerMockConfig,
     launcher: &str,
     expected_p2_hash: &str,
@@ -48,32 +50,29 @@ fn assert_operator_probe_report_contract(
     assert_eq!(report.scan_window.peak_height, mocks.peak_height);
     assert_eq!(report.scan_window.end_height, mocks.peak_height);
     assert_eq!(report.scan_window.start_height, 0);
-    assert!(
-        report
-            .capabilities
-            .get_coin_records_by_puzzle_hashes
-            .all_supported
-    );
+    assert!(report
+        .capabilities
+        .get_coin_records_by_puzzle_hashes
+        .all_supported());
     assert_eq!(
         report
             .capabilities
             .get_coin_records_by_puzzle_hashes
-            .all_count,
+            .all_count(),
         Some(1)
     );
-    assert!(report.capabilities.get_coin_records_by_hints.all_supported);
+    assert!(report
+        .capabilities
+        .get_coin_records_by_hints
+        .all_supported());
     match &mocks.names {
         NamesMockMode::WithSample(sample_coin_id) => {
             assert_eq!(
-                report
-                    .capabilities
-                    .get_coin_records_by_names
-                    .sample_name
-                    .as_deref(),
+                report.capabilities.get_coin_records_by_names.sample_name(),
                 Some(normalize_hex_id(sample_coin_id).as_str())
             );
             assert_eq!(
-                report.capabilities.get_coin_records_by_names.all_count,
+                report.capabilities.get_coin_records_by_names.all_count(),
                 Some(0)
             );
         }
@@ -133,29 +132,24 @@ async fn build_coinset_probe_report_soft_fails_unsupported_range_calls() {
         .await
         .expect("probe report");
 
-    assert!(
-        report
-            .capabilities
-            .get_coin_records_by_puzzle_hashes
-            .all_supported
-    );
-    assert!(
-        !report
-            .capabilities
-            .get_coin_records_by_puzzle_hashes
-            .range_supported
-    );
     assert!(report
         .capabilities
         .get_coin_records_by_puzzle_hashes
-        .range_error
-        .as_deref()
+        .all_supported());
+    assert!(!report
+        .capabilities
+        .get_coin_records_by_puzzle_hashes
+        .range_supported());
+    assert!(report
+        .capabilities
+        .get_coin_records_by_puzzle_hashes
+        .range_error()
         .unwrap_or("")
         .contains("range unsupported"));
     assert!(report
         .capabilities
         .get_coin_records_by_names
-        .sample_name
+        .sample_name()
         .is_none());
 }
 
@@ -175,48 +169,37 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
     assert!(report
         .capabilities
         .get_coin_records_by_names
-        .sample_name
+        .sample_name()
         .is_none());
     assert!(report
         .capabilities
         .get_coin_records_by_names
-        .all_supported
+        .all_supported_opt()
         .is_none());
 }
 
 #[test]
 fn coinset_probe_report_serializes_top_level_contract_fields() {
-    let report = greenfloor_engine::coinset_probe::ProbeReport {
+    use greenfloor_engine::coinset::probe::{
+        CapabilitiesReport, HeightWindowCapability, ProbeReport, ScanWindow,
+    };
+
+    let report = ProbeReport {
         network: "mainnet".to_string(),
         coinset_base_url: "https://api.coinset.org".to_string(),
         launcher_id: "aa".repeat(32),
         launcher_id_source: "arg".to_string(),
         probe_nonce: 0,
         probe_p2_hash: "bb".repeat(32),
-        scan_window: greenfloor_engine::coinset_probe::ScanWindow {
+        scan_window: ScanWindow {
             start_height: 1,
             end_height: 2,
             peak_height: 2,
         },
-        capabilities: greenfloor_engine::coinset_probe::CapabilitiesReport {
-            get_coin_records_by_puzzle_hashes:
-                greenfloor_engine::coinset_probe::EndpointCapability {
-                    all_supported: true,
-                    all_error: None,
-                    all_count: Some(0),
-                    range_supported: true,
-                    range_error: None,
-                    range_count: Some(0),
-                },
-            get_coin_records_by_hints: greenfloor_engine::coinset_probe::EndpointCapability {
-                all_supported: true,
-                all_error: None,
-                all_count: Some(0),
-                range_supported: true,
-                range_error: None,
-                range_count: Some(0),
-            },
-            get_coin_records_by_names: greenfloor_engine::coinset_probe::NamesCapability::skipped(),
+        capabilities: CapabilitiesReport {
+            get_coin_records_by_puzzle_hashes: HeightWindowCapability::probed_counts(0, 0),
+            get_coin_records_by_hints: HeightWindowCapability::probed_counts(0, 0),
+            get_coin_records_by_names: HeightWindowCapability::skipped(),
         },
     };
     let payload = serde_json::to_value(report).expect("json");

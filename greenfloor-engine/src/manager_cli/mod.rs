@@ -33,5 +33,5 @@ pub use offers::{
 pub use paths::{
     default_cats_config_path, default_markets_config_path, default_metadata_config_paths,
     default_program_config_path, default_testnet_markets_config_path,
-    default_vault_scan_metadata_config_paths, optional_path,
+    default_vault_scan_metadata_config_paths, optional_path, program_config_path_from_optional,
 };
