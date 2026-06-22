@@ -1,13 +1,14 @@
 use chia_protocol::Bytes32;
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
-use chia_sdk_driver::{Action, AssetInfo, Id, Offer, Spends};
-use chia_sdk_types::conditions::AssertBeforeSecondsAbsolute;
+use chia_sdk_driver::{Action, Id, Offer, Spends};
 use clvmr::Allocator;
 
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
-use crate::offer::plan::{build_requested_payments, plan_presplit_binding};
+use crate::offer::plan::{
+    build_offer_payment_bundle, build_offer_request_conditions, plan_presplit_binding,
+};
 use crate::offer::presplit::{
     build_offer_from_presplit_cat, build_presplit_split_spend_bundle, vault_change_puzzle_hash,
     verify_presplit_cat_offer_binding,
@@ -211,20 +212,16 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
         ));
     }
 
-    let requested_payments_for_spend =
-        build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
-    let requested_asset_info = AssetInfo::new();
-    spends.conditions.required = spends.conditions.required.extend(
-        requested_payments_for_spend
-            .assertions(&mut ctx, &requested_asset_info)
-            .map_err(SignerError::from)?,
-    );
-    if let Some(seconds) = terms.expires_at {
-        spends.conditions.required = spends
-            .conditions
-            .required
-            .with(AssertBeforeSecondsAbsolute::new(seconds));
-    }
+    let spend_payments =
+        build_offer_payment_bundle(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
+    spends.conditions.required = spends
+        .conditions
+        .required
+        .extend(build_offer_request_conditions(
+            &mut ctx,
+            &spend_payments,
+            terms.expires_at,
+        )?);
 
     let deltas = spends
         .apply(&mut ctx, &actions)
@@ -236,21 +233,15 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
     let input_spend_bundle =
         materialize_vault_cat_finished_spends(&mut ctx, vault_ctx, coinset, finished).await?;
 
-    let mut offer_ctx = chia_sdk_driver::SpendContext::new();
-    let requested_payments =
-        build_requested_payments(&mut offer_ctx, terms, receive_puzzle_hash, offer_nonce)?;
-
     let mut allocator = Allocator::new();
     let offer = Offer::from_input_spend_bundle(
         &mut allocator,
         input_spend_bundle.clone(),
-        requested_payments,
-        requested_asset_info,
+        spend_payments.requested_payments,
+        spend_payments.requested_asset_info,
     )
     .map_err(SignerError::from)?;
-    let offer_spend_bundle = offer
-        .to_spend_bundle(&mut offer_ctx)
-        .map_err(SignerError::from)?;
+    let offer_spend_bundle = offer.to_spend_bundle(&mut ctx).map_err(SignerError::from)?;
     let offer_text =
         chia_sdk_driver::encode_offer(&offer_spend_bundle).map_err(SignerError::from)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;

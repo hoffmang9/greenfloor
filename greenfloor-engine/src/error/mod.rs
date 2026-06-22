@@ -47,6 +47,9 @@ pub enum SignerError {
     #[error("insufficient cat coins")]
     InsufficientCatCoins,
 
+    #[error("failed to resolve cat lineage for coin {0}")]
+    CatLineageResolutionFailed(String),
+
     #[error("derivation scan failed for selected coin")]
     MissingSigningKeyForSelectedCoins,
 
@@ -261,6 +264,10 @@ mod tests {
                 "vault launcher id missing or invalid",
             ),
             (SignerError::InsufficientCatCoins, "insufficient cat coins"),
+            (
+                SignerError::CatLineageResolutionFailed("abcd".to_string()),
+                "failed to resolve cat lineage for coin abcd",
+            ),
             (
                 SignerError::OfferInputRequiresPresplit,
                 "offer input exceeds offer amount; enable split-input-coins or specify exact coin",

@@ -1,102 +1,66 @@
-use chia_protocol::Bytes32;
+use chia_protocol::{Bytes32, Coin};
 use chia_puzzle_types::cat::CatArgs;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
-use chia_sdk_driver::{Cat, CatInfo};
+use chia_sdk_driver::Cat;
 use futures_util::future::try_join_all;
 
 use super::{coin_records_from_response, decode_receive_address, resolve, unspent_coin_records};
-use crate::coinset::client_retry::with_client_retries;
-use crate::error::SignerResult;
+use crate::coinset::retry::with_coinset_client_retries;
+use crate::error::{SignerError, SignerResult};
 
-fn cat_from_scoped_puzzle_hash_record(
-    asset_id: Bytes32,
-    p2_puzzle_hash: Bytes32,
-    record: &CoinRecord,
-) -> Cat {
-    Cat::new(
-        record.coin,
-        None,
-        CatInfo::new(asset_id, None, p2_puzzle_hash),
-    )
-}
-
-fn cats_from_scoped_puzzle_hash_records(
-    asset_id: Bytes32,
-    p2_puzzle_hash: Bytes32,
-    records: Vec<CoinRecord>,
-) -> Vec<Cat> {
-    unspent_coin_records(records)
-        .map(|record| cat_from_scoped_puzzle_hash_record(asset_id, p2_puzzle_hash, &record))
-        .collect()
-}
-
-async fn unspent_cats_from_records_with_lineage(
-    client: &CoinsetClient,
-    records: Vec<CoinRecord>,
-) -> SignerResult<Vec<Cat>> {
-    let mut cats = Vec::new();
-    for record in unspent_coin_records(records) {
-        if let Some(cat) = resolve::cat_from_record(client, &record).await? {
-            cats.push(cat);
-        }
-    }
-    Ok(cats)
-}
-
-async fn coin_records_for_cat_outer_puzzle_hash(
+pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     client: &CoinsetClient,
     receive_address: &str,
     asset_id: Bytes32,
-) -> SignerResult<(Bytes32, Vec<CoinRecord>)> {
+) -> SignerResult<Vec<CoinRecord>> {
     let p2_puzzle_hash = decode_receive_address(receive_address)?;
     let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, p2_puzzle_hash.into()).into();
-    let response = with_client_retries(|| async {
+    let response = with_coinset_client_retries(|| async {
         client
             .get_coin_records_by_puzzle_hash(cat_outer_puzzle_hash, None, None, Some(false), None)
             .await
     })
     .await?;
-    Ok((p2_puzzle_hash, coin_records_from_response(response)?))
+    coin_records_from_response(response)
 }
 
-/// List unspent cats scoped to a known asset id and receive address.
-///
-/// Uses a single `get_coin_records_by_puzzle_hash` query against the CAT outer puzzle hash.
-/// Lineage proofs are not fetched; callers that need spendable [`Cat`] metadata for vault
-/// spends should use [`list_unspent_cats_with_lineage`].
+/// List unspent CAT coins for a known asset id and receive address (single puzzle-hash RPC).
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn list_unspent_cats(
+pub(crate) async fn list_unspent_cat_coins(
     client: &CoinsetClient,
     receive_address: &str,
     asset_id: Bytes32,
-) -> SignerResult<Vec<Cat>> {
-    let (p2_puzzle_hash, records) =
-        coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?;
-    Ok(cats_from_scoped_puzzle_hash_records(
-        asset_id,
-        p2_puzzle_hash,
-        records,
-    ))
+) -> SignerResult<Vec<Coin>> {
+    Ok(unspent_coin_records(
+        coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?,
+    )
+    .map(|record| record.coin)
+    .filter(|coin| coin.amount > 0)
+    .collect())
 }
 
-/// List unspent cats and resolve lineage proofs from parent spends.
-///
-/// Used by coin selection for vault CAT spends where [`Cat::lineage_proof`] is required.
+/// Resolve spendable [`Cat`] values with lineage proofs for coin records.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub(crate) async fn list_unspent_cats_with_lineage(
+pub(crate) async fn cats_with_lineage_from_records(
     client: &CoinsetClient,
-    receive_address: &str,
-    asset_id: Bytes32,
+    records: &[CoinRecord],
 ) -> SignerResult<Vec<Cat>> {
-    let (_p2_puzzle_hash, records) =
-        coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?;
-    unspent_cats_from_records_with_lineage(client, records).await
+    let mut cats = Vec::with_capacity(records.len());
+    for record in records {
+        let Some(cat) = resolve::cat_from_record(client, record).await? else {
+            return Err(SignerError::CatLineageResolutionFailed(hex::encode(
+                record.coin.coin_id(),
+            )));
+        };
+        cats.push(cat);
+    }
+    Ok(cats)
 }
 
 /// List unspent cats by ids.
@@ -114,15 +78,16 @@ pub async fn list_unspent_cats_by_ids(
     let responses = try_join_all(coin_ids.iter().copied().map(|coin_id| {
         let client = client.clone();
         async move {
-            with_client_retries(|| async { client.get_coin_record_by_name(coin_id).await }).await
+            with_coinset_client_retries(|| async { client.get_coin_record_by_name(coin_id).await })
+                .await
         }
     }))
     .await?;
-    let records = responses
+    let records: Vec<CoinRecord> = responses
         .into_iter()
         .filter_map(|response| response.coin_record)
         .collect();
-    unspent_cats_from_records_with_lineage(client, records).await
+    cats_with_lineage_from_records(client, &records).await
 }
 
 #[cfg(test)]
@@ -132,7 +97,7 @@ mod tests {
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
 
     #[tokio::test]
-    async fn list_unspent_cats_maps_puzzle_hash_records_without_parent_lookups() {
+    async fn list_unspent_cat_coins_uses_puzzle_hash_query_only() {
         let body = r#"{
         "success": true,
         "coin_records": [{
@@ -157,13 +122,11 @@ mod tests {
             .await;
         let client = CoinsetClient::new(server.url());
         let asset_id = Bytes32::new([0xae; 32]);
-        let cats = list_unspent_cats(&client, RECEIVE_ADDRESS, asset_id)
+        let coins = list_unspent_cat_coins(&client, RECEIVE_ADDRESS, asset_id)
             .await
-            .expect("cats");
+            .expect("coins");
         mock.assert_async().await;
-        assert_eq!(cats.len(), 1);
-        assert_eq!(cats[0].coin.amount, 5000);
-        assert_eq!(cats[0].info.asset_id, asset_id);
-        assert!(cats[0].lineage_proof.is_none());
+        assert_eq!(coins.len(), 1);
+        assert_eq!(coins[0].amount, 5000);
     }
 }

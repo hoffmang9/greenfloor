@@ -6,11 +6,7 @@ use chia_sdk_driver::decode_offer;
 use chia_traits::Streamable;
 use serde::Serialize;
 
-use super::{
-    cats::{self, list_unspent_cats},
-    is_xch_like_asset, msp,
-    xch::list_unspent_xch,
-};
+use super::{cats, is_xch_like_asset, msp, xch::list_unspent_xch};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
@@ -88,11 +84,10 @@ pub(crate) async fn list_wallet_unspent_coins(
             .collect());
     }
     let asset_bytes = hex_to_bytes32(asset_id)?;
-    let cats = list_unspent_cats(&client, receive_address, asset_bytes).await?;
-    Ok(cats
+    let coins = cats::list_unspent_cat_coins(&client, receive_address, asset_bytes).await?;
+    Ok(coins
         .into_iter()
-        .filter(|cat| cat.coin.amount > 0)
-        .map(|cat| wallet_coin_from_id(cat.coin.coin_id(), cat.coin.amount))
+        .map(|coin| wallet_coin_from_id(coin.coin_id(), coin.amount))
         .collect())
 }
 
