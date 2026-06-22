@@ -85,8 +85,9 @@ pub async fn augment_dexie_offers_for_watchlist(
             continue;
         }
         match dexie.get_offer(watched_offer_id).await {
-            Ok(payload) => {
-                if let Some(error_text) = missing_offer_error_from_payload(&payload) {
+            Ok(response) => {
+                let payload = response.body();
+                if let Some(error_text) = missing_offer_error_from_payload(payload) {
                     missing_watched_offer_ids.insert(watched_offer_id.clone());
                     apply_missing_watched_offer(
                         store,
@@ -134,8 +135,8 @@ pub async fn augment_dexie_offers_for_watchlist(
             continue;
         }
         match dexie.get_offer(beyond_offer_id).await {
-            Ok(payload) => {
-                if let Some(single_offer) = payload.get("offer") {
+            Ok(response) => {
+                if let Some(single_offer) = response.body().get("offer") {
                     augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
                 }
             }

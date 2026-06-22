@@ -17,13 +17,15 @@ impl DexieClient {
         if target.is_empty() {
             return Ok(None);
         }
-        for row in self.get_swap_tokens().await? {
-            if row_matches_cat_target(&row, &target, false) {
+        let (swap_tokens, price_tickers) =
+            tokio::try_join!(self.get_swap_tokens(), self.get_price_tickers())?;
+        for row in swap_tokens {
+            if row_matches_swap_token_cat(&row, &target) {
                 return Ok(Some(row));
             }
         }
-        for row in self.get_price_tickers().await? {
-            if row_matches_cat_target(&row, &target, true) {
+        for row in price_tickers {
+            if row_matches_ticker_row_cat(&row, &target) {
                 return Ok(Some(row));
             }
         }
@@ -60,7 +62,7 @@ fn case_insensitive_match(left: &str, right: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-fn row_matches_cat_target(row: &Value, target: &str, include_ticker_split: bool) -> bool {
+fn asset_field_candidates(row: &Value) -> HashSet<String> {
     let mut candidates = HashSet::new();
     for key in [
         "assetId",
@@ -78,17 +80,72 @@ fn row_matches_cat_target(row: &Value, target: &str, include_ticker_split: bool)
             }
         }
     }
-    if let Some(ticker_id) = row.get("ticker_id").and_then(Value::as_str) {
-        let ticker_id = ticker_id.trim().to_ascii_lowercase();
-        if !ticker_id.is_empty() {
-            candidates.insert(ticker_id.clone());
-            if include_ticker_split {
-                if let Some((base, quote)) = ticker_id.split_once('_') {
-                    candidates.insert(base.to_string());
-                    candidates.insert(quote.to_string());
-                }
-            }
-        }
+    candidates
+}
+
+fn add_whole_ticker_id(candidates: &mut HashSet<String>, row: &Value) {
+    let Some(ticker_id) = row.get("ticker_id").and_then(Value::as_str) else {
+        return;
+    };
+    let ticker_id = ticker_id.trim().to_ascii_lowercase();
+    if !ticker_id.is_empty() {
+        candidates.insert(ticker_id);
     }
+}
+
+fn add_split_ticker_pair(candidates: &mut HashSet<String>, row: &Value) {
+    let Some(ticker_id) = row.get("ticker_id").and_then(Value::as_str) else {
+        return;
+    };
+    let ticker_id = ticker_id.trim().to_ascii_lowercase();
+    if ticker_id.is_empty() {
+        return;
+    }
+    candidates.insert(ticker_id.clone());
+    if let Some((base, quote)) = ticker_id.split_once('_') {
+        candidates.insert(base.to_string());
+        candidates.insert(quote.to_string());
+    }
+}
+
+fn row_matches_swap_token_cat(row: &Value, target: &str) -> bool {
+    let mut candidates = asset_field_candidates(row);
+    add_whole_ticker_id(&mut candidates, row);
     candidates.contains(target)
+}
+
+fn row_matches_ticker_row_cat(row: &Value, target: &str) -> bool {
+    let mut candidates = asset_field_candidates(row);
+    add_split_ticker_pair(&mut candidates, row);
+    candidates.contains(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{case_insensitive_match, row_matches_swap_token_cat, row_matches_ticker_row_cat};
+    use serde_json::json;
+
+    #[test]
+    fn case_insensitive_match_requires_non_empty_normalized_values() {
+        assert!(case_insensitive_match(" XCH ", "xch"));
+        assert!(!case_insensitive_match("", "xch"));
+        assert!(!case_insensitive_match("xch", "txch"));
+    }
+
+    #[test]
+    fn swap_token_cat_matches_asset_id_fields() {
+        let row = json!({"asset_id": "AbCd", "ticker_id": "cat_xch"});
+        assert!(row_matches_swap_token_cat(&row, "abcd"));
+        assert!(!row_matches_swap_token_cat(&row, "cat"));
+        assert!(row_matches_swap_token_cat(&row, "cat_xch"));
+    }
+
+    #[test]
+    fn ticker_row_cat_splits_ticker_pair() {
+        let row = json!({"ticker_id": "cat_xch", "base_currency": "ignored"});
+        assert!(row_matches_ticker_row_cat(&row, "cat"));
+        assert!(row_matches_ticker_row_cat(&row, "xch"));
+        assert!(row_matches_ticker_row_cat(&row, "cat_xch"));
+        assert!(!row_matches_swap_token_cat(&row, "cat"));
+    }
 }

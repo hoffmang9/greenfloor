@@ -62,13 +62,9 @@ pub async fn detect_stale_open_offers_for_requeue(
         let market_id = candidate.market_id.trim().to_string();
         let offer_id = candidate.offer_id.trim().to_string();
         let hit = match dexie.get_offer(&offer_id).await {
-            Ok(payload) => {
-                if payload.get("success") == Some(&serde_json::Value::Bool(false)) {
-                    let error_text = payload
-                        .get("error")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("");
-                    if is_dexie_offer_missing_error_text(error_text) {
+            Ok(response) => {
+                if response.is_explicit_failure() {
+                    if is_dexie_offer_missing_error_text(response.error_text()) {
                         Some(StaleSweepHit {
                             market_id: market_id.clone(),
                             offer_id: offer_id.clone(),
@@ -77,7 +73,7 @@ pub async fn detect_stale_open_offers_for_requeue(
                     } else {
                         None
                     }
-                } else if let Some(offer_obj) = payload.get("offer") {
+                } else if let Some(offer_obj) = response.offer_payload() {
                     let status = offer_obj
                         .get("status")
                         .and_then(serde_json::Value::as_i64)

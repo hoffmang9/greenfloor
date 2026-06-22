@@ -1,10 +1,10 @@
 use serde_json::{json, Value};
 
-use crate::adapters::{
-    dexie_offer_view_url, post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams,
-    SplashClient,
-};
+use crate::adapters::{dexie_offer_view_url, DexieClient, SplashClient};
 use crate::error::{SignerError, SignerResult};
+use crate::offer::publish::{
+    post_offer_phase_dexie, ExpectedPublishAssetFieldsRef, PostOfferPhaseDexieParams,
+};
 use crate::storage::OfferPostPersistRecord;
 
 use super::context::ResolvedBuildAndPostContext;
@@ -17,10 +17,7 @@ pub(super) struct PublishOfferParams<'a> {
     pub offer_text: &'a str,
     pub drop_only: bool,
     pub claim_rewards: bool,
-    pub expected_offered_asset_id: &'a str,
-    pub expected_offered_symbol: &'a str,
-    pub expected_requested_asset_id: &'a str,
-    pub expected_requested_symbol: &'a str,
+    pub expected: ExpectedPublishAssetFieldsRef<'a>,
 }
 
 pub(super) async fn publish_offer(params: PublishOfferParams<'_>) -> SignerResult<PublishResult> {
@@ -31,41 +28,35 @@ pub(super) async fn publish_offer(params: PublishOfferParams<'_>) -> SignerResul
         offer_text,
         drop_only,
         claim_rewards,
-        expected_offered_asset_id,
-        expected_offered_symbol,
-        expected_requested_asset_id,
-        expected_requested_symbol,
+        expected,
     } = params;
-    let body = match publish_venue {
+    match publish_venue {
         "dexie" => {
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
-            post_offer_phase_dexie(PostOfferPhaseDexieParams {
+            let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
                 dexie,
                 offer_text,
                 drop_only,
                 claim_rewards,
-                expected_offered_asset_id,
-                expected_offered_symbol,
-                expected_requested_asset_id,
-                expected_requested_symbol,
+                expected,
             })
-            .await?
+            .await?;
+            Ok(PublishResult::from_dexie_response(result))
         }
         "splash" => {
             let splash = splash.ok_or_else(|| {
                 SignerError::Other("splash adapter missing for splash publish".to_string())
             })?;
-            splash.post_offer(offer_text).await?
+            Ok(PublishResult::from_splash_response(
+                splash.post_offer(offer_text).await?,
+            ))
         }
-        other => {
-            return Err(SignerError::Other(format!(
-                "unsupported publish venue: {other}"
-            )));
-        }
-    };
-    Ok(PublishResult::from_adapter_body(body))
+        other => Err(SignerError::Other(format!(
+            "unsupported publish venue: {other}"
+        ))),
+    }
 }
 
 pub(super) fn finalize_publish_payload(

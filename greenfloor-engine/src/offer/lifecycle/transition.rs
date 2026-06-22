@@ -117,12 +117,13 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     current_state: &str,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
     match dexie.get_offer(offer_id).await {
-        Ok(payload) => {
-            if let Some(error_text) = missing_offer_error_from_payload(&payload) {
+        Ok(response) => {
+            let payload = response.body();
+            if let Some(error_text) = missing_offer_error_from_payload(payload) {
                 let transition = missing_watched_offer_transition(current_state)?;
                 return Ok((transition, None, Some(error_text)));
             }
-            let offer_body = payload.get("offer").unwrap_or(&payload);
+            let offer_body = payload.get("offer").unwrap_or(payload);
             let (transition, status) =
                 transition_from_offer_body(store, current_state, offer_body)?;
             Ok((transition, status, None))

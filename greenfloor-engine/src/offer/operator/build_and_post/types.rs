@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
+use crate::adapters::{DexieResponse, SplashResponse};
 use crate::metrics::metric_millis_to_u64;
 
 pub(crate) fn build_and_post_exit_code(publish_failures: u32) -> i32 {
@@ -77,18 +78,19 @@ impl PostFailure {
 }
 
 impl PublishResult {
-    pub fn from_adapter_body(body: Value) -> Self {
-        let success = body.get("success").and_then(Value::as_bool) == Some(true);
-        let offer_id = body
-            .get("id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
+    pub fn from_dexie_response(result: DexieResponse) -> Self {
         Self {
-            success,
-            offer_id,
-            body,
+            success: result.success(),
+            offer_id: result.offer_id().map(str::to_string),
+            body: result.into_value(),
+        }
+    }
+
+    pub fn from_splash_response(result: SplashResponse) -> Self {
+        Self {
+            success: result.success(),
+            offer_id: result.offer_id().map(str::to_string),
+            body: result.into_value(),
         }
     }
 }
