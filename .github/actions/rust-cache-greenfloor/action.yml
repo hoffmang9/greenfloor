@@ -4,7 +4,7 @@ description: Install the stable Rust toolchain and restore GreenFloor Cargo cach
 
 inputs:
   save-cache:
-    description: Save the Cargo cache at job end (disable on lint; test jobs populate it).
+    description: Save the Cargo cache at job end (lint+coverage and test jobs populate it).
     required: false
     default: "true"
   install-nextest:

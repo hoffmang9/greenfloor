@@ -17,7 +17,7 @@ env:
 
 jobs:
   lint:
-    name: Lint and format (ubuntu-latest)
+    name: Lint, format, and coverage (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,8 +58,16 @@ jobs:
 
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
-          save-cache: "false"
-          install-nextest: "false"
+          save-cache: "true"
+          install-nextest: "true"
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install Rust llvm-tools for coverage
+        run: rustup component add llvm-tools-preview
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
@@ -89,6 +97,27 @@ jobs:
             wait "${pid}" || status=1
           done
           exit "${status}"
+
+      - name: Build, test, and coverage gate (greenfloor-engine)
+        run: |
+          cargo llvm-cov nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"
+          cargo llvm-cov report --manifest-path "${{ env.CARGO_MANIFEST }}" --lcov --output-path lcov.info
+
+      - name: Script adapter coverage gate
+        run: |
+          cd scripts
+          python -m coverage run -m unittest greenfloor_scripts.test_adapters
+          python -m coverage xml -o ../coverage-python.xml
+          python -m coverage report --fail-under=76 --include='greenfloor_scripts/*'
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            lcov.info
+            coverage-python.xml
+          if-no-files-found: error
 
   test:
     name: Test (${{ matrix.os }})
@@ -124,11 +153,7 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            python -m pip install -e ".[dev]"
-          else
-            python -m pip install -e .
-          fi
+          python -m pip install -e .
 
       - name: Save Python venv cache
         if: steps.cache-venv.outputs.cache-hit != 'true'
@@ -141,46 +166,10 @@ jobs:
         with:
           install-nextest: "true"
 
-      - name: Install cargo-llvm-cov
-        if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Install Rust llvm-tools for coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: rustup component add llvm-tools-preview
-
       - name: Build and test greenfloor-engine
-        if: matrix.os != 'ubuntu-latest'
         run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"
 
-      - name: Build, test, and coverage gate (ubuntu-latest)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cargo llvm-cov nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"
-          cargo llvm-cov report --manifest-path "${{ env.CARGO_MANIFEST }}" --lcov --output-path lcov.info
-
       - name: Script adapter unit tests
-        if: matrix.os != 'ubuntu-latest'
         run: |
           cd scripts
           PYTHONPATH=. python -m unittest greenfloor_scripts.test_adapters
-
-      - name: Script adapter coverage gate (ubuntu-latest)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd scripts
-          python -m coverage run -m unittest greenfloor_scripts.test_adapters
-          python -m coverage xml -o ../coverage-python.xml
-          python -m coverage report --fail-under=76 --include='greenfloor_scripts/*'
-
-      - name: Upload coverage artifacts
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-reports
-          path: |
-            lcov.info
-            coverage-python.xml
-          if-no-files-found: error
