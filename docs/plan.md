@@ -42,7 +42,7 @@ Core trading/runtime (V1):
 5. `build-and-post-offer` — vault KMS offer build + Dexie/Splash publish
 6. `offers-status` — offer states and recent audit events
 7. `offers-reconcile` — refresh states from venue + Coinset tx signals
-8. `offers-cancel` — cancel by offer id or `--cancel-open`
+8. `offers-cancel` — on-chain cancel by offer id or `--cancel-open` (Dexie fetch + Coinset submit)
 9. `coins-list` / `coin-status` — vault coin inventory via Coinset
 10. `coin-split` / `coin-combine` — denomination shaping (default waits for confirmation)
 
@@ -78,6 +78,20 @@ Coin-op notes:
 - Offer files are Bech32m `offer1...` strings; Rust validates structure before Dexie post.
 - Reconciliation prefers Coinset tx-signal evidence over venue-status heuristics.
 
+### On-chain cancel (ADR 0015)
+
+- Dexie has no public cancel API. Cancel spends an offered vault CAT input coin back to
+  vault change; spend construction is shared in `offer/reclaim.rs`.
+- `offers-cancel` JSON reports `submitted_count` (successful Coinset submits), not confirmed
+  cancels. Failed submits increment `failed_count` only.
+- After submit, SQLite state is `cancel_submitted` until reconcile observes Dexie status `3`
+  (Cancelled) or chain confirmation; `--cancel-open` skips rows already in
+  `cancel_submitted`.
+- Presplit-existing offers derive cancel binding from the offer input spend embedded in the
+  offer file (fixed delegated puzzle hash), not by replanning with source-coin nonce.
+- Daemon cancel audit items use `status: "cancel_submitted"` and
+  `reason: "cancel_submitted_on_strong_unstable_move"` on successful submit.
+
 ## Delivery constraints
 
 Canonical local/CI gate commands: [README.md](../README.md) → **Local dev tooling** and **Developer Checks**.
@@ -110,6 +124,7 @@ Canonical local/CI gate commands: [README.md](../README.md) → **Local dev tool
 - [x] Testnet11 G1–G3 proof path (CI `live-testnet-e2e.yml`)
 - [x] Mainnet manager lifecycle evidence for `eco1812022_sell_wusdbc`
 - [x] Rust-owned operator config policy; script config via manager field CLIs
+- [x] On-chain offer cancel with `cancel_submitted` lifecycle (ADR 0015)
 
 ## Open items
 

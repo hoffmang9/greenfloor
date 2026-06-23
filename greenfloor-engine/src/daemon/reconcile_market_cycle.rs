@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::Utc;
 use serde_json::{json, Value};
 use tracing::Level;
 
@@ -17,7 +18,8 @@ use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::watchlist::cache::CoinWatchlistCache;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 use crate::offer::lifecycle::{
-    persist_offer_lifecycle_transition, transition_from_list_offer_payload, ReconcilePersistOptions,
+    persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
+    transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -146,6 +148,10 @@ pub async fn run_reconcile_market_cycle(
     let dexie_size_by_offer_id =
         build_dexie_size_by_offer_id(&augmented_offers, &market.base_asset);
 
+    let offer_rows = store.list_offer_states(Some(market_id), 5000)?;
+    let cancel_submitted_by_offer = preload_cancel_submitted_contexts(store, &offer_rows)?;
+    let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
+
     for raw in &augmented_offers {
         let Some(offer_id) = raw
             .as_object()
@@ -163,7 +169,8 @@ pub async fn run_reconcile_market_cycle(
         let current_state = state_by_offer_id
             .get(&offer_id)
             .map_or("open", String::as_str);
-        let (transition, status) = transition_from_list_offer_payload(store, current_state, raw)?;
+        let (transition, status) =
+            transition_from_list_offer_payload(store, &offer_id, current_state, raw, env)?;
         apply_reconcile_transition(ReconcileTransitionParams {
             store,
             market_id,

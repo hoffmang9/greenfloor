@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rusqlite::params;
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::{canonical_tx_id, extend_tx_id_lookup_candidates, tx_id_lookup_candidates};
 
 use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
 
@@ -18,13 +19,7 @@ impl SqliteStore {
     ) -> SignerResult<HashMap<String, TxSignalStateRow>> {
         let mut unique: Vec<String> = Vec::new();
         for tx_id in tx_ids {
-            let normalized = tx_id.trim();
-            if normalized.is_empty() {
-                continue;
-            }
-            if !unique.iter().any(|existing| existing == normalized) {
-                unique.push(normalized.to_string());
-            }
+            extend_tx_id_lookup_candidates(&mut unique, tx_id);
         }
         if unique.is_empty() {
             return Ok(HashMap::default());
@@ -60,8 +55,11 @@ impl SqliteStore {
             let tx_id: String = row
                 .get(0)
                 .map_err(|err| SignerError::Other(format!("failed to read tx_id: {err}")))?;
+            let Some(key) = canonical_tx_id(&tx_id) else {
+                continue;
+            };
             out.insert(
-                tx_id,
+                key,
                 TxSignalStateRow {
                     mempool_observed_at: row.get(1).ok(),
                     tx_block_confirmed_at: row.get(2).ok(),
@@ -83,10 +81,9 @@ impl SqliteStore {
         let mut inserted = 0_u64;
         let now = utcnow_iso();
         for tx_id in tx_ids {
-            let normalized = tx_id.trim();
-            if normalized.is_empty() {
+            let Some(normalized) = canonical_tx_id(tx_id) else {
                 continue;
-            }
+            };
             let changed = self
                 .conn
                 .execute(
@@ -116,10 +113,16 @@ impl SqliteStore {
         let now = utcnow_iso();
         let mut updated = 0_u64;
         for tx_id in tx_ids {
-            let normalized = tx_id.trim();
-            if normalized.is_empty() {
+            let Some(normalized) = canonical_tx_id(tx_id) else {
                 continue;
-            }
+            };
+            updated += self.confirm_one_tx_id(&now, &normalized)?;
+        }
+        Ok(updated)
+    }
+
+    fn confirm_one_tx_id(&self, now: &str, canonical: &str) -> SignerResult<u64> {
+        for candidate in tx_id_lookup_candidates(canonical) {
             let changed = self
                 .conn
                 .execute(
@@ -128,11 +131,14 @@ impl SqliteStore {
                     SET tx_block_confirmed_at = COALESCE(tx_block_confirmed_at, ?1)
                     WHERE tx_id = ?2
                     ",
-                    params![now, normalized],
+                    params![now, candidate],
                 )
                 .map_err(|err| SignerError::Other(format!("failed to confirm tx id: {err}")))?;
-            updated += super::sqlite_rows_changed(changed)?;
+            let rows = super::sqlite_rows_changed(changed)?;
+            if rows > 0 {
+                return Ok(rows);
+            }
         }
-        Ok(updated)
+        Ok(0)
     }
 }

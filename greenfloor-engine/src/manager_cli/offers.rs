@@ -3,10 +3,11 @@
 use clap::Args;
 
 use crate::cli_util::optional_trimmed;
-use crate::config::load_program_config;
+use crate::config::{load_program_bundle_gated, load_program_config};
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
-    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliResult,
+    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliRequest,
+    OffersCancelCliResult,
 };
 use crate::storage::resolve_state_db_path;
 
@@ -36,6 +37,10 @@ pub struct OffersStatusCliArgs {
 pub struct OffersCancelCliArgs {
     #[arg(long, action = clap::ArgAction::Append)]
     pub offer_id: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append, value_name = "PATH_OR_BECH32")]
+    pub offer_file: Vec<String>,
+    #[arg(long, value_name = "MARKET_ID")]
+    pub market_id: Option<String>,
     #[arg(long)]
     pub cancel_open: bool,
     #[arg(long)]
@@ -102,7 +107,8 @@ pub async fn run_offers_cancel_command(
     ctx: &ManagerContext,
     args: OffersCancelCliArgs,
 ) -> SignerResult<i32> {
-    let program = load_program_config(&ctx.program_config)?;
+    let bundle = load_program_bundle_gated(&ctx.program_config)?;
+    let program = bundle.program;
     let db_path = resolve_state_db_path(&program.home_dir, None);
     let venue = args
         .venue
@@ -115,8 +121,13 @@ pub async fn run_offers_cancel_command(
         &db_path,
         &program.dexie_api_base,
         &venue,
-        &args.offer_id,
-        args.cancel_open,
+        &OffersCancelCliRequest {
+            offer_ids: args.offer_id,
+            offer_files: args.offer_file,
+            market_id: args.market_id,
+            cancel_open: args.cancel_open,
+        },
+        bundle.signer,
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };

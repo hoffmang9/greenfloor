@@ -2,14 +2,16 @@
 
 use std::path::Path;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::adapters::DexieClient;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
+use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
-use super::transition::resolve_watched_offer_transition_for_venue;
+use super::transition::{resolve_watched_offer_transition_for_venue, WatchedOfferTransitionEnv};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcileBatchItem {
@@ -79,6 +81,8 @@ pub async fn reconcile_offers_batch(
     };
 
     let rows = store.list_offer_states(market_id, limit)?;
+    let cancel_submitted_by_offer = preload_cancel_submitted_contexts(&store, &rows)?;
+    let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
     let mut items = Vec::with_capacity(rows.len());
     let mut changed_count = 0u64;
 
@@ -90,6 +94,7 @@ pub async fn reconcile_offers_batch(
                 &venue,
                 &row.offer_id,
                 &row.state,
+                env,
             )
             .await?;
 

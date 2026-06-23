@@ -5,8 +5,13 @@ pub(crate) const SIGNAL_SOURCE_COINSET_WEBHOOK: &str = "coinset_webhook";
 pub(crate) const SIGNAL_SOURCE_COINSET_MEMPOOL: &str = "coinset_mempool";
 pub(crate) const SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK: &str = "dexie_status_fallback";
 pub(crate) const SIGNAL_SOURCE_DEXIE_GET_OFFER_404: &str = "dexie_get_offer_404";
+pub(crate) const SIGNAL_SOURCE_CANCEL_TX_CHAIN: &str = "cancel_tx_chain";
 
 pub(crate) const REASON_OK: &str = "ok";
+pub(crate) const REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN: &str =
+    "cancel_submitted_stale_dexie_still_open";
+pub(crate) const REASON_CANCEL_SUBMIT_CONTEXT_MISSING: &str = "cancel_submitted_context_missing";
+pub(crate) const REASON_CANCEL_TX_CHAIN_CONFIRMED: &str = "cancel_tx_chain_confirmed";
 pub(crate) const REASON_MISSING_STATUS: &str = "missing_status";
 pub(crate) const REASON_COINSET_UNAVAILABLE: &str = "coinset_signal_unavailable_for_offer";
 pub(crate) const REASON_COINSET_CONFIRMED: &str = "coinset_tx_block_webhook_confirmed";
@@ -20,3 +25,4 @@ pub(crate) const TAKER_COINSET_TX_BLOCK_WEBHOOK: &str = "coinset_tx_block_webhoo
 pub(crate) const TAKER_DIAGNOSTIC_COINSET_CONFIRMED: &str = "coinset_tx_block_confirmed";
 pub(crate) const TAKER_DIAGNOSTIC_COINSET_MEMPOOL: &str = "coinset_mempool_observed";
 pub(crate) const TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK: &str = "dexie_status_pattern_fallback";
+pub(crate) const TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED: &str = "cancel_tx_chain_confirmed";

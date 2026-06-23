@@ -1,4 +1,5 @@
 use crate::async_boundary::BuildVaultCatOfferFuture;
+use crate::bech32m::decode_address;
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend};
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
@@ -42,8 +43,7 @@ pub(crate) async fn build_vault_cat_offer_with_spend<C: OfferCoinsetBackend>(
     backend: &C,
     input: OfferInput,
 ) -> SignerResult<CreateOfferResult> {
-    let receive_puzzle_hash =
-        coinset::decode_receive_address(input.terms().receive_address.as_str())?;
+    let receive_puzzle_hash = decode_address(input.terms().receive_address.as_str())?;
     let offer_asset_id = hex_to_bytes32(&input.terms().offer_asset_id)?;
 
     match plan_vault_cat_offer(backend, &input, offer_asset_id).await? {

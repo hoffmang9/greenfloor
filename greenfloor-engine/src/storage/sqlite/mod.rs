@@ -3,6 +3,8 @@
 mod alerts;
 mod audit;
 mod coin_ops;
+mod migrations;
+mod offer_cancel;
 mod offers;
 mod pricing;
 mod reservations;
@@ -16,6 +18,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::error::{SignerError, SignerResult};
+use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
 
 use super::schema::SCHEMA;
 
@@ -29,9 +32,12 @@ pub struct OfferPostPersistRecord {
     pub resolved_base_asset_id: String,
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
+    pub cancel_fields: PresplitCancelFields,
+    pub execution_mode: Option<OfferExecutionMode>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
+pub use offer_cancel::OfferCancelWrite;
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,
@@ -72,6 +78,8 @@ pub struct OfferStateListRow {
     pub state: String,
     pub last_seen_status: Option<i64>,
     pub updated_at: String,
+    pub cancel_submitted_tx_id: Option<String>,
+    pub cancel_submitted_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +138,7 @@ impl SqliteStore {
         conn.execute_batch(SCHEMA).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;
+        migrations::apply_schema_migrations(&conn)?;
         Ok(Self { conn })
     }
 }

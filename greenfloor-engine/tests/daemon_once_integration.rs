@@ -58,12 +58,6 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
         .with_body(json!({"success": true, "offer": offer_body}).to_string())
         .create_async()
         .await;
-    let _cancel = server
-        .mock("POST", "/v1/offers/offer-1/cancel")
-        .with_status(200)
-        .with_body(r#"{"success":true,"id":"offer-1","status":3}"#)
-        .create_async()
-        .await;
 
     write_daemon_program(&program, &home, &server.url());
     write_markets_one(&markets, true);
@@ -108,8 +102,10 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
     let states = store.list_offer_states(Some("m1"), 10).expect("states");
     assert_eq!(states.len(), 1);
     assert_eq!(states[0].offer_id, "offer-1");
-    assert_eq!(states[0].state, "cancelled");
-    assert_eq!(states[0].last_seen_status, Some(3));
+    assert_eq!(
+        states[0].state, "tx_block_confirmed",
+        "on-chain cancel failure must not optimistically mark cancelled"
+    );
 
     let events = store
         .list_recent_audit_events(
@@ -130,6 +126,11 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
         .unwrap_or(&vec![])
         .iter()
         .any(|event| event.payload.get("triggered") == Some(&json!(true))));
+    assert!(by_type
+        .get("offer_cancel_policy")
+        .unwrap_or(&vec![])
+        .iter()
+        .any(|event| event.payload.get("executed_count") == Some(&json!(0))));
     assert!(by_type
         .get("offer_lifecycle_transition")
         .unwrap_or(&vec![])

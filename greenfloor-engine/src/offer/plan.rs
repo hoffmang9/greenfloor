@@ -3,7 +3,8 @@ use chia_puzzle_types::{
     offer::{NotarizedPayment, Payment},
     Memos,
 };
-use chia_sdk_driver::{AssetInfo, RequestedPayments};
+use chia_sdk_driver::{AssetInfo, RequestedPayments, SpendContext};
+use chia_sdk_types::{conditions::AssertBeforeSecondsAbsolute, Conditions};
 
 use crate::coinset::{OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
@@ -106,20 +107,57 @@ pub(crate) fn plan_presplit_binding(
     offer_nonce: Bytes32,
     launcher_id: Bytes32,
 ) -> SignerResult<PresplitOfferBinding> {
-    let mut ctx = chia_sdk_driver::SpendContext::new();
-    let requested_payments =
-        build_requested_payments(&mut ctx, terms, receive_puzzle_hash, offer_nonce)?;
-    PresplitOfferBinding::plan(
-        launcher_id,
-        requested_payments,
-        AssetInfo::new(),
-        terms.offer_amount,
-        terms.expires_at,
-    )
+    PresplitOfferBinding::plan(launcher_id, terms, receive_puzzle_hash, offer_nonce)
+}
+
+pub(crate) struct OfferPaymentBundle {
+    pub requested_payments: RequestedPayments,
+    pub requested_asset_info: AssetInfo,
+}
+
+pub(crate) fn build_offer_payment_bundle(
+    ctx: &mut SpendContext,
+    terms: &OfferTerms,
+    receive_puzzle_hash: Bytes32,
+    offer_nonce: Bytes32,
+) -> SignerResult<OfferPaymentBundle> {
+    Ok(OfferPaymentBundle {
+        requested_payments: build_requested_payments(ctx, terms, receive_puzzle_hash, offer_nonce)?,
+        requested_asset_info: AssetInfo::new(),
+    })
+}
+
+/// Request-side offer assertions plus optional absolute expiry.
+///
+/// # Errors
+///
+/// Returns an error if payment assertions cannot be built in the spend context.
+pub(crate) fn build_offer_request_conditions(
+    ctx: &mut SpendContext,
+    payments: &OfferPaymentBundle,
+    expires_at: Option<u64>,
+) -> SignerResult<Conditions> {
+    let assertions = payments
+        .requested_payments
+        .assertions(ctx, &payments.requested_asset_info)
+        .map_err(SignerError::from)?;
+    let mut conditions = Conditions::new();
+    for assertion in assertions {
+        conditions = conditions.with(assertion);
+    }
+    Ok(apply_offer_expiry(conditions, expires_at))
+}
+
+pub(crate) fn apply_offer_expiry(conditions: Conditions, expires_at: Option<u64>) -> Conditions {
+    if let Some(seconds) = expires_at {
+        conditions.with(AssertBeforeSecondsAbsolute::new(seconds))
+    } else {
+        conditions
+    }
 }
 
 pub(crate) fn build_requested_payments(
-    ctx: &mut chia_sdk_driver::SpendContext,
+    ctx: &mut SpendContext,
     terms: &OfferTerms,
     receive_puzzle_hash: Bytes32,
     offer_nonce: Bytes32,

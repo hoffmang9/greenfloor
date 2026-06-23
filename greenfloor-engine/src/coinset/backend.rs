@@ -1,5 +1,4 @@
-use chia_protocol::Bytes32;
-use chia_protocol::SpendBundle;
+use chia_protocol::{Bytes32, SpendBundle};
 use clvm_utils::TreeHash;
 
 use super::{broadcast, coin_select, presplit, vault_fetch, CoinsetClient, SelectedCats};
@@ -23,7 +22,7 @@ pub trait OfferCoinsetBackend {
         inner_puzzle_hash: TreeHash,
     ) -> impl std::future::Future<Output = SignerResult<Vault>> + Send;
 
-    fn fetch_presplit_cat_by_id(
+    fn fetch_offer_input_cat(
         &self,
         coin_id: Bytes32,
     ) -> impl std::future::Future<Output = SignerResult<Cat>> + Send;
@@ -65,8 +64,8 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
         vault_fetch::fetch_latest_vault(self.0, launcher_id, inner_puzzle_hash).await
     }
 
-    async fn fetch_presplit_cat_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        presplit::fetch_presplit_cat_by_id(self.0, coin_id).await
+    async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        presplit::fetch_offer_input_cat(self.0, coin_id).await
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {

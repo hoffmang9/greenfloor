@@ -11,6 +11,7 @@ use super::post_batch::{
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
+use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 use crate::test_support::build_and_post::unused_post_iteration_request;
@@ -131,14 +132,15 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": false}),
     };
-    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1).is_none());
+    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1, None).is_none());
 
     let success = PublishResult {
         success: true,
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": true, "id": "offer-1"}),
     };
-    let record = offer_post_persist_record(&success, "sell", "direct", &ctx, 10).expect("record");
+    let record =
+        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None).expect("record");
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
 }
@@ -181,7 +183,9 @@ fn flush_post_batch_writes_offer_state() {
                 publish_venue: "dexie".to_string(),
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
-                created_extra: json!({"execution_mode": "direct"}),
+                created_extra: json!({}),
+                cancel_fields: PresplitCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
             }],
             &[],
         )

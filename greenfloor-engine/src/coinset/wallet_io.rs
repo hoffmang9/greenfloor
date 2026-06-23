@@ -1,16 +1,12 @@
 use std::collections::HashSet;
 
+use crate::bech32m::{decode_address, decode_offer};
 use chia_protocol::SpendBundle;
 use chia_puzzle_types::cat::CatArgs;
-use chia_sdk_driver::decode_offer;
 use chia_traits::Streamable;
 use serde::Serialize;
 
-use super::{
-    cats::{self, list_unspent_cats},
-    is_xch_like_asset, msp,
-    xch::list_unspent_xch,
-};
+use super::{cats, is_xch_like_asset, msp, xch::list_unspent_xch};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
@@ -88,7 +84,7 @@ pub(crate) async fn list_wallet_unspent_coins(
             .collect());
     }
     let asset_bytes = hex_to_bytes32(asset_id)?;
-    let cats = list_unspent_cats(&client, receive_address, asset_bytes).await?;
+    let cats = cats::list_unspent_cats(&client, receive_address, asset_bytes).await?;
     Ok(cats
         .into_iter()
         .filter(|cat| cat.coin.amount > 0)
@@ -118,7 +114,7 @@ pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String
 ///
 /// Returns an error if the operation fails.
 pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResult<String> {
-    let puzzle_hash = cats::decode_receive_address(receive_address)?;
+    let puzzle_hash = decode_address(receive_address)?;
     Ok(format!("0x{}", hex::encode(puzzle_hash)))
 }
 
@@ -128,7 +124,7 @@ pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResul
 ///
 /// Returns an error if the operation fails.
 pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> SignerResult<String> {
-    let puzzle_hash = cats::decode_receive_address(receive_address)?;
+    let puzzle_hash = decode_address(receive_address)?;
     let asset_bytes = hex_to_bytes32(asset_id)?;
     let cat_outer: [u8; 32] = CatArgs::curry_tree_hash(asset_bytes, puzzle_hash.into()).into();
     Ok(format!("0x{}", hex::encode(cat_outer)))
@@ -140,8 +136,7 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
 ///
 /// Returns an error if the operation fails.
 pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<Vec<String>> {
-    let spend_bundle =
-        decode_offer(offer_text).map_err(|err| SignerError::Driver(err.to_string()))?;
+    let spend_bundle = decode_offer(offer_text)?;
     let mut hints = Vec::new();
     let mut seen = HashSet::new();
     for coin_spend in &spend_bundle.coin_spends {

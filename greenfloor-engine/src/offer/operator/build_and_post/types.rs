@@ -16,7 +16,7 @@ pub(crate) fn build_and_post_exit_code(publish_failures: u32) -> i32 {
 pub(super) enum PostIterationOutcome {
     Preview(Value),
     Failure(PostFailure),
-    Success(PostAttemptSuccess),
+    Success(Box<PostAttemptSuccess>),
 }
 
 #[derive(Debug, Clone)]

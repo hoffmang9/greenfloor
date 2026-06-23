@@ -38,17 +38,21 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
         }
         ManagerCommands::OffersCancel {
             offer_id,
+            offer_file,
+            market_id,
             cancel_open,
             venue,
         } => {
-            run_offers_cancel_command(
+            Box::pin(run_offers_cancel_command(
                 ctx,
                 OffersCancelCliArgs {
                     offer_id,
+                    offer_file,
+                    market_id,
                     cancel_open,
                     venue,
                 },
-            )
+            ))
             .await
         }
         other => unreachable!("offers::run_command called with {other:?}"),

@@ -11,7 +11,9 @@ pub(super) async fn submit_bootstrap_mixed_split(
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
+    split_asset_mojo_multiplier: i64,
 ) -> SignerResult<Value> {
+    let multiplier = split_asset_mojo_multiplier.max(1);
     let result = build_and_optionally_broadcast_vault_cat_mixed_split(
         signer_config.clone(),
         MixedSplitRequest {
@@ -21,7 +23,10 @@ pub(super) async fn submit_bootstrap_mixed_split(
                 .output_amounts_base_units
                 .iter()
                 .map(|amount| {
-                    coin_op_non_negative_u64(*amount, "bootstrap.output_amount_base_units")
+                    coin_op_non_negative_u64(
+                        amount.saturating_mul(multiplier),
+                        "bootstrap.output_amount_mojos",
+                    )
                 })
                 .collect::<SignerResult<Vec<_>>>()?,
             coin_ids: crate::coinset::parse_coin_ids(std::slice::from_ref(
@@ -66,6 +71,7 @@ mod tests {
             &plan,
             "not-a-valid-asset-id",
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+            1,
         )
         .await
         .expect_err("invalid asset hex");
@@ -90,6 +96,7 @@ mod tests {
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+            1,
         )
         .await
         .expect_err("invalid coin id");

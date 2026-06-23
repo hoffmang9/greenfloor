@@ -9,15 +9,12 @@ use chia_sdk_driver::Cat;
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
-/// Fetch presplit cat by id.
+/// Fetch an unspent offer-input CAT by coin id.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn fetch_presplit_cat_by_id(
-    client: &CoinsetClient,
-    coin_id: Bytes32,
-) -> SignerResult<Cat> {
+pub async fn fetch_offer_input_cat(client: &CoinsetClient, coin_id: Bytes32) -> SignerResult<Cat> {
     let response = client
         .get_coin_record_by_name(coin_id)
         .await

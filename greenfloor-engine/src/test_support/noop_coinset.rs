@@ -27,7 +27,7 @@ impl OfferCoinsetBackend for EmptyOfferCoinset {
         Err(SignerError::Other("unused".to_string()))
     }
 
-    async fn fetch_presplit_cat_by_id(&self, _coin_id: Bytes32) -> SignerResult<Cat> {
+    async fn fetch_offer_input_cat(&self, _coin_id: Bytes32) -> SignerResult<Cat> {
         Err(SignerError::Other("unused".to_string()))
     }
 

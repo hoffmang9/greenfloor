@@ -22,7 +22,10 @@ impl std::error::Error for ReconcileStateError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileState {
     Lifecycle(OfferLifecycleState),
+    PendingVisibility,
+    CancelSubmitted,
     Cancelled,
+    UnknownOrphaned,
     UnsupportedVenue,
 }
 
@@ -36,6 +39,15 @@ impl ReconcileState {
         let trimmed = raw.trim();
         if trimmed == "cancelled" {
             return Ok(Self::Cancelled);
+        }
+        if trimmed == "cancel_submitted" {
+            return Ok(Self::CancelSubmitted);
+        }
+        if trimmed == "pending_visibility" {
+            return Ok(Self::PendingVisibility);
+        }
+        if trimmed == "unknown_orphaned" {
+            return Ok(Self::UnknownOrphaned);
         }
         if trimmed == STATE_UNSUPPORTED_VENUE {
             return Ok(Self::UnsupportedVenue);
@@ -56,7 +68,10 @@ impl ReconcileState {
     pub fn as_str(&self) -> Cow<'_, str> {
         match self {
             Self::Lifecycle(state) => Cow::Borrowed(state.as_str()),
+            Self::PendingVisibility => Cow::Borrowed("pending_visibility"),
+            Self::CancelSubmitted => Cow::Borrowed("cancel_submitted"),
             Self::Cancelled => Cow::Borrowed("cancelled"),
+            Self::UnknownOrphaned => Cow::Borrowed("unknown_orphaned"),
             Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
         }
     }
@@ -72,6 +87,36 @@ impl ReconcileState {
     pub(crate) fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
     }
+
+    #[must_use]
+    pub fn is_cancel_submitted(&self) -> bool {
+        matches!(self, Self::CancelSubmitted)
+    }
+
+    /// Whether a tracked offer in this state is eligible for operator-initiated cancel.
+    #[must_use]
+    pub fn is_cancel_eligible(&self) -> bool {
+        matches!(
+            self,
+            Self::Lifecycle(OfferLifecycleState::Open) | Self::PendingVisibility
+        )
+    }
+
+    /// Whether offers in this state stay on the daemon reconcile watchlist.
+    #[must_use]
+    pub fn is_watched_for_reconcile(&self) -> bool {
+        match self {
+            Self::Lifecycle(
+                OfferLifecycleState::Open
+                | OfferLifecycleState::RefreshDue
+                | OfferLifecycleState::MempoolObserved,
+            )
+            | Self::PendingVisibility
+            | Self::CancelSubmitted
+            | Self::UnknownOrphaned => true,
+            Self::Lifecycle(_) | Self::Cancelled | Self::UnsupportedVenue => false,
+        }
+    }
 }
 
 impl Serialize for ReconcileState {
@@ -84,5 +129,29 @@ impl<'de> Deserialize<'de> for ReconcileState {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pending_visibility_and_unknown_orphaned() {
+        assert_eq!(
+            ReconcileState::parse("pending_visibility"),
+            Ok(ReconcileState::PendingVisibility)
+        );
+        assert_eq!(
+            ReconcileState::parse("unknown_orphaned"),
+            Ok(ReconcileState::UnknownOrphaned)
+        );
+    }
+
+    #[test]
+    fn cancel_eligible_states() {
+        assert!(ReconcileState::Lifecycle(OfferLifecycleState::Open).is_cancel_eligible());
+        assert!(ReconcileState::PendingVisibility.is_cancel_eligible());
+        assert!(!ReconcileState::CancelSubmitted.is_cancel_eligible());
     }
 }

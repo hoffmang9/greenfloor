@@ -4,6 +4,7 @@ use chia_traits::Streamable;
 
 use super::parse::ensure_coinset_typed_rpc_success;
 use crate::error::SignerResult;
+use crate::hex::canonical_tx_id;
 
 #[derive(Debug, Clone)]
 pub struct BroadcastSpendBundleResult {
@@ -20,7 +21,11 @@ pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
 ) -> SignerResult<BroadcastSpendBundleResult> {
-    let operation_id = format!("0x{}", hex::encode(spend_bundle.hash()));
+    let operation_id = canonical_tx_id(&hex::encode(spend_bundle.hash())).ok_or_else(|| {
+        crate::error::SignerError::Other(
+            "spend bundle hash did not produce a valid tx id".to_string(),
+        )
+    })?;
     // Coinset RPC expects structured SpendBundle JSON (not a hex string).
     let response = client
         .push_tx(spend_bundle)

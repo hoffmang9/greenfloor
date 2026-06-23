@@ -6,7 +6,7 @@ mod clvm;
 use crate::coinset::is_canonical_xch_asset;
 
 pub use bytes::{fixed_bytes, hex_to_bytes, hex_to_bytes32, parse_coin_ids};
-pub use clvm::{bytes32_to_hex, tree_hash_nil, tree_hash_to_hex};
+pub use clvm::{bytes32_to_hex, hex_to_tree_hash, tree_hash_nil, tree_hash_to_hex};
 
 const CANONICAL_XCH_MOJOS: i64 = 1_000_000_000_000;
 const CANONICAL_CAT_MOJOS: i64 = 1_000;
@@ -39,6 +39,49 @@ pub fn normalize_hex_id(value: &str) -> String {
     normalized
 }
 
+/// Canonical 64-char lowercase tx/coin id, or `None` when invalid.
+#[must_use]
+pub fn canonical_tx_id(value: &str) -> Option<String> {
+    let normalized = normalize_hex_id(value);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+/// Legacy `0x`-prefixed form of a canonical tx id (for tolerant DB lookups).
+#[must_use]
+pub fn legacy_prefixed_tx_id(canonical: &str) -> Option<String> {
+    canonical_tx_id(canonical).map(|id| format!("0x{id}"))
+}
+
+/// Canonical and legacy-prefixed tx ids for tolerant sqlite lookups.
+#[must_use]
+pub fn tx_id_lookup_candidates(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    let input_was_prefixed = trimmed
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x"));
+    let Some(canonical) = canonical_tx_id(value) else {
+        return Vec::new();
+    };
+    let mut out = vec![canonical.clone()];
+    if !input_was_prefixed {
+        if let Some(legacy) = legacy_prefixed_tx_id(&canonical) {
+            if legacy != canonical {
+                out.push(legacy);
+            }
+        }
+    }
+    out
+}
+
+/// Append lookup candidates for *value* into *unique* without duplicates.
+pub fn extend_tx_id_lookup_candidates(unique: &mut Vec<String>, value: &str) {
+    for candidate in tx_id_lookup_candidates(value) {
+        if !unique.iter().any(|existing| existing == &candidate) {
+            unique.push(candidate);
+        }
+    }
+}
+
 #[must_use]
 pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
     if is_canonical_xch_asset(asset_id) {
@@ -50,6 +93,7 @@ pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::{canonical_tx_id, tx_id_lookup_candidates};
     use super::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex, normalize_hex_id};
 
     #[test]
@@ -71,6 +115,21 @@ mod tests {
         assert!(!is_hex_id("abc"));
         assert!(!is_hex_id(&"g".repeat(64)));
         assert_eq!(normalize_hex_id("not-hex"), "");
+    }
+
+    #[test]
+    fn canonical_tx_id_rejects_invalid() {
+        assert!(canonical_tx_id("not-hex").is_none());
+    }
+
+    #[test]
+    fn tx_id_lookup_candidates_include_canonical_and_legacy() {
+        let id = "a".repeat(64);
+        assert_eq!(
+            tx_id_lookup_candidates(&id),
+            vec![id.clone(), format!("0x{id}")]
+        );
+        assert_eq!(tx_id_lookup_candidates(&format!("0x{id}")), vec![id]);
     }
 
     #[test]

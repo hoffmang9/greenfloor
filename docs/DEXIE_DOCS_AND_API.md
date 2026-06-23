@@ -96,6 +96,14 @@ This file summarizes the public API docs at `https://dexie.space/api` and relate
 - For GreenFloor integration, the `offer` body value is an Offer-file string (`offer1...`) produced by `chia-wallet-sdk` offer encoding.
 - GreenFloor offer strategy is expiry-first: all offers expire, with shorter expiries on stable-vs-unstable pairs.
 - GreenFloor cancel path is intentionally rare and policy-gated (stable-vs-unstable pairs only; triggered by strong unstable-leg price movement).
+- Dexie does **not** expose a public cancel API. Cancelling an offer means spending an offered input coin on-chain (typically back to vault change). GreenFloor:
+  1. Fetches the offer file via `GET /v1/offers/:id`
+  2. Builds a reclaim/cancel spend bundle in Rust (`offer/reclaim.rs`)
+  3. Submits the spend through Coinset MSP (`push_tx` / broadcast helpers)
+- Dexie is **not** called to delete or cancel the listing; venue status updates follow chain observation.
+- After on-chain cancel submit, GreenFloor records operator state `cancel_submitted` until reconcile confirms cancellation.
+- After the cancel spend confirms on-chain, Dexie status may transition to `2` (Cancelling) then `3` (Cancelled).
+- Presplit-existing offers: cancel binding (fixed conditions hash) is parsed from the maker input coin spend embedded in the offer file, not replanned from offer terms. See ADR 0015.
 - `GET /v1/offers` returns paginated payload including:
   - `success`, `count`, `page`, `page_size`, `offers[]`
 - `GET /v1/swap/quote` response includes:

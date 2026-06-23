@@ -1,12 +1,17 @@
 use std::borrow::Cow;
 
 use crate::cycle::lifecycle::OfferSignal;
+use crate::offer::dexie_payload::{
+    is_dexie_pattern_fallback_status, reconcile_from_dexie_status, DexieStatusReconcile,
+};
 
 use super::metadata::{
-    REASON_COINSET_MEMPOOL, REASON_DEXIE_OFFER_NOT_FOUND,
-    REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL,
-    SIGNAL_SOURCE_DEXIE_GET_OFFER_404, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
-    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
+    REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_DEXIE_OFFER_NOT_FOUND,
+    REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
+    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_DEXIE_GET_OFFER_404,
+    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
+    TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
+    TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
@@ -54,6 +59,41 @@ pub(crate) fn dexie_fallback_transition(
         signal,
         TAKER_NONE,
         taker_diagnostic,
+    )
+}
+
+pub(crate) fn transition_from_dexie_status(
+    status: i64,
+    unchanged_state: ReconcileState,
+) -> ReconcileTransition {
+    let taker_diagnostic = if is_dexie_pattern_fallback_status(status) {
+        TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK
+    } else {
+        TAKER_NONE
+    };
+    match reconcile_from_dexie_status(status) {
+        DexieStatusReconcile::Cancelled => {
+            dexie_fallback_transition(ReconcileState::Cancelled, None, taker_diagnostic)
+        }
+        DexieStatusReconcile::ApplySignal(signal) => dexie_fallback_transition(
+            ReconcileState::from_open_signal(signal),
+            Some(signal),
+            taker_diagnostic,
+        ),
+        DexieStatusReconcile::Unchanged => {
+            dexie_fallback_transition(unchanged_state, None, taker_diagnostic)
+        }
+    }
+}
+
+pub(crate) fn cancel_tx_chain_confirmed_transition() -> ReconcileTransition {
+    ReconcileTransition::new(
+        ReconcileState::Cancelled,
+        REASON_CANCEL_TX_CHAIN_CONFIRMED,
+        SIGNAL_SOURCE_CANCEL_TX_CHAIN,
+        None,
+        TAKER_NONE,
+        TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED,
     )
 }
 

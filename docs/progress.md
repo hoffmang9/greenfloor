@@ -16,6 +16,14 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-22 — On-chain offer cancel hardened (ADR 0015)
+
+Shared cancel/reclaim spend builder (`offer/reclaim.rs`); Dexie is offer-file fetch only;
+Coinset broadcast. Presplit cancel binding extracted from offer input spend (no replan).
+Operator state uses `cancel_submitted` until reconcile confirms `cancelled`. CLI JSON field
+`submitted_count` replaces `cancelled_count`. Simulator e2e test for presplit-existing
+`build_offer_cancel_spend_bundle`.
+
 ### 2026-06-21 — Offer publish module decomposed; bootstrap gate collapsed
 
 Split `offer/publish/mod.rs` into venue-focused `publish/dexie/` and `publish/assets/`
@@ -75,5 +83,5 @@ to active decisions (`0013`, `0010`, `0007`, `0003`).
 
 - V1 scope: [`plan.md`](plan.md)
 - Operator procedures: [`runbook.md`](runbook.md)
-- Architecture decisions: [`README.md`](README.md) (start with ADR 0013)
+- Architecture decisions: [`README.md`](README.md) (start with ADR 0013, ADR 0015 for cancel)
 - Breaking changes / migration catch-up: [`rust-migration-ledger.md`](rust-migration-ledger.md)

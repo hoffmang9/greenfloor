@@ -1,9 +1,12 @@
 use crate::cycle::lifecycle::OfferSignal;
 
+use chrono::{TimeZone, Utc};
+
 use super::metadata::{
-    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
-    REASON_DEXIE_OFFER_NOT_FOUND, REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
-    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    REASON_CANCEL_SUBMIT_CONTEXT_MISSING, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
+    REASON_COINSET_UNAVAILABLE, REASON_DEXIE_OFFER_NOT_FOUND,
+    REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL, REASON_MISSING_STATUS, REASON_OK,
+    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
     SIGNAL_SOURCE_DEXIE_GET_OFFER_404, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
     TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
@@ -11,8 +14,9 @@ use super::metadata::{
 use super::{
     decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
+    unsupported_venue_offer_transition, CycleOfferTransition, DexieCoinsetSignals, ReconcileState,
 };
+use crate::cycle::reconcile::CancelSubmittedContext;
 
 fn state(raw: &str) -> ReconcileState {
     ReconcileState::parse(raw).expect("valid reconcile state")
@@ -210,12 +214,19 @@ const DISPATCH_CASES: &[DispatchCase] = &[
 fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
     let current = state(case.current_state);
     let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = case.coinset.vecs();
+    let dexie = DexieCoinsetSignals {
+        tx_ids: coinset_tx_ids,
+        confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
+        mempool_tx_ids: coinset_mempool_tx_ids,
+    };
+    let chain_confirmed = coinset_confirmed_tx_ids.clone();
     resolve_watched_offer_decision(
         &current,
         case.status,
-        &coinset_tx_ids,
-        &coinset_confirmed_tx_ids,
-        &coinset_mempool_tx_ids,
+        &dexie,
+        &chain_confirmed,
+        None,
+        Utc::now(),
     )
     .into_cycle_transition_no_coinset(current)
 }
@@ -272,12 +283,18 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
     for case in DISPATCH_CASES {
         let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
             case.coinset.vecs();
+        let chain_confirmed = coinset_confirmed_tx_ids.clone();
         let transition = resolve_watched_offer_transition_from_signals(
             case.current_state,
             case.status,
-            coinset_tx_ids,
-            coinset_confirmed_tx_ids,
-            coinset_mempool_tx_ids,
+            DexieCoinsetSignals {
+                tx_ids: coinset_tx_ids,
+                confirmed_tx_ids: coinset_confirmed_tx_ids,
+                mempool_tx_ids: coinset_mempool_tx_ids,
+            },
+            &chain_confirmed,
+            None,
+            Utc::now(),
         )
         .unwrap_or_else(|err| panic!("{}: valid reconcile state: {err}", case.label));
         assert_eq!(
@@ -351,6 +368,16 @@ const MISSING_WATCHED_CASES: &[MissingWatchedCase] = &[
         label: "missing_watched_offer_preserves_terminal_state",
         current_state: "tx_block_confirmed",
         expected_new_state: "tx_block_confirmed",
+        expected_changed: false,
+        expected_immediate_requeue: false,
+        expected_signal: None,
+        expected_reason: REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
+        expected_signal_source: SIGNAL_SOURCE_DEXIE_GET_OFFER_404,
+    },
+    MissingWatchedCase {
+        label: "missing_watched_offer_preserves_cancel_submitted",
+        current_state: "cancel_submitted",
+        expected_new_state: "cancel_submitted",
         expected_changed: false,
         expected_immediate_requeue: false,
         expected_signal: None,
@@ -448,13 +475,66 @@ fn entry_point_factory_matrix() {
 }
 
 #[test]
+fn cancel_submitted_preserves_when_cancel_tx_pending() {
+    use crate::storage::TxSignalStateRow;
+
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some("tx-pending".to_string()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some("2020-01-01T00:00:00Z".to_string()),
+    };
+    let transition = resolve_watched_offer_decision(
+        &ReconcileState::CancelSubmitted,
+        Some(0),
+        &DexieCoinsetSignals {
+            tx_ids: vec![],
+            confirmed_tx_ids: vec![],
+            mempool_tx_ids: vec![],
+        },
+        &[],
+        Some(&ctx),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert!(!transition.changed);
+}
+
+#[test]
+fn cancel_submitted_preserves_when_context_missing() {
+    let transition = resolve_watched_offer_decision(
+        &ReconcileState::CancelSubmitted,
+        Some(1),
+        &DexieCoinsetSignals {
+            tx_ids: vec![],
+            confirmed_tx_ids: vec![],
+            mempool_tx_ids: vec![],
+        },
+        &[],
+        None,
+        Utc.with_ymd_and_hms(2020, 1, 1, 1, 0, 0).unwrap(),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert!(!transition.changed);
+    assert_eq!(
+        transition.reason,
+        REASON_CANCEL_SUBMIT_CONTEXT_MISSING.to_string()
+    );
+}
+
+#[test]
 fn unknown_reconcile_state_is_rejected() {
     let err = resolve_watched_offer_transition_from_signals(
         "not_a_real_state",
         None,
-        vec![],
-        vec![],
-        vec![],
+        DexieCoinsetSignals::default(),
+        &[],
+        None,
+        Utc::now(),
     )
     .expect_err("unknown state should fail");
     assert_eq!(

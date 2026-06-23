@@ -165,6 +165,41 @@ impl std::fmt::Display for OfferExecutionMode {
     }
 }
 
+impl OfferExecutionMode {
+    #[must_use]
+    pub fn parse_db(value: &str) -> Option<Self> {
+        match value.trim() {
+            "direct" => Some(Self::Direct),
+            "presplit_new" => Some(Self::PresplitNew),
+            "presplit_existing" => Some(Self::PresplitExisting),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PresplitCancelFields {
+    pub input_coin_id: Option<String>,
+    pub fixed_delegated_puzzle_hash: Option<String>,
+}
+
+impl PresplitCancelFields {
+    #[must_use]
+    pub fn from_presplit_build(input_coin_id: String, fixed_delegated_puzzle_hash: String) -> Self {
+        Self {
+            input_coin_id: Some(input_coin_id),
+            fixed_delegated_puzzle_hash: Some(fixed_delegated_puzzle_hash),
+        }
+    }
+}
+
+/// Cancel hints persisted at offer post time (`offer_state` row).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredOfferCancelMetadata {
+    pub fields: PresplitCancelFields,
+    pub execution_mode: Option<OfferExecutionMode>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CreateOfferResult {
     pub offer: String,
@@ -177,6 +212,8 @@ pub struct CreateOfferResult {
     /// Presplit offer coin ID for presplit-new and presplit-existing paths.
     pub presplit_coin_id: Option<String>,
     pub split_broadcast_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presplit_cancel_fields: Option<PresplitCancelFields>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +236,7 @@ impl CreateOfferResult {
         execution_mode: OfferExecutionMode,
         core: OfferArtifacts,
         presplit: PresplitArtifacts,
+        presplit_cancel_fields: Option<PresplitCancelFields>,
     ) -> Self {
         Self {
             execution_mode,
@@ -209,6 +247,7 @@ impl CreateOfferResult {
             split_spend_bundle_hex: presplit.split_spend_bundle_hex,
             presplit_coin_id: presplit.presplit_coin_id,
             split_broadcast_status: presplit.split_broadcast_status,
+            presplit_cancel_fields,
         }
     }
 }

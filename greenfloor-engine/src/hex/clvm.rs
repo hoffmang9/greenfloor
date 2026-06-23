@@ -11,6 +11,16 @@ pub fn tree_hash_to_hex(hash: TreeHash) -> String {
     hex::encode(hash.to_bytes())
 }
 
+/// Parse a 32-byte tree hash from lowercase hex.
+///
+/// # Errors
+///
+/// Returns an error when the value is not valid 32-byte hex.
+pub fn hex_to_tree_hash(value: &str) -> crate::error::SignerResult<TreeHash> {
+    let bytes = crate::hex::hex_to_bytes32(value)?;
+    Ok(TreeHash::new(bytes.into()))
+}
+
 #[must_use]
 pub fn bytes32_to_hex(value: Bytes32) -> String {
     hex::encode(value.to_bytes())

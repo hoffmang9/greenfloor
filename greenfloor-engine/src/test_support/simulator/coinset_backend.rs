@@ -43,6 +43,19 @@ impl<'a> SimulatorOfferCoinset<'a> {
         }
         Ok(cats)
     }
+
+    fn fetch_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        if let Some(cat) = self
+            .known_cats
+            .lock()
+            .expect("known cats lock")
+            .get(&coin_id)
+            .copied()
+        {
+            return Ok(cat);
+        }
+        fetch_cat_from_sim_by_id(self.chain, coin_id).map_err(SignerError::Other)
+    }
 }
 
 impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
@@ -58,7 +71,7 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         } else {
             let mut cats = Vec::new();
             for coin_id in explicit_coin_ids {
-                cats.push(self.fetch_presplit_cat_by_id(*coin_id).await?);
+                cats.push(self.fetch_by_id(*coin_id)?);
             }
             cats
         };
@@ -78,21 +91,18 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         .map_err(SignerError::Other)
     }
 
-    async fn fetch_presplit_cat_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        if let Some(cat) = self
-            .known_cats
-            .lock()
-            .expect("known cats lock")
-            .get(&coin_id)
-            .copied()
-        {
-            return Ok(cat);
+    async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        match self.fetch_by_id(coin_id) {
+            Ok(cat) => Ok(cat),
+            Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
+                Err(SignerError::PresplitCoinNotFound)
+            }
+            Err(err) => Err(err),
         }
-        fetch_cat_from_sim_by_id(self.chain, coin_id).map_err(SignerError::Other)
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
-        self.fetch_presplit_cat_by_id(coin_id).await
+        self.fetch_by_id(coin_id)
     }
 
     async fn broadcast_spend_bundle(&self, spend_bundle: SpendBundle) -> SignerResult<String> {
