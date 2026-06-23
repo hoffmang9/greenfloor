@@ -7,7 +7,7 @@ use tempfile::TempDir;
 use crate::adapters::DexieClient;
 use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
 use crate::cycle::StaleSweepProgress;
-use crate::storage::SqliteStore;
+use crate::storage::{shared_sqlite_store, SharedSqliteStore, SqliteStore};
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
@@ -16,6 +16,10 @@ use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
 
 pub fn open_test_store(path: &Path) -> SqliteStore {
     SqliteStore::open(path).expect("open sqlite store")
+}
+
+pub fn open_shared_test_store(path: &Path) -> SharedSqliteStore {
+    shared_sqlite_store(open_test_store(path))
 }
 
 pub fn sample_mainnet_program() -> ManagerProgramConfig {
@@ -53,6 +57,8 @@ pub fn test_cycle_context(
 
     let program_config = CycleProgramConfig::from_parts(program, signer);
 
+    let write_store = open_shared_test_store(db_path);
+
     TestCycleContextBundle {
         resources: DaemonCycleResources::with_program_config(
             program_config,
@@ -67,7 +73,7 @@ pub fn test_cycle_context(
             super::watchlist::CoinWatchlistCache::new(),
         ),
         dispatch: MarketDispatchContext {
-            db_path: db_path.to_path_buf(),
+            write_store,
             allowed_key_ids: Vec::new(),
             xch_price_usd: None,
             previous_xch_price_usd: None,

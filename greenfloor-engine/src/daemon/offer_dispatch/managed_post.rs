@@ -17,6 +17,7 @@ use crate::offer::operator::{
     BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
+use crate::storage::SharedSqliteStore;
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
 
@@ -28,6 +29,7 @@ use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 pub(super) struct ManagedPostContext {
     pub program: ManagerProgramConfig,
     pub paths: DaemonCyclePaths,
+    pub persist_store: Option<SharedSqliteStore>,
     #[cfg(test)]
     pub dispatch_injections: DaemonDispatchTestInjections,
 }
@@ -37,6 +39,7 @@ impl ManagedPostContext {
         Self {
             program: ctx.resources.program().clone(),
             paths: ctx.resources.paths.clone(),
+            persist_store: Some(ctx.dispatch.write_store.clone()),
             #[cfg(test)]
             dispatch_injections: ctx.dispatch.test_controls.offer_dispatch.clone(),
         }
@@ -69,6 +72,7 @@ fn daemon_managed_post_request(
                 run: BuildAndPostRunOptions {
                     dry_run: post_ctx.program.runtime_dry_run,
                     persist_results: true,
+                    persist_store: post_ctx.persist_store.clone(),
                 },
                 action_side: Some(normalize_offer_side(&action.side).to_string()),
             },
@@ -136,6 +140,7 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
+            persist_store: None,
             dispatch_injections: DaemonDispatchTestInjections::default(),
         }
     }

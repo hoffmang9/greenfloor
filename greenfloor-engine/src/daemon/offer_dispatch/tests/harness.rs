@@ -10,7 +10,7 @@ use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::SqliteStore;
+use crate::storage::{SharedSqliteStore, SqliteStore};
 use crate::test_support::market_config;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -86,7 +86,7 @@ pub(super) fn sample_action() -> PlannedAction {
 
 pub(super) struct ParallelDispatchHarness {
     pub(super) _dir: TempDir,
-    pub(super) store: SqliteStore,
+    pub(super) store: SharedSqliteStore,
     pub(super) program_path: PathBuf,
     test_ctx: crate::daemon::test_support::TestCycleContextBundle,
 }
@@ -95,7 +95,7 @@ impl ParallelDispatchHarness {
     pub(super) fn new(parallelism_enabled: bool, dry_run: bool, with_signer: bool) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
-        let store = SqliteStore::open(&db_path).expect("open");
+        let store = SqliteStore::open_shared(&db_path).expect("open");
         let program_path = dir.path().join("program.yaml");
         write_minimal_program_with_signer(
             &program_path,
@@ -106,13 +106,14 @@ impl ParallelDispatchHarness {
         );
         let markets_path = dir.path().join("markets.yaml");
         write_test_markets_file(&markets_path);
-        let test_ctx = test_context_from_program_file(
+        let mut test_ctx = test_context_from_program_file(
             &dir,
             &db_path,
             &program_path,
             sample_program(parallelism_enabled, dry_run),
             with_signer,
         );
+        test_ctx.dispatch.write_store = store.clone();
         Self {
             _dir: dir,
             store,
@@ -132,7 +133,7 @@ impl ParallelDispatchHarness {
     ) -> crate::error::SignerResult<OfferDispatchOutput> {
         use super::super::execute_strategy_actions;
 
-        execute_strategy_actions(&self.store, &self.test_ctx.cycle_context(), market, actions).await
+        execute_strategy_actions(&self.test_ctx.cycle_context(), market, actions).await
     }
 }
 

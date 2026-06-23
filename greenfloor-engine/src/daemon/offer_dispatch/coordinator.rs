@@ -1,25 +1,23 @@
-use std::sync::Mutex;
-
-use crate::error::{SignerError, SignerResult};
-use crate::storage::{OfferReservationAcquireOutcome, OfferReservationRejectReason, SqliteStore};
+use crate::error::SignerResult;
+use crate::storage::{
+    lock_sqlite_store, OfferReservationAcquireOutcome, OfferReservationRejectReason,
+    SharedSqliteStore,
+};
 
 const DEFAULT_LEASE_SECONDS: i64 = 300;
 
 pub struct OfferReservationCoordinator {
-    store: Mutex<SqliteStore>,
+    store: SharedSqliteStore,
     lease_seconds: i64,
 }
 
 impl OfferReservationCoordinator {
-    pub fn new(
-        db_path: impl AsRef<std::path::Path>,
-        lease_seconds: Option<i64>,
-    ) -> SignerResult<Self> {
+    pub fn new(store: SharedSqliteStore, lease_seconds: Option<i64>) -> Self {
         let lease_seconds = lease_seconds.unwrap_or(DEFAULT_LEASE_SECONDS).max(30);
-        Ok(Self {
-            store: Mutex::new(SqliteStore::open(db_path.as_ref())?),
+        Self {
+            store,
             lease_seconds,
-        })
+        }
     }
 
     pub fn try_acquire(
@@ -29,9 +27,7 @@ impl OfferReservationCoordinator {
         requested_amounts: &std::collections::BTreeMap<String, i64>,
         available_amounts: &std::collections::BTreeMap<String, i64>,
     ) -> SignerResult<ReservationAcquireResult> {
-        let store = self.store.lock().map_err(|err| {
-            SignerError::Other(format!("reservation coordinator lock poisoned: {err}"))
-        })?;
+        let store = lock_sqlite_store(&self.store)?;
         let reservation_id = format!(
             "res-{:x}-{}",
             std::time::SystemTime::now()
@@ -60,17 +56,13 @@ impl OfferReservationCoordinator {
     }
 
     pub fn release(&self, reservation_id: &str, release_status: &str) -> SignerResult<()> {
-        let store = self.store.lock().map_err(|err| {
-            SignerError::Other(format!("reservation coordinator lock poisoned: {err}"))
-        })?;
+        let store = lock_sqlite_store(&self.store)?;
         store.release_offer_reservation_lease(reservation_id, release_status)?;
         Ok(())
     }
 
     pub fn expire_stale(&self) -> SignerResult<u64> {
-        let store = self.store.lock().map_err(|err| {
-            SignerError::Other(format!("reservation coordinator lock poisoned: {err}"))
-        })?;
+        let store = lock_sqlite_store(&self.store)?;
         store.expire_offer_reservation_leases(None)
     }
 }

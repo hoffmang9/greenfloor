@@ -122,6 +122,8 @@ async fn run_coin_ops_phase_runs_with_minimum_cat_sell_ladder() {
 
     let events = harness
         .store
+        .lock()
+        .expect("lock")
         .list_recent_audit_events(
             Some(&[COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT, COIN_OPS_PLAN]),
             Some("m1"),
@@ -194,6 +196,8 @@ async fn run_coin_ops_phase_noops_on_empty_sell_ladder() {
 
     let events = harness
         .store
+        .lock()
+        .expect("lock")
         .list_recent_audit_events(Some(&[COIN_OPS_NO_PLANS]), Some("m1"), 5)
         .expect("events");
     assert!(events.iter().any(|event| {
@@ -224,6 +228,8 @@ async fn run_coin_ops_phase_skips_execution_when_daily_fee_budget_exhausted() {
 
     let events = harness
         .store
+        .lock()
+        .expect("lock")
         .list_recent_audit_events(
             Some(&[COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET]),
             Some("m1"),
@@ -251,6 +257,8 @@ async fn run_coin_ops_phase_records_partial_fee_budget_overflow() {
 
     let events = harness
         .store
+        .lock()
+        .expect("lock")
         .list_recent_audit_events(
             Some(&[
                 COIN_OPS_PLAN,

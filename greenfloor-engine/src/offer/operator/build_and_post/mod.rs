@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
-use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::storage::{lock_sqlite_store, state_db_path_for_home, SharedSqliteStore, SqliteStore};
 
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
@@ -39,6 +39,8 @@ pub struct BuildAndPostRunOptions {
     pub dry_run: bool,
     #[serde(default = "default_persist_results")]
     pub persist_results: bool,
+    #[serde(default, skip)]
+    pub persist_store: Option<SharedSqliteStore>,
 }
 
 #[must_use]
@@ -213,8 +215,13 @@ async fn build_and_post_offer_async(
         run_post_iterations(&request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
 
     if target == PostEmitTarget::TraceAndStore {
-        let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
-        emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
+        if let Some(shared) = &request.run.persist_store {
+            let store = lock_sqlite_store(shared)?;
+            emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
+        } else {
+            let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
+            emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
+        }
     }
 
     let payload = build_and_post_payload(&request, &ctx, &batch);

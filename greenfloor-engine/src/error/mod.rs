@@ -195,6 +195,9 @@ pub enum SignerError {
     #[error("database is locked")]
     DatabaseLocked,
 
+    #[error("failed to open sqlite db {path}: {open_error}")]
+    SqliteOpenFailed { path: String, open_error: String },
+
     #[error("offer execution requires signer.kms_key_id and vault.launcher_id in program config")]
     SignerPathNotConfigured,
 
@@ -237,7 +240,15 @@ fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
 
 impl SignerError {
     #[must_use]
+    pub fn is_sqlite_fatal(&self) -> bool {
+        matches!(self, Self::SqliteOpenFailed { .. })
+    }
+
+    #[must_use]
     pub fn is_parallel_dispatch_transient(&self) -> bool {
+        if self.is_sqlite_fatal() {
+            return false;
+        }
         match self {
             Self::ReservationContention(_)
             | Self::ManagedUpstreamTransient(_)
@@ -344,6 +355,22 @@ mod tests {
             !SignerError::Other("PermanentOfferBuildFailure: bad puzzle".to_string())
                 .is_parallel_dispatch_transient()
         );
+    }
+
+    #[test]
+    fn sqlite_fatal_errors_are_not_parallel_dispatch_transient() {
+        assert!(SignerError::SqliteOpenFailed {
+            path: "/tmp/greenfloor.sqlite".to_string(),
+            open_error: "unable to open database file".to_string(),
+        }
+        .is_sqlite_fatal());
+        assert!(!SignerError::Other("database is locked".to_string()).is_sqlite_fatal());
+        assert!(!SignerError::SqliteOpenFailed {
+            path: "/tmp/x".to_string(),
+            open_error: "permission denied".to_string(),
+        }
+        .is_parallel_dispatch_transient());
+        assert!(SignerError::DatabaseLocked.is_parallel_dispatch_transient());
     }
 
     #[test]

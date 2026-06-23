@@ -8,6 +8,7 @@ mod offer_cancel;
 mod offers;
 mod pricing;
 mod reservations;
+mod shared;
 mod transaction;
 mod tx_signals;
 
@@ -53,6 +54,12 @@ pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {
 
 pub struct SqliteStore {
     pub(crate) conn: Connection,
+}
+
+impl std::fmt::Debug for SqliteStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteStore").finish_non_exhaustive()
+    }
 }
 
 #[must_use]
@@ -122,11 +129,9 @@ impl SqliteStore {
                 ))
             })?;
         }
-        let conn = Connection::open(db_path).map_err(|err| {
-            SignerError::Other(format!(
-                "failed to open sqlite db {}: {err}",
-                db_path.display()
-            ))
+        let conn = Connection::open(db_path).map_err(|err| SignerError::SqliteOpenFailed {
+            path: db_path.display().to_string(),
+            open_error: err.to_string(),
         })?;
         conn.busy_timeout(Duration::from_secs(30)).map_err(|err| {
             SignerError::Other(format!("failed to set sqlite busy_timeout: {err}"))
@@ -135,13 +140,26 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to set busy_timeout pragma: {err}"))
             })?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|err| SignerError::Other(format!("failed to set journal_mode=WAL: {err}")))?;
         conn.execute_batch(SCHEMA).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;
         migrations::apply_schema_migrations(&conn)?;
         Ok(Self { conn })
     }
+
+    /// Open and wrap in [`SharedSqliteStore`] for multi-threaded cycle use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when [`Self::open`] fails.
+    pub fn open_shared(db_path: &Path) -> SignerResult<SharedSqliteStore> {
+        Ok(shared_sqlite_store(Self::open(db_path)?))
+    }
 }
+
+pub use shared::{lock_sqlite_store, shared_sqlite_store, with_sqlite_store, SharedSqliteStore};
 
 pub(crate) fn utcnow_iso() -> String {
     Utc::now().to_rfc3339()

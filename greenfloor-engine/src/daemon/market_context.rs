@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::adapters::DexieClient;
@@ -7,6 +6,7 @@ use crate::config::{
     ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
+use crate::storage::SharedSqliteStore;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
@@ -81,7 +81,7 @@ impl DaemonCycleResources {
 /// Shared per-cycle inputs for post-reconcile market phases.
 #[derive(Debug, Clone)]
 pub struct MarketDispatchContext {
-    pub db_path: PathBuf,
+    pub write_store: SharedSqliteStore,
     pub allowed_key_ids: Vec<String>,
     pub xch_price_usd: Option<f64>,
     pub previous_xch_price_usd: Option<f64>,
@@ -135,6 +135,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     fn sample_market(market_id: &str, enabled: bool) -> MarketConfig {
         MarketConfig {

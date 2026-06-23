@@ -312,6 +312,7 @@ async fn dry_run_returns_preview_payload_in_process() {
         run: super::BuildAndPostRunOptions {
             dry_run: true,
             persist_results: true,
+            persist_store: None,
         },
         action_side: None,
         test_overrides: crate::offer::operator::BuildOfferTestOverrides {

@@ -54,6 +54,7 @@ pub(crate) fn build_and_post_request(
                 run: BuildAndPostRunOptions {
                     dry_run: *dry_run,
                     persist_results: true,
+                    persist_store: None,
                 },
                 action_side: None,
             },

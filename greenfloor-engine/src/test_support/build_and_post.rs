@@ -33,6 +33,7 @@ pub fn post_iteration_request(
         run: BuildAndPostRunOptions {
             dry_run,
             persist_results: false,
+            persist_store: None,
         },
         action_side: None,
         test_overrides: BuildOfferTestOverrides {

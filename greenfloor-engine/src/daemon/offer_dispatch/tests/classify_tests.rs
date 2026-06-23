@@ -94,10 +94,12 @@ fn classify_parallel_dispatch_fatal_error_propagates() {
 async fn record_parallel_fallback_audit_persists_event() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
+    let store = SqliteStore::open_shared(&db_path).expect("open");
     let err = SignerError::Other("ReservationContentionError: simulated".to_string());
     record_parallel_fallback_audit(&store, "m1", &err).expect("audit");
     let events = store
+        .lock()
+        .expect("lock")
         .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
         .expect("events");
     assert_eq!(events.len(), 1);

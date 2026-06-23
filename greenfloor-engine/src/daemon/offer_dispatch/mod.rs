@@ -24,7 +24,7 @@ use crate::cycle::{expand_planned_actions, PlannedAction};
 
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
-use crate::storage::SqliteStore;
+use crate::storage::{with_sqlite_store, SharedSqliteStore};
 
 use super::market_context::MarketCycleContext;
 
@@ -73,53 +73,56 @@ pub(crate) fn classify_parallel_dispatch(
 }
 
 pub(crate) fn record_parallel_fallback_audit(
-    store: &SqliteStore,
+    write_store: &SharedSqliteStore,
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    LogContext::MARKET_CYCLE.dual_audit(
-        store,
-        Level::WARN,
-        "parallel offer dispatch fallback",
-        OFFER_PARALLEL_FALLBACK,
-        &json!({
-            "market_id": market_id,
-            "error": err.to_string(),
-            "reason": "reservation_parallel_path_failed",
-        }),
-        Some(market_id),
-    )
+    with_sqlite_store(write_store, |store| {
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "parallel offer dispatch fallback",
+            OFFER_PARALLEL_FALLBACK,
+            &json!({
+                "market_id": market_id,
+                "error": err.to_string(),
+                "reason": "reservation_parallel_path_failed",
+            }),
+            Some(market_id),
+        )
+    })
 }
 
 pub fn execute_strategy_actions<'a>(
-    store: &'a SqliteStore,
     ctx: &'a MarketCycleContext<'_>,
     market: &'a MarketConfig,
     actions: &'a [PlannedAction],
 ) -> StrategyDispatchFuture<'a> {
-    Box::pin(execute_strategy_actions_async(store, ctx, market, actions))
+    Box::pin(execute_strategy_actions_async(ctx, market, actions))
 }
 
 async fn execute_strategy_actions_async(
-    store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
+    let write_store = &ctx.dispatch.write_store;
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            LogContext::MARKET_CYCLE.dual_audit(
-                store,
-                Level::WARN,
-                "strategy execution skipped without signer",
-                STRATEGY_EXEC_SKIPPED_NO_SIGNER,
-                &json!({
-                    "market_id": market.market_id,
-                    "planned_count": actions.len(),
-                    "reason": signer_execution_skip_reason(&err),
-                }),
-                Some(&market.market_id),
-            )?;
+            with_sqlite_store(write_store, |store| {
+                LogContext::MARKET_CYCLE.dual_audit(
+                    store,
+                    Level::WARN,
+                    "strategy execution skipped without signer",
+                    STRATEGY_EXEC_SKIPPED_NO_SIGNER,
+                    &json!({
+                        "market_id": market.market_id,
+                        "planned_count": actions.len(),
+                        "reason": signer_execution_skip_reason(&err),
+                    }),
+                    Some(&market.market_id),
+                )
+            })?;
             return Ok(OfferDispatchOutput {
                 executed_count: 0,
                 newly_executed_sell_counts: BTreeMap::default(),
@@ -140,11 +143,11 @@ async fn execute_strategy_actions_async(
     let program = ctx.resources.program();
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
-            parallel::execute_actions_parallel(store, ctx, signer_config, market, &expanded).await,
+            parallel::execute_actions_parallel(ctx, signer_config, market, &expanded).await,
         ) {
             ParallelDispatchDecision::Success(output) => return Ok(output),
             ParallelDispatchDecision::FallbackTransient(err) => {
-                record_parallel_fallback_audit(store, &market.market_id, &err)?;
+                record_parallel_fallback_audit(write_store, &market.market_id, &err)?;
             }
             ParallelDispatchDecision::Fatal(err) => return Err(err),
         }

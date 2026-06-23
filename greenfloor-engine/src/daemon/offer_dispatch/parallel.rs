@@ -15,7 +15,7 @@ use crate::daemon::market_context::MarketCycleContext;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
-use crate::storage::SqliteStore;
+use crate::storage::with_sqlite_store;
 
 use super::coordinator::{OfferReservationCoordinator, ReservationAcquireResult};
 use super::managed_post::{post_managed_planned_action_owned, ManagedPostContext};
@@ -61,7 +61,6 @@ async fn resolve_parallel_spendable_profiles(
 }
 
 fn prepare_parallel_dispatch(
-    store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     signer_config: &SignerConfig,
     market: &MarketConfig,
@@ -77,28 +76,30 @@ fn prepare_parallel_dispatch(
         "runtime.reservation_ttl_seconds",
     )?;
     let coordinator = Arc::new(OfferReservationCoordinator::new(
-        &ctx.dispatch.db_path,
+        ctx.dispatch.write_store.clone(),
         Some(ttl),
-    )?);
+    ));
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
-    LogContext::MARKET_CYCLE.dual_audit(
-        store,
-        Level::DEBUG,
-        "parallel offer dispatch planned",
-        PARALLEL_OFFER_DISPATCH,
-        &json!({
-            "market_id": market.market_id,
-            "planned_count": expanded.len(),
-            "queued_count": batch_plan.queue.len(),
-            "workers": parallel_max_workers(
-                batch_plan.queue.len(),
-                program.runtime_offer_parallelism_max_workers
-            ),
-        }),
-        Some(&market.market_id),
-    )?;
+    with_sqlite_store(&ctx.dispatch.write_store, |store| {
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::DEBUG,
+            "parallel offer dispatch planned",
+            PARALLEL_OFFER_DISPATCH,
+            &json!({
+                "market_id": market.market_id,
+                "planned_count": expanded.len(),
+                "queued_count": batch_plan.queue.len(),
+                "workers": parallel_max_workers(
+                    batch_plan.queue.len(),
+                    program.runtime_offer_parallelism_max_workers
+                ),
+            }),
+            Some(&market.market_id),
+        )
+    })?;
 
     let mut skip_items = Vec::new();
     for skip in &batch_plan.skip_items {
@@ -191,7 +192,13 @@ async fn run_parallel_post_jobs(
         let (action, counts_as_executed) = handle
             .await
             .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?
-            .map_err(|err| SignerError::Other(format!("parallel worker failed: {err}")))?;
+            .map_err(|err| {
+                if err.is_sqlite_fatal() {
+                    err
+                } else {
+                    SignerError::Other(format!("parallel worker failed: {err}"))
+                }
+            })?;
         if counts_as_executed {
             executed += 1;
         }
@@ -206,7 +213,6 @@ async fn run_parallel_post_jobs(
 }
 
 pub async fn execute_actions_parallel(
-    store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     signer_config: &SignerConfig,
     market: &MarketConfig,
@@ -227,7 +233,6 @@ pub async fn execute_actions_parallel(
         resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;
 
     let setup = prepare_parallel_dispatch(
-        store,
         ctx,
         signer_config,
         market,
