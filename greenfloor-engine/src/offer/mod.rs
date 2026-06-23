@@ -34,6 +34,8 @@ pub use build::build_vault_cat_offer;
 pub use build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
+#[cfg(test)]
+pub(crate) use cancel_input::classify_cancellable_maker_input;
 pub use cancel_input::OfferReclaimMode;
 pub use codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,

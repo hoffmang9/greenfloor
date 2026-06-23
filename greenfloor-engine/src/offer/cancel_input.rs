@@ -8,8 +8,8 @@ use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
-    presplit_binding_from_coin_input, verify_fixed_delegated_puzzle_hash_for_binding,
-    PresplitCoinBinding,
+    offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
+    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup, PresplitCoinBinding,
 };
 use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
 use crate::vault::spend::VaultSpendContext;
@@ -181,25 +181,34 @@ fn offer_cancel_input_not_vault_owned(coin: Coin, launcher_id: Bytes32) -> Signe
     }
 }
 
-fn is_not_vault_owned_presplit_err(err: &SignerError) -> bool {
-    matches!(
-        err,
-        SignerError::PresplitCoinPuzzleHashMismatch
-            | SignerError::OfferCancelNoSpendableInput
-            | SignerError::OfferCancelPresplitBindingParseFailed { .. }
-    )
+async fn ensure_offer_input_unspent<C: OfferCoinsetBackend>(
+    backend: &C,
+    coin_id: Bytes32,
+) -> SignerResult<()> {
+    if backend.offer_input_coin_is_spent(coin_id).await? {
+        return Err(SignerError::OfferCancelInputCoinAlreadySpent);
+    }
+    Ok(())
 }
 
-fn optional_presplit_binding(
-    launcher_id: Bytes32,
+fn direct_vault_cat_missing_on_coinset(
+    vault_ctx: &mut VaultSpendContext,
     coin: Coin,
     spend_bundle: &SpendBundle,
-) -> SignerResult<Option<PresplitCoinBinding>> {
-    match presplit_binding_from_coin_input(launcher_id, coin, spend_bundle) {
-        Ok(binding) => Ok(Some(binding)),
-        Err(err) if is_not_vault_owned_presplit_err(&err) => Ok(None),
-        Err(err) => Err(err),
+    metadata: Option<&StoredOfferCancelMetadata>,
+) -> SignerResult<bool> {
+    let Some(cat) = offer_maker_cat_from_coin_input(coin, spend_bundle)? else {
+        return Ok(false);
+    };
+    if metadata
+        .and_then(|value| value.execution_mode)
+        .is_some_and(|mode| mode == OfferExecutionMode::Direct)
+    {
+        return Ok(true);
     }
+    Ok(vault_ctx
+        .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
+        .is_some())
 }
 
 /// Classify a cancellable maker coin as a vault-owned reclaim input.
@@ -209,6 +218,8 @@ fn optional_presplit_binding(
 /// # Errors
 ///
 /// Returns [`SignerError::OfferCancelInputNotVaultOwned`] when the coin is not vault-owned.
+/// Returns [`SignerError::OfferCancelInputCoinAlreadySpent`] when coinset shows the maker
+/// input is missing or already spent.
 pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
     vault_ctx: &mut VaultSpendContext,
     backend: &C,
@@ -217,26 +228,45 @@ pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
     coin: Coin,
 ) -> SignerResult<CancellableMakerInput> {
     if let Some(nonce) = vault_ctx.infer_nonce_for_p2_hash(coin.puzzle_hash) {
+        ensure_offer_input_unspent(backend, coin.coin_id()).await?;
         return Ok(CancellableMakerInput::DirectVaultP2 { coin, nonce });
     }
 
-    let binding = optional_presplit_binding(vault_ctx.launcher_id, coin, spend_bundle)?;
+    let binding = match presplit_binding_from_coin_input(vault_ctx.launcher_id, coin, spend_bundle)
+    {
+        Ok(PresplitBindingLookup::Found(binding)) => Some(binding),
+        Ok(PresplitBindingLookup::NotPresplitMaker) => None,
+        Err(SignerError::PresplitCoinPuzzleHashMismatch) => {
+            return Err(offer_cancel_input_not_vault_owned(
+                coin,
+                vault_ctx.launcher_id,
+            ));
+        }
+        Err(err) => return Err(err),
+    };
 
     if let Some(cat) = resolve_cancellable_cat(backend, spend_bundle, coin, metadata).await? {
+        ensure_offer_input_unspent(backend, cat.coin.coin_id()).await?;
         return classify_coinset_cat(vault_ctx, coin, cat, binding.as_ref(), metadata);
     }
 
-    let Some(binding) = binding else {
-        return Err(offer_cancel_input_not_vault_owned(
-            coin,
+    if let Some(binding) = binding {
+        ensure_offer_input_unspent(backend, coin.coin_id()).await?;
+        return presplit_maker_input(
             vault_ctx.launcher_id,
-        ));
-    };
-    presplit_maker_input(
-        vault_ctx.launcher_id,
+            coin,
+            binding.parsed_cat,
+            Some(&binding),
+            metadata.map(|value| &value.fields),
+        );
+    }
+
+    if direct_vault_cat_missing_on_coinset(vault_ctx, coin, spend_bundle, metadata)? {
+        return Err(SignerError::OfferCancelInputCoinAlreadySpent);
+    }
+
+    Err(offer_cancel_input_not_vault_owned(
         coin,
-        binding.parsed_cat,
-        Some(&binding),
-        metadata.map(|value| &value.fields),
-    )
+        vault_ctx.launcher_id,
+    ))
 }

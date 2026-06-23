@@ -23,8 +23,8 @@ use crate::vault::members::{nonce_member_puzzle_hash, p2_conditions_or_singleton
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 pub(crate) use cancel_binding::{
-    presplit_binding_from_coin_input, verify_fixed_delegated_puzzle_hash_for_binding,
-    PresplitCoinBinding,
+    offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
+    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup, PresplitCoinBinding,
 };
 
 #[must_use]
@@ -279,8 +279,16 @@ impl PresplitOfferBinding {
         coin: chia_protocol::Coin,
         spend_bundle: &SpendBundle,
     ) -> SignerResult<Self> {
-        let binding =
-            cancel_binding::presplit_binding_from_coin_input(launcher_id, coin, spend_bundle)?;
+        let binding = match cancel_binding::presplit_binding_from_coin_input(
+            launcher_id,
+            coin,
+            spend_bundle,
+        )? {
+            cancel_binding::PresplitBindingLookup::Found(binding) => binding,
+            cancel_binding::PresplitBindingLookup::NotPresplitMaker => {
+                return Err(SignerError::OfferCancelNoSpendableInput);
+            }
+        };
         Ok(Self {
             offer_amount: coin.amount,
             expires_at: None,

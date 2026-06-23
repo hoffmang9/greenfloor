@@ -45,6 +45,14 @@ impl<'a> SimulatorOfferCoinset<'a> {
     }
 
     fn fetch_by_id(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        {
+            let sim = self.chain.sim.lock().expect("sim lock");
+            if let Some(state) = sim.coin_state(coin_id) {
+                if state.spent_height.is_some() {
+                    return Err(SignerError::PresplitCoinNotFound);
+                }
+            }
+        }
         if let Some(cat) = self
             .known_cats
             .lock()
@@ -99,6 +107,14 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
             }
             Err(err) => Err(err),
         }
+    }
+
+    async fn offer_input_coin_is_spent(&self, coin_id: Bytes32) -> SignerResult<bool> {
+        let sim = self.chain.sim.lock().expect("sim lock");
+        Ok(match sim.coin_state(coin_id) {
+            None => true,
+            Some(state) => state.spent_height.is_some(),
+        })
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {

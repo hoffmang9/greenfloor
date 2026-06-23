@@ -23,6 +23,27 @@ pub(crate) struct PresplitCoinBinding {
     pub parsed_cat: Option<Cat>,
 }
 
+/// Result of attempting to read presplit binding from a cancellable maker input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum PresplitBindingLookup {
+    Found(PresplitCoinBinding),
+    /// Maker spend is not a presplit `P2_CONDITIONS_OR_SINGLETON` input.
+    NotPresplitMaker,
+}
+
+#[derive(Debug)]
+enum PeelError {
+    NotPresplitLayout,
+    Parse(SignerError),
+}
+
+struct ParsedOfferMakerSpend {
+    cat: Option<Cat>,
+    inner_puzzle: Puzzle,
+    inner_solution: NodePtr,
+}
+
 fn binding_parse_err(detail: impl Into<String>) -> SignerError {
     SignerError::OfferCancelPresplitBindingParseFailed {
         detail: detail.into(),
@@ -41,68 +62,97 @@ fn coin_spend_for_presplit_input(
     Err(SignerError::OfferCancelNoSpendableInput)
 }
 
-fn peel_index_wrapper_puzzle(allocator: &Allocator, mut puzzle: Puzzle) -> SignerResult<NodePtr> {
+fn parse_offer_maker_coin_spend(
+    allocator: &mut Allocator,
+    coin: Coin,
+    coin_spend: &CoinSpend,
+) -> SignerResult<ParsedOfferMakerSpend> {
+    let puzzle_ptr = node_from_bytes(allocator, coin_spend.puzzle_reveal.as_ref())
+        .map_err(|err| binding_parse_err(err.to_string()))?;
+    let puzzle = Puzzle::parse(allocator, puzzle_ptr);
+    let solution_ptr = node_from_bytes(allocator, coin_spend.solution.as_ref())
+        .map_err(|err| binding_parse_err(err.to_string()))?;
+    if let Some((parsed_cat, inner_puzzle, inner_solution)) =
+        Cat::parse(allocator, coin_spend.coin, puzzle, solution_ptr).map_err(SignerError::from)?
+    {
+        if parsed_cat.coin.coin_id() != coin.coin_id() {
+            return Err(SignerError::OfferCancelNoSpendableInput);
+        }
+        Ok(ParsedOfferMakerSpend {
+            cat: Some(parsed_cat),
+            inner_puzzle,
+            inner_solution,
+        })
+    } else {
+        Ok(ParsedOfferMakerSpend {
+            cat: None,
+            inner_puzzle: puzzle,
+            inner_solution: solution_ptr,
+        })
+    }
+}
+
+fn peel_index_wrapper_puzzle(
+    allocator: &Allocator,
+    mut puzzle: Puzzle,
+) -> Result<NodePtr, PeelError> {
     for _ in 0..8 {
         let Some(curried) = puzzle.as_curried() else {
             return Ok(puzzle.ptr());
         };
         if curried.mod_hash == INDEX_WRAPPER_HASH {
             let args = IndexWrapperArgs::<NodePtr, NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| binding_parse_err(err.to_string()))?;
+                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
             puzzle = Puzzle::parse(allocator, args.inner_puzzle);
             continue;
         }
         if curried.mod_hash == DELEGATED_PUZZLE_FEEDER_HASH.into() {
             let args = DelegatedPuzzleFeederArgs::<NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| binding_parse_err(err.to_string()))?;
+                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
             puzzle = Puzzle::parse(allocator, args.inner_puzzle);
             continue;
         }
         return Ok(puzzle.ptr());
     }
-    Err(binding_parse_err(
+    Err(PeelError::Parse(binding_parse_err(
         "presplit fixed member puzzle wrapper depth exceeded",
-    ))
+    )))
 }
 
 fn peel_to_one_of_n_puzzle(
     allocator: &Allocator,
     mut puzzle: Puzzle,
-) -> SignerResult<(NodePtr, NodePtr)> {
+) -> Result<(NodePtr, NodePtr), PeelError> {
     for _ in 0..8 {
         let Some(curried) = puzzle.as_curried() else {
-            return Err(binding_parse_err(
-                "presplit input inner puzzle is not curried",
-            ));
+            return Err(PeelError::NotPresplitLayout);
         };
         if curried.mod_hash == ONE_OF_N_HASH.into() {
             return Ok((curried.curried_ptr, curried.args));
         }
         if curried.mod_hash == INDEX_WRAPPER_HASH {
             let args = IndexWrapperArgs::<NodePtr, NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| binding_parse_err(err.to_string()))?;
+                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
             puzzle = Puzzle::parse(allocator, args.inner_puzzle);
             continue;
         }
         if curried.mod_hash == DELEGATED_PUZZLE_FEEDER_HASH.into() {
             let args = DelegatedPuzzleFeederArgs::<NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| binding_parse_err(err.to_string()))?;
+                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
             puzzle = Puzzle::parse(allocator, args.inner_puzzle);
             continue;
         }
-        return Err(binding_parse_err(
-            "presplit input inner puzzle is not one-of-n",
-        ));
+        return Err(PeelError::NotPresplitLayout);
     }
-    Err(binding_parse_err(
+    Err(PeelError::Parse(binding_parse_err(
         "presplit input inner puzzle wrapper depth exceeded",
-    ))
+    )))
 }
 
 fn peel_to_one_of_n_solution(
     allocator: &Allocator,
     mut solution: NodePtr,
-) -> SignerResult<NodePtr> {
+) -> Result<NodePtr, PeelError> {
     for _ in 0..8 {
         if OneOfNSolution::<NodePtr, NodePtr>::from_clvm(allocator, solution).is_ok() {
             return Ok(solution);
@@ -115,23 +165,23 @@ fn peel_to_one_of_n_solution(
         }
         return Ok(solution);
     }
-    Err(binding_parse_err(
+    Err(PeelError::Parse(binding_parse_err(
         "presplit input inner solution wrapper depth exceeded",
-    ))
+    )))
 }
 
 fn presplit_fixed_delegated_puzzle_hash_from_inner(
     allocator: &Allocator,
     inner_puzzle: Puzzle,
     inner_solution: NodePtr,
-) -> SignerResult<TreeHash> {
+) -> Result<TreeHash, PeelError> {
     let (_one_of_n_puzzle, one_of_n_args_ptr) = peel_to_one_of_n_puzzle(allocator, inner_puzzle)?;
     let one_of_n_solution_ptr = peel_to_one_of_n_solution(allocator, inner_solution)?;
     let _one_of_n_args = OneOfNArgs::from_clvm(allocator, one_of_n_args_ptr)
-        .map_err(|err| binding_parse_err(err.to_string()))?;
+        .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
     let one_of_n_solution =
         OneOfNSolution::<NodePtr, NodePtr>::from_clvm(allocator, one_of_n_solution_ptr)
-            .map_err(|err| binding_parse_err(err.to_string()))?;
+            .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
     let member_puzzle = Puzzle::parse(allocator, one_of_n_solution.member_puzzle);
     let fixed_delegated_puzzle_ptr = peel_index_wrapper_puzzle(allocator, member_puzzle)?;
     Ok(tree_hash(allocator, fixed_delegated_puzzle_ptr))
@@ -158,58 +208,71 @@ pub(crate) fn verify_fixed_delegated_puzzle_hash_for_binding(
     Ok(())
 }
 
-fn presplit_binding_from_coin_spend(
+fn presplit_binding_from_parsed_spend(
+    allocator: &Allocator,
     launcher_id: Bytes32,
     coin: Coin,
-    coin_spend: &CoinSpend,
-) -> SignerResult<PresplitCoinBinding> {
-    let mut allocator = Allocator::new();
-    let puzzle_ptr = node_from_bytes(&mut allocator, coin_spend.puzzle_reveal.as_ref())
-        .map_err(|err| binding_parse_err(err.to_string()))?;
-    let puzzle = Puzzle::parse(&allocator, puzzle_ptr);
-    let solution_ptr = node_from_bytes(&mut allocator, coin_spend.solution.as_ref())
-        .map_err(|err| binding_parse_err(err.to_string()))?;
-    let (fixed_conditions_tree_hash, binding_p2_puzzle_hash, parsed_cat) =
-        if let Some((parsed_cat, inner_puzzle, inner_solution)) =
-            Cat::parse(&allocator, coin_spend.coin, puzzle, solution_ptr)
-                .map_err(SignerError::from)?
-        {
-            if parsed_cat.coin.coin_id() != coin.coin_id() {
-                return Err(SignerError::OfferCancelNoSpendableInput);
-            }
-            let hash = presplit_fixed_delegated_puzzle_hash_from_inner(
-                &allocator,
-                inner_puzzle,
-                inner_solution,
-            )?;
-            (hash, parsed_cat.info.p2_puzzle_hash, Some(parsed_cat))
-        } else {
-            let hash =
-                presplit_fixed_delegated_puzzle_hash_from_inner(&allocator, puzzle, solution_ptr)?;
-            (hash, coin.puzzle_hash, None)
-        };
+    parsed: &ParsedOfferMakerSpend,
+) -> Result<PresplitBindingLookup, SignerError> {
+    let fixed_conditions_tree_hash = match presplit_fixed_delegated_puzzle_hash_from_inner(
+        allocator,
+        parsed.inner_puzzle,
+        parsed.inner_solution,
+    ) {
+        Ok(hash) => hash,
+        Err(PeelError::NotPresplitLayout) => return Ok(PresplitBindingLookup::NotPresplitMaker),
+        Err(PeelError::Parse(err)) => return Err(err),
+    };
+    let binding_p2_puzzle_hash = parsed
+        .cat
+        .map_or(coin.puzzle_hash, |value| value.info.p2_puzzle_hash);
     verify_fixed_delegated_puzzle_hash_for_binding(
         launcher_id,
         binding_p2_puzzle_hash,
         fixed_conditions_tree_hash,
     )?;
-    Ok(PresplitCoinBinding {
+    Ok(PresplitBindingLookup::Found(PresplitCoinBinding {
         fixed_conditions_tree_hash,
         binding_p2_puzzle_hash,
-        parsed_cat,
-    })
+        parsed_cat: parsed.cat,
+    }))
+}
+
+fn presplit_binding_from_coin_spend(
+    launcher_id: Bytes32,
+    coin: Coin,
+    coin_spend: &CoinSpend,
+) -> Result<PresplitBindingLookup, SignerError> {
+    let mut allocator = Allocator::new();
+    let parsed = parse_offer_maker_coin_spend(&mut allocator, coin, coin_spend)?;
+    presplit_binding_from_parsed_spend(&allocator, launcher_id, coin, &parsed)
 }
 
 /// Read presplit maker binding from a cancellable input (XCH or CAT).
 ///
 /// # Errors
 ///
-/// Returns an error if the input spend or puzzle structure cannot be parsed.
+/// Returns an error if the input spend cannot be read or presplit verification fails for this
+/// vault launcher.
 pub(crate) fn presplit_binding_from_coin_input(
     launcher_id: Bytes32,
     coin: Coin,
     spend_bundle: &SpendBundle,
-) -> SignerResult<PresplitCoinBinding> {
+) -> SignerResult<PresplitBindingLookup> {
     let coin_spend = coin_spend_for_presplit_input(spend_bundle, coin)?;
     presplit_binding_from_coin_spend(launcher_id, coin, coin_spend)
+}
+
+/// Parse a vault CAT maker input from the offer file without presplit binding checks.
+///
+/// # Errors
+///
+/// Returns an error if the offer input spend cannot be read.
+pub(crate) fn offer_maker_cat_from_coin_input(
+    coin: Coin,
+    spend_bundle: &SpendBundle,
+) -> SignerResult<Option<Cat>> {
+    let coin_spend = coin_spend_for_presplit_input(spend_bundle, coin)?;
+    let mut allocator = Allocator::new();
+    Ok(parse_offer_maker_coin_spend(&mut allocator, coin, coin_spend)?.cat)
 }
