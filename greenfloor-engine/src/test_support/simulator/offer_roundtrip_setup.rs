@@ -188,6 +188,12 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
     }
 }
 
+pub(crate) async fn setup_direct_roundtrip_with_expires_at(expires_at: u64) -> RoundtripSetup {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::Direct).await;
+    setup.request.expires_at = Some(expires_at);
+    setup
+}
+
 pub(crate) async fn build_offer_from_setup(
     setup: &mut RoundtripSetup,
 ) -> Result<crate::offer::CreateOfferResult, crate::error::SignerError> {

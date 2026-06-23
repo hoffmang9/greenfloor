@@ -838,3 +838,122 @@ fn prune_offer_reservation_leases_removes_old_inactive_rows() {
         .expect("rows")
         .is_empty());
 }
+
+#[test]
+fn upsert_offer_reconcile_state_persists_typed_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("state.db"));
+    store
+        .upsert_offer_reconcile_state(
+            "offer-rc",
+            "m1",
+            &greenfloor_engine::cycle::reconcile::ReconcileState::Lifecycle(
+                greenfloor_engine::cycle::OfferLifecycleState::Open,
+            ),
+            Some(1),
+        )
+        .expect("upsert");
+    assert_eq!(
+        store
+            .list_offer_states_for_ids(&["offer-rc".to_string()])
+            .expect("lookup")
+            .into_iter()
+            .next()
+            .expect("row")
+            .state,
+        "open"
+    );
+}
+
+#[test]
+fn list_open_offer_states_page_and_all_open_include_pending_visibility() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("state.db"));
+    store
+        .upsert_offer_state("open-offer", "m1", "open", Some(0))
+        .expect("open");
+    store
+        .upsert_offer_state("pending-offer", "m1", "pending_visibility", Some(0))
+        .expect("pending");
+    store
+        .upsert_offer_state("expired-offer", "m1", "expired", Some(0))
+        .expect("expired");
+    let page = store.list_open_offer_states_page(10, 0).expect("page");
+    assert_eq!(page.len(), 2);
+    let all = store.list_all_open_offer_states().expect("all open");
+    assert_eq!(all.len(), 2);
+    assert!(all
+        .iter()
+        .any(|row| row.offer_id == "open-offer" && row.state == "open"));
+    assert!(all.iter().any(|row| row.offer_id == "pending-offer"));
+    assert!(store
+        .list_open_offer_states_page(0, 0)
+        .expect("zero limit")
+        .is_empty());
+}
+
+#[test]
+fn list_offer_state_details_surfaces_cancel_submitted_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("state.db"));
+    let tx_id = "d".repeat(64);
+    store
+        .upsert_offer_cancel_submitted("offer-cancel", "m1", &tx_id, Some(0))
+        .expect("cancel submitted");
+    let details = store.list_offer_state_details("m1", 10).expect("details");
+    assert_eq!(details.len(), 1);
+    assert_eq!(details[0].offer_id, "offer-cancel");
+    assert_eq!(details[0].state, "cancel_submitted");
+    assert!(store
+        .list_offer_state_details("m1", 0)
+        .expect("zero limit")
+        .is_empty());
+    let tracked = store
+        .list_offer_states_for_ids(&["offer-cancel".to_string()])
+        .expect("tracked cancel columns")
+        .into_iter()
+        .next()
+        .expect("cancel row");
+    assert_eq!(
+        tracked.cancel_submitted_tx_id.as_deref(),
+        Some(tx_id.as_str())
+    );
+    assert!(tracked.cancel_submitted_at.is_some());
+}
+
+#[test]
+fn list_offer_states_for_ids_returns_empty_for_missing_offer() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("state.db"));
+    assert!(store
+        .list_offer_states_for_ids(&["missing-offer".to_string()])
+        .expect("lookup")
+        .is_empty());
+}
+
+#[test]
+fn list_offer_states_for_ids_returns_matches_in_input_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("state.db"));
+    store
+        .upsert_offer_state("offer-a", "m1", "open", Some(0))
+        .expect("seed");
+    store
+        .upsert_offer_state("offer-b", "m1", "expired", Some(0))
+        .expect("seed");
+    store
+        .upsert_offer_state("offer-c", "m2", "open", Some(0))
+        .expect("seed");
+    let rows = store
+        .list_offer_states_for_ids(&[
+            "offer-c".to_string(),
+            "missing-offer".to_string(),
+            "offer-a".to_string(),
+            "offer-b".to_string(),
+        ])
+        .expect("rows");
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].offer_id, "offer-c");
+    assert_eq!(rows[1].offer_id, "offer-a");
+    assert_eq!(rows[2].offer_id, "offer-b");
+}

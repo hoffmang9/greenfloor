@@ -284,10 +284,9 @@ mod tests {
     };
     use crate::bech32m::decode_offer;
     use crate::hex::hex_to_bytes32;
-    use crate::offer::build::build_vault_cat_offer_with_spend;
-    use crate::offer::types::{CreateOfferRequest, OfferInput};
-    use crate::test_support::simulator::harness::SimulatorVaultHarness;
-    use crate::test_support::simulator::SimulatorOfferCoinset;
+    use crate::test_support::simulator::{
+        build_offer_from_setup, setup_direct_roundtrip_with_expires_at,
+    };
     use chia_bls;
     use chia_protocol::{Coin, SpendBundle};
     use chia_traits::Streamable;
@@ -337,28 +336,9 @@ mod tests {
 
     #[tokio::test]
     async fn simulator_offer_passes_structure_expiry_and_dexie_gates() {
-        let mut harness = SimulatorVaultHarness::new();
-        harness.mint_vault();
-        let cat = harness.fund_vault_cat(5_000);
         let expires_at = 4_000_000_000_u64;
-        let receive_address =
-            crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch").expect("address");
-        let request = CreateOfferRequest {
-            receive_address,
-            offer_asset_id: hex::encode(harness.chain.asset_id),
-            offer_amount: cat.coin.amount,
-            request_asset_id: "xch".to_string(),
-            request_amount: 1_000,
-            offer_coin_ids: vec![cat.coin.coin_id()],
-            presplit_coin_ids: vec![],
-            split_input_coins: false,
-            broadcast_split: false,
-            expires_at: Some(expires_at),
-        };
-        let coinset = SimulatorOfferCoinset::new(&harness.chain);
-        coinset.register_cat(cat);
-        let input = OfferInput::try_from(request).expect("offer input");
-        let result = build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
+        let mut setup = setup_direct_roundtrip_with_expires_at(expires_at).await;
+        let result = build_offer_from_setup(&mut setup)
             .await
             .expect("build offer");
         validate_offer_structure(&result.offer).expect("structure");
