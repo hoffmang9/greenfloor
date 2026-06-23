@@ -225,26 +225,64 @@ mod tests {
     fn infer_vault_nonce_for_p2_hash_matches_nonzero_nonce() {
         let launcher_id = Bytes32::new([0x11; 32]);
         let r1 = R1Pair::new(99);
-        let mut vault_ctx = VaultSpendContext {
+        let mut vault_ctx = VaultSpendContext::new_test_context(
             launcher_id,
-            inner_puzzle_hash: clvm_utils::TreeHash::from(launcher_id),
-            custody_hash: clvm_utils::TreeHash::from(Bytes32::new([0x22; 32])),
-            recovery_hash: clvm_utils::TreeHash::from(Bytes32::new([0x33; 32])),
-            kms_key_id: String::new(),
-            kms_region: String::new(),
-            kms_runtime: KmsRuntime::production(),
-            secp256r1_public_key: r1.pk,
-            max_nonce_probe: 20,
-            network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::default(),
-            #[cfg(test)]
-            local_fast_forward_signer: None,
-        };
+            clvm_utils::TreeHash::from(launcher_id),
+            clvm_utils::TreeHash::from(Bytes32::new([0x22; 32])),
+            clvm_utils::TreeHash::from(Bytes32::new([0x33; 32])),
+            r1.pk,
+        );
         let target = crate::vault::members::nonce_member_puzzle_hash(launcher_id, 7)
             .expect("singleton hash");
         let inferred = vault_ctx
             .infer_nonce_for_p2_hash(target.into())
             .expect("nonce");
         assert_eq!(inferred, 7);
+    }
+
+    #[test]
+    fn infer_vault_nonce_uses_cache_without_rescanning() {
+        let launcher_id = Bytes32::new([0x44; 32]);
+        let r1 = R1Pair::new(1);
+        let p2_hash = Bytes32::new([0x55; 32]);
+        let mut vault_ctx = VaultSpendContext::new_test_context(
+            launcher_id,
+            clvm_utils::TreeHash::from(launcher_id),
+            clvm_utils::TreeHash::from(Bytes32::new([0x66; 32])),
+            clvm_utils::TreeHash::from(Bytes32::new([0x77; 32])),
+            r1.pk,
+        );
+        vault_ctx.max_nonce_probe = 0;
+        vault_ctx.seed_nonce_cache(p2_hash, 12);
+        assert_eq!(vault_ctx.infer_nonce_for_p2_hash(p2_hash), Some(12));
+    }
+
+    #[test]
+    fn build_vault_spend_context_from_hashes_seeds_nonce_zero() {
+        use crate::hex::hex_to_bytes32;
+        use crate::test_support::golden::{golden_snapshot, CUSTODY_KEY_HEX, LAUNCHER_ID_HEX};
+        use crate::vault::context::{compute_vault_context_from_hashes, compute_vault_hashes};
+
+        let snapshot = golden_snapshot();
+        let hashes = compute_vault_hashes(&snapshot).expect("hashes");
+        let display =
+            compute_vault_context_from_hashes(&snapshot, &hashes, CUSTODY_KEY_HEX, "mainnet")
+                .expect("display");
+        let config = crate::test_support::signer_config::test_signer_config("");
+        let mut spend =
+            build_vault_spend_context_from_hashes(&snapshot, &hashes, &display, &config)
+                .expect("spend context");
+        assert_eq!(
+            spend.launcher_id,
+            hex_to_bytes32(LAUNCHER_ID_HEX).expect("launcher")
+        );
+        assert_eq!(spend.kms_key_id, "kms-test");
+        assert_eq!(
+            spend.infer_nonce_for_p2_hash(hashes.p2_singleton_message_hash.into()),
+            Some(0)
+        );
+        let kms = KmsSigner::from_vault_context(&spend);
+        assert_eq!(kms.key_id, "kms-test");
+        assert_eq!(kms.region, "us-west-2");
     }
 }

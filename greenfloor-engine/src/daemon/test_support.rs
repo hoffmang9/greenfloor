@@ -7,11 +7,23 @@ use tempfile::TempDir;
 use crate::adapters::DexieClient;
 use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
 use crate::cycle::StaleSweepProgress;
+use crate::storage::SqliteStore;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
 use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
+
+pub fn open_test_store(path: &Path) -> SqliteStore {
+    SqliteStore::open(path).expect("open sqlite store")
+}
+
+pub fn sample_mainnet_program() -> ManagerProgramConfig {
+    ManagerProgramConfig {
+        network: "mainnet".to_string(),
+        ..Default::default()
+    }
+}
 
 pub struct TestCycleContextBundle {
     pub resources: DaemonCycleResources,

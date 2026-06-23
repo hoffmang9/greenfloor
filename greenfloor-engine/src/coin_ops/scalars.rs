@@ -46,3 +46,35 @@ pub fn usize_to_i64(value: usize, field: &str) -> SignerResult<i64> {
 pub fn coin_op_non_negative_u64_saturating(value: i64) -> u64 {
     u64::try_from(value.max(0)).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::SignerError;
+
+    #[test]
+    fn coin_op_non_negative_u64_rejects_negative_and_overflow() {
+        assert_eq!(coin_op_non_negative_u64(10, "amount").expect("ok"), 10);
+        assert!(matches!(
+            coin_op_non_negative_u64(-1, "amount"),
+            Err(SignerError::InvalidPlanValues)
+        ));
+    }
+
+    #[test]
+    fn i64_to_usize_converts_valid_values_and_rejects_negative() {
+        assert_eq!(i64_to_usize(4, "count").expect("usize"), 4);
+        assert!(i64_to_usize(-1, "count").is_err());
+    }
+
+    #[test]
+    fn usize_to_i64_converts_in_range() {
+        assert_eq!(usize_to_i64(4, "count").expect("i64"), 4);
+    }
+
+    #[test]
+    fn coin_op_non_negative_u64_saturating_clamps() {
+        assert_eq!(coin_op_non_negative_u64_saturating(-5), 0);
+        assert_eq!(coin_op_non_negative_u64_saturating(42), 42);
+    }
+}

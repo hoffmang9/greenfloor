@@ -123,16 +123,8 @@ async fn poll_coinset_mempool_snapshot(
 }
 
 async fn fetch_xch_price_usd() -> SignerResult<f64> {
-    if let Ok(raw) = std::env::var("GREENFLOOR_XCH_PRICE_USD") {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            let price: f64 = trimmed.parse().map_err(|err| {
-                SignerError::Other(format!("invalid GREENFLOOR_XCH_PRICE_USD: {err}"))
-            })?;
-            if price > 0.0 {
-                return Ok(price);
-            }
-        }
+    if let Some(price) = xch_price_from_env_override()? {
+        return Ok(price);
     }
     let url = std::env::var("GREENFLOOR_XCH_PRICE_URL")
         .unwrap_or_else(|_| DEFAULT_XCH_PRICE_URL.to_string());
@@ -170,4 +162,91 @@ async fn fetch_xch_price_usd() -> SignerResult<f64> {
         }
     }
     Err(SignerError::Other("xch_price_unavailable".to_string()))
+}
+
+pub(crate) fn xch_price_from_env_override() -> SignerResult<Option<f64>> {
+    let Ok(raw) = std::env::var("GREENFLOOR_XCH_PRICE_USD") else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let price: f64 = trimmed
+        .parse()
+        .map_err(|err| SignerError::Other(format!("invalid GREENFLOOR_XCH_PRICE_USD: {err}")))?;
+    if price > 0.0 {
+        Ok(Some(price))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::test_support::{open_test_store, sample_mainnet_program};
+    use crate::daemon::watchlist::CoinWatchlistCache;
+    use crate::operator_log::XCH_PRICE_SNAPSHOT;
+    use crate::test_env::EnvRestoreGuard;
+
+    #[test]
+    fn xch_price_from_env_override_parses_positive_values() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
+        assert_eq!(xch_price_from_env_override().expect("price"), Some(42.5));
+    }
+
+    #[test]
+    fn xch_price_from_env_override_rejects_invalid_values() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "not-a-number")]);
+        let err = xch_price_from_env_override().expect_err("invalid");
+        assert!(err.to_string().contains("invalid GREENFLOOR_XCH_PRICE_USD"));
+    }
+
+    #[tokio::test]
+    async fn run_cycle_preamble_records_xch_price_snapshot_when_env_set() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = open_test_store(&dir.path().join("state.sqlite"));
+        let watchlist = CoinWatchlistCache::new();
+
+        let result = run_cycle_preamble(
+            &sample_mainnet_program(),
+            &store,
+            "",
+            &watchlist,
+            false,
+            false,
+        )
+        .await
+        .expect("preamble");
+
+        assert_eq!(result.xch_price_usd, Some(42.5));
+        assert_eq!(result.cycle_error_count, 0);
+        let events = store
+            .list_recent_audit_events(Some(&[XCH_PRICE_SNAPSHOT]), None, 1)
+            .expect("audit");
+        assert_eq!(events[0].payload.get("price_usd"), Some(&json!(42.5)));
+    }
+
+    #[tokio::test]
+    async fn run_cycle_preamble_mempool_poll_failure_increments_cycle_errors() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = open_test_store(&dir.path().join("state.sqlite"));
+        let watchlist = CoinWatchlistCache::new();
+
+        let result = run_cycle_preamble(
+            &sample_mainnet_program(),
+            &store,
+            "http://127.0.0.1:1",
+            &watchlist,
+            true,
+            false,
+        )
+        .await
+        .expect("preamble");
+
+        assert_eq!(result.cycle_error_count, 1);
+    }
 }

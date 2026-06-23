@@ -318,4 +318,51 @@ mod tests {
         let payload = json!({"offer": {"coin_id": coin}});
         assert_eq!(extract_coin_ids_from_offer_payload(&payload), vec![coin]);
     }
+
+    #[test]
+    fn is_dexie_pattern_fallback_status_matches_confirmed_and_active() {
+        assert!(is_dexie_pattern_fallback_status(DEXIE_STATUS_CONFIRMED));
+        assert!(is_dexie_pattern_fallback_status(DEXIE_STATUS_ACTIVE));
+        assert!(!is_dexie_pattern_fallback_status(DEXIE_STATUS_OPEN));
+    }
+
+    #[test]
+    fn dexie_offer_payload_accessors_and_offer_file_text() {
+        let offer_text = "offer1test";
+        let value = json!({
+            "offer": {
+                "id": "offer-42",
+                "status": 5,
+                "offer": offer_text
+            }
+        });
+        let payload = DexieOfferPayload::new(value.clone());
+        assert_eq!(payload.as_value(), &value);
+        assert_eq!(payload.id().as_deref(), Some("offer-42"));
+        assert_eq!(payload.status(), Some(5));
+        assert_eq!(payload.offer_file_text(), Some(offer_text));
+        assert_eq!(
+            DexieOfferPayload::from(value.clone()).body().get("id"),
+            payload.body().get("id")
+        );
+        assert_eq!(
+            Value::from(payload.clone()).get("offer"),
+            value.get("offer")
+        );
+        assert_eq!(payload.clone().into_value(), value);
+
+        let flat = DexieOfferPayload::new(json!({"id": "flat", "status": 0}));
+        assert_eq!(flat.id().as_deref(), Some("flat"));
+        assert!(flat.offer_file_text().is_none());
+    }
+
+    #[test]
+    fn dexie_offer_status_reads_top_level_or_nested_offer_object() {
+        assert_eq!(dexie_offer_status(&json!({"status": 4})), Some(4));
+        assert_eq!(
+            dexie_offer_status(&json!({"offer": {"status": 6}})),
+            Some(6)
+        );
+        assert_eq!(dexie_offer_status(&json!({"offer": "not-an-object"})), None);
+    }
 }

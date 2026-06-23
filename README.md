@@ -159,7 +159,7 @@ pre-commit run --all-files                         # ruff, pyright, prettier, ya
 Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clippy::pedantic` with documented allows; clippy runs with `--lib --bins --tests`):
 
 ```bash
-cargo nextest run --manifest-path greenfloor-engine/Cargo.toml
+cargo nextest run --manifest-path greenfloor-engine/Cargo.toml --features test-support
 ```
 
 `cargo test` with the same manifest also works when `cargo-nextest` is not installed.

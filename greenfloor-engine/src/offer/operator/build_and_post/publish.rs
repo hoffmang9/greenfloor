@@ -104,3 +104,66 @@ pub(super) fn offer_post_persist_record(
         execution_mode,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::offer::publish::{ExpectedPublishAssetFields, PublishAssetSide};
+
+    fn sample_expected_fields() -> ExpectedPublishAssetFields {
+        ExpectedPublishAssetFields {
+            offered: PublishAssetSide {
+                asset_id: "basecat".to_string(),
+                symbol: "A1".to_string(),
+            },
+            requested: PublishAssetSide {
+                asset_id: "xch".to_string(),
+                symbol: "xch".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn finalize_publish_payload_adds_execution_mode_and_view_url() {
+        let publish = PublishResult {
+            success: true,
+            offer_id: Some("offer-99".to_string()),
+            body: json!({"success": true, "id": "offer-99"}),
+        };
+        let payload = finalize_publish_payload(
+            publish,
+            "direct",
+            json!({"total_ms": 12}),
+            Some("https://api.dexie.space"),
+        );
+        assert_eq!(payload.get("execution_mode"), Some(&json!("direct")));
+        assert_eq!(payload.get("timing_ms"), Some(&json!({"total_ms": 12})));
+        assert_eq!(
+            payload
+                .get("offer_view_url")
+                .and_then(|value| value.as_str()),
+            Some("https://dexie.space/offers/offer-99")
+        );
+    }
+
+    #[tokio::test]
+    async fn publish_offer_rejects_missing_adapters_and_unknown_venue() {
+        let expected = sample_expected_fields();
+        let err = publish_offer("dexie", None, None, "offer1", false, false, &expected)
+            .await
+            .expect_err("missing dexie");
+        assert!(err.to_string().contains("dexie adapter missing"));
+
+        let err = publish_offer("splash", None, None, "offer1", false, false, &expected)
+            .await
+            .expect_err("missing splash");
+        assert!(err.to_string().contains("splash adapter missing"));
+
+        let err = publish_offer("unknown", None, None, "offer1", false, false, &expected)
+            .await
+            .expect_err("unknown venue");
+        assert!(err.to_string().contains("unsupported publish venue"));
+    }
+}

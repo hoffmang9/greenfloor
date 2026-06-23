@@ -5,7 +5,7 @@
 # instrumentation and would invalidate llvm-cov artifacts saved on the lint runner.
 # Test jobs run full `cargo nextest run` in parallel with lint.
 # Full operator safety net before push:
-#   cargo test --manifest-path greenfloor-engine/Cargo.toml  (CI: cargo nextest run)
+#   cargo test --manifest-path greenfloor-engine/Cargo.toml --features test-support
 #
 # Speed tips:
 #   export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs (CI caches this path)
@@ -24,7 +24,9 @@ repos:
       - id: cargo-clippy
         # --tests: integration tests + lib `#[cfg(test)]` modules; skips bin-only recompile from --all-targets.
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
-        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --lib --bins --tests --no-deps
+        entry: >-
+          cargo clippy --manifest-path greenfloor-engine/Cargo.toml
+          --lib --bins --tests --no-deps --features test-support
         language: system
         pass_filenames: false
         files: ^greenfloor-engine/

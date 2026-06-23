@@ -127,4 +127,24 @@ mod tests {
         assert!((exponential_backoff_f64(0.25, 1, 8.0) - 0.5).abs() < f64::EPSILON);
         assert!((exponential_backoff_f64(0.25, 10, 8.0) - 8.0).abs() < f64::EPSILON);
     }
+
+    #[test]
+    fn moderate_retry_sleep_seconds_honors_rate_limit_hint() {
+        assert!((moderate_retry_sleep_seconds(1.0, Some(5.0)) - 5.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn moderate_retry_next_sleep_doubles_base() {
+        assert!((moderate_retry_next_sleep(1.0) - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dexie_invalid_offer_retry_sleep_scales_with_attempt() {
+        assert!((dexie_invalid_offer_retry_sleep(2, 0.25) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn coinset_fee_lookup_retry_sleep_matches_attempt() {
+        assert!((coinset_fee_lookup_retry_sleep(1) - 1.0).abs() < f64::EPSILON);
+    }
 }

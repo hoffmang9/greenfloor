@@ -130,6 +130,7 @@ mod tests {
     fn acquire_writes_lock_metadata_and_releases_on_drop() {
         let dir = tempfile::tempdir().expect("tempdir");
         let lock = DaemonInstanceLock::acquire(dir.path(), "once").expect("acquire");
+        assert_eq!(lock.path(), dir.path().join("daemon.lock"));
         let metadata = std::fs::read_to_string(lock.path()).expect("read lock");
         assert!(metadata.contains("\"mode\":\"once\""));
         assert!(metadata.contains("\"pid\":"));
@@ -142,6 +143,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let _first = DaemonInstanceLock::acquire(dir.path(), "loop").expect("first acquire");
         let err = DaemonInstanceLock::acquire(dir.path(), "loop").expect_err("contention");
-        assert!(matches!(err, SignerError::DaemonAlreadyRunning { .. }));
+        match err {
+            SignerError::DaemonAlreadyRunning { detail, .. } => {
+                assert!(detail.contains("daemon_lock_metadata="));
+                assert!(detail.contains("\"mode\":\"loop\""));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

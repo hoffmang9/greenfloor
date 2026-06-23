@@ -144,8 +144,12 @@ pub fn print_json_pretty(value: &impl Serialize) -> SignerResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{script_coinset_transport_retryable, script_engine_error_retryable};
+    use super::{
+        format_json, format_json_value, optional_str, optional_trimmed,
+        script_coinset_transport_retryable, script_engine_error_retryable,
+    };
     use crate::error::SignerError;
+    use serde_json::json;
 
     #[test]
     fn script_coinset_transport_retryable_matches_decode_and_refused() {
@@ -166,5 +170,25 @@ mod tests {
         assert!(!script_engine_error_retryable(&SignerError::Other(
             "parse body json: expected value at line 1 column 1".to_string()
         )));
+    }
+
+    #[test]
+    fn optional_str_trims_and_rejects_blank() {
+        assert_eq!(optional_str("  value  "), Some("value"));
+        assert_eq!(optional_str(""), None);
+        assert_eq!(optional_str("   "), None);
+        assert_eq!(optional_trimmed("  x  "), Some("x".to_string()));
+        assert_eq!(optional_trimmed(""), None);
+    }
+
+    #[test]
+    fn format_json_respects_compact_flag() {
+        let payload = json!({"ok": true, "n": 1});
+        assert!(format_json(&payload, false).unwrap().contains('\n'));
+        assert_eq!(format_json(&payload, true).unwrap(), r#"{"n":1,"ok":true}"#);
+        assert_eq!(
+            format_json_value(&payload, true).unwrap(),
+            r#"{"n":1,"ok":true}"#
+        );
     }
 }

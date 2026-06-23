@@ -35,3 +35,24 @@ pub fn u64_to_i64(value: u64, field: &str) -> SignerResult<i64> {
 pub fn usize_to_i64(value: usize, field: &str) -> SignerResult<i64> {
     i64::try_from(value).map_err(|_| config_err(format!("{field} must fit in i64")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_non_negative_u64_rejects_negative_values() {
+        assert_eq!(parse_non_negative_u64(0, "field").expect("zero"), 0);
+        assert!(parse_non_negative_u64(-1, "field").is_err());
+    }
+
+    #[test]
+    fn u64_to_i64_converts_in_range() {
+        assert_eq!(u64_to_i64(100, "field").expect("u64"), 100);
+    }
+
+    #[test]
+    fn usize_to_i64_converts_in_range() {
+        assert_eq!(usize_to_i64(100, "field").expect("usize"), 100);
+    }
+}
