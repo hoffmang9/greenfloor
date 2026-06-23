@@ -22,7 +22,9 @@ use crate::vault::materialize::build_vault_cat_inner_spend;
 use crate::vault::members::{nonce_member_puzzle_hash, p2_conditions_or_singleton_puzzle_hash};
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
-pub(crate) use cancel_binding::verify_fixed_delegated_puzzle_hash_for_cat;
+pub(crate) use cancel_binding::{
+    presplit_binding_from_coin_input, verify_fixed_delegated_puzzle_hash_for_binding,
+};
 
 #[must_use]
 pub fn offer_nonce_from_cats(cats: &[Cat]) -> Bytes32 {
@@ -256,22 +258,33 @@ impl PresplitOfferBinding {
     /// # Errors
     ///
     /// Returns an error if offer terms cannot be inferred or binding planning fails.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_presplit_input_spend(
         launcher_id: Bytes32,
         chain_cat: &Cat,
         spend_bundle: &SpendBundle,
     ) -> SignerResult<Self> {
-        let fixed_conditions_tree_hash =
-            cancel_binding::presplit_fixed_conditions_tree_hash_from_input(
-                launcher_id,
-                chain_cat,
-                spend_bundle,
-            )?;
+        Self::from_presplit_coin_input(launcher_id, chain_cat.coin, spend_bundle)
+    }
+
+    /// Reconstruct presplit binding from a cancellable maker coin (XCH or CAT).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if offer terms cannot be inferred or binding planning fails.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn from_presplit_coin_input(
+        launcher_id: Bytes32,
+        coin: chia_protocol::Coin,
+        spend_bundle: &SpendBundle,
+    ) -> SignerResult<Self> {
+        let binding =
+            cancel_binding::presplit_binding_from_coin_input(launcher_id, coin, spend_bundle)?;
         Ok(Self {
-            offer_amount: chain_cat.coin.amount,
+            offer_amount: coin.amount,
             expires_at: None,
-            fixed_conditions_tree_hash,
-            p2_puzzle_hash: chain_cat.info.p2_puzzle_hash,
+            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
+            p2_puzzle_hash: binding.binding_p2_puzzle_hash,
         })
     }
 }
@@ -405,21 +418,20 @@ where
     ))
 }
 
-/// Build offer from presplit cat.
+/// Build offer from a presplit maker coin (XCH or CAT).
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub(crate) async fn build_offer_from_presplit_cat(
-    presplit_cat: Cat,
+pub(crate) fn build_offer_from_presplit_input(
+    presplit_coin: chia_protocol::Coin,
+    presplit_cat: Option<Cat>,
     launcher_id: Bytes32,
-    binding: PresplitOfferBinding,
+    binding: &PresplitOfferBinding,
     terms: &OfferTerms,
     receive_puzzle_hash: Bytes32,
     offer_nonce: Bytes32,
 ) -> SignerResult<(String, String, String)> {
-    // Rebuild fixed conditions in one spend context, verify against the binding
-    // planned before the vault split, then materialize the presplit CAT input spend.
     let mut ctx = SpendContext::new();
     let built = build_presplit_fixed_spend(
         &mut ctx,
@@ -436,8 +448,12 @@ pub(crate) async fn build_offer_from_presplit_cat(
     }
     let inner_spend =
         build_presplit_conditions_inner_spend(&mut ctx, built.fixed_spend, launcher_id)?;
-    Cat::spend_all(&mut ctx, &[CatSpend::new(presplit_cat, inner_spend)])
-        .map_err(SignerError::from)?;
+    if let Some(cat) = presplit_cat {
+        Cat::spend_all(&mut ctx, &[CatSpend::new(cat, inner_spend)]).map_err(SignerError::from)?;
+    } else {
+        ctx.spend(presplit_coin, inner_spend)
+            .map_err(SignerError::from)?;
+    }
     let input_spend_bundle = SpendBundle::new(ctx.take(), chia_bls::Signature::default());
 
     let (offer_text, spend_bundle_hex) = encode_presplit_offer_from_input(
@@ -447,6 +463,30 @@ pub(crate) async fn build_offer_from_presplit_cat(
         offer_nonce,
     )?;
     Ok((offer_text, spend_bundle_hex, hex::encode(offer_nonce)))
+}
+
+/// Build offer from presplit cat.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub(crate) fn build_offer_from_presplit_cat(
+    presplit_cat: Cat,
+    launcher_id: Bytes32,
+    binding: &PresplitOfferBinding,
+    terms: &OfferTerms,
+    receive_puzzle_hash: Bytes32,
+    offer_nonce: Bytes32,
+) -> SignerResult<(String, String, String)> {
+    build_offer_from_presplit_input(
+        presplit_cat.coin,
+        Some(presplit_cat),
+        launcher_id,
+        binding,
+        terms,
+        receive_puzzle_hash,
+        offer_nonce,
+    )
 }
 
 #[cfg(test)]

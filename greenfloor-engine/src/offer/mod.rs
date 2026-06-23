@@ -7,6 +7,7 @@ pub mod assemble;
 pub mod bootstrap;
 pub mod build;
 pub mod build_context;
+mod cancel_input;
 pub mod codec;
 pub mod dexie_payload;
 pub mod invariants;
@@ -33,6 +34,7 @@ pub use build::build_vault_cat_offer;
 pub use build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
+pub use cancel_input::OfferReclaimMode;
 pub use codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
@@ -43,6 +45,7 @@ pub use publish::{
     expected_publish_asset_fields, post_offer_phase_dexie, ExpectedPublishAssetFields,
     PostOfferPhaseDexieParams, PublishAssetSide,
 };
+pub use reclaim::{build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle};
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     signer_split_asset_id, SignerOfferLegAmounts,

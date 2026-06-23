@@ -9,21 +9,25 @@ use super::harness::{
     fetch_cat_from_sim, sample_create_offer_request, take_atomic_offer_on_sim,
     SimulatorVaultHarness,
 };
+use super::offer_cancel_fixtures::{build_standard_p2_xch_offer, TEST_XCH_MOJO_MULT};
 use crate::coinset::OfferCoinsetBackend;
+use crate::error::SignerError;
 use crate::offer::build::build_vault_cat_offer_with_spend;
 use crate::offer::presplit::{
-    build_presplit_split_spend_bundle_with_vault, offer_nonce_from_cats, vault_change_puzzle_hash,
-    PresplitSplitParams,
+    build_offer_from_presplit_input, build_presplit_split_spend_bundle_with_vault,
+    offer_nonce_from_cats, vault_change_puzzle_hash, PresplitOfferBinding, PresplitSplitParams,
 };
 use crate::offer::reclaim::{
-    build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferCatReclaimMode,
+    build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
 };
 use crate::offer::types::{CreateOfferRequest, OfferExecutionMode, OfferInput};
-use crate::vault::materialize::materialize_vault_cat_finished_spends_with_vault;
+use crate::vault::materialize::{
+    append_vault_p2_reclaim_spend, finalize_vault_reclaim_spend_bundle,
+    materialize_vault_cat_finished_spends_with_vault,
+};
 use crate::vault::spend::VaultFastForwardSigner;
 
 const TEST_CAT_MOJO_MULT: u64 = 1_000;
-const TEST_XCH_MOJO_MULT: u64 = 1_000_000_000_000;
 
 #[derive(Debug, Clone, Copy)]
 pub enum OfferRoundtripScenario {
@@ -545,7 +549,7 @@ async fn build_presplit_offer_reclaim_spend_returns_cat_to_vault() {
         &mut setup.harness.vault_ctx,
         presplit_cat,
         change_puzzle_hash,
-        OfferCatReclaimMode::PresplitOffer {
+        OfferReclaimMode::PresplitOffer {
             fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
         },
         &vault,
@@ -660,7 +664,7 @@ async fn build_vault_cat_reclaim_spend_returns_offered_coin_to_vault() {
         &mut harness.vault_ctx,
         cat,
         change_puzzle_hash,
-        OfferCatReclaimMode::DirectVault,
+        OfferReclaimMode::DirectVault,
         &vault,
         move |message| {
             let signer = signer.clone();
@@ -685,6 +689,145 @@ async fn build_vault_cat_reclaim_spend_returns_offered_coin_to_vault() {
         .expect("offered coin")
         .spent_height
         .is_some());
+}
+
+#[tokio::test]
+async fn build_vault_xch_reclaim_spend_returns_offered_coin_to_vault() {
+    let mut harness = SimulatorVaultHarness::new();
+    harness.mint_vault();
+    let amount = TEST_XCH_MOJO_MULT;
+    let xch_coin = {
+        let mut sim = harness.chain.sim.lock().expect("sim lock");
+        sim.new_coin(harness.chain.p2_message_hash, amount)
+    };
+    let coinset = SimulatorOfferCoinset::new(&harness.chain);
+    let change_puzzle_hash =
+        vault_change_puzzle_hash(harness.vault_ctx.launcher_id).expect("change ph");
+    let vault = coinset
+        .fetch_latest_vault(
+            harness.vault_ctx.launcher_id,
+            harness.vault_ctx.inner_puzzle_hash,
+        )
+        .await
+        .expect("vault");
+    let offered_coin_id = xch_coin.coin_id();
+    let signer = VaultFastForwardSigner::from_context(&harness.vault_ctx);
+    let mut ctx = SpendContext::new();
+    append_vault_p2_reclaim_spend(
+        &mut ctx,
+        xch_coin,
+        change_puzzle_hash,
+        &harness.vault_ctx,
+        harness.chain.p2_message_hash.into(),
+        0,
+    )
+    .expect("append xch reclaim");
+    let reclaim_bundle =
+        finalize_vault_reclaim_spend_bundle(ctx, &mut harness.vault_ctx, &vault, move |message| {
+            let signer = signer.clone();
+            async move { signer.sign(message).await }
+        })
+        .await
+        .expect("direct xch reclaim bundle");
+    harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .spend_coins(reclaim_bundle.coin_spends, &[])
+        .expect("direct xch reclaim accepted");
+    assert!(harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .coin_state(offered_coin_id)
+        .expect("offered xch coin")
+        .spent_height
+        .is_some());
+}
+
+#[tokio::test]
+async fn build_offer_cancel_rejects_non_vault_maker_coin() {
+    let mut harness = SimulatorVaultHarness::new();
+    harness.mint_vault();
+    let offer_text = build_standard_p2_xch_offer(&harness, TEST_XCH_MOJO_MULT);
+    let coinset = SimulatorOfferCoinset::new(&harness.chain);
+    let err = build_offer_cancel_spend_bundle(&mut harness.vault_ctx, &coinset, &offer_text, None)
+        .await
+        .expect_err("non-vault maker must fail");
+    assert!(
+        matches!(err, SignerError::OfferCancelInputNotVaultOwned { .. }),
+        "expected OfferCancelInputNotVaultOwned, got {err}"
+    );
+}
+
+#[tokio::test]
+async fn build_offer_cancel_spend_bundle_presplit_xch_returns_coin_to_vault() {
+    let mut harness = SimulatorVaultHarness::new();
+    harness.mint_vault();
+    let _cat = harness.fund_vault_cat(TEST_CAT_MOJO_MULT);
+    let offer_amount = TEST_XCH_MOJO_MULT;
+    let offer_nonce = Bytes32::new([0x55; 32]);
+    let receive_address = crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch")
+        .expect("receive address");
+    let terms = crate::offer::types::OfferTerms {
+        receive_address,
+        offer_asset_id: "xch".to_string(),
+        offer_amount,
+        request_asset_id: hex::encode(harness.chain.asset_id),
+        request_amount: TEST_CAT_MOJO_MULT,
+        expires_at: None,
+    };
+    let binding = PresplitOfferBinding::plan(
+        harness.vault_ctx.launcher_id,
+        &terms,
+        harness.chain.p2_message_hash,
+        offer_nonce,
+    )
+    .expect("plan presplit xch binding");
+    let presplit_coin = {
+        let mut sim = harness.chain.sim.lock().expect("sim lock");
+        sim.new_coin(binding.p2_puzzle_hash, offer_amount)
+    };
+    let (offer_text, _, _) = build_offer_from_presplit_input(
+        presplit_coin,
+        None,
+        harness.vault_ctx.launcher_id,
+        &binding,
+        &terms,
+        harness.chain.p2_message_hash,
+        offer_nonce,
+    )
+    .expect("presplit xch offer");
+    let presplit_coin_id = presplit_coin.coin_id();
+    let cancel_bundle = build_offer_cancel_spend_bundle(
+        &mut harness.vault_ctx,
+        &SimulatorOfferCoinset::new(&harness.chain),
+        &offer_text,
+        None,
+    )
+    .await
+    .expect("presplit xch cancel bundle");
+    harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .spend_coins(cancel_bundle.coin_spends, &[])
+        .expect("presplit xch cancel accepted");
+    assert!(
+        harness
+            .chain
+            .sim
+            .lock()
+            .expect("sim lock")
+            .coin_state(presplit_coin_id)
+            .expect("presplit xch coin")
+            .spent_height
+            .is_some(),
+        "presplit xch offer input must be spent by cancel"
+    );
 }
 
 #[tokio::test]

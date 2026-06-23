@@ -28,6 +28,8 @@ pub(super) async fn create_offer(
         action_side: ctx.action_side.clone(),
         pricing: ctx.market.pricing.clone(),
         quote_price: Some(ctx.quote_price),
+        // Presplit (ent-wallet `splitInputCoins`): vault singleton spends only in the split tx;
+        // the Dexie offer file is self-contained so one taker fill does not invalidate siblings.
         split_input_coins: true,
         broadcast_split: true,
         offer_coin_ids: Vec::new(),

@@ -1,4 +1,4 @@
-use chia_protocol::SpendBundle;
+use chia_protocol::{Bytes32, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_sdk_driver::{
     mips_puzzle_hash, Cat, CatSpend, InnerPuzzleSpend, MipsSpend, Spend, SpendContext, Vault,
@@ -88,6 +88,62 @@ where
     }
     Cat::spend_all(ctx, &cat_spends).map_err(SignerError::from)?;
     append_vault_singleton_spend_for_vault(ctx, vault_ctx, &vault, sign_digest).await?;
+    Ok(SpendBundle::new(ctx.take(), chia_bls::Signature::default()))
+}
+
+pub(crate) fn build_vault_change_delegated_spend(
+    ctx: &mut SpendContext,
+    change_puzzle_hash: Bytes32,
+    amount: u64,
+) -> SignerResult<Spend> {
+    let memos = ctx.hint(change_puzzle_hash).map_err(SignerError::from)?;
+    let conditions = Conditions::new().create_coin(change_puzzle_hash, amount, memos);
+    ctx.delegated_spend(conditions).map_err(SignerError::from)
+}
+
+pub(crate) fn build_vault_change_inner_spend(
+    ctx: &mut SpendContext,
+    change_puzzle_hash: Bytes32,
+    amount: u64,
+    vault_ctx: &VaultSpendContext,
+    nonce: u32,
+    p2_puzzle_hash: TreeHash,
+) -> SignerResult<Spend> {
+    let delegated = build_vault_change_delegated_spend(ctx, change_puzzle_hash, amount)?;
+    build_vault_cat_inner_spend(ctx, delegated, vault_ctx, nonce, p2_puzzle_hash)
+}
+
+pub(crate) fn append_vault_p2_reclaim_spend(
+    ctx: &mut SpendContext,
+    coin: chia_protocol::Coin,
+    change_puzzle_hash: Bytes32,
+    vault_ctx: &VaultSpendContext,
+    p2_puzzle_hash: TreeHash,
+    nonce: u32,
+) -> SignerResult<()> {
+    let inner_spend = build_vault_change_inner_spend(
+        ctx,
+        change_puzzle_hash,
+        coin.amount,
+        vault_ctx,
+        nonce,
+        p2_puzzle_hash,
+    )?;
+    ctx.spend(coin, inner_spend).map_err(SignerError::from)?;
+    Ok(())
+}
+
+pub(crate) async fn finalize_vault_reclaim_spend_bundle<F, Fut>(
+    mut ctx: SpendContext,
+    vault_ctx: &mut VaultSpendContext,
+    vault: &Vault,
+    sign_digest: F,
+) -> SignerResult<SpendBundle>
+where
+    F: FnOnce(Vec<u8>) -> Fut,
+    Fut: std::future::Future<Output = SignerResult<R1Signature>>,
+{
+    append_vault_singleton_spend_for_vault(&mut ctx, vault_ctx, vault, sign_digest).await?;
     Ok(SpendBundle::new(ctx.take(), chia_bls::Signature::default()))
 }
 

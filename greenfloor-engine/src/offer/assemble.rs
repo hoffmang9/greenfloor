@@ -106,12 +106,11 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
     let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
         presplit_cat,
         vault_ctx.launcher_id,
-        binding,
+        &binding,
         terms,
         receive_puzzle_hash,
         offer_nonce,
-    )
-    .await?;
+    )?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitNew,
@@ -169,12 +168,11 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
     let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
         presplit_cat,
         vault_ctx.launcher_id,
-        binding,
+        &binding,
         terms,
         receive_puzzle_hash,
         offer_nonce,
-    )
-    .await?;
+    )?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitExisting,
