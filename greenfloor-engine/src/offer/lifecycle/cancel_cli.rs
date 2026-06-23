@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -10,6 +11,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::storage::{OfferStateListRow, SqliteStore};
 
 use super::cancel::{cancel_offers_on_chain, CancelOfferTarget};
+use super::cancel_context::defer_in_flight_cancel_offer_ids;
 use super::cancel_eligibility::row_cancel_eligible;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,7 @@ pub struct OffersCancelCliResult {
     pub cancel_open: bool,
     pub requested_offer_ids: Vec<String>,
     pub selected_count: u64,
+    pub skipped_count: u64,
     pub submitted_count: u64,
     pub failed_count: u64,
     pub items: Vec<OffersCancelCliItem>,
@@ -108,6 +111,45 @@ fn select_targets_for_cancel(
             }
         })
         .collect())
+}
+
+fn partition_defer_in_flight_cancel_selections(
+    store: &SqliteStore,
+    rows: &[OfferStateListRow],
+    selections: Vec<CancelCliSelection>,
+) -> SignerResult<(Vec<CancelCliSelection>, Vec<CancelCliSelection>)> {
+    if selections.is_empty() {
+        return Ok((selections, Vec::new()));
+    }
+    let tracked_ids: Vec<String> = selections
+        .iter()
+        .filter(|selection| selection.target.persists_state())
+        .map(|selection| selection.target.offer_id().to_string())
+        .collect();
+    let allowed = defer_in_flight_cancel_offer_ids(store, rows, &tracked_ids, Utc::now())?;
+    let allowed: std::collections::HashSet<&str> = allowed.iter().map(String::as_str).collect();
+    let mut active = Vec::new();
+    let mut skipped = Vec::new();
+    for selection in selections {
+        if selection.target.persists_state() && !allowed.contains(selection.target.offer_id()) {
+            skipped.push(selection);
+        } else {
+            active.push(selection);
+        }
+    }
+    Ok((active, skipped))
+}
+
+fn skipped_cancel_cli_item(selection: &CancelCliSelection) -> OffersCancelCliItem {
+    OffersCancelCliItem {
+        offer_id: selection.target.offer_id().to_string(),
+        market_id: selection.target.normalized_market_id(),
+        state: selection.state.clone(),
+        result: json!({
+            "skipped": true,
+            "reason": "cancel_submit_in_flight",
+        }),
+    }
 }
 
 fn load_rows_for_cancel(
@@ -228,14 +270,18 @@ pub async fn offers_cancel_cli(
         &request.offer_files,
         request.market_id.as_deref(),
     )?);
+    let (mut selections, skipped) =
+        partition_defer_in_flight_cancel_selections(&store, &rows, selections)?;
+    let mut items: Vec<OffersCancelCliItem> = skipped.iter().map(skipped_cancel_cli_item).collect();
+    let skipped_count = crate::metrics::metric_collection_len_to_u64(skipped.len());
     let targets: Vec<CancelOfferTarget> = selections
         .iter()
         .map(|selection| selection.target.clone())
         .collect();
     let outcomes = cancel_offers_on_chain(&store, &dexie, signer_config, &targets).await?;
-    let mut items = Vec::with_capacity(outcomes.len());
+    let selected_count = crate::metrics::metric_collection_len_to_u64(selections.len());
     let mut failures = 0u64;
-    for (outcome, selection) in outcomes.into_iter().zip(selections) {
+    for (outcome, selection) in outcomes.into_iter().zip(selections.drain(..)) {
         if !outcome.success {
             failures += 1;
         }
@@ -250,12 +296,12 @@ pub async fn offers_cancel_cli(
             }),
         });
     }
-    let selected_count = crate::metrics::metric_collection_len_to_u64(items.len());
     Ok(OffersCancelCliResult {
         venue,
         cancel_open: request.cancel_open,
         requested_offer_ids,
         selected_count,
+        skipped_count,
         submitted_count: selected_count.saturating_sub(failures),
         failed_count: failures,
         items,
@@ -303,6 +349,34 @@ mod tests {
         let selected = select_targets_for_cancel(&rows, &[], true, None).expect("selected");
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].target.offer_id(), "offer-open");
+    }
+
+    #[test]
+    fn explicit_offer_id_skips_in_flight_cancel_submitted() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let tx_id = "b".repeat(64);
+        store
+            .upsert_offer_cancel_submitted("offer-cancel-submitted", "m1", &tx_id, Some(0))
+            .expect("seed cancel submitted");
+        let rows = load_rows_for_cancel(&store, &["offer-cancel-submitted".to_string()], false)
+            .expect("rows");
+        let selected =
+            select_targets_for_cancel(&rows, &["offer-cancel-submitted".to_string()], false, None)
+                .expect("selected");
+        assert_eq!(selected.len(), 1);
+        let (active, skipped) =
+            partition_defer_in_flight_cancel_selections(&store, &rows, selected)
+                .expect("partition");
+        assert!(active.is_empty());
+        assert_eq!(skipped.len(), 1);
+        let item = skipped_cancel_cli_item(&skipped[0]);
+        assert_eq!(item.result.get("skipped"), Some(&json!(true)));
+        assert_eq!(
+            item.result.get("reason"),
+            Some(&json!("cancel_submit_in_flight"))
+        );
     }
 
     #[test]

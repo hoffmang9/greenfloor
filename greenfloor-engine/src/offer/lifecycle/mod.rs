@@ -16,6 +16,9 @@ pub use cancel::{
 pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliRequest, OffersCancelCliResult,
 };
+pub(crate) use cancel_context::{
+    defer_in_flight_cancel_offer_ids, preload_cancel_submitted_contexts,
+};
 pub use cancel_eligibility::{collect_dexie_open_offer_ids, row_cancel_eligible};
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reconcile_watched_offers::{
@@ -30,4 +33,3 @@ pub use transition::{
     resolve_watched_offer_transition_from_dexie_fetch, transition_from_dexie_offer_payload,
     transition_from_list_offer_payload, WatchedOfferTransitionEnv,
 };
-pub(crate) use cancel_context::preload_cancel_submitted_contexts;

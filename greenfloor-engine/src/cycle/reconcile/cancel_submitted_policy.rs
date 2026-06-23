@@ -9,7 +9,9 @@ use crate::hex::canonical_tx_id;
 use crate::offer::dexie_payload::{DEXIE_STATUS_CANCELLED, DEXIE_STATUS_OPEN};
 use crate::storage::{OfferStateListRow, TxSignalStateRow};
 
-use super::builders::{cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status};
+use super::builders::{
+    cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status,
+};
 use super::coinset_signals::CoinsetSignalSummary;
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
@@ -92,12 +94,7 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    if cancel_tx_in_flight(ctx, now) {
-        return cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx, now);
-    }
-    if let Some(taker) =
-        apply_coinset_taker_dispatch_if_present(coinset, dexie_status, &current)
-    {
+    if let Some(taker) = apply_coinset_taker_dispatch_if_present(coinset, dexie_status, &current) {
         return taker;
     }
     cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx, now)
@@ -114,14 +111,16 @@ fn cancel_submitted_dexie_status_transition(
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
-        Some(DEXIE_STATUS_OPEN) if stale_cancel_submit_eligible(ctx, now) => ReconcileTransition::new(
-            ReconcileState::Lifecycle(OfferLifecycleState::Open),
-            REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
-            SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
-            None,
-            TAKER_NONE,
-            TAKER_NONE,
-        ),
+        Some(DEXIE_STATUS_OPEN) if stale_cancel_submit_eligible(ctx, now) => {
+            ReconcileTransition::new(
+                ReconcileState::Lifecycle(OfferLifecycleState::Open),
+                REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
+                SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
+                None,
+                TAKER_NONE,
+                TAKER_NONE,
+            )
+        }
         Some(status) => transition_from_dexie_status(status, ReconcileState::CancelSubmitted),
     }
 }
@@ -176,12 +175,12 @@ fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext, now: DateTime<Utc>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use crate::cycle::reconcile::metadata::{
         REASON_CANCEL_TX_CHAIN_CONFIRMED, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
         TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED,
     };
     use crate::storage::OfferStateListRow;
+    use chrono::TimeZone;
 
     fn row(
         offer_id: &str,
@@ -321,6 +320,33 @@ mod tests {
         )
         .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
         assert_eq!(transition.new_state, ReconcileState::Cancelled);
+    }
+
+    #[test]
+    fn taker_confirmed_while_cancel_in_flight_promotes_to_tx_block_confirmed() {
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some("a".repeat(64)),
+            cancel_tx_signal: Some(TxSignalStateRow {
+                mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+                tx_block_confirmed_at: None,
+            }),
+            submitted_at: Some("2020-01-01T00:00:00Z".to_string()),
+        };
+        let transition = resolve_cancel_submitted_transition(
+            Some(DEXIE_STATUS_OPEN),
+            CoinsetSignalSummary {
+                has_tx_ids: true,
+                has_confirmed: true,
+                has_mempool: false,
+            },
+            &ctx,
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+        )
+        .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+        assert_eq!(
+            transition.new_state,
+            ReconcileState::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
+        );
     }
 
     #[test]

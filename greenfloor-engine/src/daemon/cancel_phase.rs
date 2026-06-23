@@ -7,15 +7,17 @@ use crate::config::{
     MarketConfig,
 };
 use crate::cycle::{
-    evaluate_cancel_policy_decision, filter_defer_cancel_submitted_targets,
-    CancelPolicyDecision, MarketCycleResultState, ReconcileState,
+    evaluate_cancel_policy_decision, CancelPolicyDecision, MarketCycleResultState, ReconcileState,
 };
-use chrono::Utc;
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::dexie_offer_status;
-use crate::offer::lifecycle::{cancel_offers_on_chain, collect_dexie_open_offer_ids, CancelOfferTarget};
+use crate::offer::lifecycle::{
+    cancel_offers_on_chain, collect_dexie_open_offer_ids, defer_in_flight_cancel_offer_ids,
+    CancelOfferTarget,
+};
 use crate::operator_log::{LogContext, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
+use chrono::Utc;
 
 use super::market_context::MarketCycleContext;
 
@@ -103,17 +105,7 @@ fn cancel_target_offer_ids(store: &SqliteStore, offers: &[Value]) -> SignerResul
         return Ok(target_offer_ids);
     }
     let db_rows = store.list_offer_states_for_ids(&target_offer_ids)?;
-    let cancel_tx_ids: Vec<String> = db_rows
-        .iter()
-        .filter_map(|row| row.cancel_submitted_tx_id.clone())
-        .collect();
-    let tx_signals = store.get_tx_signal_state(&cancel_tx_ids)?;
-    Ok(filter_defer_cancel_submitted_targets(
-        &target_offer_ids,
-        &db_rows,
-        &tx_signals,
-        Utc::now(),
-    ))
+    defer_in_flight_cancel_offer_ids(store, &db_rows, &target_offer_ids, Utc::now())
 }
 
 /// Run market cancel phase.
