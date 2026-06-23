@@ -230,6 +230,6 @@ jobs:
         run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}" --features test-support
 
       - name: Script adapter unit tests
-        run: |
-          cd scripts
-          PYTHONPATH=. python -m unittest greenfloor_scripts.test_adapters
+        env:
+          RUN_PY_COV: "false"
+        run: bash .github/scripts/ubuntu-script-tests.sh

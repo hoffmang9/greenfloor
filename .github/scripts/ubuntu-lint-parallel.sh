@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run pre-commit lint/format hooks in parallel (cargo-clippy is separate).
+# Keep hooks in sync with .pre-commit-config.yaml (exclude cargo-clippy).
 set -euo pipefail
 
 hooks=(
