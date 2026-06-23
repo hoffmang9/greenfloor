@@ -16,9 +16,7 @@ pub use cancel::{
 pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliRequest, OffersCancelCliResult,
 };
-pub use cancel_eligibility::{
-    collect_dexie_open_offer_ids, filter_out_cancel_submitted_state_ids, row_cancel_eligible,
-};
+pub use cancel_eligibility::{collect_dexie_open_offer_ids, row_cancel_eligible};
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

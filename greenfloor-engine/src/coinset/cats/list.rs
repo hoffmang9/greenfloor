@@ -7,7 +7,7 @@ use futures_util::future::try_join_all;
 use super::{coin_records_from_response, resolve, unspent_coin_records};
 use crate::bech32m::decode_address;
 use crate::coinset::retry::with_coinset_client_retries;
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 
 pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     client: &CoinsetClient,
@@ -55,30 +55,23 @@ pub(crate) async fn cats_with_lineage_from_records(
     if records.is_empty() {
         return Ok(Vec::new());
     }
-    let cats = try_join_all(records.iter().copied().map(|record| {
+    let resolved = try_join_all(records.iter().copied().map(|record| {
         let client = client.clone();
-        async move {
-            match resolve::cat_from_record(&client, &record).await? {
-                Some(cat) => Ok(cat),
-                None => Err(SignerError::CatLineageResolutionFailed(hex::encode(
-                    record.coin.coin_id(),
-                ))),
-            }
-        }
+        async move { resolve::cat_from_record(&client, &record).await }
     }))
     .await?;
-    Ok(cats)
+    Ok(resolved.into_iter().flatten().collect())
 }
 
-/// List unspent cats by ids.
+/// Fetch coin records for the given coin ids (missing ids are omitted).
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn list_unspent_cats_by_ids(
+pub(crate) async fn coin_records_for_coin_ids(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],
-) -> SignerResult<Vec<Cat>> {
+) -> SignerResult<Vec<CoinRecord>> {
     if coin_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -90,10 +83,22 @@ pub async fn list_unspent_cats_by_ids(
         }
     }))
     .await?;
-    let records: Vec<CoinRecord> = responses
+    Ok(responses
         .into_iter()
         .filter_map(|response| response.coin_record)
-        .collect();
+        .collect())
+}
+
+/// List unspent cats by ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn list_unspent_cats_by_ids(
+    client: &CoinsetClient,
+    coin_ids: &[Bytes32],
+) -> SignerResult<Vec<Cat>> {
+    let records = coin_records_for_coin_ids(client, coin_ids).await?;
     cats_with_lineage_from_records(client, &records).await
 }
 

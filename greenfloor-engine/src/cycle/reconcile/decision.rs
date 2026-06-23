@@ -1,29 +1,20 @@
-use super::cancel_submitted_policy::{
-    resolve_cancel_submitted_transition, CancelSubmittedContext, CoinsetOfferSignals,
-};
+use super::cancel_submitted_policy::{resolve_cancel_submitted_transition, CancelSubmittedContext};
 use crate::cycle::lifecycle::OfferSignal;
-use crate::offer::dexie_payload::{
-    is_dexie_pattern_fallback_status, reconcile_from_dexie_status, DexieStatusReconcile,
-    DEXIE_STATUS_CANCELLED,
-};
+use crate::offer::dexie_payload::DEXIE_STATUS_CANCELLED;
 
 use super::builders::{
-    dexie_fallback_transition, open_signal_transition, preserve_mempool_observation, preserve_state,
+    open_signal_transition, preserve_mempool_observation, preserve_state,
+    transition_from_dexie_status,
 };
+use super::coinset_signals::CoinsetSignalSummary;
 use super::metadata::{
     REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
     REASON_MISSING_STATUS, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
     TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
-    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CoinsetPresence {
-    has_confirmed: bool,
-    has_mempool: bool,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusClass {
@@ -52,7 +43,7 @@ impl StatusClass {
 }
 
 fn dispatch(
-    coinset: CoinsetPresence,
+    coinset: CoinsetSignalSummary,
     status: StatusClass,
     current: &ReconcileState,
 ) -> ReconcileDispatch {
@@ -98,24 +89,7 @@ impl ReconcileDispatch {
             Self::MissingStatus => preserve_state(current_state, REASON_MISSING_STATUS),
             Self::CoinsetUnavailable => preserve_state(current_state, REASON_COINSET_UNAVAILABLE),
             Self::DexieFallback(status) => {
-                let taker_diagnostic = if is_dexie_pattern_fallback_status(status) {
-                    TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK
-                } else {
-                    TAKER_NONE
-                };
-                match reconcile_from_dexie_status(status) {
-                    DexieStatusReconcile::Cancelled => {
-                        dexie_fallback_transition(ReconcileState::Cancelled, None, taker_diagnostic)
-                    }
-                    DexieStatusReconcile::ApplySignal(signal) => dexie_fallback_transition(
-                        ReconcileState::from_open_signal(signal),
-                        Some(signal),
-                        taker_diagnostic,
-                    ),
-                    DexieStatusReconcile::Unchanged => {
-                        dexie_fallback_transition(current_state.clone(), None, taker_diagnostic)
-                    }
-                }
+                transition_from_dexie_status(status, current_state.clone())
             }
         }
     }
@@ -129,22 +103,15 @@ pub(crate) fn resolve_watched_offer_decision(
     coinset_mempool_tx_ids: &[String],
     cancel_submitted: Option<&CancelSubmittedContext>,
 ) -> ReconcileTransition {
+    let coinset = CoinsetSignalSummary::from_tx_lists(
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    );
     if current_state.is_cancel_submitted() {
         let ctx = cancel_submitted.cloned().unwrap_or_default();
-        return resolve_cancel_submitted_transition(
-            status,
-            CoinsetOfferSignals {
-                has_tx_ids: !coinset_tx_ids.is_empty(),
-                has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
-                has_mempool: !coinset_mempool_tx_ids.is_empty(),
-            },
-            &ctx,
-        );
+        return resolve_cancel_submitted_transition(status, coinset, &ctx);
     }
-    let coinset = CoinsetPresence {
-        has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
-        has_mempool: !coinset_mempool_tx_ids.is_empty(),
-    };
-    let status = StatusClass::from_option(status, !coinset_tx_ids.is_empty());
+    let status = StatusClass::from_option(status, coinset.has_tx_ids);
     dispatch(coinset, status, current_state).apply(current_state)
 }

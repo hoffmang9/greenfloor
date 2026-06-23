@@ -5,32 +5,26 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 use crate::cycle::lifecycle::{OfferLifecycleState, OfferSignal};
-use crate::offer::dexie_payload::{
-    is_dexie_pattern_fallback_status, reconcile_from_dexie_status, DexieStatusReconcile,
-    DEXIE_STATUS_CANCELLED, DEXIE_STATUS_OPEN,
-};
+use crate::offer::dexie_payload::{DEXIE_STATUS_CANCELLED, DEXIE_STATUS_OPEN};
 use crate::storage::{OfferStateListRow, TxSignalStateRow};
 
-use super::builders::{dexie_fallback_transition, open_signal_transition, preserve_state};
+use super::builders::{
+    cancel_tx_chain_confirmed_transition, open_signal_transition, preserve_state,
+    transition_from_dexie_status,
+};
+use super::coinset_signals::CoinsetSignalSummary;
 use super::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
     REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS, SIGNAL_SOURCE_COINSET_MEMPOOL,
     SIGNAL_SOURCE_COINSET_WEBHOOK, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
     TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
-    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
 
 /// Grace period after submit before treating an untracked cancel tx as stale.
 pub(crate) const CANCEL_SUBMIT_TRACKING_GRACE_SECS: i64 = 5 * 60;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CoinsetOfferSignals {
-    pub has_tx_ids: bool,
-    pub has_confirmed: bool,
-    pub has_mempool: bool,
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct CancelSubmittedContext {
@@ -55,12 +49,6 @@ impl CancelSubmittedContext {
             submitted_at: Some(row.updated_at.clone()),
         }
     }
-}
-
-/// Whether a missing watched offer in `cancel_submitted` should stay preserved.
-#[must_use]
-pub fn preserve_cancel_submitted_on_missing_offer() -> bool {
-    true
 }
 
 /// Whether daemon cancel policy should skip targeting this offer for now.
@@ -96,10 +84,22 @@ pub fn filter_defer_cancel_submitted_targets(
 /// Resolve reconcile transition for an offer already in `cancel_submitted`.
 pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
-    coinset: CoinsetOfferSignals,
+    coinset: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
 ) -> ReconcileTransition {
-    if coinset.has_confirmed && dexie_status != Some(DEXIE_STATUS_CANCELLED) {
+    if cancel_tx_confirmed(ctx) {
+        return cancel_tx_chain_confirmed_transition();
+    }
+    if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
+        return transition_from_dexie_status(
+            DEXIE_STATUS_CANCELLED,
+            ReconcileState::CancelSubmitted,
+        );
+    }
+    if cancel_tx_in_flight(ctx) {
+        return cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx);
+    }
+    if coinset.has_confirmed {
         return open_signal_transition(
             OfferSignal::TxConfirmed,
             REASON_COINSET_CONFIRMED,
@@ -117,6 +117,14 @@ pub(crate) fn resolve_cancel_submitted_transition(
             TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
         );
     }
+    cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx)
+}
+
+fn cancel_submitted_dexie_status_transition(
+    dexie_status: Option<i64>,
+    coinset: CoinsetSignalSummary,
+    ctx: &CancelSubmittedContext,
+) -> ReconcileTransition {
     match dexie_status {
         None if coinset.has_tx_ids => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
@@ -130,29 +138,15 @@ pub(crate) fn resolve_cancel_submitted_transition(
             TAKER_NONE,
             TAKER_NONE,
         ),
-        Some(status) => dexie_fallback_for_cancel_submitted(status),
+        Some(status) => transition_from_dexie_status(status, ReconcileState::CancelSubmitted),
     }
 }
 
-fn dexie_fallback_for_cancel_submitted(status: i64) -> ReconcileTransition {
-    let taker_diagnostic = if is_dexie_pattern_fallback_status(status) {
-        TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK
-    } else {
-        TAKER_NONE
-    };
-    match reconcile_from_dexie_status(status) {
-        DexieStatusReconcile::Cancelled => {
-            dexie_fallback_transition(ReconcileState::Cancelled, None, taker_diagnostic)
-        }
-        DexieStatusReconcile::ApplySignal(signal) => dexie_fallback_transition(
-            ReconcileState::from_open_signal(signal),
-            Some(signal),
-            taker_diagnostic,
-        ),
-        DexieStatusReconcile::Unchanged => {
-            dexie_fallback_transition(ReconcileState::CancelSubmitted, None, taker_diagnostic)
-        }
-    }
+#[must_use]
+fn cancel_tx_confirmed(ctx: &CancelSubmittedContext) -> bool {
+    ctx.cancel_tx_signal
+        .as_ref()
+        .is_some_and(|signal| signal.tx_block_confirmed_at.is_some())
 }
 
 #[must_use]
@@ -175,7 +169,7 @@ fn cancel_tx_in_flight(ctx: &CancelSubmittedContext) -> bool {
 
 #[must_use]
 fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext) -> bool {
-    !cancel_tx_in_flight(ctx)
+    !cancel_tx_in_flight(ctx) && !cancel_tx_confirmed(ctx)
 }
 
 #[must_use]
@@ -195,6 +189,10 @@ fn within_cancel_submit_grace(submitted_at: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cycle::reconcile::metadata::{
+        REASON_CANCEL_TX_CHAIN_CONFIRMED, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
+        TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED,
+    };
     use crate::storage::OfferStateListRow;
 
     fn row(
@@ -227,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_reset_when_cancel_tx_confirmed_but_dexie_still_open() {
+    fn stale_reset_ineligible_when_cancel_tx_confirmed_but_dexie_still_open() {
         let ctx = CancelSubmittedContext {
             cancel_tx_id: Some("tx1".to_string()),
             cancel_tx_signal: Some(TxSignalStateRow {
@@ -236,7 +234,55 @@ mod tests {
             }),
             submitted_at: None,
         };
-        assert!(stale_cancel_submit_eligible(&ctx));
+        assert!(!stale_cancel_submit_eligible(&ctx));
+    }
+
+    #[test]
+    fn cancel_tx_chain_confirmed_moves_to_cancelled() {
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some("tx1".to_string()),
+            cancel_tx_signal: Some(TxSignalStateRow {
+                mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+                tx_block_confirmed_at: Some("2020-01-01T00:01:00Z".to_string()),
+            }),
+            submitted_at: None,
+        };
+        let transition = resolve_cancel_submitted_transition(
+            Some(DEXIE_STATUS_OPEN),
+            CoinsetSignalSummary::default(),
+            &ctx,
+        )
+        .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+        assert_eq!(transition.new_state, ReconcileState::Cancelled);
+        assert_eq!(transition.reason, REASON_CANCEL_TX_CHAIN_CONFIRMED);
+        assert_eq!(transition.signal_source, SIGNAL_SOURCE_CANCEL_TX_CHAIN);
+        assert_eq!(
+            transition.taker_diagnostic,
+            TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED
+        );
+    }
+
+    #[test]
+    fn cancel_tx_chain_confirmed_beats_dexie_linked_taker_confirm() {
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some("tx1".to_string()),
+            cancel_tx_signal: Some(TxSignalStateRow {
+                mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+                tx_block_confirmed_at: Some("2020-01-01T00:01:00Z".to_string()),
+            }),
+            submitted_at: None,
+        };
+        let transition = resolve_cancel_submitted_transition(
+            Some(DEXIE_STATUS_OPEN),
+            CoinsetSignalSummary {
+                has_tx_ids: true,
+                has_confirmed: true,
+                has_mempool: false,
+            },
+            &ctx,
+        )
+        .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+        assert_eq!(transition.new_state, ReconcileState::Cancelled);
     }
 
     #[test]

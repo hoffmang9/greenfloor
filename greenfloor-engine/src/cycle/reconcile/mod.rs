@@ -5,6 +5,7 @@
 
 mod builders;
 mod cancel_submitted_policy;
+mod coinset_signals;
 mod decision;
 mod metadata;
 mod state;
@@ -13,10 +14,8 @@ mod transition;
 #[cfg(test)]
 mod tests;
 
-pub use cancel_submitted_policy::{
-    filter_defer_cancel_submitted_targets, preserve_cancel_submitted_on_missing_offer,
-    CancelSubmittedContext, CoinsetOfferSignals,
-};
+pub use cancel_submitted_policy::{filter_defer_cancel_submitted_targets, CancelSubmittedContext};
+pub use coinset_signals::CoinsetSignalSummary;
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
@@ -61,9 +60,7 @@ pub fn resolve_missing_watched_offer_transition(
     current_state: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
-    let decision = if old_state.is_terminal()
-        || (old_state.is_cancel_submitted() && preserve_cancel_submitted_on_missing_offer())
-    {
+    let decision = if old_state.is_terminal() || old_state.is_cancel_submitted() {
         missing_watched_offer_preserved(old_state.clone())
     } else {
         missing_watched_offer_expired()

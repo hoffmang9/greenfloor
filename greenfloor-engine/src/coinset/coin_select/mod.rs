@@ -7,7 +7,7 @@ use chia_sdk_coinset::{CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
 
 use super::cats::{
-    cat_from_record, coin_records_for_cat_outer_puzzle_hash, list_unspent_cats_by_ids,
+    cat_from_record, coin_records_for_cat_outer_puzzle_hash, coin_records_for_coin_ids,
 };
 use super::parse::unspent_coin_records;
 use crate::error::{SignerError, SignerResult};
@@ -154,20 +154,21 @@ pub(crate) async fn select_cats_for_spend(
     explicit_coin_ids: &[Bytes32],
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
-    if explicit_coin_ids.is_empty() {
-        let records: Vec<CoinRecord> = unspent_coin_records(
+    let records = if explicit_coin_ids.is_empty() {
+        unspent_coin_records(
             coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?,
         )
-        .collect();
-        return select_cats_for_spend_from_records(client, records, target_amount).await;
-    }
-    let cats = list_unspent_cats_by_ids(client, explicit_coin_ids).await?;
-    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+        .collect()
+    } else {
+        coin_records_for_coin_ids(client, explicit_coin_ids).await?
+    };
+    select_cats_for_spend_from_records(client, records, explicit_coin_ids, target_amount).await
 }
 
 async fn select_cats_for_spend_from_records(
     client: &CoinsetClient,
     records: Vec<CoinRecord>,
+    explicit_coin_ids: &[Bytes32],
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
     let mut excluded = HashSet::new();
@@ -177,8 +178,10 @@ async fn select_cats_for_spend_from_records(
             .copied()
             .filter(|record| !excluded.contains(&record.coin.coin_id()))
             .collect();
-        let (selected_records, offered_total) =
-            finalize_amount_selection(available, &[], target_amount, |record| record.coin.amount)?;
+        let (selected_records, _offered_total) =
+            finalize_amount_selection(available, explicit_coin_ids, target_amount, |record| {
+                record.coin.amount
+            })?;
         let mut selected = Vec::with_capacity(selected_records.len());
         let mut unresolvable = Vec::new();
         for record in selected_records {
@@ -188,11 +191,7 @@ async fn select_cats_for_spend_from_records(
             }
         }
         if unresolvable.is_empty() {
-            return Ok(SelectedCats {
-                change_amount: offered_total.saturating_sub(target_amount),
-                selected,
-                offered_total,
-            });
+            return finalize_selected_cats(selected, explicit_coin_ids, target_amount);
         }
         excluded.extend(unresolvable);
         if excluded.len() >= records.len() {

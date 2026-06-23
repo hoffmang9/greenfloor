@@ -1,7 +1,5 @@
 //! Shared cancel eligibility policy for daemon and CLI paths.
 
-use std::collections::HashSet;
-
 use crate::cycle::ReconcileState;
 use crate::offer::dexie_payload::DEXIE_STATUS_OPEN;
 use crate::storage::OfferStateListRow;
@@ -33,28 +31,6 @@ pub fn row_cancel_eligible(row: &OfferStateListRow) -> bool {
     ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_eligible())
 }
 
-/// Drop Dexie-open ids already in `cancel_submitted` (legacy filter without tx tracking).
-#[must_use]
-pub fn filter_out_cancel_submitted_state_ids(
-    offer_ids: &[String],
-    db_rows: &[OfferStateListRow],
-) -> Vec<String> {
-    let cancel_pending: HashSet<&str> = db_rows
-        .iter()
-        .filter_map(|row| {
-            ReconcileState::parse(&row.state)
-                .ok()
-                .filter(ReconcileState::is_cancel_submitted)
-                .map(|_| row.offer_id.as_str())
-        })
-        .collect();
-    offer_ids
-        .iter()
-        .filter(|offer_id| !cancel_pending.contains(offer_id.as_str()))
-        .cloned()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,16 +56,6 @@ mod tests {
         ];
         assert_eq!(
             collect_dexie_open_offer_ids(&offers),
-            vec!["o1".to_string()]
-        );
-    }
-
-    #[test]
-    fn filter_out_cancel_submitted_state_ids_skips_cancel_submitted() {
-        let open_ids = vec!["o1".to_string(), "o2".to_string()];
-        let db_rows = vec![row("o1", "open"), row("o2", "cancel_submitted")];
-        assert_eq!(
-            filter_out_cancel_submitted_state_ids(&open_ids, &db_rows),
             vec!["o1".to_string()]
         );
     }
