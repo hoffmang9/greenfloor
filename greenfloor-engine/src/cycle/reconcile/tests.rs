@@ -527,7 +527,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
             mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
             tx_block_confirmed_at: None,
         }),
-        submitted_at: None,
+        cancel_submitted_at: None,
     };
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,

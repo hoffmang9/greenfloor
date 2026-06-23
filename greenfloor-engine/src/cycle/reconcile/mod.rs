@@ -17,9 +17,8 @@ mod tests;
 
 use chrono::{DateTime, Utc};
 
-pub use cancel_submitted_policy::{
-    defer_cancel_target, filter_defer_cancel_submitted_targets, CancelSubmittedContext,
-};
+pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
+pub use cancel_submitted_policy::CancelSubmittedContext;
 pub use coinset_signals::CoinsetSignalSummary;
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;

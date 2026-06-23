@@ -1,7 +1,7 @@
 use crate::error::{SignerError, SignerResult};
 use crate::hex::canonical_tx_id;
 use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
 
@@ -11,6 +11,7 @@ pub struct OfferCancelWrite<'a> {
     pub fields: Option<&'a PresplitCancelFields>,
     pub execution_mode: Option<OfferExecutionMode>,
     pub cancel_submitted_tx_id: Option<&'a str>,
+    pub cancel_submitted_at: Option<&'a str>,
 }
 
 pub(crate) fn cancel_metadata_params(
@@ -26,6 +27,35 @@ pub(crate) fn cancel_metadata_params(
     } else {
         (None, None, execution_mode_str)
     }
+}
+
+fn resolve_cancel_submitted_at_for_upsert(
+    conn: &rusqlite::Connection,
+    offer_id: &str,
+    state: &str,
+    updated_at: &str,
+    explicit: Option<&str>,
+) -> SignerResult<Option<String>> {
+    if state != "cancel_submitted" {
+        return Ok(None);
+    }
+    if let Some(value) = explicit {
+        return Ok(Some(value.to_string()));
+    }
+    let existing = conn
+        .query_row(
+            "SELECT cancel_submitted_at FROM offer_state WHERE offer_id = ?1",
+            params![offer_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to read offer_state cancel_submitted_at for {offer_id}: {err}"
+            ))
+        })?
+        .flatten();
+    Ok(existing.or_else(|| Some(updated_at.to_string())))
 }
 
 impl SqliteStore {
@@ -45,6 +75,13 @@ impl SqliteStore {
     ) -> SignerResult<()> {
         let (presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode_str) =
             cancel_metadata_params(cancel);
+        let cancel_submitted_at = resolve_cancel_submitted_at_for_upsert(
+            &self.conn,
+            offer_id,
+            state,
+            updated_at,
+            cancel.cancel_submitted_at,
+        )?;
         self.conn
             .execute(
                 r"
@@ -57,9 +94,10 @@ impl SqliteStore {
                   presplit_input_coin_id,
                   fixed_delegated_puzzle_hash,
                   execution_mode,
-                  cancel_submitted_tx_id
+                  cancel_submitted_tx_id,
+                  cancel_submitted_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
@@ -72,7 +110,8 @@ impl SqliteStore {
                     WHEN excluded.state = 'cancel_submitted'
                       THEN COALESCE(excluded.cancel_submitted_tx_id, offer_state.cancel_submitted_tx_id)
                     ELSE NULL
-                  END
+                  END,
+                  cancel_submitted_at = excluded.cancel_submitted_at
                 ",
                 params![
                     offer_id,
@@ -84,6 +123,7 @@ impl SqliteStore {
                     fixed_delegated_puzzle_hash,
                     execution_mode_str.as_deref(),
                     cancel.cancel_submitted_tx_id,
+                    cancel_submitted_at,
                 ],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
@@ -170,9 +210,8 @@ impl SqliteStore {
         last_seen_status: Option<i64>,
         updated_at: &str,
     ) -> SignerResult<()> {
-        let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id).ok_or_else(|| {
-            SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}"))
-        })?;
+        let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id)
+            .ok_or_else(|| SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}")))?;
         self.immediate_transaction("cancel_submitted", |store| {
             store.upsert_offer_state_with_metadata_at(
                 offer_id,
@@ -182,6 +221,7 @@ impl SqliteStore {
                 updated_at,
                 OfferCancelWrite {
                     cancel_submitted_tx_id: Some(stored_cancel_tx_id.as_str()),
+                    cancel_submitted_at: Some(updated_at),
                     ..OfferCancelWrite::default()
                 },
             )?;

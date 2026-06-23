@@ -1,15 +1,25 @@
 //! SQLite-backed assembly of [`CancelSubmittedContext`] for lifecycle reconcile.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
+use serde_json::{json, Value};
 
 use crate::cycle::reconcile::{
-    filter_defer_cancel_submitted_targets, CancelSubmittedContext, ReconcileState,
+    allowed_cancel_target_offer_ids, CancelSubmittedContext, ReconcileState,
 };
 use crate::error::SignerResult;
 use crate::hex::canonical_tx_id;
 use crate::storage::{OfferStateListRow, SqliteStore, TxSignalStateRow};
+
+/// CLI/daemon skip reason when a tracked offer's cancel submit is still in flight.
+pub const CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON: &str = "cancel_submit_in_flight";
+
+#[derive(Debug, Clone)]
+pub struct DeferInFlightCancelPartition<T> {
+    pub active: Vec<T>,
+    pub skipped: Vec<T>,
+}
 
 fn cancel_tx_signals_for_rows(
     store: &SqliteStore,
@@ -37,12 +47,61 @@ pub fn defer_in_flight_cancel_offer_ids(
         return Ok(Vec::new());
     }
     let tx_signals = cancel_tx_signals_for_rows(store, db_rows)?;
-    Ok(filter_defer_cancel_submitted_targets(
+    Ok(allowed_cancel_target_offer_ids(
         offer_ids,
         db_rows,
         &tx_signals,
         now,
     ))
+}
+
+/// Split cancel targets into active vs in-flight-deferred buckets.
+///
+/// # Errors
+///
+/// Returns an error if tx signal lookup fails.
+pub fn partition_defer_in_flight_cancel_targets<T>(
+    store: &SqliteStore,
+    rows: &[OfferStateListRow],
+    targets: Vec<T>,
+    now: DateTime<Utc>,
+    offer_id: impl Fn(&T) -> &str,
+    persists_state: impl Fn(&T) -> bool,
+) -> SignerResult<DeferInFlightCancelPartition<T>> {
+    if targets.is_empty() {
+        return Ok(DeferInFlightCancelPartition {
+            active: Vec::new(),
+            skipped: Vec::new(),
+        });
+    }
+    let tracked_ids: Vec<String> = targets
+        .iter()
+        .filter(|target| persists_state(target))
+        .map(|target| offer_id(target).to_string())
+        .collect();
+    let allowed = defer_in_flight_cancel_offer_ids(store, rows, &tracked_ids, now)?;
+    let allowed: HashSet<&str> = allowed.iter().map(String::as_str).collect();
+    let mut partition = DeferInFlightCancelPartition {
+        active: Vec::new(),
+        skipped: Vec::new(),
+    };
+    for target in targets {
+        if persists_state(&target) && !allowed.contains(offer_id(&target)) {
+            partition.skipped.push(target);
+        } else {
+            partition.active.push(target);
+        }
+    }
+    Ok(partition)
+}
+
+/// JSON result payload for CLI items skipped due to in-flight cancel submit.
+#[must_use]
+pub fn cancel_submit_in_flight_skip_result() -> Value {
+    json!({
+        "skipped": true,
+        "reason": CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON,
+    })
 }
 
 /// Preload cancel-submit context for all `cancel_submitted` rows in one tx-signal query.
@@ -135,5 +194,34 @@ mod tests {
             defer_in_flight_cancel_offer_ids(&store, &rows, &["offer-defer".to_string()], now)
                 .expect("defer");
         assert!(allowed.is_empty());
+    }
+
+    #[test]
+    fn partition_defers_tracked_in_flight_cancel_submitted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let tx_id = "b".repeat(64);
+        store
+            .upsert_offer_cancel_submitted("offer-defer", "m1", &tx_id, Some(0))
+            .expect("seed");
+        let rows = store
+            .list_offer_states_for_ids(&["offer-defer".to_string()])
+            .expect("rows");
+        let now = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let partition = partition_defer_in_flight_cancel_targets(
+            &store,
+            &rows,
+            vec![("offer-defer".to_string(), true)],
+            now,
+            |target| target.0.as_str(),
+            |target| target.1,
+        )
+        .expect("partition");
+        assert!(partition.active.is_empty());
+        assert_eq!(partition.skipped.len(), 1);
+        assert_eq!(
+            cancel_submit_in_flight_skip_result().get("reason"),
+            Some(&json!(CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON))
+        );
     }
 }

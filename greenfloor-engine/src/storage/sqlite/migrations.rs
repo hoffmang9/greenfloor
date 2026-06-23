@@ -55,6 +55,8 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     )?;
     add_column_if_missing(conn, "offer_state", "execution_mode", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_tx_id", "TEXT NULL")?;
+    add_column_if_missing(conn, "offer_state", "cancel_submitted_at", "TEXT NULL")?;
+    backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
     Ok(())
 }
@@ -62,6 +64,24 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
 fn normalize_legacy_tx_id_storage(conn: &Connection) -> SignerResult<()> {
     normalize_tx_signal_state_ids(conn)?;
     normalize_offer_cancel_submitted_tx_ids(conn)?;
+    Ok(())
+}
+
+fn backfill_offer_cancel_submitted_at(conn: &Connection) -> SignerResult<()> {
+    conn.execute(
+        r"
+        UPDATE offer_state
+        SET cancel_submitted_at = updated_at
+        WHERE state = 'cancel_submitted'
+          AND cancel_submitted_at IS NULL
+        ",
+        [],
+    )
+    .map_err(|err| {
+        SignerError::Other(format!(
+            "failed to backfill offer_state cancel_submitted_at: {err}"
+        ))
+    })?;
     Ok(())
 }
 
@@ -74,20 +94,28 @@ fn normalize_tx_signal_state_ids(conn: &Connection) -> SignerResult<()> {
             ",
         )
         .map_err(|err| {
-            SignerError::Other(format!("failed to prepare tx_signal_state migration query: {err}"))
+            SignerError::Other(format!(
+                "failed to prepare tx_signal_state migration query: {err}"
+            ))
         })?;
     let mut rows = stmt.query([]).map_err(|err| {
-        SignerError::Other(format!("failed to query tx_signal_state for migration: {err}"))
+        SignerError::Other(format!(
+            "failed to query tx_signal_state for migration: {err}"
+        ))
     })?;
     let mut legacy_rows = Vec::new();
     while let Some(row) = rows.next().map_err(|err| {
-        SignerError::Other(format!("failed to read tx_signal_state migration row: {err}"))
+        SignerError::Other(format!(
+            "failed to read tx_signal_state migration row: {err}"
+        ))
     })? {
         let raw_id: String = row.get(0).map_err(|err| {
             SignerError::Other(format!("failed to read tx_signal_state tx_id: {err}"))
         })?;
         let mempool: String = row.get(1).map_err(|err| {
-            SignerError::Other(format!("failed to read tx_signal_state mempool timestamp: {err}"))
+            SignerError::Other(format!(
+                "failed to read tx_signal_state mempool timestamp: {err}"
+            ))
         })?;
         let confirmed: Option<String> = row.get(2).ok();
         legacy_rows.push((raw_id, mempool, confirmed));
@@ -126,7 +154,9 @@ fn normalize_tx_signal_state_ids(conn: &Connection) -> SignerResult<()> {
             params![raw_id],
         )
         .map_err(|err| {
-            SignerError::Other(format!("failed to delete legacy tx_signal_state id {raw_id}: {err}"))
+            SignerError::Other(format!(
+                "failed to delete legacy tx_signal_state id {raw_id}: {err}"
+            ))
         })?;
     }
     Ok(())
@@ -158,7 +188,9 @@ fn normalize_offer_cancel_submitted_tx_ids(conn: &Connection) -> SignerResult<()
         ))
     })? {
         let offer_id: String = row.get(0).map_err(|err| {
-            SignerError::Other(format!("failed to read offer_id for cancel tx migration: {err}"))
+            SignerError::Other(format!(
+                "failed to read offer_id for cancel tx migration: {err}"
+            ))
         })?;
         let raw_id: String = row.get(1).map_err(|err| {
             SignerError::Other(format!(

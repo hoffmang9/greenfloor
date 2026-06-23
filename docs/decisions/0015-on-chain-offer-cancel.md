@@ -41,12 +41,30 @@ back to extraction from the Dexie offer file.
    then optional inner-puzzle + amount fallback when decoded-offer coin ids differ.
 
 5. **Optimistic operator state is `cancel_submitted`, not `cancelled`.**
-   Successful cancel **submit** records `cancel_submitted` and observes the cancel tx id
-   for reconcile. Reconcile promotes to `cancelled` when Dexie status is `3` or chain
-   evidence confirms the spend. Failed submit does **not** mark the offer cancelled.
+   Successful cancel **submit** atomically records:
+   - `offer_state.state = cancel_submitted`
+   - `cancel_submitted_tx_id` (canonical hex)
+   - `cancel_submitted_at` (submit timestamp; preserved across reconcile preserves)
+   - `tx_signal_state` mempool observation for the cancel tx id
 
-6. **CLI and audit naming reflects submit semantics.**
-   - `greenfloor-manager offers-cancel` JSON: `submitted_count` (successful on-chain submits).
+   Reconcile promotes to `cancelled` when Dexie status is `3`, cancel tx chain-confirms, or
+   other canonical reconcile signals apply. Failed submit does **not** mark the offer
+   cancelled.
+
+6. **`cancel_submitted` reconcile and defer policy.**
+   - Pure policy: `cycle/reconcile/cancel_submitted_policy.rs` (`CancelSubmittedContext`,
+     `allowed_cancel_target_offer_ids`, `resolve_cancel_submitted_transition`).
+   - SQLite I/O adapter: `offer/lifecycle/cancel_context.rs` (`preload_cancel_submitted_contexts`,
+     `defer_in_flight_cancel_offer_ids`, `partition_defer_in_flight_cancel_targets`).
+   - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) uses
+     `cancel_submitted_at`, not `updated_at`, so reconcile preserve upserts do not extend
+     the grace window.
+   - While cancel submit is in flight (tracked tx unconfirmed or within orphan grace),
+     daemon cancel policy and CLI `--offer-id` / `--cancel-open` defer re-submit.
+
+7. **CLI and audit naming reflects submit semantics.**
+   - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item
+     `result.skipped` / `result.reason = cancel_submit_in_flight` when defer applies.
    - Daemon `offer_cancel_policy` success items: `status: "cancel_submitted"`,
      `reason: "cancel_submitted_on_strong_unstable_move"`.
    - **`--offer-id` does not require a state DB row.** Dexie fetch + on-chain cancel still
@@ -54,7 +72,7 @@ back to extraction from the Dexie offer file.
    - **`--offer-file`** accepts a local path or inline `offer1...` bech32 when Dexie id is
      unknown or unavailable (no Dexie fetch).
 
-7. **Presplit cancel inner spend follows ent-wallet `CONDITIONS_OR_SINGLETON` / `SINGLETON`
+8. **Presplit cancel inner spend follows ent-wallet `CONDITIONS_OR_SINGLETON` / `SINGLETON`
    path:** cancel delegated spend at MIPS top level + vault singleton member for
    fast-forward (see `build_presplit_offer_cancel_inner_spend` in `offer/presplit.rs`).
 
@@ -64,6 +82,8 @@ back to extraction from the Dexie offer file.
 - `--cancel-open` selects all open/pending_visibility rows (paginated), excluding
   `cancel_submitted`.
 - Operator JSON consumers must use `submitted_count`; `cancelled_count` is removed.
+- Defer helpers are exported from `offer::lifecycle` (not `cycle::`); reconcile policy
+  stays pure and crate-private where possible.
 - Simulator coverage: presplit-existing `build_offer_cancel_spend_bundle` roundtrip test.
 
 ## References

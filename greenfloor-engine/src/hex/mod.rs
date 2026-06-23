@@ -87,8 +87,8 @@ pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex, normalize_hex_id};
     use super::{canonical_tx_id, tx_id_lookup_candidates};
+    use super::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex, normalize_hex_id};
 
     #[test]
     fn normalize_hex_strips_prefix_and_non_hex() {

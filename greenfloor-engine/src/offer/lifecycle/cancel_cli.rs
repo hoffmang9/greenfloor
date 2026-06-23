@@ -11,7 +11,9 @@ use crate::error::{SignerError, SignerResult};
 use crate::storage::{OfferStateListRow, SqliteStore};
 
 use super::cancel::{cancel_offers_on_chain, CancelOfferTarget};
-use super::cancel_context::defer_in_flight_cancel_offer_ids;
+use super::cancel_context::{
+    cancel_submit_in_flight_skip_result, partition_defer_in_flight_cancel_targets,
+};
 use super::cancel_eligibility::row_cancel_eligible;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,45 +113,6 @@ fn select_targets_for_cancel(
             }
         })
         .collect())
-}
-
-fn partition_defer_in_flight_cancel_selections(
-    store: &SqliteStore,
-    rows: &[OfferStateListRow],
-    selections: Vec<CancelCliSelection>,
-) -> SignerResult<(Vec<CancelCliSelection>, Vec<CancelCliSelection>)> {
-    if selections.is_empty() {
-        return Ok((selections, Vec::new()));
-    }
-    let tracked_ids: Vec<String> = selections
-        .iter()
-        .filter(|selection| selection.target.persists_state())
-        .map(|selection| selection.target.offer_id().to_string())
-        .collect();
-    let allowed = defer_in_flight_cancel_offer_ids(store, rows, &tracked_ids, Utc::now())?;
-    let allowed: std::collections::HashSet<&str> = allowed.iter().map(String::as_str).collect();
-    let mut active = Vec::new();
-    let mut skipped = Vec::new();
-    for selection in selections {
-        if selection.target.persists_state() && !allowed.contains(selection.target.offer_id()) {
-            skipped.push(selection);
-        } else {
-            active.push(selection);
-        }
-    }
-    Ok((active, skipped))
-}
-
-fn skipped_cancel_cli_item(selection: &CancelCliSelection) -> OffersCancelCliItem {
-    OffersCancelCliItem {
-        offer_id: selection.target.offer_id().to_string(),
-        market_id: selection.target.normalized_market_id(),
-        state: selection.state.clone(),
-        result: json!({
-            "skipped": true,
-            "reason": "cancel_submit_in_flight",
-        }),
-    }
 }
 
 fn load_rows_for_cancel(
@@ -270,9 +233,25 @@ pub async fn offers_cancel_cli(
         &request.offer_files,
         request.market_id.as_deref(),
     )?);
-    let (mut selections, skipped) =
-        partition_defer_in_flight_cancel_selections(&store, &rows, selections)?;
-    let mut items: Vec<OffersCancelCliItem> = skipped.iter().map(skipped_cancel_cli_item).collect();
+    let partition = partition_defer_in_flight_cancel_targets(
+        &store,
+        &rows,
+        selections,
+        Utc::now(),
+        |selection| selection.target.offer_id(),
+        |selection| selection.target.persists_state(),
+    )?;
+    let mut selections = partition.active;
+    let skipped = partition.skipped;
+    let mut items: Vec<OffersCancelCliItem> = skipped
+        .iter()
+        .map(|selection| OffersCancelCliItem {
+            offer_id: selection.target.offer_id().to_string(),
+            market_id: selection.target.normalized_market_id(),
+            state: selection.state.clone(),
+            result: cancel_submit_in_flight_skip_result(),
+        })
+        .collect();
     let skipped_count = crate::metrics::metric_collection_len_to_u64(skipped.len());
     let targets: Vec<CancelOfferTarget> = selections
         .iter()
@@ -313,6 +292,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::offer::lifecycle::cancel_context::{
+        cancel_submit_in_flight_skip_result, partition_defer_in_flight_cancel_targets,
+    };
 
     #[test]
     fn load_rows_for_cancel_open_includes_stale_offer_beyond_recency_window() {
@@ -366,15 +348,23 @@ mod tests {
             select_targets_for_cancel(&rows, &["offer-cancel-submitted".to_string()], false, None)
                 .expect("selected");
         assert_eq!(selected.len(), 1);
-        let (active, skipped) =
-            partition_defer_in_flight_cancel_selections(&store, &rows, selected)
-                .expect("partition");
-        assert!(active.is_empty());
-        assert_eq!(skipped.len(), 1);
-        let item = skipped_cancel_cli_item(&skipped[0]);
-        assert_eq!(item.result.get("skipped"), Some(&json!(true)));
+        let partition = partition_defer_in_flight_cancel_targets(
+            &store,
+            &rows,
+            selected,
+            Utc::now(),
+            |selection| selection.target.offer_id(),
+            |selection| selection.target.persists_state(),
+        )
+        .expect("partition");
+        assert!(partition.active.is_empty());
+        assert_eq!(partition.skipped.len(), 1);
         assert_eq!(
-            item.result.get("reason"),
+            cancel_submit_in_flight_skip_result().get("skipped"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            cancel_submit_in_flight_skip_result().get("reason"),
             Some(&json!("cancel_submit_in_flight"))
         );
     }

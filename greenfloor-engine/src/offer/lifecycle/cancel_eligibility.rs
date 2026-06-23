@@ -44,6 +44,7 @@ mod tests {
             last_seen_status: None,
             updated_at: String::new(),
             cancel_submitted_tx_id: None,
+            cancel_submitted_at: None,
         }
     }
 

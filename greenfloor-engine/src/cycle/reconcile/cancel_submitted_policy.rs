@@ -28,7 +28,7 @@ pub(crate) const CANCEL_SUBMIT_TRACKING_GRACE_SECS: i64 = 5 * 60;
 pub struct CancelSubmittedContext {
     pub cancel_tx_id: Option<String>,
     pub cancel_tx_signal: Option<TxSignalStateRow>,
-    pub submitted_at: Option<String>,
+    pub cancel_submitted_at: Option<String>,
 }
 
 impl CancelSubmittedContext {
@@ -44,20 +44,17 @@ impl CancelSubmittedContext {
                 .as_deref()
                 .and_then(|tx_id| canonical_tx_id(tx_id).and_then(|id| signals.get(&id)))
                 .cloned(),
-            submitted_at: Some(row.updated_at.clone()),
+            cancel_submitted_at: row
+                .cancel_submitted_at
+                .clone()
+                .or_else(|| Some(row.updated_at.clone())),
         }
     }
 }
 
-/// Whether daemon cancel policy should skip targeting this offer for now.
+/// Drop offer ids whose cancel submit is still in flight (pure policy; no I/O).
 #[must_use]
-pub fn defer_cancel_target(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
-    cancel_tx_in_flight(ctx, now)
-}
-
-/// Drop Dexie-open ids whose cancel submit is still in flight.
-#[must_use]
-pub fn filter_defer_cancel_submitted_targets(
+pub(crate) fn allowed_cancel_target_offer_ids(
     offer_ids: &[String],
     db_rows: &[OfferStateListRow],
     tx_signals: &HashMap<String, TxSignalStateRow>,
@@ -70,7 +67,7 @@ pub fn filter_defer_cancel_submitted_targets(
                 return None;
             }
             let ctx = CancelSubmittedContext::from_row_and_signals(row, tx_signals);
-            defer_cancel_target(&ctx, now).then_some(row.offer_id.as_str())
+            is_cancel_submit_in_flight(&ctx, now).then_some(row.offer_id.as_str())
         })
         .collect();
     offer_ids
@@ -134,22 +131,20 @@ fn cancel_tx_confirmed(ctx: &CancelSubmittedContext) -> bool {
 
 #[must_use]
 fn tracked_cancel_tx_pending(ctx: &CancelSubmittedContext) -> bool {
-    let Some(cancel_tx_id) = ctx
-        .cancel_tx_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    else {
+    if ctx.cancel_tx_id.as_deref().is_none_or(str::is_empty) {
         return false;
-    };
-    let _ = cancel_tx_id;
+    }
     ctx.cancel_tx_signal
         .as_ref()
         .is_none_or(|signal| signal.tx_block_confirmed_at.is_none())
 }
 
 #[must_use]
-fn orphan_cancel_submit_within_grace(submitted_at: Option<&str>, now: DateTime<Utc>) -> bool {
-    let Some(raw) = submitted_at
+fn orphan_cancel_submit_within_grace(
+    cancel_submitted_at: Option<&str>,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(raw) = cancel_submitted_at
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
@@ -162,14 +157,14 @@ fn orphan_cancel_submit_within_grace(submitted_at: Option<&str>, now: DateTime<U
 }
 
 #[must_use]
-fn cancel_tx_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
+fn is_cancel_submit_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
     tracked_cancel_tx_pending(ctx)
-        || orphan_cancel_submit_within_grace(ctx.submitted_at.as_deref(), now)
+        || orphan_cancel_submit_within_grace(ctx.cancel_submitted_at.as_deref(), now)
 }
 
 #[must_use]
 fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
-    !cancel_tx_in_flight(ctx, now) && !cancel_tx_confirmed(ctx)
+    !is_cancel_submit_in_flight(ctx, now) && !cancel_tx_confirmed(ctx)
 }
 
 #[cfg(test)]
@@ -187,6 +182,7 @@ mod tests {
         state: &str,
         cancel_tx_id: Option<&str>,
         updated_at: &str,
+        cancel_submitted_at: Option<&str>,
     ) -> OfferStateListRow {
         OfferStateListRow {
             offer_id: offer_id.to_string(),
@@ -195,20 +191,21 @@ mod tests {
             last_seen_status: None,
             updated_at: updated_at.to_string(),
             cancel_submitted_tx_id: cancel_tx_id.map(str::to_string),
+            cancel_submitted_at: cancel_submitted_at.map(str::to_string),
         }
     }
 
     #[test]
-    fn defer_cancel_target_while_mempool_unconfirmed() {
+    fn cancel_submit_in_flight_while_mempool_unconfirmed() {
         let ctx = CancelSubmittedContext {
             cancel_tx_id: Some("tx1".to_string()),
             cancel_tx_signal: Some(TxSignalStateRow {
                 mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
                 tx_block_confirmed_at: None,
             }),
-            submitted_at: None,
+            cancel_submitted_at: None,
         };
-        assert!(defer_cancel_target(
+        assert!(is_cancel_submit_in_flight(
             &ctx,
             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
         ));
@@ -222,7 +219,7 @@ mod tests {
                 mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
                 tx_block_confirmed_at: Some("2020-01-01T00:01:00Z".to_string()),
             }),
-            submitted_at: None,
+            cancel_submitted_at: None,
         };
         assert!(!stale_cancel_submit_eligible(
             &ctx,
@@ -251,10 +248,10 @@ mod tests {
         let ctx = CancelSubmittedContext {
             cancel_tx_id: Some("a".repeat(64)),
             cancel_tx_signal: None,
-            submitted_at: Some(submitted.to_rfc3339()),
+            cancel_submitted_at: Some(submitted.to_rfc3339()),
         };
         assert!(tracked_cancel_tx_pending(&ctx));
-        assert!(cancel_tx_in_flight(&ctx, after_grace));
+        assert!(is_cancel_submit_in_flight(&ctx, after_grace));
         assert!(!stale_cancel_submit_eligible(&ctx, after_grace));
     }
 
@@ -265,10 +262,30 @@ mod tests {
         let ctx = CancelSubmittedContext {
             cancel_tx_id: None,
             cancel_tx_signal: None,
-            submitted_at: Some(submitted.to_rfc3339()),
+            cancel_submitted_at: Some(submitted.to_rfc3339()),
         };
         assert!(!tracked_cancel_tx_pending(&ctx));
-        assert!(!cancel_tx_in_flight(&ctx, after_grace));
+        assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+        assert!(stale_cancel_submit_eligible(&ctx, after_grace));
+    }
+
+    #[test]
+    fn stale_reset_uses_cancel_submitted_at_not_refreshed_updated_at() {
+        let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let refreshed = submitted + chrono::Duration::seconds(240);
+        let after_grace = submitted + chrono::Duration::seconds(600);
+        let db_row = row(
+            "offer-orphan",
+            "cancel_submitted",
+            None,
+            &refreshed.to_rfc3339(),
+            Some(&submitted.to_rfc3339()),
+        );
+        let ctx = CancelSubmittedContext::from_row_and_signals(&db_row, &HashMap::new());
+        assert_eq!(
+            ctx.cancel_submitted_at.as_deref(),
+            Some(submitted.to_rfc3339().as_str())
+        );
         assert!(stale_cancel_submit_eligible(&ctx, after_grace));
     }
 
@@ -280,7 +297,7 @@ mod tests {
                 mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
                 tx_block_confirmed_at: Some("2020-01-01T00:01:00Z".to_string()),
             }),
-            submitted_at: None,
+            cancel_submitted_at: None,
         };
         let transition = resolve_cancel_submitted_transition(
             Some(DEXIE_STATUS_OPEN),
@@ -306,7 +323,7 @@ mod tests {
                 mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
                 tx_block_confirmed_at: Some("2020-01-01T00:01:00Z".to_string()),
             }),
-            submitted_at: None,
+            cancel_submitted_at: None,
         };
         let transition = resolve_cancel_submitted_transition(
             Some(DEXIE_STATUS_OPEN),
@@ -330,7 +347,7 @@ mod tests {
                 mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
                 tx_block_confirmed_at: None,
             }),
-            submitted_at: Some("2020-01-01T00:00:00Z".to_string()),
+            cancel_submitted_at: Some("2020-01-01T00:00:00Z".to_string()),
         };
         let transition = resolve_cancel_submitted_transition(
             Some(DEXIE_STATUS_OPEN),
@@ -350,11 +367,17 @@ mod tests {
     }
 
     #[test]
-    fn filter_defers_only_in_flight_cancel_submitted() {
+    fn allowed_cancel_target_offer_ids_defers_only_in_flight_cancel_submitted() {
         let now = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let rows = vec![
-            row("o1", "open", None, &now.to_rfc3339()),
-            row("o2", "cancel_submitted", Some("tx2"), &now.to_rfc3339()),
+            row("o1", "open", None, &now.to_rfc3339(), None),
+            row(
+                "o2",
+                "cancel_submitted",
+                Some("tx2"),
+                &now.to_rfc3339(),
+                Some(&now.to_rfc3339()),
+            ),
         ];
         let mut signals = HashMap::new();
         signals.insert(
@@ -365,7 +388,7 @@ mod tests {
             },
         );
         assert_eq!(
-            filter_defer_cancel_submitted_targets(
+            allowed_cancel_target_offer_ids(
                 &["o1".to_string(), "o2".to_string()],
                 &rows,
                 &signals,

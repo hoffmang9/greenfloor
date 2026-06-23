@@ -179,7 +179,7 @@ fn get_tx_signal_state_dedupes_and_ignores_empty_ids() {
     );
     assert_eq!(
         store
-            .confirm_tx_ids(&[tx_a.clone()])
+            .confirm_tx_ids(std::slice::from_ref(&tx_a))
             .expect("confirm"),
         1
     );
@@ -223,9 +223,11 @@ fn tx_signal_state_normalizes_prefixed_tx_ids() {
         1
     );
     let state = store
-        .get_tx_signal_state(&[tx_id.clone()])
+        .get_tx_signal_state(std::slice::from_ref(&tx_id))
         .expect("state");
-    assert!(state.get(&tx_id).is_some_and(|row| row.mempool_observed_at.is_some()));
+    assert!(state
+        .get(&tx_id)
+        .is_some_and(|row| row.mempool_observed_at.is_some()));
 }
 
 #[test]
@@ -240,9 +242,14 @@ fn confirm_tx_ids_updates_legacy_prefixed_row() {
             rusqlite::params![format!("0x{tx_id}"), "2020-01-01T00:00:00Z"],
         )
         .expect("seed legacy row");
-    assert_eq!(store.confirm_tx_ids(&[tx_id.clone()]).expect("confirm"), 1);
+    assert_eq!(
+        store
+            .confirm_tx_ids(std::slice::from_ref(&tx_id))
+            .expect("confirm"),
+        1
+    );
     let state = store
-        .get_tx_signal_state(&[tx_id.clone()])
+        .get_tx_signal_state(std::slice::from_ref(&tx_id))
         .expect("state");
     assert!(state
         .get(&tx_id)
@@ -259,9 +266,11 @@ fn upsert_offer_cancel_submitted_seeds_tx_signal_state() {
         .upsert_offer_cancel_submitted("offer-1", "m1", &tx_id, Some(0))
         .expect("cancel submitted");
     let state = store
-        .get_tx_signal_state(&[tx_id.clone()])
+        .get_tx_signal_state(std::slice::from_ref(&tx_id))
         .expect("state");
-    assert!(state.get(&tx_id).is_some_and(|row| row.mempool_observed_at.is_some()));
+    assert!(state
+        .get(&tx_id)
+        .is_some_and(|row| row.mempool_observed_at.is_some()));
     assert_eq!(
         store
             .list_offer_states_for_ids(&["offer-1".to_string()])
@@ -269,6 +278,41 @@ fn upsert_offer_cancel_submitted_seeds_tx_signal_state() {
             .first()
             .map(|row| row.state.as_str()),
         Some("cancel_submitted")
+    );
+}
+
+#[test]
+fn cancel_submitted_at_survives_reconcile_preserve_upsert() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("greenfloor.sqlite"));
+    store
+        .upsert_offer_state_at(
+            "offer-1",
+            "m1",
+            "cancel_submitted",
+            Some(0),
+            "2020-01-01T00:00:00Z",
+        )
+        .expect("initial cancel submitted");
+    store
+        .upsert_offer_state_at(
+            "offer-1",
+            "m1",
+            "cancel_submitted",
+            Some(0),
+            "2020-01-01T00:10:00Z",
+        )
+        .expect("preserve reconcile");
+    let row = store
+        .list_offer_states_for_ids(&["offer-1".to_string()])
+        .expect("offer state")
+        .into_iter()
+        .next()
+        .expect("row");
+    assert_eq!(row.updated_at, "2020-01-01T00:10:00Z");
+    assert_eq!(
+        row.cancel_submitted_at.as_deref(),
+        Some("2020-01-01T00:00:00Z")
     );
 }
 

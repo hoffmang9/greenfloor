@@ -22,11 +22,12 @@ fn read_offer_state_list_row(row: &rusqlite::Row<'_>) -> SignerResult<OfferState
             .get(4)
             .map_err(|err| SignerError::Other(format!("failed to read updated_at: {err}")))?,
         cancel_submitted_tx_id: row.get(5).ok(),
+        cancel_submitted_at: row.get(6).ok(),
     })
 }
 
 const OFFER_STATE_LIST_COLUMNS: &str =
-    "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id";
+    "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id, cancel_submitted_at";
 
 impl SqliteStore {
     /// Upsert offer state.
