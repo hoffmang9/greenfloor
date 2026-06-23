@@ -98,7 +98,10 @@ pub async fn list_unspent_cats_by_ids(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],
 ) -> SignerResult<Vec<Cat>> {
-    let records = coin_records_for_coin_ids(client, coin_ids).await?;
+    let records: Vec<CoinRecord> = unspent_coin_records(
+        coin_records_for_coin_ids(client, coin_ids).await?,
+    )
+    .collect();
     cats_with_lineage_from_records(client, &records).await
 }
 

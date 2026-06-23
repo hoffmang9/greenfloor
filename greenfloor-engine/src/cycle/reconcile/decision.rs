@@ -1,4 +1,5 @@
 use super::cancel_submitted_policy::{resolve_cancel_submitted_transition, CancelSubmittedContext};
+use chrono::Utc;
 use crate::cycle::lifecycle::OfferSignal;
 use crate::offer::dexie_payload::DEXIE_STATUS_CANCELLED;
 
@@ -110,7 +111,7 @@ pub(crate) fn resolve_watched_offer_decision(
     );
     if current_state.is_cancel_submitted() {
         let ctx = cancel_submitted.cloned().unwrap_or_default();
-        return resolve_cancel_submitted_transition(status, coinset, &ctx);
+        return resolve_cancel_submitted_transition(status, coinset, &ctx, Utc::now());
     }
     let status = StatusClass::from_option(status, coinset.has_tx_ids);
     dispatch(coinset, status, current_state).apply(current_state)

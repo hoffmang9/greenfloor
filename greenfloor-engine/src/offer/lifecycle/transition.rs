@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::adapters::DexieClient;
 use crate::cycle::reconcile::CancelSubmittedContext;
+use crate::hex::canonical_tx_id;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
@@ -53,10 +54,13 @@ fn cancel_submitted_context_for_offer(
         return Ok(None);
     };
     let cancel_tx_signal = match tracking.cancel_tx_id.as_deref() {
-        Some(tx_id) => store
-            .get_tx_signal_state(&[tx_id.to_string()])?
-            .get(tx_id)
-            .cloned(),
+        Some(tx_id) => match canonical_tx_id(tx_id) {
+            Some(canonical) => store
+                .get_tx_signal_state(std::slice::from_ref(&canonical))?
+                .get(&canonical)
+                .cloned(),
+            None => None,
+        },
         None => None,
     };
     Ok(Some(CancelSubmittedContext {

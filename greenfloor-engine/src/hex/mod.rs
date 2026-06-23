@@ -39,6 +39,19 @@ pub fn normalize_hex_id(value: &str) -> String {
     normalized
 }
 
+/// Canonical 64-char lowercase tx/coin id, or `None` when invalid.
+#[must_use]
+pub fn canonical_tx_id(value: &str) -> Option<String> {
+    let normalized = normalize_hex_id(value);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+/// Legacy `0x`-prefixed form of a canonical tx id (for tolerant DB lookups).
+#[must_use]
+pub fn legacy_prefixed_tx_id(canonical: &str) -> Option<String> {
+    canonical_tx_id(canonical).map(|id| format!("0x{id}"))
+}
+
 #[must_use]
 pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
     if is_canonical_xch_asset(asset_id) {
@@ -51,6 +64,7 @@ pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex, normalize_hex_id};
+    use super::canonical_tx_id;
 
     #[test]
     fn normalize_hex_strips_prefix_and_non_hex() {
@@ -71,6 +85,11 @@ mod tests {
         assert!(!is_hex_id("abc"));
         assert!(!is_hex_id(&"g".repeat(64)));
         assert_eq!(normalize_hex_id("not-hex"), "");
+    }
+
+    #[test]
+    fn canonical_tx_id_rejects_invalid() {
+        assert!(canonical_tx_id("not-hex").is_none());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use crate::error::{SignerError, SignerResult};
+use crate::hex::canonical_tx_id;
 use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
 use rusqlite::params;
 
@@ -215,6 +216,9 @@ impl SqliteStore {
         last_seen_status: Option<i64>,
         updated_at: &str,
     ) -> SignerResult<()> {
+        let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id).ok_or_else(|| {
+            SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}"))
+        })?;
         self.upsert_offer_state_with_metadata_at(
             offer_id,
             market_id,
@@ -222,7 +226,7 @@ impl SqliteStore {
             last_seen_status,
             updated_at,
             OfferCancelWrite {
-                cancel_submitted_tx_id: Some(cancel_tx_id),
+                cancel_submitted_tx_id: Some(stored_cancel_tx_id.as_str()),
                 ..OfferCancelWrite::default()
             },
         )

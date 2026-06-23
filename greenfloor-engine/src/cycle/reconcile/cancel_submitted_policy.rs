@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 use crate::cycle::lifecycle::{OfferLifecycleState, OfferSignal};
+use crate::hex::canonical_tx_id;
 use crate::offer::dexie_payload::{DEXIE_STATUS_CANCELLED, DEXIE_STATUS_OPEN};
 use crate::storage::{OfferStateListRow, TxSignalStateRow};
 
@@ -42,7 +43,8 @@ impl CancelSubmittedContext {
         let cancel_tx_id = row.cancel_submitted_tx_id.clone();
         let cancel_tx_signal = cancel_tx_id
             .as_deref()
-            .and_then(|tx_id| signals.get(tx_id).cloned());
+            .and_then(|tx_id| canonical_tx_id(tx_id).and_then(|id| signals.get(&id)))
+            .cloned();
         Self {
             cancel_tx_id,
             cancel_tx_signal,
@@ -53,8 +55,8 @@ impl CancelSubmittedContext {
 
 /// Whether daemon cancel policy should skip targeting this offer for now.
 #[must_use]
-pub fn defer_cancel_target(ctx: &CancelSubmittedContext) -> bool {
-    cancel_tx_in_flight(ctx)
+pub fn defer_cancel_target(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
+    cancel_tx_in_flight(ctx, now)
 }
 
 /// Drop Dexie-open ids whose cancel submit is still in flight.
@@ -63,6 +65,7 @@ pub fn filter_defer_cancel_submitted_targets(
     offer_ids: &[String],
     db_rows: &[OfferStateListRow],
     tx_signals: &HashMap<String, TxSignalStateRow>,
+    now: DateTime<Utc>,
 ) -> Vec<String> {
     let defer_targets: std::collections::HashSet<&str> = db_rows
         .iter()
@@ -71,7 +74,7 @@ pub fn filter_defer_cancel_submitted_targets(
                 return None;
             }
             let ctx = CancelSubmittedContext::from_row_and_signals(row, tx_signals);
-            defer_cancel_target(&ctx).then_some(row.offer_id.as_str())
+            defer_cancel_target(&ctx, now).then_some(row.offer_id.as_str())
         })
         .collect();
     offer_ids
@@ -86,6 +89,7 @@ pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
     coinset: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
+    now: DateTime<Utc>,
 ) -> ReconcileTransition {
     if cancel_tx_confirmed(ctx) {
         return cancel_tx_chain_confirmed_transition();
@@ -96,8 +100,8 @@ pub(crate) fn resolve_cancel_submitted_transition(
             ReconcileState::CancelSubmitted,
         );
     }
-    if cancel_tx_in_flight(ctx) {
-        return cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx);
+    if cancel_tx_in_flight(ctx, now) {
+        return cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx, now);
     }
     if coinset.has_confirmed {
         return open_signal_transition(
@@ -117,20 +121,21 @@ pub(crate) fn resolve_cancel_submitted_transition(
             TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
         );
     }
-    cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx)
+    cancel_submitted_dexie_status_transition(dexie_status, coinset, ctx, now)
 }
 
 fn cancel_submitted_dexie_status_transition(
     dexie_status: Option<i64>,
     coinset: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
+    now: DateTime<Utc>,
 ) -> ReconcileTransition {
     match dexie_status {
         None if coinset.has_tx_ids => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
-        Some(DEXIE_STATUS_OPEN) if stale_cancel_submit_eligible(ctx) => ReconcileTransition::new(
+        Some(DEXIE_STATUS_OPEN) if stale_cancel_submit_eligible(ctx, now) => ReconcileTransition::new(
             ReconcileState::Lifecycle(OfferLifecycleState::Open),
             REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
             SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
@@ -150,17 +155,17 @@ fn cancel_tx_confirmed(ctx: &CancelSubmittedContext) -> bool {
 }
 
 #[must_use]
-fn cancel_tx_in_flight(ctx: &CancelSubmittedContext) -> bool {
+fn cancel_tx_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
     let Some(cancel_tx_id) = ctx
         .cancel_tx_id
         .as_deref()
         .filter(|value| !value.is_empty())
     else {
-        return within_cancel_submit_grace(ctx.submitted_at.as_deref());
+        return within_cancel_submit_grace(ctx.submitted_at.as_deref(), now);
     };
     let _ = cancel_tx_id;
     match ctx.cancel_tx_signal.as_ref() {
-        None => within_cancel_submit_grace(ctx.submitted_at.as_deref()),
+        None => within_cancel_submit_grace(ctx.submitted_at.as_deref(), now),
         Some(signal) if signal.tx_block_confirmed_at.is_some() => false,
         Some(signal) if signal.mempool_observed_at.is_some() => true,
         Some(_) => false,
@@ -168,12 +173,12 @@ fn cancel_tx_in_flight(ctx: &CancelSubmittedContext) -> bool {
 }
 
 #[must_use]
-fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext) -> bool {
-    !cancel_tx_in_flight(ctx) && !cancel_tx_confirmed(ctx)
+fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
+    !cancel_tx_in_flight(ctx, now) && !cancel_tx_confirmed(ctx)
 }
 
 #[must_use]
-fn within_cancel_submit_grace(submitted_at: Option<&str>) -> bool {
+fn within_cancel_submit_grace(submitted_at: Option<&str>, now: DateTime<Utc>) -> bool {
     let Some(raw) = submitted_at
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -183,12 +188,13 @@ fn within_cancel_submit_grace(submitted_at: Option<&str>) -> bool {
     let Ok(parsed) = DateTime::parse_from_rfc3339(raw) else {
         return false;
     };
-    (Utc::now() - parsed.with_timezone(&Utc)).num_seconds() < CANCEL_SUBMIT_TRACKING_GRACE_SECS
+    (now - parsed.with_timezone(&Utc)).num_seconds() < CANCEL_SUBMIT_TRACKING_GRACE_SECS
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use crate::cycle::reconcile::metadata::{
         REASON_CANCEL_TX_CHAIN_CONFIRMED, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
         TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED,
@@ -221,7 +227,10 @@ mod tests {
             }),
             submitted_at: None,
         };
-        assert!(defer_cancel_target(&ctx));
+        assert!(defer_cancel_target(
+            &ctx,
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
+        ));
     }
 
     #[test]
@@ -234,7 +243,24 @@ mod tests {
             }),
             submitted_at: None,
         };
-        assert!(!stale_cancel_submit_eligible(&ctx));
+        assert!(!stale_cancel_submit_eligible(
+            &ctx,
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
+        ));
+    }
+
+    #[test]
+    fn grace_allows_untracked_cancel_shortly_after_submit() {
+        let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let now = submitted + chrono::Duration::seconds(60);
+        assert!(within_cancel_submit_grace(
+            Some(&submitted.to_rfc3339()),
+            now
+        ));
+        assert!(!within_cancel_submit_grace(
+            Some(&submitted.to_rfc3339()),
+            submitted + chrono::Duration::seconds(600)
+        ));
     }
 
     #[test]
@@ -251,6 +277,7 @@ mod tests {
             Some(DEXIE_STATUS_OPEN),
             CoinsetSignalSummary::default(),
             &ctx,
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
         )
         .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
         assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -280,6 +307,7 @@ mod tests {
                 has_mempool: false,
             },
             &ctx,
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
         )
         .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
         assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -287,16 +315,16 @@ mod tests {
 
     #[test]
     fn filter_defers_only_in_flight_cancel_submitted() {
-        let now = Utc::now().to_rfc3339();
+        let now = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let rows = vec![
-            row("o1", "open", None, &now),
-            row("o2", "cancel_submitted", Some("tx2"), &now),
+            row("o1", "open", None, &now.to_rfc3339()),
+            row("o2", "cancel_submitted", Some("tx2"), &now.to_rfc3339()),
         ];
         let mut signals = HashMap::new();
         signals.insert(
             "tx2".to_string(),
             TxSignalStateRow {
-                mempool_observed_at: Some(now.clone()),
+                mempool_observed_at: Some(now.to_rfc3339()),
                 tx_block_confirmed_at: None,
             },
         );
@@ -305,6 +333,7 @@ mod tests {
                 &["o1".to_string(), "o2".to_string()],
                 &rows,
                 &signals,
+                now,
             ),
             vec!["o1".to_string()]
         );

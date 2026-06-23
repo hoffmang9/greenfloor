@@ -7,14 +7,13 @@ use crate::config::{
     MarketConfig,
 };
 use crate::cycle::{
-    evaluate_cancel_policy_decision, CancelPolicyDecision, MarketCycleResultState, ReconcileState,
+    evaluate_cancel_policy_decision, filter_defer_cancel_submitted_targets,
+    CancelPolicyDecision, MarketCycleResultState, ReconcileState,
 };
+use chrono::Utc;
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::dexie_offer_status;
-use crate::offer::lifecycle::{
-    cancel_offers_on_chain, collect_dexie_open_offer_ids, filter_defer_cancel_submitted_targets,
-    CancelOfferTarget,
-};
+use crate::offer::lifecycle::{cancel_offers_on_chain, collect_dexie_open_offer_ids, CancelOfferTarget};
 use crate::operator_log::{LogContext, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
 
@@ -113,6 +112,7 @@ fn cancel_target_offer_ids(store: &SqliteStore, offers: &[Value]) -> SignerResul
         &target_offer_ids,
         &db_rows,
         &tx_signals,
+        Utc::now(),
     ))
 }
 

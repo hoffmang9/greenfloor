@@ -8,7 +8,6 @@ mod reconcile_watched_offers;
 mod status_cli;
 mod transition;
 
-pub use crate::cycle::reconcile::filter_defer_cancel_submitted_targets;
 pub use cancel::{
     cancel_offer_on_chain, cancel_offers_on_chain, CancelOfferOnChainParams,
     CancelOfferOnChainResult, CancelOfferOutcome, CancelOfferTarget,

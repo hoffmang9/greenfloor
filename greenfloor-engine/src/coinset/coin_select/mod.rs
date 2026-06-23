@@ -160,7 +160,8 @@ pub(crate) async fn select_cats_for_spend(
         )
         .collect()
     } else {
-        coin_records_for_coin_ids(client, explicit_coin_ids).await?
+        unspent_coin_records(coin_records_for_coin_ids(client, explicit_coin_ids).await?)
+            .collect()
     };
     select_cats_for_spend_from_records(client, records, explicit_coin_ids, target_amount).await
 }

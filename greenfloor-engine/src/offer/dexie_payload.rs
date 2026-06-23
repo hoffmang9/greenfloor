@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use crate::cycle::lifecycle::OfferSignal;
+use crate::hex::canonical_tx_id;
 
 pub const DEXIE_STATUS_OPEN: i64 = 0;
 pub const DEXIE_STATUS_CANCELLED: i64 = 3;
@@ -60,22 +61,13 @@ const COINSET_COIN_ID_KEYS: &[&str] = &[
     "removals",
 ];
 
-fn normalize_hex_hash(value: &str) -> String {
-    value.trim().trim_start_matches("0x").to_ascii_lowercase()
-}
-
-fn looks_like_tx_id(value: &str) -> bool {
-    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
-}
-
 fn add_candidate(candidate: &Value, tx_ids: &mut Vec<String>) {
     match candidate {
         Value::String(raw) => {
-            let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized)
-                && !tx_ids.iter().any(|existing| existing == &normalized)
-            {
-                tx_ids.push(normalized);
+            if let Some(normalized) = canonical_tx_id(raw) {
+                if !tx_ids.iter().any(|existing| existing == &normalized) {
+                    tx_ids.push(normalized);
+                }
             }
         }
         Value::Array(items) => {
@@ -113,11 +105,10 @@ fn walk_tx_id_node(node: &Value, tx_ids: &mut Vec<String>) {
 fn add_coin_id_candidate(candidate: &Value, coin_ids: &mut Vec<String>) {
     match candidate {
         Value::String(raw) => {
-            let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized)
-                && !coin_ids.iter().any(|existing| existing == &normalized)
-            {
-                coin_ids.push(normalized);
+            if let Some(normalized) = canonical_tx_id(raw) {
+                if !coin_ids.iter().any(|existing| existing == &normalized) {
+                    coin_ids.push(normalized);
+                }
             }
         }
         Value::Array(items) => {
@@ -261,6 +252,7 @@ impl From<DexieOfferPayload> for Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hex::is_hex_id;
     use serde_json::json;
 
     #[test]
@@ -301,6 +293,23 @@ mod tests {
             extract_coinset_tx_ids_from_offer_payload(&payload),
             vec!["a".repeat(64)]
         );
+    }
+
+    #[test]
+    fn extracts_prefixed_tx_id_in_canonical_form() {
+        let tx_id = "c".repeat(64);
+        let payload = json!({"offer": {"tx_id": format!("0x{tx_id}")}});
+        assert_eq!(
+            extract_coinset_tx_ids_from_offer_payload(&payload),
+            vec![tx_id]
+        );
+    }
+
+    #[test]
+    fn ignores_invalid_tx_id_candidates() {
+        let payload = json!({"offer": {"tx_id": "not-a-tx-id"}});
+        assert!(extract_coinset_tx_ids_from_offer_payload(&payload).is_empty());
+        assert!(!is_hex_id("not-a-tx-id"));
     }
 
     #[test]

@@ -48,9 +48,9 @@ pub use orchestration::{
     DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };
 pub use reconcile::{
-    resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
-    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
-    ReconcileState,
+    filter_defer_cancel_submitted_targets, resolve_missing_watched_offer_transition,
+    resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
+    unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
