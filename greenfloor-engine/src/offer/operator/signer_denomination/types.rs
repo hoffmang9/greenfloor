@@ -68,8 +68,8 @@ struct BootstrapPlanOutput<'a> {
 impl<'a> From<&'a BootstrapPlan> for BootstrapPlanOutput<'a> {
     fn from(plan: &'a BootstrapPlan) -> Self {
         Self {
-            source_coin_id: &plan.source_coin_id,
-            source_amount: plan.source_amount,
+            source_coin_id: plan.source_coin_id(),
+            source_amount: plan.source_amount(),
             output_amounts_base_units: &plan.output_amounts_base_units,
             total_output_amount: plan.total_output_amount,
             change_amount: plan.change_amount,
@@ -182,11 +182,6 @@ impl BootstrapPhaseFailure {
 
     pub(super) fn with_wait_error(mut self, wait_error: impl Into<String>) -> Self {
         self.wait_error = Some(wait_error.into());
-        self
-    }
-
-    pub(super) fn with_split_result(mut self, split_result: Value) -> Self {
-        self.split_result = split_result;
         self
     }
 }

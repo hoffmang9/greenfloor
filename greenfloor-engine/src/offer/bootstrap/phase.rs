@@ -44,7 +44,7 @@ pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<Bootstrap
             reason: "bootstrap_invalid_coins".to_string(),
             ready: false,
         }),
-        BootstrapPlanOutcome::NeedsSplit(_) => None,
+        BootstrapPlanOutcome::NeedsShape(_) => None,
     }
 }
 
@@ -66,9 +66,13 @@ pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPh
             ),
             ready: false,
         },
-        BootstrapPlanOutcome::NeedsSplit(_) => BootstrapPhaseSnapshot {
+        BootstrapPlanOutcome::NeedsShape(plan) => BootstrapPhaseSnapshot {
             status: "executed",
-            reason: "bootstrap_submitted:still_needs_split".to_string(),
+            reason: if plan.requires_combine_first() {
+                "bootstrap_submitted:still_needs_combine".to_string()
+            } else {
+                "bootstrap_submitted:still_needs_split".to_string()
+            },
             ready: false,
         },
         BootstrapPlanOutcome::InvalidLadder => BootstrapPhaseSnapshot {
@@ -110,7 +114,7 @@ mod tests {
     fn early_phase_skips_when_needs_split() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable);
+        let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5);
         assert!(bootstrap_early_phase(&outcome).is_none());
     }
 

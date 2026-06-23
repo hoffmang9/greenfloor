@@ -126,7 +126,7 @@ pub fn plan_coin_ops(
             op_type: CoinOpKind::Split,
             size_base_units: bucket.size_base_units,
             op_count,
-            reason: "low_watermark_buffer_deficit".to_string(),
+            reason: crate::coin_ops::LOW_WATERMARK_BUFFER_DEFICIT.to_string(),
         });
         remaining_ops -= op_count;
         remaining_fee -= split_fee_mojos;

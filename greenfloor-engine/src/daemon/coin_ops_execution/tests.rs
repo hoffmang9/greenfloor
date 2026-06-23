@@ -1,3 +1,5 @@
+#![allow(clippy::large_futures)]
+
 use std::collections::HashSet;
 
 use crate::coin_ops::execution::{
@@ -210,20 +212,68 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
 }
 
 #[tokio::test]
-async fn execute_daemon_split_plan_skips_single_coin_noop() {
-    let ctx = test_exec_context(sample_market("xch1test"), Vec::new(), None);
+async fn execute_daemon_split_plan_defers_single_output_to_bootstrap() {
+    let mut market = sample_market("xch1test");
+    market.base_asset = "b".repeat(64);
+    let ctx = test_exec_context(
+        market,
+        vec![
+            SpendableCoin {
+                id: test_coin_id('a'),
+                amount: 65_000,
+            },
+            SpendableCoin {
+                id: test_coin_id('b'),
+                amount: 20_000,
+            },
+            SpendableCoin {
+                id: test_coin_id('c'),
+                amount: 11_000,
+            },
+            SpendableCoin {
+                id: test_coin_id('d'),
+                amount: 4_000,
+            },
+        ],
+        None,
+    );
     let plan = CoinOpPlan {
         op_type: CoinOpKind::Split,
-        size_base_units: 10,
+        size_base_units: 100,
         op_count: 1,
-        reason: "test".to_string(),
+        reason: "low_watermark_buffer_deficit".to_string(),
     };
 
     let (items, executed) = execute_daemon_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].reason, "split_single_coin_noop_skipped");
+    assert_eq!(items[0].reason, "bootstrap_primary_shape_deferred");
+}
+
+#[tokio::test]
+async fn execute_daemon_split_plan_submits_single_output_when_source_is_larger() {
+    let mut market = sample_market("xch1test");
+    market.base_asset = "b".repeat(64);
+    let ctx = test_exec_context(
+        market,
+        vec![SpendableCoin {
+            id: test_coin_id('a'),
+            amount: 150_000,
+        }],
+        Some("split-op"),
+    );
+    let plan = CoinOpPlan {
+        op_type: CoinOpKind::Split,
+        size_base_units: 100,
+        op_count: 1,
+        reason: "low_watermark_buffer_deficit".to_string(),
+    };
+
+    let (items, executed) = execute_daemon_split_plan(&ctx, &plan).await;
+
+    assert_eq!(executed, 1);
+    assert_eq!(items[0].reason, "signer_split_submitted");
 }
 
 #[tokio::test]

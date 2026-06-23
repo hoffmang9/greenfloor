@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::{
-    coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_daemon_auto_split_selection, usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
-    SplitCombinePrereqPlan, SplitSkipReason,
+    coin_op_non_negative_u64, coin_op_target_amount_allowed,
+    defer_low_watermark_split_to_post_bootstrap, i64_to_usize, plan_daemon_auto_split_selection,
+    usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan, SplitCombinePrereqPlan,
+    SplitSkipReason,
 };
 
 use super::items::{
@@ -92,6 +93,18 @@ struct SplitPlanContext {
     canonical_asset_id: String,
 }
 
+fn spendable_amounts_base_units(
+    spendable: &[SpendableCoin],
+    base_unit_mojo_multiplier: i64,
+) -> Vec<i64> {
+    let multiplier = base_unit_mojo_multiplier.max(1);
+    spendable
+        .iter()
+        .map(|coin| coin.amount / multiplier)
+        .filter(|amount| *amount > 0)
+        .collect()
+}
+
 fn prepare_split_plan_context(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
@@ -99,18 +112,6 @@ fn prepare_split_plan_context(
     let op_type = plan.op_type.as_str();
     let op_count = plan.op_count;
     let size_base_units = plan.size_base_units;
-
-    if op_count == 1 {
-        return Err((
-            vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
-                "split_single_coin_noop_skipped",
-            )],
-            0,
-        ));
-    }
 
     let amount_per_coin_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
     let canonical_asset_id = ctx.market.base_asset.trim();
@@ -268,6 +269,7 @@ async fn attempt_daemon_split(
     }
 }
 
+#[allow(clippy::large_futures)] // defer gate stacks coin-list and auto-split selection futures
 pub(crate) async fn execute_daemon_split_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
@@ -282,16 +284,14 @@ async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
-    let split_ctx = prepare_split_plan_context(ctx, plan)?;
-
     let initial = match ctx.list_spendable_coins().await {
         Ok(coins) => coins,
         Err(err) => {
             return Err((
                 vec![skip_item(
-                    &split_ctx.op_type,
-                    split_ctx.size_base_units,
-                    split_ctx.op_count,
+                    plan.op_type.as_str(),
+                    plan.size_base_units,
+                    plan.op_count,
                     format!("{COIN_OP_ERROR_PREFIX}:{err}"),
                 )],
                 0,
@@ -301,15 +301,35 @@ async fn execute_daemon_split_plan_inner(
     if initial.is_empty() {
         return Err((
             vec![skip_item(
-                &split_ctx.op_type,
-                split_ctx.size_base_units,
-                split_ctx.op_count,
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
                 "no_spendable_split_coin_available",
             )],
             0,
         ));
     }
 
+    let spendable_for_defer: Vec<SpendableCoin> = initial
+        .iter()
+        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
+        .cloned()
+        .collect();
+    let amounts_base_units =
+        spendable_amounts_base_units(&spendable_for_defer, ctx.base_unit_mojo_multiplier);
+    if defer_low_watermark_split_to_post_bootstrap(plan, &amounts_base_units) {
+        return Ok((
+            vec![skip_item(
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
+                "bootstrap_primary_shape_deferred",
+            )],
+            0,
+        ));
+    }
+
+    let split_ctx = prepare_split_plan_context(ctx, plan)?;
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {
         match attempt_daemon_split(ctx, &split_ctx, attempt_index, &attempted_coin_ids).await? {

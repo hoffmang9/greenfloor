@@ -27,6 +27,9 @@ pub fn build_combine_prereq_plan(
         .filter(|coin| selected_ids.contains(coin.id.as_str()))
         .map(|coin| coin.amount)
         .sum();
+    if combine_selected_total < required_amount_mojos {
+        return None;
+    }
 
     let cap_applied = combine_input_coin_ids.len() < combine_coin_ids.len();
     Some(SplitCombinePrereqPlan {

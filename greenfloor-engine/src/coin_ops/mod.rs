@@ -13,6 +13,7 @@ mod plan;
 mod policy;
 mod scalars;
 mod selection;
+mod shape_defer;
 mod wallet_coin;
 
 pub use amounts::{combine_output_amounts, total_for_coin_ids};
@@ -44,5 +45,9 @@ pub use scalars::{
 pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
     select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
+};
+pub use shape_defer::{
+    aggregate_covers_without_single_coin, defer_low_watermark_split_to_post_bootstrap,
+    LOW_WATERMARK_BUFFER_DEFICIT,
 };
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};
