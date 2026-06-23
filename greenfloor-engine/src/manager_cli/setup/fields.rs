@@ -30,6 +30,7 @@ pub fn run_program_fields(ctx: &ManagerContext) -> SignerResult<i32> {
         "signer_kms_region": program.signer_kms_region,
         "vault_launcher_id": program.vault_launcher_id,
         "signer_offer_path_configured": program.signer_offer_path_configured(),
+        "storage_audit_retention_days": program.storage_audit_retention_days,
         "dev_python_min_version": program.dev_python_min_version,
         "keys_registry": keys_registry,
     }))?;

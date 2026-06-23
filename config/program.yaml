@@ -21,6 +21,10 @@ runtime:
   market_slot_count: 4
   dry_run: false
 
+storage:
+  # Delete non-financial audit_event rows older than this many days (daemon runs daily).
+  audit_retention_days: 30
+
 # Local Rust engine for vault KMS offer execution.
 # Written to ~/.greenfloor/config/signer.yaml at runtime for Rust load_signer_config.
 signer:

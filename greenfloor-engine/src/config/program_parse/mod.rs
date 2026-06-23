@@ -5,6 +5,7 @@ mod guards;
 mod helpers;
 mod runtime;
 mod signer_vault;
+mod storage;
 mod tx_block;
 mod venue;
 
@@ -14,6 +15,7 @@ use coin_ops::parse_coin_ops_config;
 use guards::{parse_dev_python_min_version, reject_cloud_wallet, require_pushover_provider};
 use runtime::parse_runtime_config;
 use signer_vault::parse_signer_vault_ids;
+use storage::parse_storage_config;
 use tx_block::parse_tx_block_config;
 use venue::parse_venue_config;
 
@@ -45,6 +47,7 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     let venue = parse_venue_config(raw)?;
     let coin_ops = parse_coin_ops_config(coin_ops_section)?;
     let runtime = parse_runtime_config(runtime_section)?;
+    let storage = parse_storage_config(raw.get("storage").and_then(Value::as_object))?;
     let tx_block = parse_tx_block_config(tx_trigger, &network)?;
     let signer_vault = parse_signer_vault_ids(raw);
 
@@ -78,6 +81,7 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         runtime_reservation_ttl_seconds: runtime.runtime_reservation_ttl_seconds,
         runtime_dry_run: runtime.runtime_dry_run,
         runtime_loop_interval_seconds: runtime.runtime_loop_interval_seconds,
+        storage_audit_retention_days: storage.storage_audit_retention_days,
         tx_block_trigger_mode: tx_block.tx_block_trigger_mode,
         tx_block_websocket_url: tx_block.tx_block_websocket_url,
         tx_block_websocket_reconnect_interval_seconds: tx_block

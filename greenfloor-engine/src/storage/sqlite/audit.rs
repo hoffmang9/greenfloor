@@ -1,7 +1,11 @@
+use chrono::{DateTime, Utc};
 use rusqlite::params;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::storage::audit_retention::{
+    audit_retention_cutoff, preserve_predicate_sql, PruneAuditEventsOptions, PruneAuditEventsReport,
+};
 
 use super::{utcnow_iso, AuditEventRow, SqliteStore};
 
@@ -193,5 +197,110 @@ impl SqliteStore {
         Ok(events
             .iter()
             .any(|row| row.payload.get(field).and_then(serde_json::Value::as_str) == Some(value)))
+    }
+
+    /// Prune non-financial audit rows older than the configured retention window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if counting, deleting, or vacuuming fails.
+    pub fn prune_stale_audit_events(
+        &self,
+        retention_days: u64,
+        options: PruneAuditEventsOptions,
+    ) -> SignerResult<PruneAuditEventsReport> {
+        let cutoff = audit_retention_cutoff(retention_days)?;
+        let deletable_count = self.count_prunable_audit_events_older_than(cutoff)?;
+        if options.dry_run {
+            return Ok(PruneAuditEventsReport {
+                retention_days,
+                cutoff,
+                dry_run: true,
+                deletable_count,
+                deleted_count: 0,
+                vacuum_ran: false,
+            });
+        }
+
+        let batch_size = i64::try_from(options.batch_size.max(1)).map_err(|_| {
+            SignerError::Other("audit prune batch_size exceeds i64 max".to_string())
+        })?;
+        let mut deleted_count = 0_u64;
+        loop {
+            let deleted = self.delete_prunable_audit_events_batch(cutoff, batch_size)?;
+            if deleted == 0 {
+                break;
+            }
+            deleted_count = deleted_count.saturating_add(deleted);
+        }
+
+        let vacuum_ran = if options.vacuum {
+            self.conn
+                .execute_batch("VACUUM;")
+                .map_err(|err| SignerError::Other(format!("failed to vacuum sqlite db: {err}")))?;
+            true
+        } else {
+            false
+        };
+
+        Ok(PruneAuditEventsReport {
+            retention_days,
+            cutoff,
+            dry_run: false,
+            deletable_count,
+            deleted_count,
+            vacuum_ran,
+        })
+    }
+
+    fn count_prunable_audit_events_older_than(&self, cutoff: DateTime<Utc>) -> SignerResult<u64> {
+        let cutoff_iso = cutoff.to_rfc3339();
+        let preserve = preserve_predicate_sql();
+        let sql = format!(
+            r"
+            SELECT COUNT(*)
+            FROM audit_event
+            WHERE created_at < ?1
+              AND NOT ({preserve})
+            "
+        );
+        let count: i64 = self
+            .conn
+            .query_row(&sql, params![cutoff_iso], |row| row.get(0))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to count prunable audit_event rows: {err}"))
+            })?;
+        u64::try_from(count.max(0)).map_err(|_| {
+            SignerError::Other("prunable audit_event count exceeds u64 max".to_string())
+        })
+    }
+
+    fn delete_prunable_audit_events_batch(
+        &self,
+        cutoff: DateTime<Utc>,
+        batch_size: i64,
+    ) -> SignerResult<u64> {
+        let cutoff_iso = cutoff.to_rfc3339();
+        let preserve = preserve_predicate_sql();
+        let sql = format!(
+            r"
+            DELETE FROM audit_event
+            WHERE id IN (
+                SELECT id
+                FROM audit_event
+                WHERE created_at < ?1
+                  AND NOT ({preserve})
+                LIMIT ?2
+            )
+            "
+        );
+        let deleted = self
+            .conn
+            .execute(&sql, params![cutoff_iso, batch_size])
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prune audit_event rows: {err}"))
+            })?;
+        u64::try_from(deleted)
+            .map_err(|_| SignerError::Other("pruned audit_event count exceeds u64 max".to_string()))
     }
 }

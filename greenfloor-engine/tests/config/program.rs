@@ -20,6 +20,7 @@ fn parse_program_config_minimal_valid() {
         std::path::PathBuf::from("/tmp/greenfloor-test-home")
     );
     assert_eq!(cfg.runtime_loop_interval_seconds, 30);
+    assert_eq!(cfg.storage_audit_retention_days, 30);
     assert!(!cfg.runtime_dry_run);
     assert_eq!(cfg.tx_block_trigger_mode, "websocket");
     assert_eq!(cfg.runtime_market_slot_count, 0);
@@ -172,6 +173,14 @@ fn parse_program_config_market_slot_count() {
     raw["runtime"]["market_slot_count"] = json!(4);
     let cfg = parse_program_config(&raw).expect("config");
     assert_eq!(cfg.runtime_market_slot_count, 4);
+}
+
+#[test]
+fn parse_program_config_storage_audit_retention_days() {
+    let mut raw = base_program_raw();
+    raw["storage"] = json!({ "audit_retention_days": 45 });
+    let cfg = parse_program_config(&raw).expect("config");
+    assert_eq!(cfg.storage_audit_retention_days, 45);
 }
 
 #[test]

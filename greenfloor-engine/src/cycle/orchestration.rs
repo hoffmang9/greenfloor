@@ -170,16 +170,6 @@ pub fn dedupe_sorted_market_ids(market_ids: &[String]) -> Vec<String> {
 }
 
 #[must_use]
-pub fn should_log_disabled_market(now_monotonic: f64, next_log_deadline: f64) -> bool {
-    next_log_deadline <= now_monotonic
-}
-
-#[must_use]
-pub fn next_disabled_market_log_deadline(now_monotonic: f64, interval_seconds: u64) -> f64 {
-    now_monotonic + crate::offer::pricing::u64_to_f64(interval_seconds)
-}
-
-#[must_use]
 pub fn should_try_cat_inventory_fallback(coinset_scan_empty: bool, base_asset: &str) -> bool {
     if !coinset_scan_empty {
         return false;

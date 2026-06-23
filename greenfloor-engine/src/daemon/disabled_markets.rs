@@ -1,25 +1,14 @@
-use std::sync::{Mutex, Once};
-use std::time::Instant;
+use std::sync::Once;
 
 use crate::config::MarketsConfig;
 use crate::cycle::{
-    next_disabled_market_log_deadline, should_log_disabled_market,
+    periodic::{PeriodicGate, PeriodicOutcome},
     DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };
 
 static STARTUP_LOGGED: Once = Once::new();
-static NEXT_LOG_DEADLINE: std::sync::LazyLock<Mutex<Option<f64>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
-
-fn monotonic_seconds() -> f64 {
-    static START: Once = Once::new();
-    static mut ORIGIN: Option<Instant> = None;
-    START.call_once(|| unsafe {
-        ORIGIN = Some(Instant::now());
-    });
-    let origin = unsafe { ORIGIN.expect("monotonic origin") };
-    origin.elapsed().as_secs_f64()
-}
+static PERIODIC_GATE: std::sync::LazyLock<PeriodicGate> =
+    std::sync::LazyLock::new(PeriodicGate::new);
 
 pub fn disabled_market_log_interval_seconds() -> u64 {
     std::env::var("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS")
@@ -51,23 +40,11 @@ pub fn log_disabled_markets_startup_once(markets: &MarketsConfig) {
             market_ids = ?disabled_market_ids,
             "disabled_markets_startup"
         );
-        let now = monotonic_seconds();
-        if let Ok(mut next_log_deadline) = NEXT_LOG_DEADLINE.lock() {
-            *next_log_deadline = Some(next_disabled_market_log_deadline(now, interval_seconds));
-        }
+        PERIODIC_GATE.seed_next_deadline(interval_seconds);
     });
 }
 
 pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
-    let interval_seconds = disabled_market_log_interval_seconds();
-    let now = monotonic_seconds();
-    let Ok(mut next_log_deadline) = NEXT_LOG_DEADLINE.lock() else {
-        return;
-    };
-    let deadline = next_log_deadline.unwrap_or(0.0);
-    if !should_log_disabled_market(now, deadline) {
-        return;
-    }
     let disabled_count = markets
         .markets
         .iter()
@@ -76,13 +53,16 @@ pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
     if disabled_count == 0 {
         return;
     }
-    *next_log_deadline = Some(next_disabled_market_log_deadline(now, interval_seconds));
-    tracing::info!(
-        count = disabled_count,
-        interval_seconds,
-        event = "disabled_markets_periodic",
-        "disabled_markets"
-    );
+    let interval_seconds = disabled_market_log_interval_seconds();
+    PERIODIC_GATE.run_if_due(interval_seconds, || {
+        tracing::info!(
+            count = disabled_count,
+            interval_seconds,
+            event = "disabled_markets_periodic",
+            "disabled_markets"
+        );
+        PeriodicOutcome::Completed
+    });
 }
 
 #[cfg(test)]
@@ -129,5 +109,35 @@ mod tests {
         };
         log_disabled_markets_startup_once(&markets);
         log_disabled_markets_startup_once(&markets);
+    }
+
+    #[test]
+    fn periodic_gate_skips_second_log_until_interval_elapses() {
+        let markets = MarketsConfig {
+            markets: vec![sample_market("disabled-a", false)],
+        };
+        log_disabled_markets_periodic(&markets);
+        log_disabled_markets_periodic(&markets);
+    }
+
+    #[test]
+    fn periodic_log_skips_gate_when_no_disabled_markets() {
+        let enabled_only = MarketsConfig {
+            markets: vec![sample_market("enabled", true)],
+        };
+        log_disabled_markets_periodic(&enabled_only);
+        log_disabled_markets_periodic(&enabled_only);
+    }
+
+    #[test]
+    fn periodic_log_runs_when_disabled_markets_present() {
+        let with_disabled = MarketsConfig {
+            markets: vec![
+                sample_market("enabled", true),
+                sample_market("disabled-a", false),
+            ],
+        };
+        log_disabled_markets_periodic(&with_disabled);
+        log_disabled_markets_periodic(&with_disabled);
     }
 }

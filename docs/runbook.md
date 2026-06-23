@@ -160,6 +160,18 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - `coin_ops_plan` and `coin_op_*`: split/combine planning and execution outcomes.
 - `taker_detection`: canonical taker transition events produced by `offers-reconcile`.
 
+### Audit retention
+
+- Configure `storage.audit_retention_days` in `program.yaml` (default `30`).
+- The daemon prunes non-financial `audit_event` rows once per day (override cadence with
+  `GREENFLOOR_AUDIT_PRUNE_INTERVAL_SECONDS`; failed daemon prunes retry after
+  `GREENFLOOR_AUDIT_PRUNE_FAILURE_RETRY_SECONDS`, default 1 hour).
+- Preserved forever: taker/cancel/on-chain coin-op audit rows (see `storage/audit_retention.rs`).
+- Manual maintenance:
+  - `greenfloor-manager audit-prune --dry-run`
+  - `greenfloor-manager audit-prune`
+  - `greenfloor-manager audit-prune --vacuum` (reclaim disk after large deletes)
+
 ## 5) Incident Triage
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
