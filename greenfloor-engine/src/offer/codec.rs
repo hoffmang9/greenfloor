@@ -285,7 +285,7 @@ mod tests {
     use crate::bech32m::decode_offer;
     use crate::hex::hex_to_bytes32;
     use crate::test_support::simulator::{
-        build_offer_from_setup, setup_direct_roundtrip_with_expires_at,
+        build_offer_from_setup, setup_roundtrip_opts, OfferRoundtripScenario, RoundtripOptions,
     };
     use chia_bls;
     use chia_protocol::{Coin, SpendBundle};
@@ -337,7 +337,13 @@ mod tests {
     #[tokio::test]
     async fn simulator_offer_passes_structure_expiry_and_dexie_gates() {
         let expires_at = 4_000_000_000_u64;
-        let mut setup = setup_direct_roundtrip_with_expires_at(expires_at).await;
+        let mut setup = setup_roundtrip_opts(
+            OfferRoundtripScenario::Direct,
+            RoundtripOptions {
+                expires_at: Some(expires_at),
+            },
+        )
+        .await;
         let result = build_offer_from_setup(&mut setup)
             .await
             .expect("build offer");

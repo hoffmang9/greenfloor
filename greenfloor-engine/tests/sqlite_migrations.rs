@@ -1,6 +1,6 @@
 use greenfloor_engine::hex::legacy_prefixed_tx_id;
+use greenfloor_engine::storage::test_support::open_pre_migration_connection;
 use greenfloor_engine::storage::SqliteStore;
-use greenfloor_engine::storage::SCHEMA;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -15,10 +15,8 @@ fn run_migration_case(case: MigrationCase) {
     let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("{}: tempdir: {err}", case.name));
     let path = dir.path().join("migrate.db");
     {
-        let conn =
-            Connection::open(&path).unwrap_or_else(|err| panic!("{}: open: {err}", case.name));
-        conn.execute_batch(SCHEMA)
-            .unwrap_or_else(|err| panic!("{}: schema: {err}", case.name));
+        let conn = open_pre_migration_connection(&path)
+            .unwrap_or_else(|err| panic!("{}: pre-migration open: {err}", case.name));
         (case.seed)(&conn);
     }
     let store =
@@ -114,26 +112,28 @@ fn assert_cancel_submitted_at_backfilled(store: &SqliteStore, _path: &Path) {
 }
 
 #[test]
-fn store_open_runs_sqlite_migrations() {
-    let cases = [
-        MigrationCase {
-            name: "normalize_legacy_tx_signal_ids",
-            seed: seed_legacy_tx_signal,
-            assert: assert_legacy_tx_signal_normalized,
-        },
-        MigrationCase {
-            name: "normalize_legacy_offer_cancel_tx_id",
-            seed: seed_legacy_offer_cancel_tx_id,
-            assert: assert_legacy_offer_cancel_tx_id_normalized,
-        },
-        MigrationCase {
-            name: "backfill_cancel_submitted_at_from_updated_at",
-            seed: seed_cancel_submitted_without_timestamp,
-            assert: assert_cancel_submitted_at_backfilled,
-        },
-    ];
+fn normalize_legacy_tx_signal_ids_on_store_open() {
+    run_migration_case(MigrationCase {
+        name: "normalize_legacy_tx_signal_ids",
+        seed: seed_legacy_tx_signal,
+        assert: assert_legacy_tx_signal_normalized,
+    });
+}
 
-    for case in cases {
-        run_migration_case(case);
-    }
+#[test]
+fn normalize_legacy_offer_cancel_tx_id_on_store_open() {
+    run_migration_case(MigrationCase {
+        name: "normalize_legacy_offer_cancel_tx_id",
+        seed: seed_legacy_offer_cancel_tx_id,
+        assert: assert_legacy_offer_cancel_tx_id_normalized,
+    });
+}
+
+#[test]
+fn backfill_cancel_submitted_at_from_updated_at_on_store_open() {
+    run_migration_case(MigrationCase {
+        name: "backfill_cancel_submitted_at_from_updated_at",
+        seed: seed_cancel_submitted_without_timestamp,
+        assert: assert_cancel_submitted_at_backfilled,
+    });
 }

@@ -362,25 +362,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_combine_batches_marks_invalid_coin_id_batch_failed() {
-        let plan = DustBatchPlan {
-            combinable_batches: vec![vec![DustCoin {
-                coin_id: "not-valid-hex".to_string(),
-                amount: 100,
-            }]],
-            uncombinable: vec![],
-        };
-        let signer = crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1");
-        let (failed, batches) = Box::pin(execute_combine_batches(
-            &signer,
+    async fn run_dust_combine_batch_rejects_invalid_coin_id() {
+        let err = run_dust_combine_batch(
+            crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1"),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             &"f".repeat(64),
-            &plan,
-            CoinSpentVerifyConfig::default(),
-        ))
-        .await;
-        assert!(failed);
-        let entries = batches.as_array().expect("batch array");
-        assert_eq!(entries[0].get("status"), Some(&json!("failed")));
+            &[DustCoin {
+                coin_id: "not-valid-hex".to_string(),
+                amount: 100,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("invalid hex"));
     }
 }

@@ -46,6 +46,11 @@ pub(crate) struct RoundtripSetup {
     pub scenario: OfferRoundtripScenario,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RoundtripOptions {
+    pub expires_at: Option<u64>,
+}
+
 async fn split_presplit_cat_on_sim(
     harness: &mut SimulatorVaultHarness,
     source_cat: Cat,
@@ -154,6 +159,13 @@ fn build_request(
 }
 
 pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> RoundtripSetup {
+    setup_roundtrip_opts(scenario, RoundtripOptions::default()).await
+}
+
+pub(crate) async fn setup_roundtrip_opts(
+    scenario: OfferRoundtripScenario,
+    options: RoundtripOptions,
+) -> RoundtripSetup {
     let mut harness = SimulatorVaultHarness::new();
     let offer_amount = 1_000;
     let source_cat = match scenario {
@@ -170,7 +182,7 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
             (None, None)
         };
 
-    let request = build_request(
+    let mut request = build_request(
         &harness,
         scenario,
         offer_amount,
@@ -178,6 +190,7 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
         presplit_cat.as_ref(),
         source_coin_id,
     );
+    request.expires_at = options.expires_at;
 
     RoundtripSetup {
         harness,
@@ -186,12 +199,6 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
         presplit_cat,
         scenario,
     }
-}
-
-pub(crate) async fn setup_direct_roundtrip_with_expires_at(expires_at: u64) -> RoundtripSetup {
-    let mut setup = setup_roundtrip(OfferRoundtripScenario::Direct).await;
-    setup.request.expires_at = Some(expires_at);
-    setup
 }
 
 pub(crate) async fn build_offer_from_setup(

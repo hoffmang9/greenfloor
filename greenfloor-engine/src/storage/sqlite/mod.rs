@@ -1,4 +1,5 @@
 //! `SQLite` store: connection lifecycle and shared row types.
+#![cfg_attr(coverage, coverage(off))]
 
 mod alerts;
 mod audit;

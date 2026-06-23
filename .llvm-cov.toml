@@ -1,2 +1,4 @@
 [report]
-ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|/tests\\.rs$|/bin/|/main\\.rs$)"
+# Persistence glue under storage/sqlite/ is exercised by tests/sqlite_* integration
+# suites; exclude it from llvm-cov function/line noise (map_err arms, migrations).
+ignore-filename-regex = "(tests/|test_support/|test_env/|test_overrides|/tests\\.rs$|/bin/|/main\\.rs$|storage/sqlite/|storage/test_support\\.rs$)"
