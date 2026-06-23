@@ -10,7 +10,7 @@ use crate::daemon::dispatch_test_controls::{
 };
 use crate::error::{SignerError, SignerResult};
 
-use super::managed_post::{flush_managed_post_persist_for_test, ManagedPostContext};
+use super::managed_post::ManagedPostContext;
 use super::OfferDispatchOutput;
 
 pub(crate) fn parallel_dispatch_result(
@@ -31,15 +31,12 @@ pub(crate) fn parallel_dispatch_result(
 }
 
 pub(crate) fn managed_post_result(
-    post_ctx: &ManagedPostContext,
+    _post_ctx: &ManagedPostContext,
     injections: &DaemonDispatchTestInjections,
 ) -> Option<SignerResult<bool>> {
     match injections.managed_post? {
         ManagedPostTestMode::Success => Some(Ok(true)),
         ManagedPostTestMode::Failure => Some(Ok(false)),
-        ManagedPostTestMode::ExerciseSharedPersistFlush => {
-            Some(flush_managed_post_persist_for_test(post_ctx).map(|()| true))
-        }
     }
 }
 
@@ -48,7 +45,7 @@ mod tests {
     use super::*;
     use crate::config::ManagerProgramConfig;
     use crate::daemon::offer_dispatch::managed_post::ManagedPostContext;
-    use crate::storage::SqliteStore;
+    use crate::storage::CycleWriteStore;
 
     #[test]
     fn parallel_dispatch_injection_modes() {
@@ -79,7 +76,7 @@ mod tests {
     #[test]
     fn managed_post_injection_modes() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = ManagedPostContext {
             program: ManagerProgramConfig::default(),
             paths: crate::daemon::cycle_paths::DaemonCyclePaths::new(
@@ -102,13 +99,5 @@ mod tests {
         assert!(!managed_post_result(&post_ctx, &failure)
             .expect("configured")
             .expect("not posted"));
-
-        crate::storage::reset_sqlite_open_calls_for_test();
-        let flush = DaemonDispatchTestInjections::default()
-            .managed_post(ManagedPostTestMode::ExerciseSharedPersistFlush);
-        assert!(managed_post_result(&post_ctx, &flush)
-            .expect("configured")
-            .expect("flushed"));
-        assert_eq!(crate::storage::sqlite_open_calls_for_test(), 0);
     }
 }

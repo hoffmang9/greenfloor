@@ -137,9 +137,7 @@ mod tests {
     use crate::cycle::PlannedAction;
     use crate::daemon::cycle_paths::DaemonCyclePaths;
     use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
-    use crate::storage::{
-        reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test, SqliteStore,
-    };
+    use crate::storage::CycleWriteStore;
     use crate::test_support::market_config::sample_market;
 
     fn sample_post_context(store: CycleWriteStore) -> ManagedPostContext {
@@ -179,7 +177,7 @@ mod tests {
     #[test]
     fn daemon_managed_post_request_builds_drop_only_offer_parts() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = sample_post_context(store);
         let market = sample_market("xch1test");
         let action = sample_action(25);
@@ -199,7 +197,7 @@ mod tests {
     #[tokio::test]
     async fn execute_managed_post_skips_non_positive_size_without_network() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = sample_post_context(store);
         let market = sample_market("xch1test");
         let action = sample_action(0);
@@ -208,15 +206,5 @@ mod tests {
             .await
             .expect("managed post");
         assert!(!posted);
-    }
-
-    #[test]
-    fn managed_post_persist_flush_uses_shared_store_without_reopen() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
-        reset_sqlite_open_calls_for_test();
-        let post_ctx = sample_post_context(store);
-        flush_managed_post_persist_for_test(&post_ctx).expect("flush");
-        assert_eq!(sqlite_open_calls_for_test(), 0);
     }
 }

@@ -10,7 +10,7 @@ use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::{CycleWriteStore, SqliteStore};
+use crate::storage::CycleWriteStore;
 use crate::test_support::market_config;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -96,7 +96,7 @@ impl ParallelDispatchHarness {
     pub(super) fn new(parallelism_enabled: bool, dry_run: bool, with_signer: bool) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
-        let store = SqliteStore::open_shared(&db_path).expect("open");
+        let store = CycleWriteStore::open(&db_path).expect("open");
         let program_path = dir.path().join("program.yaml");
         write_minimal_program_with_signer(
             &program_path,
@@ -136,6 +136,24 @@ impl ParallelDispatchHarness {
 
         execute_strategy_actions(&self.test_ctx.cycle_context(), market, actions).await
     }
+
+    pub(super) fn managed_post_context(&self) -> super::super::managed_post::ManagedPostContext {
+        super::super::managed_post::ManagedPostContext::from_market_cycle(
+            &self.test_ctx.cycle_context(),
+        )
+    }
+}
+
+pub(super) fn assert_persist_flush_does_not_reopen_cycle_db(
+    post_ctx: &super::super::managed_post::ManagedPostContext,
+) {
+    use crate::storage::{reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test};
+
+    use super::super::managed_post::flush_managed_post_persist_for_test;
+
+    reset_sqlite_open_calls_for_test();
+    flush_managed_post_persist_for_test(post_ctx).expect("flush");
+    assert_eq!(sqlite_open_calls_for_test(), 0);
 }
 
 pub(super) async fn generous_spendable_profiles(

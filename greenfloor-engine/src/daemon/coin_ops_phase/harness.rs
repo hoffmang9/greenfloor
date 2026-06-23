@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, CycleWriteStore, SqliteStore};
+use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, CycleWriteStore};
 use crate::test_support::ladder::market_with_sell_ladder;
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
@@ -41,7 +41,7 @@ impl CoinOpsPhaseHarness {
         bundle.program.coin_ops_max_operations_per_run = 20;
         configure_program(&mut bundle.program);
         let db_path = state_db_path_for_home(dir.path());
-        let store = SqliteStore::open_shared(&db_path).expect("open");
+        let store = CycleWriteStore::open(&db_path).expect("open");
         if let Some(entry) = ledger_seed {
             store
                 .lock()

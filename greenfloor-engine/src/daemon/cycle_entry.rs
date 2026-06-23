@@ -9,7 +9,7 @@ use crate::operator_log::{
     LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY,
     STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
-use crate::storage::{CycleWriteStore, SqliteStore};
+use crate::storage::CycleWriteStore;
 use tracing::Level;
 
 use super::market_context::{
@@ -172,7 +172,7 @@ pub async fn run_daemon_cycle_once(
         &resources.program().home_dir,
         request.state_db_override.as_deref(),
     );
-    let write_store = SqliteStore::open_shared(&db_path)?;
+    let write_store = CycleWriteStore::open(&db_path)?;
     write_store.sync(|store| {
         crate::storage::maybe_prune_stale_audit_events(
             store,

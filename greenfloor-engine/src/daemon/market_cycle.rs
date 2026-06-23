@@ -4,100 +4,17 @@ use std::pin::Pin;
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{LogContext, MARKET_CYCLE_COMPLETED, MARKET_CYCLE_STARTED, MARKET_PHASE};
+use crate::locked_logged_phase;
+use crate::operator_log::{LogContext, MARKET_CYCLE_COMPLETED, MARKET_CYCLE_STARTED};
 use crate::storage::CycleWriteStore;
-use tracing::Level;
 
 use super::cancel_phase::run_market_cancel_phase;
 use super::coin_ops_phase::run_coin_ops_phase;
+use super::cycle_store::run_logged_market_phase;
 use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::strategy_phase::run_strategy_phase;
-
-#[derive(Clone, Copy)]
-enum MarketPhaseTraceOutcome {
-    Started,
-    Failed,
-    Completed,
-}
-
-impl MarketPhaseTraceOutcome {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Started => "started",
-            Self::Failed => "failed",
-            Self::Completed => "completed",
-        }
-    }
-}
-
-fn trace_market_phase(
-    market_id: &str,
-    market_phase: &str,
-    outcome: MarketPhaseTraceOutcome,
-    level: Level,
-) {
-    macro_rules! emit {
-        ($msg:literal) => {
-            crate::trace_event!(
-                level = level,
-                LogContext::MARKET_CYCLE,
-                MARKET_PHASE,
-                {
-                    market_id = market_id,
-                    market_phase = market_phase,
-                    outcome = outcome.label(),
-                };
-                $msg
-            );
-        };
-    }
-    match outcome {
-        MarketPhaseTraceOutcome::Started => {
-            emit!("market phase started");
-        }
-        MarketPhaseTraceOutcome::Failed => {
-            emit!("market phase failed");
-        }
-        MarketPhaseTraceOutcome::Completed => {
-            emit!("market phase completed");
-        }
-    }
-}
-
-async fn run_logged_market_phase<F, T>(
-    market_id: &str,
-    market_phase: &str,
-    body: F,
-) -> SignerResult<T>
-where
-    F: Future<Output = SignerResult<T>>,
-{
-    trace_market_phase(
-        market_id,
-        market_phase,
-        MarketPhaseTraceOutcome::Started,
-        Level::DEBUG,
-    );
-    let result = body.await;
-    if result.is_err() {
-        trace_market_phase(
-            market_id,
-            market_phase,
-            MarketPhaseTraceOutcome::Failed,
-            Level::WARN,
-        );
-    } else {
-        trace_market_phase(
-            market_id,
-            market_phase,
-            MarketPhaseTraceOutcome::Completed,
-            Level::DEBUG,
-        );
-    }
-    result
-}
 
 pub fn run_post_reconcile_market_phases<'a>(
     write_store: &'a CycleWriteStore,
@@ -111,17 +28,19 @@ pub fn run_post_reconcile_market_phases<'a>(
     ))
 }
 
+#[allow(clippy::large_futures)] // sequential phase orchestration stacks market context futures
 async fn execute_post_reconcile_phases(
     write_store: &CycleWriteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
-    let bucket_counts = run_logged_market_phase(market.market_id.as_str(), "inventory", async {
-        crate::cycle_locked!(write_store, |store| {
-            run_inventory_phase(&store, ctx.resources, market, cycle_state)
-        })
-    })
+    let bucket_counts = locked_logged_phase!(
+        market.market_id.as_str(),
+        "inventory",
+        write_store,
+        |store| { run_inventory_phase(&store, ctx.resources, market, cycle_state) }
+    )
     .await?;
 
     let strategy = run_logged_market_phase(
@@ -131,19 +50,16 @@ async fn execute_post_reconcile_phases(
     )
     .await?;
 
-    Box::pin(run_logged_market_phase(
-        market.market_id.as_str(),
-        "cancel",
-        async {
-            crate::cycle_locked!(write_store, |store| {
-                run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state)
-            })
-        },
-    ))
+    locked_logged_phase!(market.market_id.as_str(), "cancel", write_store, |store| {
+        run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state)
+    })
     .await?;
 
-    run_logged_market_phase(market.market_id.as_str(), "coin_ops", async {
-        crate::cycle_locked!(write_store, |store| {
+    locked_logged_phase!(
+        market.market_id.as_str(),
+        "coin_ops",
+        write_store,
+        |store| {
             run_coin_ops_phase(
                 &store,
                 ctx,
@@ -153,8 +69,8 @@ async fn execute_post_reconcile_phases(
                 &strategy.sell_active_counts,
                 &strategy.newly_executed_sell_counts,
             )
-        })
-    })
+        }
+    )
     .await?;
     Ok(())
 }

@@ -17,7 +17,6 @@ pub enum ParallelDispatchTestMode {
 pub enum ManagedPostTestMode {
     Success,
     Failure,
-    ExerciseSharedPersistFlush,
 }
 
 /// Test-only offer-dispatch injections carried on `DaemonCycleTestControls`.

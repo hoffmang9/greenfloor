@@ -176,6 +176,7 @@ impl SqliteStore {
     /// # Errors
     ///
     /// Returns an error when [`Self::open`] fails.
+    #[deprecated(note = "use CycleWriteStore::open instead")]
     pub fn open_shared(db_path: &Path) -> SignerResult<CycleWriteStore> {
         CycleWriteStore::open(db_path)
     }

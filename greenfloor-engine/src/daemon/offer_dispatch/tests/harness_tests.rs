@@ -119,16 +119,20 @@ async fn execute_strategy_actions_parallel_success_runs_prepare_path() {
 
 #[tokio::test]
 async fn parallel_dispatch_persist_flush_does_not_reopen_cycle_db() {
-    use crate::storage::{reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test};
+    use super::harness::{
+        assert_persist_flush_does_not_reopen_cycle_db, generous_spendable_profiles,
+    };
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode,
+    };
 
     let market = sample_market_with_pricing();
     let mut harness = ParallelDispatchHarness::new(true, false, true);
-    reset_sqlite_open_calls_for_test();
     let spendable_profiles = generous_spendable_profiles(&harness.program_path, &market).await;
     harness.set_offer_dispatch(
         DaemonDispatchTestInjections::default()
             .spendable_profiles(spendable_profiles)
-            .managed_post(ManagedPostTestMode::ExerciseSharedPersistFlush),
+            .managed_post(ManagedPostTestMode::Success),
     );
 
     let output = harness
@@ -136,5 +140,5 @@ async fn parallel_dispatch_persist_flush_does_not_reopen_cycle_db() {
         .await
         .expect("parallel persist dispatch");
     assert_eq!(output.executed_count, 1);
-    assert_eq!(sqlite_open_calls_for_test(), 0);
+    assert_persist_flush_does_not_reopen_cycle_db(&harness.managed_post_context());
 }

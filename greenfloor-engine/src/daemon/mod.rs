@@ -9,6 +9,7 @@ mod coinset_tx;
 mod coinset_ws;
 mod cycle_entry;
 mod cycle_paths;
+mod cycle_store;
 mod daemon_loop;
 mod disabled_markets;
 #[cfg(test)]
