@@ -87,7 +87,7 @@ mod tests {
                 dir.path().join("markets.yaml"),
                 None,
             ),
-            persist_store: store,
+            write_store: store,
             dispatch_injections: DaemonDispatchTestInjections::default(),
         };
 

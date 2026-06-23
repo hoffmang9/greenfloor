@@ -15,7 +15,6 @@ use crate::daemon::market_context::MarketCycleContext;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
-use crate::storage::with_sqlite_store;
 
 use super::coordinator::{OfferReservationCoordinator, ReservationAcquireResult};
 use super::managed_post::{post_managed_planned_action_owned, ManagedPostContext};
@@ -82,7 +81,7 @@ fn prepare_parallel_dispatch(
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
-    with_sqlite_store(&ctx.dispatch.write_store, |store| {
+    ctx.dispatch.write_store.sync(|store| {
         LogContext::MARKET_CYCLE.dual_audit(
             store,
             Level::DEBUG,

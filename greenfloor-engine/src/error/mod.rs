@@ -41,6 +41,9 @@ pub enum SignerError {
     #[error("driver error: {0}")]
     Driver(String),
 
+    #[error("unparseable cat lineage: {0}")]
+    UnparseableCatLineage(String),
+
     #[error("no unspent cat coins")]
     NoUnspentCatCoins,
 

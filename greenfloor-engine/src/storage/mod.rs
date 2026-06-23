@@ -23,12 +23,13 @@ pub use persist::{persist_offer_post_records, upsert_offer_post_record};
 #[doc(hidden)]
 pub mod test_support;
 pub use sqlite::{
-    lock_sqlite_store, resolve_state_db_path, shared_sqlite_store, state_db_path_for_home,
-    with_sqlite_store, AuditEventRow, CoinOpBudgetReport, CoinOpLedgerEntry,
-    OfferPostPersistRecord, OfferReservationAcquireOutcome, OfferReservationLeaseRequest,
-    OfferReservationLeaseRow, OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow,
-    SharedSqliteStore, SqliteStore, StoredAlertState, TxSignalStateRow,
+    resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
+    CoinOpLedgerEntry, CycleWriteStore, OfferPostPersistRecord, OfferReservationAcquireOutcome,
+    OfferReservationLeaseRequest, OfferReservationLeaseRow, OfferReservationRejectReason,
+    OfferStateDetailRow, OfferStateListRow, SqliteStore, StoredAlertState, TxSignalStateRow,
 };
 
 #[cfg(test)]
-pub use sqlite::{reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test};
+pub use sqlite::{
+    lock_shared_store_for_test, reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test,
+};

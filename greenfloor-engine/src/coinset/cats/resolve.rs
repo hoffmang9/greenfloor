@@ -12,6 +12,10 @@ use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 
+fn unparseable_cat_lineage(detail: impl Into<String>) -> SignerError {
+    SignerError::UnparseableCatLineage(detail.into())
+}
+
 pub(crate) async fn cat_from_record(
     client: &CoinsetClient,
     record: &CoinRecord,
@@ -69,7 +73,7 @@ fn parse_cat_children(
     catch_unwind(AssertUnwindSafe(move || {
         parse_cat_children_inner(parent_coin, &puzzle_reveal, &solution)
     }))
-    .map_err(|_| SignerError::Driver("clvm panic while parsing cat children".to_string()))?
+    .map_err(|_| unparseable_cat_lineage("clvm panic while parsing cat children"))?
 }
 
 fn parse_cat_children_inner(
@@ -79,9 +83,9 @@ fn parse_cat_children_inner(
 ) -> SignerResult<Option<Vec<Cat>>> {
     let mut allocator = Allocator::new();
     let parent_puzzle_ptr = node_from_bytes(&mut allocator, puzzle_reveal)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+        .map_err(|err| unparseable_cat_lineage(err.to_string()))?;
     let parent_solution_ptr = node_from_bytes(&mut allocator, solution)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+        .map_err(|err| unparseable_cat_lineage(err.to_string()))?;
     let parent_puzzle = Puzzle::parse(&allocator, parent_puzzle_ptr);
     Cat::parse_children(
         &mut allocator,
@@ -89,7 +93,7 @@ fn parse_cat_children_inner(
         parent_puzzle,
         parent_solution_ptr,
     )
-    .map_err(|err| SignerError::Driver(err.to_string()))
+    .map_err(|err| unparseable_cat_lineage(err.to_string()))
 }
 
 fn parse_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Option<Cat>> {
@@ -143,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_cat_children_empty_spend_returns_driver_error_not_panic() {
+    fn parse_cat_children_empty_spend_returns_unparseable_lineage_not_panic() {
         let _parent = Coin::new(
             chia_protocol::Bytes32::new([1; 32]),
             chia_protocol::Bytes32::new([2; 32]),
@@ -155,6 +159,6 @@ mod tests {
             1,
         );
         let err = parse_cat_from_parent_spend(child, &empty_parent_spend()).expect_err("parse");
-        assert!(matches!(err, SignerError::Driver(_)));
+        assert!(matches!(err, SignerError::UnparseableCatLineage(_)));
     }
 }

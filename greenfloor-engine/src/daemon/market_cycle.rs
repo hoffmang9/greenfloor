@@ -5,7 +5,7 @@ use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, MARKET_CYCLE_COMPLETED, MARKET_CYCLE_STARTED, MARKET_PHASE};
-use crate::storage::SharedSqliteStore;
+use crate::storage::CycleWriteStore;
 use tracing::Level;
 
 use super::cancel_phase::run_market_cancel_phase;
@@ -100,7 +100,7 @@ where
 }
 
 pub fn run_post_reconcile_market_phases<'a>(
-    write_store: &'a SharedSqliteStore,
+    write_store: &'a CycleWriteStore,
     ctx: &'a MarketCycleContext<'a>,
     market: &'a MarketConfig,
 ) -> Pin<Box<dyn Future<Output = SignerResult<MarketCycleResultState>> + 'a>> {
@@ -112,13 +112,13 @@ pub fn run_post_reconcile_market_phases<'a>(
 }
 
 async fn execute_post_reconcile_phases(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
     let bucket_counts = run_logged_market_phase(market.market_id.as_str(), "inventory", async {
-        crate::with_locked_store!(write_store, |store| {
+        crate::cycle_locked!(write_store, |store| {
             run_inventory_phase(&store, ctx.resources, market, cycle_state)
         })
     })
@@ -135,7 +135,7 @@ async fn execute_post_reconcile_phases(
         market.market_id.as_str(),
         "cancel",
         async {
-            crate::with_locked_store!(write_store, |store| {
+            crate::cycle_locked!(write_store, |store| {
                 run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state)
             })
         },
@@ -143,7 +143,7 @@ async fn execute_post_reconcile_phases(
     .await?;
 
     run_logged_market_phase(market.market_id.as_str(), "coin_ops", async {
-        crate::with_locked_store!(write_store, |store| {
+        crate::cycle_locked!(write_store, |store| {
             run_coin_ops_phase(
                 &store,
                 ctx,
@@ -160,7 +160,7 @@ async fn execute_post_reconcile_phases(
 }
 
 async fn run_post_reconcile_market_phases_async(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
 ) -> SignerResult<MarketCycleResultState> {

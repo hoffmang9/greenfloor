@@ -26,11 +26,6 @@ pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     coin_records_from_response(response)
 }
 
-#[must_use]
-pub(crate) fn is_skippable_cat_lineage_error(err: &SignerError) -> bool {
-    matches!(err, SignerError::Driver(_))
-}
-
 /// Resolve spendable [`Cat`] values with lineage proofs for coin records.
 ///
 /// Lineage resolution runs sequentially so clvm parsing stays on one task and
@@ -52,7 +47,7 @@ pub(crate) async fn cats_with_lineage_from_records(
         match resolve::cat_from_record(client, record).await {
             Ok(Some(cat)) => cats.push(cat),
             Ok(None) => {}
-            Err(err) if is_skippable_cat_lineage_error(&err) => {
+            Err(err @ SignerError::UnparseableCatLineage(_)) => {
                 crate::trace_event!(
                     DEBUG,
                     LogContext::COINSET,
@@ -180,24 +175,5 @@ mod tests {
             .expect("cats");
         mock.assert_async().await;
         assert!(cats.is_empty(), "unresolved lineage records are omitted");
-    }
-
-    #[tokio::test]
-    #[ignore = "live coinset BYC inventory scan (run: RUST_BACKTRACE=1 cargo test -p greenfloor-engine byc_inventory_scan_live_coinset -- --ignored --nocapture)"]
-    async fn byc_inventory_scan_live_coinset() {
-        use crate::coinset::direct_coinset_client;
-
-        const BYC_ASSET_HEX: &str =
-            "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac";
-        const RECEIVE_ADDRESS: &str =
-            "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3";
-
-        let asset_bytes = hex::decode(BYC_ASSET_HEX).expect("BYC asset hex");
-        let asset_id = Bytes32::try_from(asset_bytes.as_slice()).expect("BYC asset id");
-        let client = direct_coinset_client("mainnet", None).expect("coinset client");
-        let cats = list_unspent_cats(&client, RECEIVE_ADDRESS, asset_id)
-            .await
-            .expect("BYC inventory scan must return SignerResult, not panic");
-        eprintln!("BYC inventory scan: {} spendable cats", cats.len());
     }
 }

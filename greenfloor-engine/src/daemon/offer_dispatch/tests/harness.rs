@@ -10,7 +10,7 @@ use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::{SharedSqliteStore, SqliteStore};
+use crate::storage::{CycleWriteStore, SqliteStore};
 use crate::test_support::market_config;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -39,7 +39,7 @@ markets:
 pub(super) fn test_context_from_program_file(
     dir: &TempDir,
     db_path: &Path,
-    write_store: SharedSqliteStore,
+    write_store: CycleWriteStore,
     program_path: &Path,
     mut program: ManagerProgramConfig,
     with_signer: bool,
@@ -87,7 +87,7 @@ pub(super) fn sample_action() -> PlannedAction {
 
 pub(super) struct ParallelDispatchHarness {
     pub(super) _dir: TempDir,
-    pub(super) store: SharedSqliteStore,
+    pub(super) store: CycleWriteStore,
     pub(super) program_path: PathBuf,
     test_ctx: crate::daemon::test_support::TestCycleContextBundle,
 }

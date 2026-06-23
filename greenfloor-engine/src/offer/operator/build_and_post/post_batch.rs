@@ -35,13 +35,24 @@ pub struct PostFailureAudit {
 }
 
 #[derive(Clone)]
+pub struct PostPersistPayload {
+    pub persist_records: Vec<OfferPostPersistRecord>,
+    pub failure_audits: Vec<PostFailureAudit>,
+}
+
 pub struct PostIterationBatch {
     pub post_results: Vec<Value>,
     pub built_offers_preview: Vec<Value>,
     pub bootstrap_actions: Vec<Value>,
     pub publish_failures: u32,
-    pub persist_records: Vec<OfferPostPersistRecord>,
-    pub failure_audits: Vec<PostFailureAudit>,
+    pub(crate) persist: PostPersistPayload,
+}
+
+impl PostIterationBatch {
+    #[must_use]
+    pub fn into_persist_payload(self) -> PostPersistPayload {
+        self.persist
+    }
 }
 
 pub struct PostBatchEmitter<'a> {
@@ -192,7 +203,7 @@ pub fn apply_post_iteration_outcome(
             if target == PostEmitTarget::TraceOnly {
                 emitter.trace_failure(&failure.error, None);
             } else {
-                batch.failure_audits.push(PostFailureAudit {
+                batch.persist.failure_audits.push(PostFailureAudit {
                     error: failure.error.clone(),
                     offer_ref: None,
                 });
@@ -225,6 +236,7 @@ pub fn apply_post_iteration_outcome(
                     emitter.trace_failure(&error, offer_ref.as_deref());
                 } else {
                     batch
+                        .persist
                         .failure_audits
                         .push(PostFailureAudit { error, offer_ref });
                 }
@@ -232,7 +244,7 @@ pub fn apply_post_iteration_outcome(
             }
             batch.post_results.push(success.to_venue_result());
             if let Some(record) = success.persist_record {
-                batch.persist_records.push(record);
+                batch.persist.persist_records.push(record);
             }
         }
     }

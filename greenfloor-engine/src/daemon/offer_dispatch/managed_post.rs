@@ -17,7 +17,7 @@ use crate::offer::operator::{
     BuildAndPostOfferRequestParts, BuildAndPostRunOptions, BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
-use crate::storage::{lock_sqlite_store, SharedSqliteStore};
+use crate::storage::CycleWriteStore;
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
 
@@ -29,7 +29,7 @@ use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 pub(super) struct ManagedPostContext {
     pub program: ManagerProgramConfig,
     pub paths: DaemonCyclePaths,
-    pub persist_store: SharedSqliteStore,
+    pub write_store: CycleWriteStore,
     #[cfg(test)]
     pub dispatch_injections: DaemonDispatchTestInjections,
 }
@@ -39,7 +39,7 @@ impl ManagedPostContext {
         Self {
             program: ctx.resources.program().clone(),
             paths: ctx.resources.paths.clone(),
-            persist_store: ctx.dispatch.write_store.clone(),
+            write_store: ctx.dispatch.write_store.clone(),
             #[cfg(test)]
             dispatch_injections: ctx.dispatch.test_controls.offer_dispatch.clone(),
         }
@@ -96,7 +96,7 @@ async fn execute_managed_post(
     let request = daemon_managed_post_request(post_ctx, market, action)?;
     let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
     if let Some(artifacts) = artifacts {
-        let store = lock_sqlite_store(&post_ctx.persist_store)?;
+        let store = post_ctx.write_store.lock()?;
         flush_build_and_post_persist(&store, &artifacts)?;
     }
     Ok(response.exit_code == 0)
@@ -124,7 +124,7 @@ pub(super) fn flush_managed_post_persist_for_test(
 ) -> SignerResult<()> {
     use crate::offer::operator::empty_persist_artifacts_for_test;
 
-    let store = lock_sqlite_store(&post_ctx.persist_store)?;
+    let store = post_ctx.write_store.lock()?;
     flush_build_and_post_persist(&store, &empty_persist_artifacts_for_test())
 }
 
@@ -142,7 +142,7 @@ mod tests {
     };
     use crate::test_support::market_config::sample_market;
 
-    fn sample_post_context(store: SharedSqliteStore) -> ManagedPostContext {
+    fn sample_post_context(store: CycleWriteStore) -> ManagedPostContext {
         ManagedPostContext {
             program: ManagerProgramConfig {
                 network: "mainnet".to_string(),
@@ -157,7 +157,7 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            persist_store: store,
+            write_store: store,
             dispatch_injections: DaemonDispatchTestInjections::default(),
         }
     }

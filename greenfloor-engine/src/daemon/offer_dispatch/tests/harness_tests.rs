@@ -5,6 +5,8 @@ use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };
 
+use crate::storage::lock_shared_store_for_test;
+
 use super::harness::{
     generous_spendable_profiles, sample_action, sample_market, sample_market_with_pricing,
     ParallelDispatchHarness,
@@ -19,10 +21,7 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         .expect("dispatch");
 
     assert_eq!(output.executed_count, 0);
-    let events = harness
-        .store
-        .lock()
-        .expect("lock")
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
         .expect("events");
     assert_eq!(events.len(), 1);

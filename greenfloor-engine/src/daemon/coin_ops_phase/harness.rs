@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SharedSqliteStore, SqliteStore};
+use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, CycleWriteStore, SqliteStore};
 use crate::test_support::ladder::market_with_sell_ladder;
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
@@ -18,7 +18,7 @@ use crate::test_support::minimal_program::{
 use super::run_coin_ops_phase;
 
 pub struct CoinOpsPhaseHarness {
-    pub store: SharedSqliteStore,
+    pub store: CycleWriteStore,
     _dir: TempDir,
     ctx: crate::daemon::test_support::TestCycleContextBundle,
 }
@@ -64,7 +64,7 @@ impl CoinOpsPhaseHarness {
     }
 
     pub async fn run_with_market(&self, market: &MarketConfig, wallet_counts: &BTreeMap<i64, i64>) {
-        crate::with_locked_store!(&self.store, |store| {
+        crate::cycle_locked!(&self.store, |store| {
             run_coin_ops_phase(
                 &store,
                 &self.ctx.cycle_context(),

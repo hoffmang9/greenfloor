@@ -24,7 +24,7 @@ use crate::cycle::{expand_planned_actions, PlannedAction};
 
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
-use crate::storage::{with_sqlite_store, SharedSqliteStore};
+use crate::storage::CycleWriteStore;
 
 use super::market_context::MarketCycleContext;
 
@@ -73,11 +73,11 @@ pub(crate) fn classify_parallel_dispatch(
 }
 
 pub(crate) fn record_parallel_fallback_audit(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    with_sqlite_store(write_store, |store| {
+    write_store.sync(|store| {
         LogContext::MARKET_CYCLE.dual_audit(
             store,
             Level::WARN,
@@ -109,7 +109,7 @@ async fn execute_strategy_actions_async(
     let write_store = &ctx.dispatch.write_store;
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            with_sqlite_store(write_store, |store| {
+            write_store.sync(|store| {
                 LogContext::MARKET_CYCLE.dual_audit(
                     store,
                     Level::WARN,

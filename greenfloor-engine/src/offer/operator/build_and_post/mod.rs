@@ -22,6 +22,7 @@ use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
 use post_batch::{
     apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostIterationBatch,
+    PostPersistPayload,
 };
 use types::build_and_post_exit_code;
 
@@ -141,8 +142,10 @@ async fn run_post_iterations(
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist_records: Vec::new(),
-        failure_audits: Vec::new(),
+        persist: PostPersistPayload {
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
     };
     let emitter = PostBatchEmitter::new(ctx);
     for _ in 0..request.repeat {
@@ -184,7 +187,7 @@ fn build_and_post_payload(
 
 #[derive(Clone)]
 pub(crate) struct BuildAndPostPersistArtifacts {
-    pub batch: PostIterationBatch,
+    pub persist: PostPersistPayload,
     pub ctx: ResolvedBuildAndPostContext,
 }
 
@@ -200,8 +203,8 @@ pub(crate) fn flush_build_and_post_persist(
     let emitter = PostBatchEmitter::new(&artifacts.ctx);
     emitter.flush(
         store,
-        &artifacts.batch.persist_records,
-        &artifacts.batch.failure_audits,
+        &artifacts.persist.persist_records,
+        &artifacts.persist.failure_audits,
     )
 }
 
@@ -246,7 +249,7 @@ async fn run_build_and_post_offer(
 
     let persist_artifacts = if target == PostEmitTarget::TraceAndStore {
         Some(BuildAndPostPersistArtifacts {
-            batch,
+            persist: batch.into_persist_payload(),
             ctx: ctx.clone(),
         })
     } else {
@@ -295,11 +298,7 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
 #[cfg(test)]
 pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts {
     BuildAndPostPersistArtifacts {
-        batch: PostIterationBatch {
-            post_results: Vec::new(),
-            built_offers_preview: Vec::new(),
-            bootstrap_actions: Vec::new(),
-            publish_failures: 0,
+        persist: PostPersistPayload {
             persist_records: Vec::new(),
             failure_audits: Vec::new(),
         },

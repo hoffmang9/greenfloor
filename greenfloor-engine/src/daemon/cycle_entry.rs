@@ -9,7 +9,7 @@ use crate::operator_log::{
     LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY,
     STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
-use crate::storage::{with_sqlite_store, SharedSqliteStore, SqliteStore};
+use crate::storage::{CycleWriteStore, SqliteStore};
 use tracing::Level;
 
 use super::market_context::{
@@ -39,11 +39,11 @@ pub struct DaemonCycleOnceResponse {
     pub cycle_summary: DaemonCycleSummary,
 }
 
-fn write_stale_sweep_audit(store: &SharedSqliteStore, plan: &CyclePlan) -> SignerResult<()> {
+fn write_stale_sweep_audit(store: &CycleWriteStore, plan: &CyclePlan) -> SignerResult<()> {
     if plan.stale_open_sweep.requeue_market_ids.is_empty() {
         return Ok(());
     }
-    with_sqlite_store(store, |store| {
+    store.sync(|store| {
         LogContext::DAEMON_CYCLE.dual_audit(
             store,
             Level::INFO,
@@ -61,13 +61,13 @@ fn write_stale_sweep_audit(store: &SharedSqliteStore, plan: &CyclePlan) -> Signe
 }
 
 async fn process_one_market(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let reconcile = crate::with_locked_store!(write_store, |store| {
+    let reconcile = crate::cycle_locked!(write_store, |store| {
         run_reconcile_market_cycle(
             &store,
             &resources.coin_watchlist,
@@ -93,7 +93,7 @@ async fn process_one_market(
 }
 
 fn record_market_result(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     market_id: &str,
     result: SignerResult<SingleMarketCycleOutput>,
     source: &str,
@@ -101,10 +101,13 @@ fn record_market_result(
     match result {
         Ok(output) => Ok(Ok(output)),
         Err(err) => {
+            // Only a fresh sqlite open failure aborts the whole cycle. Contention such as
+            // "database is locked" during a shared-store flush is recorded per-market and
+            // the cycle continues so parallel dispatch can fall back or retry next tick.
             if err.is_sqlite_fatal() {
                 return Err(err);
             }
-            with_sqlite_store(write_store, |store| {
+            write_store.sync(|store| {
                 record_market_worker_error(store, market_id, &err.to_string(), source)
             })?;
             Ok(Err(1))
@@ -125,7 +128,7 @@ fn trace_sqlite_fatal_cycle_abort(err: &SignerError) {
 }
 
 async fn dispatch_markets(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
@@ -170,7 +173,7 @@ pub async fn run_daemon_cycle_once(
         request.state_db_override.as_deref(),
     );
     let write_store = SqliteStore::open_shared(&db_path)?;
-    with_sqlite_store(&write_store, |store| {
+    write_store.sync(|store| {
         crate::storage::maybe_prune_stale_audit_events(
             store,
             resources.program().storage_audit_retention_days,
@@ -178,7 +181,7 @@ pub async fn run_daemon_cycle_once(
         Ok(())
     })?;
 
-    let plan = crate::with_locked_store!(&write_store, |store| {
+    let plan = crate::cycle_locked!(&write_store, |store| {
         build_cycle_plan(request, &resources, &store)
     })?;
     write_stale_sweep_audit(&write_store, &plan)?;
@@ -195,7 +198,7 @@ pub async fn run_daemon_cycle_once(
         "daemon cycle started"
     );
 
-    let preamble = crate::with_locked_store!(&write_store, |store| {
+    let preamble = crate::cycle_locked!(&write_store, |store| {
         run_cycle_preamble(
             resources.program(),
             &store,
@@ -236,7 +239,7 @@ pub async fn run_daemon_cycle_once(
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    with_sqlite_store(&write_store, |store| {
+    write_store.sync(|store| {
         LogContext::DAEMON_CYCLE.audit(store, DAEMON_CYCLE_SUMMARY, &summary_payload, None)
     })?;
 

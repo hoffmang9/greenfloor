@@ -6,7 +6,7 @@ use crate::config::{
     ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
-use crate::storage::SharedSqliteStore;
+use crate::storage::CycleWriteStore;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
@@ -81,7 +81,7 @@ impl DaemonCycleResources {
 /// Shared per-cycle inputs for post-reconcile market phases.
 #[derive(Debug, Clone)]
 pub struct MarketDispatchContext {
-    pub write_store: SharedSqliteStore,
+    pub write_store: CycleWriteStore,
     pub allowed_key_ids: Vec<String>,
     pub xch_price_usd: Option<f64>,
     pub previous_xch_price_usd: Option<f64>,

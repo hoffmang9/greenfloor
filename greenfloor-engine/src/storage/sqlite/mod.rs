@@ -12,6 +12,11 @@ mod shared;
 mod transaction;
 mod tx_signals;
 
+pub use shared::CycleWriteStore;
+
+#[cfg(test)]
+pub use shared::lock_shared_store_for_test;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -166,17 +171,15 @@ impl SqliteStore {
         Ok(Self { conn })
     }
 
-    /// Open and wrap in [`SharedSqliteStore`] for multi-threaded cycle use.
+    /// Open and wrap in [`CycleWriteStore`] for multi-threaded cycle use.
     ///
     /// # Errors
     ///
     /// Returns an error when [`Self::open`] fails.
-    pub fn open_shared(db_path: &Path) -> SignerResult<SharedSqliteStore> {
-        Ok(shared_sqlite_store(Self::open(db_path)?))
+    pub fn open_shared(db_path: &Path) -> SignerResult<CycleWriteStore> {
+        CycleWriteStore::open(db_path)
     }
 }
-
-pub use shared::{lock_sqlite_store, shared_sqlite_store, with_sqlite_store, SharedSqliteStore};
 
 pub(crate) fn utcnow_iso() -> String {
     Utc::now().to_rfc3339()

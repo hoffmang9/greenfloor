@@ -6,7 +6,7 @@ use tracing::Level;
 use crate::config::MarketConfig;
 use crate::error::SignerResult;
 use crate::operator_log::{LogContext, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR};
-use crate::storage::{with_sqlite_store, SharedSqliteStore};
+use crate::storage::CycleWriteStore;
 
 use crate::cycle::MarketCycleResultState;
 
@@ -20,12 +20,12 @@ pub struct StrategyPhaseResult {
 }
 
 pub async fn run_strategy_phase(
-    write_store: &SharedSqliteStore,
+    write_store: &CycleWriteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     state: &mut MarketCycleResultState,
 ) -> SignerResult<StrategyPhaseResult> {
-    let (strategy_actions, sell_active_counts) = with_sqlite_store(write_store, |store| {
+    let (strategy_actions, sell_active_counts) = write_store.sync(|store| {
         evaluate_strategy_actions_for_market(
             store,
             market,
@@ -39,7 +39,7 @@ pub async fn run_strategy_phase(
         0,
     );
 
-    with_sqlite_store(write_store, |store| {
+    write_store.sync(|store| {
         LogContext::MARKET_CYCLE.dual_audit(
             store,
             Level::INFO,
@@ -66,7 +66,7 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
-                with_sqlite_store(write_store, |store| {
+                write_store.sync(|store| {
                     LogContext::MARKET_CYCLE.dual_audit(
                         store,
                         Level::WARN,
