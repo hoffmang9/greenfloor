@@ -5,6 +5,7 @@ mod cats;
 mod coin_ops;
 mod dust;
 mod flag_groups;
+mod maintenance;
 mod offers;
 mod setup;
 
@@ -30,9 +31,9 @@ impl ManagerCommands {
             | ManagerCommands::MaterializeMinimalProgram { .. }
             | ManagerCommands::KeysOnboard { .. }
             | ManagerCommands::Doctor
-            | ManagerCommands::AuditPrune { .. }
             | ManagerCommands::BootstrapHome { .. }
             | ManagerCommands::SetLogLevel { .. }) => setup::run_command(cmd, ctx),
+            ManagerCommands::AuditPrune { .. } => maintenance::run_command(self, ctx),
             ManagerCommands::BuildAndPostOffer { .. } => build_offer::run_command(self, ctx).await,
             cmd @ (ManagerCommands::OffersStatus { .. }
             | ManagerCommands::OffersReconcile { .. }) => offers::run_command(cmd, ctx).await,

@@ -171,12 +171,12 @@ pub fn dedupe_sorted_market_ids(market_ids: &[String]) -> Vec<String> {
 
 #[must_use]
 pub fn should_log_disabled_market(now_monotonic: f64, next_log_deadline: f64) -> bool {
-    next_log_deadline <= now_monotonic
+    crate::cycle::periodic::is_periodic_due(now_monotonic, next_log_deadline)
 }
 
 #[must_use]
 pub fn next_disabled_market_log_deadline(now_monotonic: f64, interval_seconds: u64) -> f64 {
-    now_monotonic + crate::offer::pricing::u64_to_f64(interval_seconds)
+    crate::cycle::periodic::next_periodic_deadline(now_monotonic, interval_seconds)
 }
 
 #[must_use]

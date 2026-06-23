@@ -9,6 +9,7 @@ pub mod lifecycle;
 pub mod market;
 pub mod notifications;
 pub mod orchestration;
+pub mod periodic;
 pub mod reconcile;
 pub mod reseed;
 pub mod retry;

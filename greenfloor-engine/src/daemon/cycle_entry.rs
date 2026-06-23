@@ -144,10 +144,10 @@ pub async fn run_daemon_cycle_once(
         request.state_db_override.as_deref(),
     );
     let cycle_store = SqliteStore::open(&db_path)?;
-    let _ = super::audit_retention::maybe_prune_audit_events(
+    crate::storage::maybe_prune_stale_audit_events(
         &cycle_store,
         resources.program().storage_audit_retention_days,
-    )?;
+    );
     let plan = build_cycle_plan(request, &resources, &cycle_store).await?;
     write_stale_sweep_audit(&cycle_store, &plan)?;
 

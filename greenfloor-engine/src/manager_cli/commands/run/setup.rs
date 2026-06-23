@@ -3,9 +3,9 @@ use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::keys;
 use crate::manager_cli::paths;
 use crate::manager_cli::setup::{
-    run_audit_prune, run_bootstrap_home, run_cats_fields, run_config_validate, run_doctor,
-    run_markets_fields, run_materialize_minimal_program, run_program_fields, run_set_log_level,
-    BootstrapHomeParams, MaterializeMinimalProgramFeatureFlags, MaterializeMinimalProgramRequest,
+    run_bootstrap_home, run_cats_fields, run_config_validate, run_doctor, run_markets_fields,
+    run_materialize_minimal_program, run_program_fields, run_set_log_level, BootstrapHomeParams,
+    MaterializeMinimalProgramFeatureFlags, MaterializeMinimalProgramRequest,
 };
 
 use super::super::clap::ManagerCommands;
@@ -50,7 +50,6 @@ pub fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> SignerResu
             paths::optional_path(&chia_keys_dir).as_deref(),
         ),
         ManagerCommands::Doctor => run_doctor(ctx),
-        ManagerCommands::AuditPrune { dry_run } => run_audit_prune(ctx, dry_run),
         ManagerCommands::BootstrapHome {
             home_dir,
             program_template,

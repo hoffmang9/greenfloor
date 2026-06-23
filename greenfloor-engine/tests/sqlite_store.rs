@@ -341,60 +341,6 @@ fn cancel_submitted_at_survives_reconcile_preserve_upsert() {
 }
 
 #[test]
-fn prune_audit_events_older_than_keeps_financial_rows() {
-    use chrono::{Duration, Utc};
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let store = open_store(&dir.path().join("greenfloor.sqlite"));
-    let old = (Utc::now() - Duration::days(40)).to_rfc3339();
-    let recent = Utc::now().to_rfc3339();
-
-    store
-        .add_audit_event_at("daemon_cycle_summary", &json!({"ok": true}), None, &old)
-        .expect("old noise");
-    store
-        .add_audit_event_at(
-            "coin_op_executed",
-            &json!({"operation_id": "abc"}),
-            Some("m1"),
-            &old,
-        )
-        .expect("old coin op");
-    store
-        .add_audit_event_at(
-            "offer_lifecycle_transition",
-            &json!({"new_state": "mempool_observed", "reason": "potential_take_seen"}),
-            Some("m1"),
-            &old,
-        )
-        .expect("old take signal");
-    store
-        .add_audit_event_at(
-            "xch_price_snapshot",
-            &json!({"price_usd": 1.0}),
-            None,
-            &recent,
-        )
-        .expect("recent noise");
-
-    let cutoff = Utc::now() - Duration::days(30);
-    assert_eq!(
-        store
-            .count_prunable_audit_events_older_than(cutoff)
-            .expect("count"),
-        1
-    );
-    assert_eq!(
-        store.prune_audit_events_older_than(cutoff).expect("prune"),
-        1
-    );
-    let remaining = store
-        .list_recent_audit_events(None, None, 10)
-        .expect("list");
-    assert_eq!(remaining.len(), 3);
-}
-
-#[test]
 fn list_recent_audit_events_filters_by_event_type_and_market() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));

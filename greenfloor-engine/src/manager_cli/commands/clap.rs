@@ -91,6 +91,12 @@ pub enum ManagerCommands {
     AuditPrune {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Run VACUUM after deleting rows."
+        )]
+        vacuum: bool,
     },
     OffersStatus {
         #[arg(long, default_value = "")]

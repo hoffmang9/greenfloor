@@ -9,8 +9,10 @@ mod schema;
 mod sqlite;
 
 pub use audit_retention::{
-    DEFAULT_AUDIT_PRUNE_INTERVAL_SECONDS, DEFAULT_AUDIT_RETENTION_DAYS,
-    FINANCIALLY_IMPORTANT_AUDIT_EVENT_TYPES, FINANCIALLY_IMPORTANT_OFFER_LIFECYCLE_STATES,
+    audit_prune_interval_seconds, audit_retention_cutoff, is_preserved_audit_row,
+    maybe_prune_stale_audit_events, preserve_predicate_sql, PruneAuditEventsOptions,
+    PruneAuditEventsReport, DEFAULT_AUDIT_PRUNE_BATCH_SIZE, DEFAULT_AUDIT_PRUNE_INTERVAL_SECONDS,
+    DEFAULT_AUDIT_RETENTION_DAYS,
 };
 
 pub use crate::offer::types::PresplitCancelFields;
