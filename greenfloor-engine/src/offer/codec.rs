@@ -277,8 +277,15 @@ pub fn from_input_spend_bundle_xch_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_xch_bytes,
-        offer_has_duplicate_spent_coin_ids, verify_offer_for_dexie,
+        encode_offer_from_spend_bundle_bytes, expires_at_seconds_from_coin_spend,
+        expires_at_seconds_from_offer_spend, from_input_spend_bundle_xch_bytes,
+        offer_has_duplicate_spent_coin_ids, offer_has_expiration_condition,
+        validate_offer_structure, validate_offer_text, verify_offer_for_dexie,
+    };
+    use crate::bech32m::decode_offer;
+    use crate::hex::hex_to_bytes32;
+    use crate::test_support::simulator::{
+        build_offer_from_setup, setup_roundtrip_opts, OfferRoundtripScenario,
     };
     use chia_bls;
     use chia_protocol::{Coin, SpendBundle};
@@ -325,5 +332,33 @@ mod tests {
         let err =
             from_input_spend_bundle_xch_bytes(&bytes, vec![(vec![0x01], vec![])]).unwrap_err();
         assert!(err.to_string().contains("nonce must be 32 bytes"));
+    }
+
+    #[tokio::test]
+    async fn simulator_offer_passes_structure_expiry_and_dexie_gates() {
+        let expires_at = 4_000_000_000_u64;
+        let mut setup =
+            setup_roundtrip_opts(OfferRoundtripScenario::Direct, Some(expires_at)).await;
+        let result = build_offer_from_setup(&mut setup)
+            .await
+            .expect("build offer");
+        validate_offer_structure(&result.offer).expect("structure");
+        validate_offer_text(&result.offer).expect("validate text");
+        assert!(verify_offer_for_dexie(&result.offer).is_none());
+        let spend_bundle = decode_offer(&result.offer).expect("decode");
+        assert!(offer_has_expiration_condition(&spend_bundle).expect("expiration"));
+        let coin_id = hex_to_bytes32(&result.selected_coin_ids[0]).expect("coin id");
+        let parsed_expiry =
+            expires_at_seconds_from_offer_spend(&spend_bundle, coin_id).expect("expiry");
+        assert_eq!(parsed_expiry, Some(expires_at));
+        let coin_spend = spend_bundle
+            .coin_spends
+            .iter()
+            .find(|spend| spend.coin.coin_id() == coin_id)
+            .expect("maker spend");
+        assert_eq!(
+            expires_at_seconds_from_coin_spend(coin_spend).expect("coin spend expiry"),
+            Some(expires_at)
+        );
     }
 }

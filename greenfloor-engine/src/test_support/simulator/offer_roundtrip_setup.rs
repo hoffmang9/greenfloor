@@ -154,6 +154,13 @@ fn build_request(
 }
 
 pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> RoundtripSetup {
+    setup_roundtrip_opts(scenario, None).await
+}
+
+pub(crate) async fn setup_roundtrip_opts(
+    scenario: OfferRoundtripScenario,
+    expires_at: Option<u64>,
+) -> RoundtripSetup {
     let mut harness = SimulatorVaultHarness::new();
     let offer_amount = 1_000;
     let source_cat = match scenario {
@@ -170,7 +177,7 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
             (None, None)
         };
 
-    let request = build_request(
+    let mut request = build_request(
         &harness,
         scenario,
         offer_amount,
@@ -178,6 +185,7 @@ pub(crate) async fn setup_roundtrip(scenario: OfferRoundtripScenario) -> Roundtr
         presplit_cat.as_ref(),
         source_coin_id,
     );
+    request.expires_at = expires_at;
 
     RoundtripSetup {
         harness,

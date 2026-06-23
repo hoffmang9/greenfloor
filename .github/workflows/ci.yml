@@ -140,7 +140,8 @@ jobs:
               --include-untracked \
               --exclude '**/tests/**' '**/test_support/**' '**/test_env/**' \
               --exclude '**/test_overrides/**' '**/bin/**' '**/main.rs' \
-              --exclude '**/tests.rs' \
+              --exclude '**/tests.rs' '**/storage/sqlite/**' \
+              --exclude '**/storage/test_support.rs' \
               || status=1
           fi
           if [ "${{ steps.scope.outputs.run_py_cov }}" = "true" ]; then

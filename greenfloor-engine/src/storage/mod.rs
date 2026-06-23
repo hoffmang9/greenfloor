@@ -1,7 +1,10 @@
 //! `SQLite` persistence for the Rust engine.
 //!
 //! The canonical schema for `GreenFloor` state lives here. Rust integration tests in
-//! `greenfloor-engine/tests/` assert against the same schema via `SqliteStore`.
+//! `greenfloor-engine/tests/sqlite_*` exercise persistence behavior.
+//!
+//! `storage/sqlite/` and `storage/test_support.rs` are excluded from llvm-cov reports and
+//! diff-cover (see `.llvm-cov.toml`, ADR 0016).
 
 mod audit_retention;
 mod persist;
@@ -17,6 +20,8 @@ pub use audit_retention::{
 
 pub use crate::offer::types::PresplitCancelFields;
 pub use persist::{persist_offer_post_records, upsert_offer_post_record};
+#[doc(hidden)]
+pub mod test_support;
 pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
     CoinOpLedgerEntry, OfferPostPersistRecord, OfferReservationAcquireOutcome,

@@ -360,36 +360,3 @@ impl SqliteStore {
         Ok(None)
     }
 }
-
-#[cfg(test)]
-mod list_offer_states_tests {
-    use super::SqliteStore;
-
-    #[test]
-    fn list_offer_states_for_ids_returns_matches_in_input_order() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
-        store
-            .upsert_offer_state("offer-a", "m1", "open", Some(0))
-            .expect("seed");
-        store
-            .upsert_offer_state("offer-b", "m1", "expired", Some(0))
-            .expect("seed");
-        store
-            .upsert_offer_state("offer-c", "m2", "open", Some(0))
-            .expect("seed");
-        let rows = store
-            .list_offer_states_for_ids(&[
-                "offer-c".to_string(),
-                "missing-offer".to_string(),
-                "offer-a".to_string(),
-                "offer-b".to_string(),
-            ])
-            .expect("rows");
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].offer_id, "offer-c");
-        assert_eq!(rows[1].offer_id, "offer-a");
-        assert_eq!(rows[2].offer_id, "offer-b");
-    }
-}

@@ -10,9 +10,10 @@ use greenfloor_engine::storage::{
 use serde_json::json;
 use tempfile::TempDir;
 
-fn open_store(path: &std::path::Path) -> SqliteStore {
-    SqliteStore::open(path).expect("open store")
-}
+#[path = "support/sqlite.rs"]
+mod sqlite_support;
+
+use sqlite_support::open_store;
 
 fn seed_old_rows(store: &SqliteStore, created_at: &str) {
     store
