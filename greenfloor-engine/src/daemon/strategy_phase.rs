@@ -6,7 +6,7 @@ use tracing::Level;
 use crate::config::MarketConfig;
 use crate::error::SignerResult;
 use crate::operator_log::{LogContext, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR};
-use crate::storage::SqliteStore;
+use crate::storage::CycleWriteStore;
 
 use crate::cycle::MarketCycleResultState;
 
@@ -20,39 +20,43 @@ pub struct StrategyPhaseResult {
 }
 
 pub async fn run_strategy_phase(
-    store: &SqliteStore,
+    write_store: &CycleWriteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     state: &mut MarketCycleResultState,
 ) -> SignerResult<StrategyPhaseResult> {
-    let (strategy_actions, sell_active_counts) = evaluate_strategy_actions_for_market(
-        store,
-        market,
-        &ctx.resources.network,
-        &ctx.reconcile.dexie_size_by_offer_id,
-        ctx.dispatch.xch_price_usd,
-    )?;
+    let (strategy_actions, sell_active_counts) = write_store.sync(|store| {
+        evaluate_strategy_actions_for_market(
+            store,
+            market,
+            &ctx.resources.network,
+            &ctx.reconcile.dexie_size_by_offer_id,
+            ctx.dispatch.xch_price_usd,
+        )
+    })?;
     state.merge_strategy_execution(
         crate::config::usize_to_i64(strategy_actions.len(), "strategy.action_count")?,
         0,
     );
 
-    LogContext::MARKET_CYCLE.dual_audit(
-        store,
-        Level::INFO,
-        "strategy actions planned",
-        STRATEGY_ACTIONS_PLANNED,
-        &json!({
-            "market_id": market.market_id,
-            "xch_price_usd": ctx.dispatch.xch_price_usd,
-            "action_count": strategy_actions.len(),
-        }),
-        Some(&market.market_id),
-    )?;
+    write_store.sync(|store| {
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::INFO,
+            "strategy actions planned",
+            STRATEGY_ACTIONS_PLANNED,
+            &json!({
+                "market_id": market.market_id,
+                "xch_price_usd": ctx.dispatch.xch_price_usd,
+                "action_count": strategy_actions.len(),
+            }),
+            Some(&market.market_id),
+        )
+    })?;
 
     let mut newly_executed_sell_counts = BTreeMap::default();
     if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
-        match execute_strategy_actions(store, ctx, market, &strategy_actions).await {
+        match execute_strategy_actions(ctx, market, &strategy_actions).await {
             Ok(output) => {
                 state.merge_strategy_execution(
                     0,
@@ -62,14 +66,16 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
-                LogContext::MARKET_CYCLE.dual_audit(
-                    store,
-                    Level::WARN,
-                    "strategy offer execution failed",
-                    STRATEGY_OFFER_EXECUTION_ERROR,
-                    &json!({"market_id": market.market_id, "error": err.to_string()}),
-                    Some(&market.market_id),
-                )?;
+                write_store.sync(|store| {
+                    LogContext::MARKET_CYCLE.dual_audit(
+                        store,
+                        Level::WARN,
+                        "strategy offer execution failed",
+                        STRATEGY_OFFER_EXECUTION_ERROR,
+                        &json!({"market_id": market.market_id, "error": err.to_string()}),
+                        Some(&market.market_id),
+                    )
+                })?;
             }
         }
     }

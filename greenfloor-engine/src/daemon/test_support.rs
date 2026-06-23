@@ -7,7 +7,7 @@ use tempfile::TempDir;
 use crate::adapters::DexieClient;
 use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
 use crate::cycle::StaleSweepProgress;
-use crate::storage::SqliteStore;
+use crate::storage::{CycleWriteStore, SqliteStore};
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
@@ -46,6 +46,7 @@ impl TestCycleContextBundle {
 pub fn test_cycle_context(
     dir: &TempDir,
     db_path: &Path,
+    write_store: CycleWriteStore,
     program: ManagerProgramConfig,
     signer: Option<SignerConfig>,
 ) -> TestCycleContextBundle {
@@ -67,7 +68,7 @@ pub fn test_cycle_context(
             super::watchlist::CoinWatchlistCache::new(),
         ),
         dispatch: MarketDispatchContext {
-            db_path: db_path.to_path_buf(),
+            write_store,
             allowed_key_ids: Vec::new(),
             xch_price_usd: None,
             previous_xch_price_usd: None,

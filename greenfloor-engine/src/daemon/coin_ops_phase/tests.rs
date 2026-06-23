@@ -12,7 +12,9 @@ use crate::operator_log::{
     COIN_OPS_NO_PLANS, COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN,
     COIN_OPS_SKIPPED_FEE_BUDGET, COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
 };
-use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SqliteStore};
+use crate::storage::{
+    lock_shared_store_for_test, state_db_path_for_home, CoinOpLedgerEntry, SqliteStore,
+};
 use crate::test_support::ladder::market_with_side_ladder;
 use crate::test_support::market_config::sample_market;
 
@@ -120,8 +122,7 @@ async fn run_coin_ops_phase_runs_with_minimum_cat_sell_ladder() {
         .run_with_market(&market, &BTreeMap::from([(1_i64, 0_i64)]))
         .await;
 
-    let events = harness
-        .store
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(
             Some(&[COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT, COIN_OPS_PLAN]),
             Some("m1"),
@@ -192,8 +193,7 @@ async fn run_coin_ops_phase_noops_on_empty_sell_ladder() {
     let harness = CoinOpsPhaseHarness::open(|_| {}, None);
     harness.run_empty_sell_ladder().await;
 
-    let events = harness
-        .store
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(Some(&[COIN_OPS_NO_PLANS]), Some("m1"), 5)
         .expect("events");
     assert!(events.iter().any(|event| {
@@ -222,8 +222,7 @@ async fn run_coin_ops_phase_skips_execution_when_daily_fee_budget_exhausted() {
     let wallet_counts = BTreeMap::from([(10_i64, 0_i64)]);
     harness.run_with_sell_ladder(&wallet_counts).await;
 
-    let events = harness
-        .store
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(
             Some(&[COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET]),
             Some("m1"),
@@ -249,8 +248,7 @@ async fn run_coin_ops_phase_records_partial_fee_budget_overflow() {
     let wallet_counts = BTreeMap::from([(10_i64, 0_i64)]);
     harness.run_with_sell_ladder(&wallet_counts).await;
 
-    let events = harness
-        .store
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(
             Some(&[
                 COIN_OPS_PLAN,

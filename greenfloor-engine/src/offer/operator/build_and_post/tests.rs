@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::post_batch::{
     apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostFailureAudit,
-    PostIterationBatch,
+    PostIterationBatch, PostPersistPayload,
 };
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
@@ -56,8 +56,10 @@ fn dry_run_failure_traces_without_persisting() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist_records: Vec::new(),
-        failure_audits: Vec::new(),
+        persist: PostPersistPayload {
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceOnly,
@@ -71,7 +73,7 @@ fn dry_run_failure_traces_without_persisting() {
         }),
         &mut batch,
     );
-    assert_eq!(batch.failure_audits.len(), 0);
+    assert_eq!(batch.persist.failure_audits.len(), 0);
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
     assert_eq!(
         PostEmitTarget::from_run(true, true),
@@ -93,8 +95,10 @@ fn persist_path_defers_failure_trace_until_flush() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist_records: Vec::new(),
-        failure_audits: Vec::new(),
+        persist: PostPersistPayload {
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceAndStore,
@@ -109,9 +113,9 @@ fn persist_path_defers_failure_trace_until_flush() {
         &mut batch,
     );
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
-    assert_eq!(batch.failure_audits.len(), 1);
+    assert_eq!(batch.persist.failure_audits.len(), 1);
     emitter
-        .flush(&store, &[], &batch.failure_audits)
+        .flush(&store, &[], &batch.persist.failure_audits)
         .expect("persist");
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }

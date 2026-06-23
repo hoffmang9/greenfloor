@@ -5,6 +5,8 @@ use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };
 
+use crate::storage::lock_shared_store_for_test;
+
 use super::harness::{
     generous_spendable_profiles, sample_action, sample_market, sample_market_with_pricing,
     ParallelDispatchHarness,
@@ -19,8 +21,7 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         .expect("dispatch");
 
     assert_eq!(output.executed_count, 0);
-    let events = harness
-        .store
+    let events = lock_shared_store_for_test(&harness.store)
         .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
         .expect("events");
     assert_eq!(events.len(), 1);
@@ -114,4 +115,30 @@ async fn execute_strategy_actions_parallel_success_runs_prepare_path() {
         .await
         .expect("parallel dispatch");
     assert_eq!(output.executed_count, 1);
+}
+
+#[tokio::test]
+async fn parallel_dispatch_persist_flush_does_not_reopen_cycle_db() {
+    use super::harness::{
+        assert_persist_flush_does_not_reopen_cycle_db, generous_spendable_profiles,
+    };
+    use crate::daemon::dispatch_test_controls::{
+        DaemonDispatchTestInjections, ManagedPostTestMode,
+    };
+
+    let market = sample_market_with_pricing();
+    let mut harness = ParallelDispatchHarness::new(true, false, true);
+    let spendable_profiles = generous_spendable_profiles(&harness.program_path, &market).await;
+    harness.set_offer_dispatch(
+        DaemonDispatchTestInjections::default()
+            .spendable_profiles(spendable_profiles)
+            .managed_post(ManagedPostTestMode::Success),
+    );
+
+    let output = harness
+        .execute(&market, &[sample_action()])
+        .await
+        .expect("parallel persist dispatch");
+    assert_eq!(output.executed_count, 1);
+    assert_persist_flush_does_not_reopen_cycle_db(&harness.managed_post_context());
 }

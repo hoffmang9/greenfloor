@@ -1,13 +1,15 @@
+//! Daemon cycle entry: one shared sqlite store per cycle, markets processed sequentially.
+
 use std::time::Instant;
 
 use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
     LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY,
     STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
-use crate::storage::SqliteStore;
+use crate::storage::CycleWriteStore;
 use tracing::Level;
 
 use super::market_context::{
@@ -37,47 +39,50 @@ pub struct DaemonCycleOnceResponse {
     pub cycle_summary: DaemonCycleSummary,
 }
 
-fn write_stale_sweep_audit(store: &SqliteStore, plan: &CyclePlan) -> SignerResult<()> {
+fn write_stale_sweep_audit(store: &CycleWriteStore, plan: &CyclePlan) -> SignerResult<()> {
     if plan.stale_open_sweep.requeue_market_ids.is_empty() {
         return Ok(());
     }
-    LogContext::DAEMON_CYCLE.dual_audit(
-        store,
-        Level::INFO,
-        "stale open offer requeue detected",
-        STALE_OPEN_OFFER_REQUEUE_DETECTED,
-        &serde_json::json!({
-            "market_ids": plan.stale_open_sweep.requeue_market_ids,
-            "checked_offer_count": plan.stale_open_sweep.checked_offer_count,
-            "truncated": plan.stale_open_sweep.truncated,
-            "hits": plan.stale_open_sweep.hits,
-        }),
-        None,
-    )
+    store.sync(|store| {
+        LogContext::DAEMON_CYCLE.dual_audit(
+            store,
+            Level::INFO,
+            "stale open offer requeue detected",
+            STALE_OPEN_OFFER_REQUEUE_DETECTED,
+            &serde_json::json!({
+                "market_ids": plan.stale_open_sweep.requeue_market_ids,
+                "checked_offer_count": plan.stale_open_sweep.checked_offer_count,
+                "truncated": plan.stale_open_sweep.truncated,
+                "hits": plan.stale_open_sweep.hits,
+            }),
+            None,
+        )
+    })
 }
 
 async fn process_one_market(
-    store: &SqliteStore,
+    write_store: &CycleWriteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let reconcile = run_reconcile_market_cycle(
-        store,
-        &resources.coin_watchlist,
-        &resources.dexie,
-        market,
-        &resources.network,
-    )
-    .await?;
+    let reconcile = crate::cycle_locked!(write_store, |store| {
+        run_reconcile_market_cycle(
+            &store,
+            &resources.coin_watchlist,
+            &resources.dexie,
+            market,
+            &resources.network,
+        )
+    })?;
     let phase_context = MarketCycleContext {
         resources,
         dispatch: dispatch_context,
         plan,
         reconcile: &reconcile,
     };
-    let mut state = run_post_reconcile_market_phases(store, &phase_context, market).await?;
+    let mut state = run_post_reconcile_market_phases(write_store, &phase_context, market).await?;
     merge_reconcile_immediate_requeue(&mut state, &reconcile.metrics);
 
     Ok(SingleMarketCycleOutput {
@@ -88,7 +93,7 @@ async fn process_one_market(
 }
 
 fn record_market_result(
-    error_store: &SqliteStore,
+    write_store: &CycleWriteStore,
     market_id: &str,
     result: SignerResult<SingleMarketCycleOutput>,
     source: &str,
@@ -96,14 +101,34 @@ fn record_market_result(
     match result {
         Ok(output) => Ok(Ok(output)),
         Err(err) => {
-            record_market_worker_error(error_store, market_id, &err.to_string(), source)?;
+            // Only a fresh sqlite open failure aborts the whole cycle. Contention such as
+            // "database is locked" during a shared-store flush is recorded per-market and
+            // the cycle continues so parallel dispatch can fall back or retry next tick.
+            if err.is_sqlite_fatal() {
+                return Err(err);
+            }
+            write_store.sync(|store| {
+                record_market_worker_error(store, market_id, &err.to_string(), source)
+            })?;
             Ok(Err(1))
         }
     }
 }
 
+fn trace_sqlite_fatal_cycle_abort(err: &SignerError) {
+    crate::trace_event!(
+        ERROR,
+        LogContext::DAEMON_CYCLE,
+        "sqlite_cycle_abort",
+        {
+            error = err.to_string(),
+        };
+        "sqlite fatal error aborting daemon cycle"
+    );
+}
+
 async fn dispatch_markets(
-    cycle_store: &SqliteStore,
+    write_store: &CycleWriteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
@@ -113,15 +138,19 @@ async fn dispatch_markets(
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
         let result =
-            process_one_market(cycle_store, resources, dispatch_context, plan, &market).await;
+            process_one_market(write_store, resources, dispatch_context, plan, &market).await;
         match record_market_result(
-            cycle_store,
+            write_store,
             &market.market_id,
             result,
             SEQUENTIAL_MARKET_WORKER_SOURCE,
-        )? {
-            Ok(output) => outputs.push(output),
-            Err(count) => worker_errors += count,
+        ) {
+            Ok(Ok(output)) => outputs.push(output),
+            Ok(Err(count)) => worker_errors += count,
+            Err(err) => {
+                trace_sqlite_fatal_cycle_abort(&err);
+                return Err(err);
+            }
         }
     }
     Ok((outputs, worker_errors))
@@ -143,13 +172,19 @@ pub async fn run_daemon_cycle_once(
         &resources.program().home_dir,
         request.state_db_override.as_deref(),
     );
-    let cycle_store = SqliteStore::open(&db_path)?;
-    crate::storage::maybe_prune_stale_audit_events(
-        &cycle_store,
-        resources.program().storage_audit_retention_days,
-    );
-    let plan = build_cycle_plan(request, &resources, &cycle_store).await?;
-    write_stale_sweep_audit(&cycle_store, &plan)?;
+    let write_store = CycleWriteStore::open(&db_path)?;
+    write_store.sync(|store| {
+        crate::storage::maybe_prune_stale_audit_events(
+            store,
+            resources.program().storage_audit_retention_days,
+        );
+        Ok(())
+    })?;
+
+    let plan = crate::cycle_locked!(&write_store, |store| {
+        build_cycle_plan(request, &resources, &store)
+    })?;
+    write_stale_sweep_audit(&write_store, &plan)?;
 
     crate::trace_event!(
         INFO,
@@ -163,18 +198,19 @@ pub async fn run_daemon_cycle_once(
         "daemon cycle started"
     );
 
-    let preamble = run_cycle_preamble(
-        resources.program(),
-        &cycle_store,
-        &request.coinset_base_url,
-        &resources.coin_watchlist,
-        request.poll_coinset_mempool,
-        request.use_websocket_capture,
-    )
-    .await?;
+    let preamble = crate::cycle_locked!(&write_store, |store| {
+        run_cycle_preamble(
+            resources.program(),
+            &store,
+            &request.coinset_base_url,
+            &resources.coin_watchlist,
+            request.poll_coinset_mempool,
+            request.use_websocket_capture,
+        )
+    })?;
 
     let dispatch_context = MarketDispatchContext {
-        db_path: plan.db_path.clone(),
+        write_store: write_store.clone(),
         allowed_key_ids: request.allowed_key_ids.clone(),
         xch_price_usd: preamble.xch_price_usd,
         previous_xch_price_usd: plan.previous_xch_price_usd,
@@ -184,7 +220,7 @@ pub async fn run_daemon_cycle_once(
     let markets = resources.selected_markets(&plan.selected_market_ids);
 
     let (cycle_outputs, worker_errors) =
-        dispatch_markets(&cycle_store, &resources, &dispatch_context, &plan, markets).await?;
+        dispatch_markets(&write_store, &resources, &dispatch_context, &plan, markets).await?;
 
     let mut metrics: MarketDispatchMetrics = aggregate_market_dispatch_metrics(&cycle_outputs);
     metrics.cycle_error_count += worker_errors;
@@ -203,7 +239,9 @@ pub async fn run_daemon_cycle_once(
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    LogContext::DAEMON_CYCLE.audit(&cycle_store, DAEMON_CYCLE_SUMMARY, &summary_payload, None)?;
+    write_store.sync(|store| {
+        LogContext::DAEMON_CYCLE.audit(store, DAEMON_CYCLE_SUMMARY, &summary_payload, None)
+    })?;
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
     trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());

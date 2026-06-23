@@ -7,7 +7,8 @@ use futures_util::future::try_join_all;
 use super::{coin_records_from_response, resolve, unspent_coin_records};
 use crate::bech32m::decode_address;
 use crate::coinset::retry::with_coinset_client_retries;
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
+use crate::operator_log::LogContext;
 
 pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     client: &CoinsetClient,
@@ -27,6 +28,9 @@ pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
 
 /// Resolve spendable [`Cat`] values with lineage proofs for coin records.
 ///
+/// Lineage resolution runs sequentially so clvm parsing stays on one task and
+/// unparseable parent spends are omitted instead of failing the whole scan.
+///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
@@ -37,12 +41,28 @@ pub(crate) async fn cats_with_lineage_from_records(
     if records.is_empty() {
         return Ok(Vec::new());
     }
-    let resolved = try_join_all(records.iter().copied().map(|record| {
-        let client = client.clone();
-        async move { resolve::cat_from_record(&client, &record).await }
-    }))
-    .await?;
-    Ok(resolved.into_iter().flatten().collect())
+    let mut cats = Vec::new();
+    for record in records {
+        let coin_name = hex::encode(record.coin.coin_id());
+        match resolve::cat_from_record(client, record).await {
+            Ok(Some(cat)) => cats.push(cat),
+            Ok(None) => {}
+            Err(err @ SignerError::UnparseableCatLineage(_)) => {
+                crate::trace_event!(
+                    DEBUG,
+                    LogContext::COINSET,
+                    "cat_lineage_skipped",
+                    {
+                        coin_name = coin_name.as_str(),
+                        error = err.to_string(),
+                    };
+                    "skipped unparseable cat lineage record"
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(cats)
 }
 
 /// Fetch coin records for the given coin ids (missing ids are omitted).

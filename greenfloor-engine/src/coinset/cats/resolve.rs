@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use chia_protocol::{Coin, CoinSpend};
 use chia_sdk_coinset::{
@@ -10,6 +11,10 @@ use clvmr::{serde::node_from_bytes, Allocator};
 use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
+
+fn unparseable_cat_lineage(detail: impl Into<String>) -> SignerError {
+    SignerError::UnparseableCatLineage(detail.into())
+}
 
 pub(crate) async fn cat_from_record(
     client: &CoinsetClient,
@@ -63,11 +68,24 @@ fn parse_cat_children(
     parent_coin: Coin,
     parent_spend: &CoinSpend,
 ) -> SignerResult<Option<Vec<Cat>>> {
+    let puzzle_reveal = parent_spend.puzzle_reveal.clone();
+    let solution = parent_spend.solution.clone();
+    catch_unwind(AssertUnwindSafe(move || {
+        parse_cat_children_inner(parent_coin, &puzzle_reveal, &solution)
+    }))
+    .map_err(|_| unparseable_cat_lineage("clvm panic while parsing cat children"))?
+}
+
+fn parse_cat_children_inner(
+    parent_coin: Coin,
+    puzzle_reveal: &[u8],
+    solution: &[u8],
+) -> SignerResult<Option<Vec<Cat>>> {
     let mut allocator = Allocator::new();
-    let parent_puzzle_ptr = node_from_bytes(&mut allocator, parent_spend.puzzle_reveal.as_ref())
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
-    let parent_solution_ptr = node_from_bytes(&mut allocator, parent_spend.solution.as_ref())
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let parent_puzzle_ptr = node_from_bytes(&mut allocator, puzzle_reveal)
+        .map_err(|err| unparseable_cat_lineage(err.to_string()))?;
+    let parent_solution_ptr = node_from_bytes(&mut allocator, solution)
+        .map_err(|err| unparseable_cat_lineage(err.to_string()))?;
     let parent_puzzle = Puzzle::parse(&allocator, parent_puzzle_ptr);
     Cat::parse_children(
         &mut allocator,
@@ -75,7 +93,7 @@ fn parse_cat_children(
         parent_puzzle,
         parent_solution_ptr,
     )
-    .map_err(|err| SignerError::Driver(err.to_string()))
+    .map_err(|err| unparseable_cat_lineage(err.to_string()))
 }
 
 fn parse_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Option<Cat>> {
@@ -109,4 +127,38 @@ pub fn child_cat_asset_ids_from_parent_spend(
             )
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chia_protocol::{Bytes, Coin, CoinSpend};
+
+    fn empty_parent_spend() -> CoinSpend {
+        CoinSpend {
+            coin: Coin::new(
+                chia_protocol::Bytes32::default(),
+                chia_protocol::Bytes32::default(),
+                0,
+            ),
+            puzzle_reveal: Bytes::new(vec![]).into(),
+            solution: Bytes::new(vec![]).into(),
+        }
+    }
+
+    #[test]
+    fn parse_cat_children_empty_spend_returns_unparseable_lineage_not_panic() {
+        let _parent = Coin::new(
+            chia_protocol::Bytes32::new([1; 32]),
+            chia_protocol::Bytes32::new([2; 32]),
+            1,
+        );
+        let child = Coin::new(
+            chia_protocol::Bytes32::new([3; 32]),
+            chia_protocol::Bytes32::new([4; 32]),
+            1,
+        );
+        let err = parse_cat_from_parent_spend(child, &empty_parent_spend()).expect_err("parse");
+        assert!(matches!(err, SignerError::UnparseableCatLineage(_)));
+    }
 }

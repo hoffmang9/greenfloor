@@ -8,11 +8,20 @@ mod offer_cancel;
 mod offers;
 mod pricing;
 mod reservations;
+mod shared;
 mod transaction;
 mod tx_signals;
 
+pub use shared::CycleWriteStore;
+
+#[cfg(test)]
+pub use shared::lock_shared_store_for_test;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::Utc;
 use rusqlite::Connection;
@@ -53,6 +62,12 @@ pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {
 
 pub struct SqliteStore {
     pub(crate) conn: Connection,
+}
+
+impl std::fmt::Debug for SqliteStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteStore").finish_non_exhaustive()
+    }
 }
 
 #[must_use]
@@ -107,6 +122,20 @@ pub struct AuditEventRow {
     pub created_at: String,
 }
 
+#[cfg(test)]
+static SQLITE_OPEN_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub fn reset_sqlite_open_calls_for_test() {
+    SQLITE_OPEN_CALLS.store(0, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+#[must_use]
+pub fn sqlite_open_calls_for_test() -> usize {
+    SQLITE_OPEN_CALLS.load(Ordering::SeqCst)
+}
+
 impl SqliteStore {
     /// Open.
     ///
@@ -114,6 +143,8 @@ impl SqliteStore {
     ///
     /// Returns an error if the operation fails.
     pub fn open(db_path: &Path) -> SignerResult<Self> {
+        #[cfg(test)]
+        SQLITE_OPEN_CALLS.fetch_add(1, Ordering::SeqCst);
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 SignerError::Other(format!(
@@ -122,11 +153,9 @@ impl SqliteStore {
                 ))
             })?;
         }
-        let conn = Connection::open(db_path).map_err(|err| {
-            SignerError::Other(format!(
-                "failed to open sqlite db {}: {err}",
-                db_path.display()
-            ))
+        let conn = Connection::open(db_path).map_err(|err| SignerError::SqliteOpenFailed {
+            path: db_path.display().to_string(),
+            open_error: err.to_string(),
         })?;
         conn.busy_timeout(Duration::from_secs(30)).map_err(|err| {
             SignerError::Other(format!("failed to set sqlite busy_timeout: {err}"))
@@ -140,6 +169,16 @@ impl SqliteStore {
         })?;
         migrations::apply_schema_migrations(&conn)?;
         Ok(Self { conn })
+    }
+
+    /// Open and wrap in [`CycleWriteStore`] for multi-threaded cycle use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when [`Self::open`] fails.
+    #[deprecated(note = "use CycleWriteStore::open instead")]
+    pub fn open_shared(db_path: &Path) -> SignerResult<CycleWriteStore> {
+        CycleWriteStore::open(db_path)
     }
 }
 

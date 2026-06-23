@@ -10,6 +10,7 @@ use crate::daemon::dispatch_test_controls::{
 };
 use crate::error::{SignerError, SignerResult};
 
+use super::managed_post::ManagedPostContext;
 use super::OfferDispatchOutput;
 
 pub(crate) fn parallel_dispatch_result(
@@ -30,6 +31,7 @@ pub(crate) fn parallel_dispatch_result(
 }
 
 pub(crate) fn managed_post_result(
+    _post_ctx: &ManagedPostContext,
     injections: &DaemonDispatchTestInjections,
 ) -> Option<SignerResult<bool>> {
     match injections.managed_post? {
@@ -41,6 +43,9 @@ pub(crate) fn managed_post_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ManagerProgramConfig;
+    use crate::daemon::offer_dispatch::managed_post::ManagedPostContext;
+    use crate::storage::CycleWriteStore;
 
     #[test]
     fn parallel_dispatch_injection_modes() {
@@ -70,15 +75,28 @@ mod tests {
 
     #[test]
     fn managed_post_injection_modes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
+        let post_ctx = ManagedPostContext {
+            program: ManagerProgramConfig::default(),
+            paths: crate::daemon::cycle_paths::DaemonCyclePaths::new(
+                dir.path().join("program.yaml"),
+                dir.path().join("markets.yaml"),
+                None,
+            ),
+            write_store: store,
+            dispatch_injections: DaemonDispatchTestInjections::default(),
+        };
+
         let success =
             DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Success);
-        assert!(managed_post_result(&success)
+        assert!(managed_post_result(&post_ctx, &success)
             .expect("configured")
             .expect("posted"));
 
         let failure =
             DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Failure);
-        assert!(!managed_post_result(&failure)
+        assert!(!managed_post_result(&post_ctx, &failure)
             .expect("configured")
             .expect("not posted"));
     }

@@ -10,7 +10,7 @@ use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::SqliteStore;
+use crate::storage::CycleWriteStore;
 use crate::test_support::market_config;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -39,6 +39,7 @@ markets:
 pub(super) fn test_context_from_program_file(
     dir: &TempDir,
     db_path: &Path,
+    write_store: CycleWriteStore,
     program_path: &Path,
     mut program: ManagerProgramConfig,
     with_signer: bool,
@@ -51,7 +52,7 @@ pub(super) fn test_context_from_program_file(
     } else {
         None
     };
-    test_cycle_context(dir, db_path, program, signer)
+    test_cycle_context(dir, db_path, write_store, program, signer)
 }
 
 pub(super) fn sample_market() -> MarketConfig {
@@ -86,7 +87,7 @@ pub(super) fn sample_action() -> PlannedAction {
 
 pub(super) struct ParallelDispatchHarness {
     pub(super) _dir: TempDir,
-    pub(super) store: SqliteStore,
+    pub(super) store: CycleWriteStore,
     pub(super) program_path: PathBuf,
     test_ctx: crate::daemon::test_support::TestCycleContextBundle,
 }
@@ -95,7 +96,7 @@ impl ParallelDispatchHarness {
     pub(super) fn new(parallelism_enabled: bool, dry_run: bool, with_signer: bool) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
-        let store = SqliteStore::open(&db_path).expect("open");
+        let store = CycleWriteStore::open(&db_path).expect("open");
         let program_path = dir.path().join("program.yaml");
         write_minimal_program_with_signer(
             &program_path,
@@ -109,6 +110,7 @@ impl ParallelDispatchHarness {
         let test_ctx = test_context_from_program_file(
             &dir,
             &db_path,
+            store.clone(),
             &program_path,
             sample_program(parallelism_enabled, dry_run),
             with_signer,
@@ -132,8 +134,26 @@ impl ParallelDispatchHarness {
     ) -> crate::error::SignerResult<OfferDispatchOutput> {
         use super::super::execute_strategy_actions;
 
-        execute_strategy_actions(&self.store, &self.test_ctx.cycle_context(), market, actions).await
+        execute_strategy_actions(&self.test_ctx.cycle_context(), market, actions).await
     }
+
+    pub(super) fn managed_post_context(&self) -> super::super::managed_post::ManagedPostContext {
+        super::super::managed_post::ManagedPostContext::from_market_cycle(
+            &self.test_ctx.cycle_context(),
+        )
+    }
+}
+
+pub(super) fn assert_persist_flush_does_not_reopen_cycle_db(
+    post_ctx: &super::super::managed_post::ManagedPostContext,
+) {
+    use crate::storage::{reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test};
+
+    use super::super::managed_post::flush_managed_post_persist_for_test;
+
+    reset_sqlite_open_calls_for_test();
+    flush_managed_post_persist_for_test(post_ctx).expect("flush");
+    assert_eq!(sqlite_open_calls_for_test(), 0);
 }
 
 pub(super) async fn generous_spendable_profiles(

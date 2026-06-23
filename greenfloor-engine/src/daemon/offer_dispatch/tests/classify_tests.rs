@@ -9,7 +9,7 @@ use super::super::{
 };
 use crate::config::ManagerProgramConfig;
 use crate::error::SignerError;
-use crate::storage::SqliteStore;
+use crate::storage::{lock_shared_store_for_test, CycleWriteStore};
 
 #[test]
 fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
@@ -94,10 +94,10 @@ fn classify_parallel_dispatch_fatal_error_propagates() {
 async fn record_parallel_fallback_audit_persists_event() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
+    let store = CycleWriteStore::open(&db_path).expect("open");
     let err = SignerError::Other("ReservationContentionError: simulated".to_string());
     record_parallel_fallback_audit(&store, "m1", &err).expect("audit");
-    let events = store
+    let events = lock_shared_store_for_test(&store)
         .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
         .expect("events");
     assert_eq!(events.len(), 1);
