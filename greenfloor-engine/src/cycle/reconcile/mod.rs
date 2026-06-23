@@ -25,6 +25,7 @@ pub(crate) use metadata::{
     REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK,
     REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK,
 };
+pub(crate) use state::STATE_CANCELLED;
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 

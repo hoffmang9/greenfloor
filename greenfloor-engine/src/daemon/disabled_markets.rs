@@ -2,8 +2,8 @@ use std::sync::Once;
 
 use crate::config::MarketsConfig;
 use crate::cycle::{
-    periodic::PeriodicGate, DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
-    MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
+    periodic::{PeriodicGate, PeriodicOutcome},
+    DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };
 
 static STARTUP_LOGGED: Once = Once::new();
@@ -61,7 +61,7 @@ pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
             event = "disabled_markets_periodic",
             "disabled_markets"
         );
-        true
+        PeriodicOutcome::Completed
     });
 }
 

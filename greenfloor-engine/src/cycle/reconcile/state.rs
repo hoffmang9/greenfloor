@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::cycle::lifecycle::{apply_open_signal, OfferLifecycleState, OfferSignal};
 
 pub(crate) const STATE_UNSUPPORTED_VENUE: &str = "reconcile_unsupported_venue";
+pub(crate) const STATE_CANCELLED: &str = "cancelled";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReconcileStateError {
@@ -37,7 +38,7 @@ impl ReconcileState {
     /// Returns an error when `raw` is not a known lifecycle or reconcile-only state.
     pub fn parse(raw: &str) -> Result<Self, ReconcileStateError> {
         let trimmed = raw.trim();
-        if trimmed == "cancelled" {
+        if trimmed == STATE_CANCELLED {
             return Ok(Self::Cancelled);
         }
         if trimmed == "cancel_submitted" {
@@ -70,7 +71,7 @@ impl ReconcileState {
             Self::Lifecycle(state) => Cow::Borrowed(state.as_str()),
             Self::PendingVisibility => Cow::Borrowed("pending_visibility"),
             Self::CancelSubmitted => Cow::Borrowed("cancel_submitted"),
-            Self::Cancelled => Cow::Borrowed("cancelled"),
+            Self::Cancelled => Cow::Borrowed(STATE_CANCELLED),
             Self::UnknownOrphaned => Cow::Borrowed("unknown_orphaned"),
             Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
         }

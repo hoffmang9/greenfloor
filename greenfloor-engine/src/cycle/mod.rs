@@ -42,9 +42,8 @@ pub use notifications::{
 };
 pub use orchestration::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates, dedupe_sorted_market_ids,
-    enqueue_immediate_requeue, is_dexie_offer_missing_error_text,
-    next_disabled_market_log_deadline, record_stale_sweep_check, select_market_batch,
-    should_log_disabled_market, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
+    enqueue_immediate_requeue, is_dexie_offer_missing_error_text, record_stale_sweep_check,
+    select_market_batch, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
     DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };

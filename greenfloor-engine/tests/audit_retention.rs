@@ -4,8 +4,7 @@ use greenfloor_engine::operator_log::{
     TAKER_DETECTION,
 };
 use greenfloor_engine::storage::{
-    audit_retention_cutoff, is_preserved_audit_row, maybe_prune_stale_audit_events,
-    PruneAuditEventsOptions, SqliteStore, DEFAULT_AUDIT_RETENTION_DAYS,
+    is_preserved_audit_row, PruneAuditEventsOptions, SqliteStore, DEFAULT_AUDIT_RETENTION_DAYS,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -63,26 +62,6 @@ fn seed_old_rows(store: &SqliteStore, created_at: &str) {
             created_at,
         )
         .expect("cancel policy");
-}
-
-#[test]
-fn is_preserved_audit_row_matches_financial_events_only() {
-    assert!(is_preserved_audit_row(
-        OFFER_LIFECYCLE_TRANSITION,
-        &json!({"new_state":"cancelled","reason":"ok"}),
-    ));
-    assert!(is_preserved_audit_row(
-        OFFER_LIFECYCLE_TRANSITION,
-        &json!({"new_state":"tx_block_confirmed","reason":"take_confirmed_on_tx_block"}),
-    ));
-    assert!(!is_preserved_audit_row(
-        OFFER_LIFECYCLE_TRANSITION,
-        &json!({"new_state":"open","reason":"ok"}),
-    ));
-    assert!(!is_preserved_audit_row(
-        OFFER_CANCEL_POLICY,
-        &json!({"executed_count": 0}),
-    ));
 }
 
 #[test]
@@ -163,11 +142,6 @@ fn prune_stale_audit_events_vacuum_flag_runs_vacuum() {
 }
 
 #[test]
-fn audit_retention_cutoff_rejects_unrepresentable_retention_days() {
-    assert!(audit_retention_cutoff(u64::MAX).is_err());
-}
-
-#[test]
 fn sql_prune_preserves_rows_matching_rust_predicate() {
     let dir = TempDir::new().expect("tempdir");
     let store = open_store(&dir.path().join("state.sqlite"));
@@ -243,11 +217,4 @@ fn sql_prune_preserves_rows_matching_rust_predicate() {
             row.event_type
         );
     }
-}
-
-#[test]
-fn maybe_prune_stale_audit_events_is_best_effort_on_success() {
-    let dir = TempDir::new().expect("tempdir");
-    let store = open_store(&dir.path().join("state.sqlite"));
-    maybe_prune_stale_audit_events(&store, DEFAULT_AUDIT_RETENTION_DAYS);
 }

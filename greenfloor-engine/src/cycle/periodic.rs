@@ -18,7 +18,14 @@ pub fn next_periodic_deadline(now_monotonic: f64, interval_seconds: u64) -> f64 
     now_monotonic + crate::offer::pricing::u64_to_f64(interval_seconds.max(1))
 }
 
-/// Runs `task` at most once per `interval_seconds` of monotonic time.
+/// Result of a periodic gate task controlling the next run deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodicOutcome {
+    Completed,
+    RetryAfter(u64),
+}
+
+/// Runs `task` at most once per configured interval of monotonic time.
 pub struct PeriodicGate {
     next_deadline: Mutex<Option<f64>>,
 }
@@ -31,8 +38,8 @@ impl PeriodicGate {
         }
     }
 
-    /// Runs `task` when due. Advances the next deadline only when `task` returns `true`.
-    pub fn run_if_due(&self, interval_seconds: u64, task: impl FnOnce() -> bool) {
+    /// Runs `task` when due and advances the next deadline from the task outcome.
+    pub fn run_if_due(&self, interval_seconds: u64, task: impl FnOnce() -> PeriodicOutcome) {
         let now = monotonic_seconds();
         let Ok(mut next_deadline) = self.next_deadline.lock() else {
             return;
@@ -41,9 +48,11 @@ impl PeriodicGate {
         if !is_periodic_due(now, deadline) {
             return;
         }
-        if task() {
-            *next_deadline = Some(next_periodic_deadline(now, interval_seconds));
-        }
+        let delay_seconds = match task() {
+            PeriodicOutcome::Completed => interval_seconds,
+            PeriodicOutcome::RetryAfter(retry_seconds) => retry_seconds,
+        };
+        *next_deadline = Some(next_periodic_deadline(now, delay_seconds));
     }
 
     pub fn seed_next_deadline(&self, interval_seconds: u64) {
@@ -70,24 +79,24 @@ mod tests {
         let mut runs = 0_u8;
         gate.run_if_due(3600, || {
             runs += 1;
-            true
+            PeriodicOutcome::Completed
         });
         gate.run_if_due(3600, || {
             runs += 1;
-            true
+            PeriodicOutcome::Completed
         });
         assert_eq!(runs, 1);
     }
 
     #[test]
-    fn periodic_gate_does_not_advance_deadline_when_task_returns_false() {
+    fn periodic_gate_retry_after_delays_next_run() {
         let gate = PeriodicGate::new();
+        gate.run_if_due(86_400, || PeriodicOutcome::RetryAfter(3600));
         let mut runs = 0_u8;
-        gate.run_if_due(3600, || false);
-        gate.run_if_due(3600, || {
+        gate.run_if_due(86_400, || {
             runs += 1;
-            true
+            PeriodicOutcome::Completed
         });
-        assert_eq!(runs, 1);
+        assert_eq!(runs, 0);
     }
 }

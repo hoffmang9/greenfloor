@@ -164,7 +164,8 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 - Configure `storage.audit_retention_days` in `program.yaml` (default `30`).
 - The daemon prunes non-financial `audit_event` rows once per day (override cadence with
-  `GREENFLOOR_AUDIT_PRUNE_INTERVAL_SECONDS`).
+  `GREENFLOOR_AUDIT_PRUNE_INTERVAL_SECONDS`; failed daemon prunes retry after
+  `GREENFLOOR_AUDIT_PRUNE_FAILURE_RETRY_SECONDS`, default 1 hour).
 - Preserved forever: taker/cancel/on-chain coin-op audit rows (see `storage/audit_retention.rs`).
 - Manual maintenance:
   - `greenfloor-manager audit-prune --dry-run`
