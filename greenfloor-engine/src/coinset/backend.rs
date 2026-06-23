@@ -27,6 +27,11 @@ pub trait OfferCoinsetBackend {
         coin_id: Bytes32,
     ) -> impl std::future::Future<Output = SignerResult<Cat>> + Send;
 
+    fn offer_input_coin_is_spent(
+        &self,
+        coin_id: Bytes32,
+    ) -> impl std::future::Future<Output = SignerResult<bool>> + Send;
+
     fn wait_for_unspent_cat(
         &self,
         coin_id: Bytes32,
@@ -66,6 +71,10 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
 
     async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
         presplit::fetch_offer_input_cat(self.0, coin_id).await
+    }
+
+    async fn offer_input_coin_is_spent(&self, coin_id: Bytes32) -> SignerResult<bool> {
+        presplit::offer_input_coin_is_spent(self.0, coin_id).await
     }
 
     async fn wait_for_unspent_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {

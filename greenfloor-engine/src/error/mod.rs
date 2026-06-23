@@ -158,6 +158,16 @@ pub enum SignerError {
     #[error("offer_cancel_no_spendable_input")]
     OfferCancelNoSpendableInput,
 
+    #[error("offer_cancel_input_not_vault_owned: coin={coin_id} puzzle_hash={puzzle_hash} launcher={launcher_id}")]
+    OfferCancelInputNotVaultOwned {
+        coin_id: String,
+        puzzle_hash: String,
+        launcher_id: String,
+    },
+
+    #[error("offer_cancel_presplit_binding_parse_failed:{detail}")]
+    OfferCancelPresplitBindingParseFailed { detail: String },
+
     #[error("offer_cancel_input_coin_already_spent")]
     OfferCancelInputCoinAlreadySpent,
 

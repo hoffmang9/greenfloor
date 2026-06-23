@@ -2,12 +2,40 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 
 use super::poll::{run_poll_loop, PollConfig};
+use super::spent_verify::coin_record_is_spent;
 use super::{cats, CoinsetClient};
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::Cat;
 
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
+
+/// Fetch an unspent offer-input CAT by coin id.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+/// Returns whether an offer maker input coin is no longer unspent on chain.
+///
+/// Missing coin records are treated as spent so cancel fails fast instead of building
+/// reclaim spends from offer-embedded coin data.
+///
+/// # Errors
+///
+/// Returns an error if the coin record lookup fails.
+pub async fn offer_input_coin_is_spent(
+    client: &CoinsetClient,
+    coin_id: Bytes32,
+) -> SignerResult<bool> {
+    let response = client
+        .get_coin_record_by_name(coin_id)
+        .await
+        .map_err(SignerError::from)?;
+    Ok(match response.coin_record {
+        None => true,
+        Some(record) => coin_record_is_spent(record.spent_block_index),
+    })
+}
 
 /// Fetch an unspent offer-input CAT by coin id.
 ///

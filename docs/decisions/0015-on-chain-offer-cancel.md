@@ -20,7 +20,8 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
    `greenfloor-engine/src/coinset/`).
 
 2. **Shared spend construction lives in `offer/reclaim.rs`.**
-   - `build_offer_cancel_spend_bundle` — decode offer → resolve input CAT → build reclaim spend.
+   - `build_offer_cancel_spend_bundle` — decode offer → spend each cancellable maker input
+     (vault XCH p2 or presplit CAT) → one vault singleton fast-forward.
    - `build_vault_cat_reclaim_spend_bundle` — direct vault vs presplit-offer inner spend modes.
    - Lifecycle orchestration (`offer/lifecycle/cancel.rs`) handles Dexie fetch, Coinset
      broadcast, DB updates, and mempool tx observation.

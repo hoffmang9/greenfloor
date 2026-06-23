@@ -31,6 +31,10 @@ impl OfferCoinsetBackend for EmptyOfferCoinset {
         Err(SignerError::Other("unused".to_string()))
     }
 
+    async fn offer_input_coin_is_spent(&self, _coin_id: Bytes32) -> SignerResult<bool> {
+        Err(SignerError::Other("unused".to_string()))
+    }
+
     async fn wait_for_unspent_cat(&self, _coin_id: Bytes32) -> SignerResult<Cat> {
         Err(SignerError::Other("unused".to_string()))
     }
