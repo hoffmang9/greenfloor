@@ -62,10 +62,14 @@ mod tests {
     }
 
     #[test]
-    fn i64_to_usize_and_usize_to_i64_convert_valid_values() {
+    fn i64_to_usize_converts_valid_values_and_rejects_negative() {
         assert_eq!(i64_to_usize(4, "count").expect("usize"), 4);
-        assert_eq!(usize_to_i64(4, "count").expect("i64"), 4);
         assert!(i64_to_usize(-1, "count").is_err());
+    }
+
+    #[test]
+    fn usize_to_i64_converts_in_range() {
+        assert_eq!(usize_to_i64(4, "count").expect("i64"), 4);
     }
 
     #[test]

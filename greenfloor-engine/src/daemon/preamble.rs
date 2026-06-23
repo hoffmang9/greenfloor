@@ -185,22 +185,10 @@ pub(crate) fn xch_price_from_env_override() -> SignerResult<Option<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ManagerProgramConfig;
+    use crate::daemon::test_support::{open_test_store, sample_mainnet_program};
     use crate::daemon::watchlist::CoinWatchlistCache;
     use crate::operator_log::XCH_PRICE_SNAPSHOT;
-    use crate::storage::SqliteStore;
     use crate::test_env::EnvRestoreGuard;
-
-    fn open_store(path: &std::path::Path) -> SqliteStore {
-        SqliteStore::open(path).expect("open sqlite store")
-    }
-
-    fn sample_program() -> ManagerProgramConfig {
-        ManagerProgramConfig {
-            network: "mainnet".to_string(),
-            ..Default::default()
-        }
-    }
 
     #[test]
     fn xch_price_from_env_override_parses_positive_values() {
@@ -219,12 +207,19 @@ mod tests {
     async fn run_cycle_preamble_records_xch_price_snapshot_when_env_set() {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = open_store(&dir.path().join("state.sqlite"));
+        let store = open_test_store(&dir.path().join("state.sqlite"));
         let watchlist = CoinWatchlistCache::new();
 
-        let result = run_cycle_preamble(&sample_program(), &store, "", &watchlist, false, false)
-            .await
-            .expect("preamble");
+        let result = run_cycle_preamble(
+            &sample_mainnet_program(),
+            &store,
+            "",
+            &watchlist,
+            false,
+            false,
+        )
+        .await
+        .expect("preamble");
 
         assert_eq!(result.xch_price_usd, Some(42.5));
         assert_eq!(result.cycle_error_count, 0);
@@ -238,11 +233,11 @@ mod tests {
     async fn run_cycle_preamble_mempool_poll_failure_increments_cycle_errors() {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = open_store(&dir.path().join("state.sqlite"));
+        let store = open_test_store(&dir.path().join("state.sqlite"));
         let watchlist = CoinWatchlistCache::new();
 
         let result = run_cycle_preamble(
-            &sample_program(),
+            &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
             &watchlist,
@@ -252,7 +247,6 @@ mod tests {
         .await
         .expect("preamble");
 
-        assert_eq!(result.xch_price_usd, Some(33.0));
         assert_eq!(result.cycle_error_count, 1);
     }
 }

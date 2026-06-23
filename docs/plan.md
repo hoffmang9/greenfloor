@@ -99,7 +99,7 @@ Canonical local/CI gate commands: [README.md](../README.md) → **Local dev tool
 - Python 3.11+ for dev tooling (script lint/type-check).
 - Node.js LTS for Prettier (YAML/JSON/Markdown); see [README.md](../README.md) → **Local dev tooling**.
 - Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`
-- Rust operator tests: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI
+- Rust operator tests: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml --features test-support` in CI
   (`cargo test` with the same manifest works locally).
 - Local gate: `pre-commit run --all-files` (ruff, pyright, prettier, yamllint, cargo fmt/clippy;
   ~5–10s warm with `PRE_COMMIT_HOME=.cache/pre-commit`). Run the Rust test command above

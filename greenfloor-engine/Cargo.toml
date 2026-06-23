@@ -9,6 +9,9 @@ repository = "https://github.com/hoffmang9/greenfloor"
 keywords = ["chia", "greenfloor", "market-making"]
 categories = ["command-line-utilities"]
 
+[features]
+test-support = []
+
 [lib]
 name = "greenfloor_engine"
 path = "src/lib.rs"

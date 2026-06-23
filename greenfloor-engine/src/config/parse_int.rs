@@ -47,8 +47,12 @@ mod tests {
     }
 
     #[test]
-    fn u64_to_i64_and_usize_to_i64_convert_in_range() {
+    fn u64_to_i64_converts_in_range() {
         assert_eq!(u64_to_i64(100, "field").expect("u64"), 100);
+    }
+
+    #[test]
+    fn usize_to_i64_converts_in_range() {
         assert_eq!(usize_to_i64(100, "field").expect("usize"), 100);
     }
 }

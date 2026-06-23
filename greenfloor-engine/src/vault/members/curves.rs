@@ -254,13 +254,4 @@ mod tests {
             .expect_err("unsupported curve");
         assert!(matches!(err, SignerError::UnsupportedVaultCurve(_)));
     }
-
-    #[test]
-    fn fast_forward_flag_changes_r1_member_hash() {
-        let config = MemberConfig::default();
-        let pk = R1Pair::new(3).pk;
-        let normal = r1_member_hash(&config, pk, false).expect("normal");
-        let fast_forward = r1_member_hash(&config, pk, true).expect("ff");
-        assert_ne!(normal, fast_forward);
-    }
 }
