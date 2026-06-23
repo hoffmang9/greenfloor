@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::offer::bootstrap::{bootstrap_offer_gate_for_status, BootstrapPhaseStatus};
-use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPlan};
+use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPlan};
 
 #[derive(Debug, Clone)]
 pub struct BootstrapPhaseResult {
@@ -57,8 +57,12 @@ impl Serialize for BootstrapPhaseResult {
 
 #[derive(Serialize)]
 struct BootstrapPlanOutput<'a> {
-    source_coin_id: &'a str,
+    funding: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_coin_id: Option<&'a str>,
     source_amount: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    combine_input_coin_ids: Option<&'a [String]>,
     output_amounts_base_units: &'a [i64],
     total_output_amount: i64,
     change_amount: i64,
@@ -67,9 +71,21 @@ struct BootstrapPlanOutput<'a> {
 
 impl<'a> From<&'a BootstrapPlan> for BootstrapPlanOutput<'a> {
     fn from(plan: &'a BootstrapPlan) -> Self {
+        let (funding, source_coin_id, combine_input_coin_ids) = match &plan.funding {
+            BootstrapFundingSource::SingleCoin { coin_id, .. } => {
+                ("single_coin", Some(coin_id.as_str()), None)
+            }
+            BootstrapFundingSource::CombineFirst(prereq) => (
+                "combine_first",
+                None,
+                Some(prereq.input_coin_ids.as_slice()),
+            ),
+        };
         Self {
-            source_coin_id: plan.source_coin_id(),
+            funding,
+            source_coin_id,
             source_amount: plan.source_amount(),
+            combine_input_coin_ids,
             output_amounts_base_units: &plan.output_amounts_base_units,
             total_output_amount: plan.total_output_amount,
             change_amount: plan.change_amount,
@@ -188,8 +204,9 @@ impl BootstrapPhaseFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::BootstrapPhaseResult;
-    use crate::offer::bootstrap::BootstrapPhaseSnapshot;
+    use super::{BootstrapPhaseResult, BootstrapPlanOutput};
+    use crate::coin_ops::SplitCombinePrereqPlan;
+    use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPlan};
 
     #[test]
     fn from_snapshot_block_error_matches_snapshot_gate() {
@@ -211,5 +228,31 @@ mod tests {
                 "status={status} reason={reason} ready={ready}"
             );
         }
+    }
+
+    #[test]
+    fn plan_output_omits_source_coin_id_for_combine_first() {
+        let plan = BootstrapPlan {
+            funding: BootstrapFundingSource::CombineFirst(SplitCombinePrereqPlan {
+                input_coin_ids: vec!["coin-a".to_string(), "coin-b".to_string()],
+                target_amount: 100,
+                selected_total: 100,
+                exact_match: true,
+                cap_applied: false,
+                selected_count_before_cap: 2,
+                combine_input_cap: 5,
+            }),
+            output_amounts_base_units: vec![100],
+            total_output_amount: 100,
+            change_amount: 0,
+            deficits: Vec::new(),
+        };
+        let output = BootstrapPlanOutput::from(&plan);
+        assert_eq!(output.funding, "combine_first");
+        assert!(output.source_coin_id.is_none());
+        assert_eq!(
+            output.combine_input_coin_ids,
+            Some(["coin-a".to_string(), "coin-b".to_string()].as_slice())
+        );
     }
 }

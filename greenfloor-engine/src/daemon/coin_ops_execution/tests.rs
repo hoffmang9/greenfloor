@@ -1,5 +1,3 @@
-#![allow(clippy::large_futures)]
-
 use std::collections::HashSet;
 
 use crate::coin_ops::execution::{

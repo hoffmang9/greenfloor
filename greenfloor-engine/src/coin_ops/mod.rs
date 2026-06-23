@@ -47,7 +47,8 @@ pub use selection::{
     select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
 };
 pub use shape_defer::{
-    aggregate_covers_without_single_coin, defer_low_watermark_split_to_post_bootstrap,
+    aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,
+    defer_low_watermark_split_to_post_bootstrap, spendable_amounts_in_base_units,
     LOW_WATERMARK_BUFFER_DEFICIT,
 };
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};

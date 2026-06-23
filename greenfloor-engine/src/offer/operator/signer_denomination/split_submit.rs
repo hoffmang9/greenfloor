@@ -44,26 +44,25 @@ pub(super) async fn submit_bootstrap_combine(
     receive_address: &str,
     split_asset_mojo_multiplier: i64,
 ) -> SignerResult<Value> {
-    let BootstrapFundingSource::CombineFirst {
-        input_coin_ids,
-        selected_total,
-    } = &bootstrap_plan.funding
-    else {
+    let BootstrapFundingSource::CombineFirst(prereq) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
     let multiplier = split_asset_mojo_multiplier.max(1);
-    let total_mojos = selected_total.saturating_mul(multiplier);
+    let total_mojos = prereq.selected_total.saturating_mul(multiplier);
     let output_amounts = combine_output_amounts(total_mojos, 1)?;
     let mut result = submit_bootstrap_vault_mixed_split(
         signer_config,
         split_asset_id,
         receive_address,
-        input_coin_ids,
+        &prereq.input_coin_ids,
         output_amounts,
     )
     .await?;
     if let Some(obj) = result.as_object_mut() {
-        obj.insert("input_coin_count".to_string(), json!(input_coin_ids.len()));
+        obj.insert(
+            "input_coin_count".to_string(),
+            json!(prereq.input_coin_ids.len()),
+        );
     }
     Ok(result)
 }

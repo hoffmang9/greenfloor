@@ -5,6 +5,7 @@
 
 use crate::coin_ops::{
     aggregate_covers_without_single_coin, build_combine_prereq_plan, SpendableCoin,
+    SplitCombinePrereqPlan,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,14 +31,8 @@ pub struct BootstrapCoin {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapFundingSource {
-    SingleCoin {
-        coin_id: String,
-        amount: i64,
-    },
-    CombineFirst {
-        input_coin_ids: Vec<String>,
-        selected_total: i64,
-    },
+    SingleCoin { coin_id: String, amount: i64 },
+    CombineFirst(SplitCombinePrereqPlan),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,14 +47,14 @@ pub struct BootstrapPlan {
 impl BootstrapPlan {
     #[must_use]
     pub fn requires_combine_first(&self) -> bool {
-        matches!(self.funding, BootstrapFundingSource::CombineFirst { .. })
+        matches!(self.funding, BootstrapFundingSource::CombineFirst(_))
     }
 
     #[must_use]
-    pub fn source_coin_id(&self) -> &str {
+    pub fn source_coin_id(&self) -> Option<&str> {
         match &self.funding {
-            BootstrapFundingSource::SingleCoin { coin_id, .. } => coin_id,
-            BootstrapFundingSource::CombineFirst { .. } => "",
+            BootstrapFundingSource::SingleCoin { coin_id, .. } => Some(coin_id.as_str()),
+            BootstrapFundingSource::CombineFirst(_) => None,
         }
     }
 
@@ -67,18 +62,22 @@ impl BootstrapPlan {
     pub fn source_amount(&self) -> i64 {
         match &self.funding {
             BootstrapFundingSource::SingleCoin { amount, .. } => *amount,
-            BootstrapFundingSource::CombineFirst { selected_total, .. } => *selected_total,
+            BootstrapFundingSource::CombineFirst(prereq) => prereq.selected_total,
+        }
+    }
+
+    #[must_use]
+    pub fn combine_prereq(&self) -> Option<&SplitCombinePrereqPlan> {
+        match &self.funding {
+            BootstrapFundingSource::CombineFirst(prereq) => Some(prereq),
+            BootstrapFundingSource::SingleCoin { .. } => None,
         }
     }
 
     #[must_use]
     pub fn combine_input_coin_ids(&self) -> Option<&[String]> {
-        match &self.funding {
-            BootstrapFundingSource::CombineFirst { input_coin_ids, .. } => {
-                Some(input_coin_ids.as_slice())
-            }
-            BootstrapFundingSource::SingleCoin { .. } => None,
-        }
+        self.combine_prereq()
+            .map(|prereq| prereq.input_coin_ids.as_slice())
     }
 }
 
@@ -220,14 +219,12 @@ pub fn plan_bootstrap_mixed_outputs(
                 total_output_amount,
             };
         };
+        let selected_total = prereq.selected_total;
         return BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst {
-                input_coin_ids: prereq.input_coin_ids,
-                selected_total: prereq.selected_total,
-            },
+            funding: BootstrapFundingSource::CombineFirst(prereq),
             output_amounts_base_units: output_amounts,
             total_output_amount,
-            change_amount: prereq.selected_total - total_output_amount,
+            change_amount: selected_total - total_output_amount,
             deficits,
         });
     };
@@ -294,7 +291,7 @@ mod tests {
             panic!("expected needs_shape")
         };
         assert_single_coin_split(&plan);
-        assert_eq!(plan.source_coin_id(), "coin-big");
+        assert_eq!(plan.source_coin_id(), Some("coin-big"));
         let mut outputs = plan.output_amounts_base_units;
         outputs.sort_unstable();
         assert_eq!(outputs, vec![1, 1, 10, 10, 10]);
@@ -324,7 +321,7 @@ mod tests {
         else {
             panic!("expected needs_shape")
         };
-        assert_eq!(plan.source_coin_id(), "coin-big-object");
+        assert_eq!(plan.source_coin_id(), Some("coin-big-object"));
         assert_eq!(plan.output_amounts_base_units, vec![10, 10]);
     }
 
@@ -337,7 +334,7 @@ mod tests {
         else {
             panic!("expected needs_shape")
         };
-        assert_eq!(plan.source_coin_id(), "valid");
+        assert_eq!(plan.source_coin_id(), Some("valid"));
     }
 
     #[test]

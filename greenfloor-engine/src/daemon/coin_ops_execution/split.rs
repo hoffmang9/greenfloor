@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed,
-    defer_low_watermark_split_to_post_bootstrap, i64_to_usize, plan_daemon_auto_split_selection,
+    defer_low_watermark_split_from_spendable, i64_to_usize, plan_daemon_auto_split_selection,
     usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan, SplitCombinePrereqPlan,
     SplitSkipReason,
 };
@@ -93,16 +93,71 @@ struct SplitPlanContext {
     canonical_asset_id: String,
 }
 
-fn spendable_amounts_base_units(
-    spendable: &[SpendableCoin],
-    base_unit_mojo_multiplier: i64,
-) -> Vec<i64> {
-    let multiplier = base_unit_mojo_multiplier.max(1);
-    spendable
+async fn deferred_daemon_split_result(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> CoinOpSkipResult<Option<(Vec<CoinOpExecItem>, u64)>> {
+    let initial = match ctx.list_spendable_coins().await {
+        Ok(coins) => coins,
+        Err(err) => {
+            return Err((
+                vec![skip_item(
+                    plan.op_type.as_str(),
+                    plan.size_base_units,
+                    plan.op_count,
+                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                )],
+                0,
+            ));
+        }
+    };
+    if initial.is_empty() {
+        return Err((
+            vec![skip_item(
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
+                "no_spendable_split_coin_available",
+            )],
+            0,
+        ));
+    }
+
+    let spendable_for_defer: Vec<SpendableCoin> = initial
         .iter()
-        .map(|coin| coin.amount / multiplier)
-        .filter(|amount| *amount > 0)
-        .collect()
+        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
+        .cloned()
+        .collect();
+    if defer_low_watermark_split_from_spendable(
+        plan,
+        &spendable_for_defer,
+        ctx.base_unit_mojo_multiplier,
+    ) {
+        return Ok(Some((
+            vec![skip_item(
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
+                "bootstrap_primary_shape_deferred",
+            )],
+            0,
+        )));
+    }
+    Ok(None)
+}
+
+pub(crate) async fn execute_daemon_split_plan(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> (Vec<CoinOpExecItem>, u64) {
+    match deferred_daemon_split_result(ctx, plan).await {
+        Ok(Some(deferred)) => deferred,
+        Err(skip) => skip,
+        Ok(None) => match execute_daemon_split_plan_inner(ctx, plan).await {
+            Ok(result) => result,
+            Err(skip) => skip,
+        },
+    }
 }
 
 fn prepare_split_plan_context(
@@ -269,66 +324,10 @@ async fn attempt_daemon_split(
     }
 }
 
-#[allow(clippy::large_futures)] // defer gate stacks coin-list and auto-split selection futures
-pub(crate) async fn execute_daemon_split_plan(
-    ctx: &CoinOpExecContext,
-    plan: &CoinOpPlan,
-) -> (Vec<CoinOpExecItem>, u64) {
-    match execute_daemon_split_plan_inner(ctx, plan).await {
-        Ok(result) => result,
-        Err(skip) => skip,
-    }
-}
-
 async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
-    let initial = match ctx.list_spendable_coins().await {
-        Ok(coins) => coins,
-        Err(err) => {
-            return Err((
-                vec![skip_item(
-                    plan.op_type.as_str(),
-                    plan.size_base_units,
-                    plan.op_count,
-                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                )],
-                0,
-            ));
-        }
-    };
-    if initial.is_empty() {
-        return Err((
-            vec![skip_item(
-                plan.op_type.as_str(),
-                plan.size_base_units,
-                plan.op_count,
-                "no_spendable_split_coin_available",
-            )],
-            0,
-        ));
-    }
-
-    let spendable_for_defer: Vec<SpendableCoin> = initial
-        .iter()
-        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
-        .cloned()
-        .collect();
-    let amounts_base_units =
-        spendable_amounts_base_units(&spendable_for_defer, ctx.base_unit_mojo_multiplier);
-    if defer_low_watermark_split_to_post_bootstrap(plan, &amounts_base_units) {
-        return Ok((
-            vec![skip_item(
-                plan.op_type.as_str(),
-                plan.size_base_units,
-                plan.op_count,
-                "bootstrap_primary_shape_deferred",
-            )],
-            0,
-        ));
-    }
-
     let split_ctx = prepare_split_plan_context(ctx, plan)?;
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {

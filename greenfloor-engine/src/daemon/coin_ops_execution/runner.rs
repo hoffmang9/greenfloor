@@ -119,7 +119,6 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
     ))
 }
 
-#[allow(clippy::large_futures)] // split defer gate stacks coin-list and auto-split futures
 async fn execute_managed_coin_op_plans_async(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,

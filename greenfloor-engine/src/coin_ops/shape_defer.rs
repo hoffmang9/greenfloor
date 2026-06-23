@@ -1,9 +1,23 @@
 //! Post-bootstrap vs daemon coin-op shaping coordination.
 
-use super::{CoinOpKind, CoinOpPlan};
+use super::{CoinOpKind, CoinOpPlan, SpendableCoin};
 
 /// Reason tag for a single low-watermark split plan emitted by coin-op planning.
 pub const LOW_WATERMARK_BUFFER_DEFICIT: &str = "low_watermark_buffer_deficit";
+
+/// Convert spendable coin mojos to positive base-unit amounts.
+#[must_use]
+pub fn spendable_amounts_in_base_units(
+    spendable: &[SpendableCoin],
+    base_unit_mojo_multiplier: i64,
+) -> Vec<i64> {
+    let multiplier = base_unit_mojo_multiplier.max(1);
+    spendable
+        .iter()
+        .map(|coin| coin.amount / multiplier)
+        .filter(|amount| *amount > 0)
+        .collect()
+}
 
 /// True when aggregate inventory covers `required_base_units` but no single coin does.
 #[must_use]
@@ -36,13 +50,36 @@ pub fn defer_low_watermark_split_to_post_bootstrap(
         && aggregate_covers_without_single_coin(plan.size_base_units, spendable_amounts_base_units)
 }
 
+/// Skip daemon execution using live spendable coins (sync; safe before split orchestration).
+#[must_use]
+pub fn defer_low_watermark_split_from_spendable(
+    plan: &CoinOpPlan,
+    spendable: &[SpendableCoin],
+    base_unit_mojo_multiplier: i64,
+) -> bool {
+    defer_low_watermark_split_to_post_bootstrap(
+        plan,
+        &spendable_amounts_in_base_units(spendable, base_unit_mojo_multiplier),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        aggregate_covers_without_single_coin, defer_low_watermark_split_to_post_bootstrap,
+        aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,
+        defer_low_watermark_split_to_post_bootstrap, spendable_amounts_in_base_units,
         LOW_WATERMARK_BUFFER_DEFICIT,
     };
-    use crate::coin_ops::{CoinOpKind, CoinOpPlan};
+    use crate::coin_ops::{CoinOpKind, CoinOpPlan, SpendableCoin};
+
+    #[test]
+    fn spendable_amounts_in_base_units_divides_by_multiplier() {
+        let spendable = vec![SpendableCoin {
+            id: "a".to_string(),
+            amount: 65_000,
+        }];
+        assert_eq!(spendable_amounts_in_base_units(&spendable, 1_000), vec![65]);
+    }
 
     #[test]
     fn aggregate_covers_without_single_coin_detects_combine_first_inventory() {
@@ -66,6 +103,29 @@ mod tests {
         assert!(!defer_low_watermark_split_to_post_bootstrap(
             &plan,
             &[150, 10]
+        ));
+    }
+
+    #[test]
+    fn defer_from_spendable_matches_base_unit_amounts() {
+        let plan = CoinOpPlan {
+            op_type: CoinOpKind::Split,
+            size_base_units: 100,
+            op_count: 1,
+            reason: LOW_WATERMARK_BUFFER_DEFICIT.to_string(),
+        };
+        let spendable = vec![
+            SpendableCoin {
+                id: "a".to_string(),
+                amount: 65_000,
+            },
+            SpendableCoin {
+                id: "b".to_string(),
+                amount: 35_000,
+            },
+        ];
+        assert!(defer_low_watermark_split_from_spendable(
+            &plan, &spendable, 1_000
         ));
     }
 }
