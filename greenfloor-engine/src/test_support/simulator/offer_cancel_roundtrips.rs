@@ -19,11 +19,36 @@ use crate::offer::presplit::{
 use crate::offer::reclaim::{
     build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
 };
-use crate::offer::types::OfferInput;
+use crate::offer::types::{OfferInput, StoredOfferCancelMetadata};
 use crate::vault::materialize::{
     append_vault_p2_reclaim_spend, finalize_vault_reclaim_spend_bundle,
 };
 use crate::vault::spend::VaultFastForwardSigner;
+
+fn stored_cancel_metadata(
+    result: &crate::offer::types::CreateOfferResult,
+) -> StoredOfferCancelMetadata {
+    StoredOfferCancelMetadata {
+        fields: result
+            .presplit_cancel_fields
+            .clone()
+            .expect("presplit cancel fields"),
+        execution_mode: Some(result.execution_mode),
+    }
+}
+
+fn corrupt_presplit_maker_puzzle_reveal(spend_bundle: &mut SpendBundle, presplit_coin_id: Bytes32) {
+    let mut allocator = clvmr::Allocator::new();
+    let garbage = allocator
+        .new_atom(b"not-presplit-puzzle")
+        .expect("garbage puzzle atom");
+    let puzzle_bytes = clvmr::serde::node_to_bytes(&allocator, garbage).expect("puzzle bytes");
+    for coin_spend in &mut spend_bundle.coin_spends {
+        if coin_spend.coin.coin_id() == presplit_coin_id {
+            coin_spend.puzzle_reveal = puzzle_bytes.clone().into();
+        }
+    }
+}
 
 async fn spend_vault_cat_reclaim(
     setup: &mut RoundtripSetup,
@@ -161,6 +186,102 @@ async fn build_offer_cancel_spend_bundle_presplit_existing_returns_cat_to_vault(
             .is_some(),
         "presplit offer input must be spent by cancel"
     );
+}
+
+#[tokio::test]
+async fn classify_presplit_cat_uses_stored_metadata_before_offer_binding() {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
+    let result = build_offer_from_setup(&mut setup)
+        .await
+        .expect("presplit-existing offer");
+    let presplit_cat = setup.presplit_cat.expect("presplit cat");
+    let presplit_coin_id = presplit_cat.coin.coin_id();
+    let coinset = SimulatorOfferCoinset::new(&setup.harness.chain);
+    coinset.register_cat(presplit_cat);
+    let mut corrupt_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
+    corrupt_presplit_maker_puzzle_reveal(&mut corrupt_bundle, presplit_coin_id);
+    let metadata = stored_cancel_metadata(&result);
+    let maker_coin = presplit_cat.coin;
+    classify_cancellable_maker_input(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &corrupt_bundle,
+        None,
+        maker_coin,
+    )
+    .await
+    .expect_err("corrupt maker spend without stored metadata must not classify");
+    let _input = classify_cancellable_maker_input(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &corrupt_bundle,
+        Some(&metadata),
+        maker_coin,
+    )
+    .await
+    .expect("stored metadata must classify presplit cat without offer binding");
+    let cancel_bundle = build_offer_cancel_spend_bundle(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &result.offer,
+        Some(&metadata),
+    )
+    .await
+    .expect("stored metadata cancel with valid offer");
+    setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .spend_coins(cancel_bundle.coin_spends, &[])
+        .expect("presplit cancel accepted");
+    assert!(
+        setup
+            .harness
+            .chain
+            .sim
+            .lock()
+            .expect("sim lock")
+            .coin_state(presplit_coin_id)
+            .expect("presplit coin")
+            .spent_height
+            .is_some(),
+        "presplit offer input must be spent by cancel"
+    );
+}
+
+#[tokio::test]
+async fn classify_presplit_cat_without_coinset_uses_stored_metadata() {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
+    let result = build_offer_from_setup(&mut setup)
+        .await
+        .expect("presplit-existing offer");
+    let presplit_cat = setup.presplit_cat.expect("presplit cat");
+    let presplit_coin_id = presplit_cat.coin.coin_id();
+    let coinset = SimulatorOfferCoinset::new(&setup.harness.chain);
+    let mut corrupt_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
+    corrupt_presplit_maker_puzzle_reveal(&mut corrupt_bundle, presplit_coin_id);
+    let metadata = stored_cancel_metadata(&result);
+    let maker_coin = presplit_cat.coin;
+    classify_cancellable_maker_input(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &corrupt_bundle,
+        None,
+        maker_coin,
+    )
+    .await
+    .expect_err("coinset miss without stored metadata must not classify");
+    classify_cancellable_maker_input(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &corrupt_bundle,
+        Some(&metadata),
+        maker_coin,
+    )
+    .await
+    .expect("stored metadata must classify presplit cat without coinset registration");
 }
 
 #[tokio::test]

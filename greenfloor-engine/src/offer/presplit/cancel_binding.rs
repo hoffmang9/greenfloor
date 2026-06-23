@@ -92,27 +92,35 @@ fn parse_offer_maker_coin_spend(
     }
 }
 
+fn try_peel_puzzle_wrapper(
+    allocator: &Allocator,
+    puzzle: Puzzle,
+) -> Result<Option<Puzzle>, PeelError> {
+    let Some(curried) = puzzle.as_curried() else {
+        return Ok(None);
+    };
+    if curried.mod_hash == INDEX_WRAPPER_HASH {
+        let args = IndexWrapperArgs::<NodePtr, NodePtr>::from_clvm(allocator, curried.args)
+            .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
+        return Ok(Some(Puzzle::parse(allocator, args.inner_puzzle)));
+    }
+    if curried.mod_hash == DELEGATED_PUZZLE_FEEDER_HASH.into() {
+        let args = DelegatedPuzzleFeederArgs::<NodePtr>::from_clvm(allocator, curried.args)
+            .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
+        return Ok(Some(Puzzle::parse(allocator, args.inner_puzzle)));
+    }
+    Ok(None)
+}
+
 fn peel_index_wrapper_puzzle(
     allocator: &Allocator,
     mut puzzle: Puzzle,
 ) -> Result<NodePtr, PeelError> {
     for _ in 0..8 {
-        let Some(curried) = puzzle.as_curried() else {
-            return Ok(puzzle.ptr());
-        };
-        if curried.mod_hash == INDEX_WRAPPER_HASH {
-            let args = IndexWrapperArgs::<NodePtr, NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
-            puzzle = Puzzle::parse(allocator, args.inner_puzzle);
-            continue;
+        match try_peel_puzzle_wrapper(allocator, puzzle)? {
+            Some(inner) => puzzle = inner,
+            None => return Ok(puzzle.ptr()),
         }
-        if curried.mod_hash == DELEGATED_PUZZLE_FEEDER_HASH.into() {
-            let args = DelegatedPuzzleFeederArgs::<NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
-            puzzle = Puzzle::parse(allocator, args.inner_puzzle);
-            continue;
-        }
-        return Ok(puzzle.ptr());
     }
     Err(PeelError::Parse(binding_parse_err(
         "presplit fixed member puzzle wrapper depth exceeded",
@@ -130,19 +138,10 @@ fn peel_to_one_of_n_puzzle(
         if curried.mod_hash == ONE_OF_N_HASH.into() {
             return Ok((curried.curried_ptr, curried.args));
         }
-        if curried.mod_hash == INDEX_WRAPPER_HASH {
-            let args = IndexWrapperArgs::<NodePtr, NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
-            puzzle = Puzzle::parse(allocator, args.inner_puzzle);
-            continue;
-        }
-        if curried.mod_hash == DELEGATED_PUZZLE_FEEDER_HASH.into() {
-            let args = DelegatedPuzzleFeederArgs::<NodePtr>::from_clvm(allocator, curried.args)
-                .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
-            puzzle = Puzzle::parse(allocator, args.inner_puzzle);
-            continue;
-        }
-        return Err(PeelError::NotPresplitLayout);
+        puzzle = match try_peel_puzzle_wrapper(allocator, puzzle)? {
+            Some(inner) => inner,
+            None => return Err(PeelError::NotPresplitLayout),
+        };
     }
     Err(PeelError::Parse(binding_parse_err(
         "presplit input inner puzzle wrapper depth exceeded",

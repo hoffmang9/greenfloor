@@ -24,7 +24,7 @@ use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 pub(crate) use cancel_binding::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
-    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup, PresplitCoinBinding,
+    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup,
 };
 
 #[must_use]
@@ -219,6 +219,19 @@ fn encode_presplit_offer_from_input(
 }
 
 impl PresplitOfferBinding {
+    #[must_use]
+    pub(crate) fn from_coin_binding(
+        coin: chia_protocol::Coin,
+        binding: &cancel_binding::PresplitCoinBinding,
+    ) -> Self {
+        Self {
+            offer_amount: coin.amount,
+            expires_at: None,
+            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
+            p2_puzzle_hash: binding.binding_p2_puzzle_hash,
+        }
+    }
+
     /// Plan presplit fixed conditions and P2 puzzle hash using one spend context.
     ///
     /// This is the first of up to three payment rebuilds in a presplit-new offer:
@@ -289,12 +302,13 @@ impl PresplitOfferBinding {
                 return Err(SignerError::OfferCancelNoSpendableInput);
             }
         };
-        Ok(Self {
-            offer_amount: coin.amount,
-            expires_at: None,
-            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
-            p2_puzzle_hash: binding.binding_p2_puzzle_hash,
-        })
+        Ok(Self::from_coin_binding(coin, &binding))
+    }
+}
+
+impl From<(&chia_protocol::Coin, &cancel_binding::PresplitCoinBinding)> for PresplitOfferBinding {
+    fn from((coin, binding): (&chia_protocol::Coin, &cancel_binding::PresplitCoinBinding)) -> Self {
+        Self::from_coin_binding(*coin, binding)
     }
 }
 
