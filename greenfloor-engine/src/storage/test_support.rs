@@ -1,5 +1,4 @@
 //! Hidden helpers for integration tests that seed legacy DB state before migrations run.
-#![cfg_attr(coverage, coverage(off))]
 
 use std::path::Path;
 

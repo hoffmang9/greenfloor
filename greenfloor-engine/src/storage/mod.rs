@@ -3,9 +3,8 @@
 //! The canonical schema for `GreenFloor` state lives here. Rust integration tests in
 //! `greenfloor-engine/tests/sqlite_*` exercise persistence behavior.
 //!
-//! `storage/sqlite/` is excluded from llvm-cov reports (see `.llvm-cov.toml`); use
-//! `#[cfg_attr(coverage, coverage(off))]` on other test-only glue such as
-//! `storage::test_support`.
+//! `storage/sqlite/` and `storage/test_support.rs` are excluded from llvm-cov reports and
+//! diff-cover (see `.llvm-cov.toml`, ADR 0016).
 
 mod audit_retention;
 mod persist;

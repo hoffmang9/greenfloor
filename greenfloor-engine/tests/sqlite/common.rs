@@ -7,9 +7,9 @@ use greenfloor_engine::storage::{
 use rusqlite::Connection;
 
 #[path = "../support/sqlite.rs"]
-mod support;
+mod sqlite_support;
 
-pub use support::open_store;
+pub use sqlite_support::open_store;
 
 pub fn acquire_test_reservation_lease(
     store: &SqliteStore,
