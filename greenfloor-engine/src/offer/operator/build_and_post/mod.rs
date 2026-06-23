@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
-use crate::storage::{lock_sqlite_store, state_db_path_for_home, SharedSqliteStore, SqliteStore};
+use crate::storage::{state_db_path_for_home, SqliteStore};
 
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
@@ -39,8 +39,6 @@ pub struct BuildAndPostRunOptions {
     pub dry_run: bool,
     #[serde(default = "default_persist_results")]
     pub persist_results: bool,
-    #[serde(default, skip)]
-    pub persist_store: Option<SharedSqliteStore>,
 }
 
 #[must_use]
@@ -184,19 +182,36 @@ fn build_and_post_payload(
     })
 }
 
-async fn build_and_post_offer_async(
-    request: BuildAndPostOfferRequest,
-) -> SignerResult<BuildAndPostOfferResponse> {
-    if request.size_base_units == 0 {
-        return Err(SignerError::Other(
-            "size_base_units must be positive".to_string(),
-        ));
-    }
-    if request.repeat == 0 {
-        return Err(SignerError::Other("repeat must be positive".to_string()));
-    }
+#[derive(Clone)]
+pub(crate) struct BuildAndPostPersistArtifacts {
+    pub batch: PostIterationBatch,
+    pub ctx: ResolvedBuildAndPostContext,
+}
 
-    let ctx = resolve_build_and_post_context(&request).await?;
+/// Persist offer-post records collected during build-and-post.
+///
+/// # Errors
+///
+/// Returns an error when sqlite writes fail.
+pub(crate) fn flush_build_and_post_persist(
+    store: &SqliteStore,
+    artifacts: &BuildAndPostPersistArtifacts,
+) -> SignerResult<()> {
+    let emitter = PostBatchEmitter::new(&artifacts.ctx);
+    emitter.flush(
+        store,
+        &artifacts.batch.persist_records,
+        &artifacts.batch.failure_audits,
+    )
+}
+
+async fn run_build_and_post_offer(
+    request: &BuildAndPostOfferRequest,
+) -> SignerResult<(
+    BuildAndPostOfferResponse,
+    Option<BuildAndPostPersistArtifacts>,
+)> {
+    let ctx = resolve_build_and_post_context(request).await?;
     let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
 
     let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
@@ -210,21 +225,9 @@ async fn build_and_post_offer_async(
         None
     };
 
-    let emitter = PostBatchEmitter::new(&ctx);
-    let batch =
-        run_post_iterations(&request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
+    let batch = run_post_iterations(request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
 
-    if target == PostEmitTarget::TraceAndStore {
-        if let Some(shared) = &request.run.persist_store {
-            let store = lock_sqlite_store(shared)?;
-            emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
-        } else {
-            let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
-            emitter.flush(&store, &batch.persist_records, &batch.failure_audits)?;
-        }
-    }
-
-    let payload = build_and_post_payload(&request, &ctx, &batch);
+    let payload = build_and_post_payload(request, &ctx, &batch);
     let exit_code = build_and_post_exit_code(batch.publish_failures);
     let outcome = if batch.publish_failures == 0 {
         "success"
@@ -234,11 +237,72 @@ async fn build_and_post_offer_async(
     } else {
         "partial_failure"
     };
-    emitter.trace_completed(
+    PostBatchEmitter::new(&ctx).trace_completed(
         outcome,
         batch.post_results.len(),
         batch.publish_failures,
         request.run.dry_run,
     );
-    Ok(BuildAndPostOfferResponse { exit_code, payload })
+
+    let persist_artifacts = if target == PostEmitTarget::TraceAndStore {
+        Some(BuildAndPostPersistArtifacts {
+            batch,
+            ctx: ctx.clone(),
+        })
+    } else {
+        None
+    };
+
+    Ok((
+        BuildAndPostOfferResponse { exit_code, payload },
+        persist_artifacts,
+    ))
+}
+
+async fn build_and_post_offer_async(
+    request: BuildAndPostOfferRequest,
+) -> SignerResult<BuildAndPostOfferResponse> {
+    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
+    if let Some(artifacts) = artifacts {
+        let store = SqliteStore::open(&state_db_path_for_home(&artifacts.ctx.program.home_dir))?;
+        flush_build_and_post_persist(&store, &artifacts)?;
+    }
+    Ok(response)
+}
+
+/// Run build-and-post and return optional persist artifacts for caller-side flush.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub(crate) async fn build_and_post_offer_with_persist_artifacts(
+    request: BuildAndPostOfferRequest,
+) -> SignerResult<(
+    BuildAndPostOfferResponse,
+    Option<BuildAndPostPersistArtifacts>,
+)> {
+    if request.size_base_units == 0 {
+        return Err(SignerError::Other(
+            "size_base_units must be positive".to_string(),
+        ));
+    }
+    if request.repeat == 0 {
+        return Err(SignerError::Other("repeat must be positive".to_string()));
+    }
+    run_build_and_post_offer(&request).await
+}
+
+#[cfg(test)]
+pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts {
+    BuildAndPostPersistArtifacts {
+        batch: PostIterationBatch {
+            post_results: Vec::new(),
+            built_offers_preview: Vec::new(),
+            bootstrap_actions: Vec::new(),
+            publish_failures: 0,
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
+        ctx: context::sample_resolved_build_and_post_context(),
+    }
 }

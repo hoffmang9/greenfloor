@@ -1,9 +1,5 @@
 //! Daemon cycle entry: one shared sqlite store per cycle, markets processed sequentially.
 
-// Sequential phases hold the std mutex across short sqlite-bound awaits by design;
-// strategy parallel dispatch runs only after the lock is released between phases.
-#![allow(clippy::await_holding_lock)]
-
 use std::time::Instant;
 
 use crate::config::MarketConfig;
@@ -13,7 +9,7 @@ use crate::operator_log::{
     LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY,
     STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
-use crate::storage::{lock_sqlite_store, with_sqlite_store, SharedSqliteStore, SqliteStore};
+use crate::storage::{with_sqlite_store, SharedSqliteStore, SqliteStore};
 use tracing::Level;
 
 use super::market_context::{
@@ -71,8 +67,7 @@ async fn process_one_market(
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let reconcile = {
-        let store = lock_sqlite_store(write_store)?;
+    let reconcile = crate::with_locked_store!(write_store, |store| {
         run_reconcile_market_cycle(
             &store,
             &resources.coin_watchlist,
@@ -80,8 +75,7 @@ async fn process_one_market(
             market,
             &resources.network,
         )
-        .await?
-    };
+    })?;
     let phase_context = MarketCycleContext {
         resources,
         dispatch: dispatch_context,
@@ -184,10 +178,9 @@ pub async fn run_daemon_cycle_once(
         Ok(())
     })?;
 
-    let plan = {
-        let store = lock_sqlite_store(&write_store)?;
-        build_cycle_plan(request, &resources, &store).await?
-    };
+    let plan = crate::with_locked_store!(&write_store, |store| {
+        build_cycle_plan(request, &resources, &store)
+    })?;
     write_stale_sweep_audit(&write_store, &plan)?;
 
     crate::trace_event!(
@@ -202,8 +195,7 @@ pub async fn run_daemon_cycle_once(
         "daemon cycle started"
     );
 
-    let preamble = {
-        let store = lock_sqlite_store(&write_store)?;
+    let preamble = crate::with_locked_store!(&write_store, |store| {
         run_cycle_preamble(
             resources.program(),
             &store,
@@ -212,8 +204,7 @@ pub async fn run_daemon_cycle_once(
             request.poll_coinset_mempool,
             request.use_websocket_capture,
         )
-        .await?
-    };
+    })?;
 
     let dispatch_context = MarketDispatchContext {
         write_store: write_store.clone(),

@@ -13,11 +13,11 @@ use crate::daemon::cycle_paths::DaemonCyclePaths;
 use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
 use crate::offer::operator::{
-    build_and_post_offer, BuildAndPostOfferRequestParts, BuildAndPostRunOptions,
-    BuildAndPostVenueOptions,
+    build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
+    BuildAndPostOfferRequestParts, BuildAndPostRunOptions, BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
-use crate::storage::SharedSqliteStore;
+use crate::storage::{lock_sqlite_store, SharedSqliteStore};
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
 
@@ -29,7 +29,7 @@ use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 pub(super) struct ManagedPostContext {
     pub program: ManagerProgramConfig,
     pub paths: DaemonCyclePaths,
-    pub persist_store: Option<SharedSqliteStore>,
+    pub persist_store: SharedSqliteStore,
     #[cfg(test)]
     pub dispatch_injections: DaemonDispatchTestInjections,
 }
@@ -39,7 +39,7 @@ impl ManagedPostContext {
         Self {
             program: ctx.resources.program().clone(),
             paths: ctx.resources.paths.clone(),
-            persist_store: Some(ctx.dispatch.write_store.clone()),
+            persist_store: ctx.dispatch.write_store.clone(),
             #[cfg(test)]
             dispatch_injections: ctx.dispatch.test_controls.offer_dispatch.clone(),
         }
@@ -72,7 +72,6 @@ fn daemon_managed_post_request(
                 run: BuildAndPostRunOptions {
                     dry_run: post_ctx.program.runtime_dry_run,
                     persist_results: true,
-                    persist_store: post_ctx.persist_store.clone(),
                 },
                 action_side: Some(normalize_offer_side(&action.side).to_string()),
             },
@@ -86,15 +85,20 @@ async fn execute_managed_post(
     action: &PlannedAction,
 ) -> SignerResult<bool> {
     #[cfg(test)]
-    if let Some(result) = super::test_overrides::managed_post_result(&post_ctx.dispatch_injections)
+    if let Some(result) =
+        super::test_overrides::managed_post_result(post_ctx, &post_ctx.dispatch_injections)
     {
         return result;
     }
     if action.size <= 0 {
         return Ok(false);
     }
-    let response =
-        build_and_post_offer(daemon_managed_post_request(post_ctx, market, action)?).await?;
+    let request = daemon_managed_post_request(post_ctx, market, action)?;
+    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
+    if let Some(artifacts) = artifacts {
+        let store = lock_sqlite_store(&post_ctx.persist_store)?;
+        flush_build_and_post_persist(&store, &artifacts)?;
+    }
     Ok(response.exit_code == 0)
 }
 
@@ -115,6 +119,16 @@ pub fn post_managed_planned_action_owned(
 }
 
 #[cfg(test)]
+pub(super) fn flush_managed_post_persist_for_test(
+    post_ctx: &ManagedPostContext,
+) -> SignerResult<()> {
+    use crate::offer::operator::empty_persist_artifacts_for_test;
+
+    let store = lock_sqlite_store(&post_ctx.persist_store)?;
+    flush_build_and_post_persist(&store, &empty_persist_artifacts_for_test())
+}
+
+#[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
@@ -123,9 +137,12 @@ mod tests {
     use crate::cycle::PlannedAction;
     use crate::daemon::cycle_paths::DaemonCyclePaths;
     use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
+    use crate::storage::{
+        reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test, SqliteStore,
+    };
     use crate::test_support::market_config::sample_market;
 
-    fn sample_post_context() -> ManagedPostContext {
+    fn sample_post_context(store: SharedSqliteStore) -> ManagedPostContext {
         ManagedPostContext {
             program: ManagerProgramConfig {
                 network: "mainnet".to_string(),
@@ -140,7 +157,7 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            persist_store: None,
+            persist_store: store,
             dispatch_injections: DaemonDispatchTestInjections::default(),
         }
     }
@@ -161,7 +178,9 @@ mod tests {
 
     #[test]
     fn daemon_managed_post_request_builds_drop_only_offer_parts() {
-        let post_ctx = sample_post_context();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        let post_ctx = sample_post_context(store);
         let market = sample_market("xch1test");
         let action = sample_action(25);
 
@@ -179,7 +198,9 @@ mod tests {
 
     #[tokio::test]
     async fn execute_managed_post_skips_non_positive_size_without_network() {
-        let post_ctx = sample_post_context();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        let post_ctx = sample_post_context(store);
         let market = sample_market("xch1test");
         let action = sample_action(0);
 
@@ -187,5 +208,15 @@ mod tests {
             .await
             .expect("managed post");
         assert!(!posted);
+    }
+
+    #[test]
+    fn managed_post_persist_flush_uses_shared_store_without_reopen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open_shared(&dir.path().join("state.db")).expect("open");
+        reset_sqlite_open_calls_for_test();
+        let post_ctx = sample_post_context(store);
+        flush_managed_post_persist_for_test(&post_ctx).expect("flush");
+        assert_eq!(sqlite_open_calls_for_test(), 0);
     }
 }

@@ -7,7 +7,7 @@ use tempfile::TempDir;
 use crate::adapters::DexieClient;
 use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
 use crate::cycle::StaleSweepProgress;
-use crate::storage::{shared_sqlite_store, SharedSqliteStore, SqliteStore};
+use crate::storage::{SharedSqliteStore, SqliteStore};
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
@@ -16,10 +16,6 @@ use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
 
 pub fn open_test_store(path: &Path) -> SqliteStore {
     SqliteStore::open(path).expect("open sqlite store")
-}
-
-pub fn open_shared_test_store(path: &Path) -> SharedSqliteStore {
-    shared_sqlite_store(open_test_store(path))
 }
 
 pub fn sample_mainnet_program() -> ManagerProgramConfig {
@@ -50,14 +46,13 @@ impl TestCycleContextBundle {
 pub fn test_cycle_context(
     dir: &TempDir,
     db_path: &Path,
+    write_store: SharedSqliteStore,
     program: ManagerProgramConfig,
     signer: Option<SignerConfig>,
 ) -> TestCycleContextBundle {
     use std::collections::HashMap;
 
     let program_config = CycleProgramConfig::from_parts(program, signer);
-
-    let write_store = open_shared_test_store(db_path);
 
     TestCycleContextBundle {
         resources: DaemonCycleResources::with_program_config(

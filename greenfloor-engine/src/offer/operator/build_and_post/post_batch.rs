@@ -28,11 +28,13 @@ impl PostEmitTarget {
     }
 }
 
+#[derive(Clone)]
 pub struct PostFailureAudit {
     pub error: String,
     pub offer_ref: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct PostIterationBatch {
     pub post_results: Vec<Value>,
     pub built_offers_preview: Vec<Value>,

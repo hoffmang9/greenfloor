@@ -33,3 +33,18 @@ where
     let guard = lock_sqlite_store(store)?;
     f(&guard)
 }
+
+/// Hold the cycle-store lock across one async section (sequential daemon phases only).
+///
+/// Do not use while parallel offer-dispatch workers may need the same store.
+#[macro_export]
+macro_rules! with_locked_store {
+    ($store:expr, |$guard:ident| $body:expr) => {{
+        #[allow(clippy::await_holding_lock)]
+        async {
+            let $guard = $crate::storage::lock_sqlite_store($store)?;
+            $body.await
+        }
+        .await
+    }};
+}

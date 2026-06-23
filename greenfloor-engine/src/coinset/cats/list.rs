@@ -8,6 +8,7 @@ use super::{coin_records_from_response, resolve, unspent_coin_records};
 use crate::bech32m::decode_address;
 use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
+use crate::operator_log::LogContext;
 
 pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     client: &CoinsetClient,
@@ -47,10 +48,22 @@ pub(crate) async fn cats_with_lineage_from_records(
     }
     let mut cats = Vec::new();
     for record in records {
+        let coin_name = hex::encode(record.coin.coin_id());
         match resolve::cat_from_record(client, record).await {
             Ok(Some(cat)) => cats.push(cat),
             Ok(None) => {}
-            Err(err) if is_skippable_cat_lineage_error(&err) => {}
+            Err(err) if is_skippable_cat_lineage_error(&err) => {
+                crate::trace_event!(
+                    DEBUG,
+                    LogContext::COINSET,
+                    "cat_lineage_skipped",
+                    {
+                        coin_name = coin_name.as_str(),
+                        error = err.to_string(),
+                    };
+                    "skipped unparseable cat lineage record"
+                );
+            }
             Err(err) => return Err(err),
         }
     }

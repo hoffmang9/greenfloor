@@ -39,6 +39,7 @@ markets:
 pub(super) fn test_context_from_program_file(
     dir: &TempDir,
     db_path: &Path,
+    write_store: SharedSqliteStore,
     program_path: &Path,
     mut program: ManagerProgramConfig,
     with_signer: bool,
@@ -51,7 +52,7 @@ pub(super) fn test_context_from_program_file(
     } else {
         None
     };
-    test_cycle_context(dir, db_path, program, signer)
+    test_cycle_context(dir, db_path, write_store, program, signer)
 }
 
 pub(super) fn sample_market() -> MarketConfig {
@@ -106,14 +107,14 @@ impl ParallelDispatchHarness {
         );
         let markets_path = dir.path().join("markets.yaml");
         write_test_markets_file(&markets_path);
-        let mut test_ctx = test_context_from_program_file(
+        let test_ctx = test_context_from_program_file(
             &dir,
             &db_path,
+            store.clone(),
             &program_path,
             sample_program(parallelism_enabled, dry_run),
             with_signer,
         );
-        test_ctx.dispatch.write_store = store.clone();
         Self {
             _dir: dir,
             store,

@@ -15,6 +15,9 @@ mod tx_signals;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use chrono::Utc;
 use rusqlite::Connection;
 
@@ -114,6 +117,20 @@ pub struct AuditEventRow {
     pub created_at: String,
 }
 
+#[cfg(test)]
+static SQLITE_OPEN_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub fn reset_sqlite_open_calls_for_test() {
+    SQLITE_OPEN_CALLS.store(0, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+#[must_use]
+pub fn sqlite_open_calls_for_test() -> usize {
+    SQLITE_OPEN_CALLS.load(Ordering::SeqCst)
+}
+
 impl SqliteStore {
     /// Open.
     ///
@@ -121,6 +138,8 @@ impl SqliteStore {
     ///
     /// Returns an error if the operation fails.
     pub fn open(db_path: &Path) -> SignerResult<Self> {
+        #[cfg(test)]
+        SQLITE_OPEN_CALLS.fetch_add(1, Ordering::SeqCst);
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 SignerError::Other(format!(
@@ -140,8 +159,6 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to set busy_timeout pragma: {err}"))
             })?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|err| SignerError::Other(format!("failed to set journal_mode=WAL: {err}")))?;
         conn.execute_batch(SCHEMA).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;

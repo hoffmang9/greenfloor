@@ -29,3 +29,6 @@ pub use sqlite::{
     OfferReservationLeaseRow, OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow,
     SharedSqliteStore, SqliteStore, StoredAlertState, TxSignalStateRow,
 };
+
+#[cfg(test)]
+pub use sqlite::{reset_sqlite_open_calls_for_test, sqlite_open_calls_for_test};

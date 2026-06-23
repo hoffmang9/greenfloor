@@ -1,6 +1,5 @@
 //! Shared harness for `run_coin_ops_phase` integration tests.
 #![allow(clippy::missing_panics_doc)] // test harness: panics on fixture setup failure
-#![allow(clippy::await_holding_lock)]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,9 +8,7 @@ use tempfile::TempDir;
 
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::daemon::test_support::test_cycle_context;
-use crate::storage::{
-    lock_sqlite_store, state_db_path_for_home, CoinOpLedgerEntry, SharedSqliteStore, SqliteStore,
-};
+use crate::storage::{state_db_path_for_home, CoinOpLedgerEntry, SharedSqliteStore, SqliteStore};
 use crate::test_support::ladder::market_with_sell_ladder;
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
@@ -52,9 +49,13 @@ impl CoinOpsPhaseHarness {
                 .add_coin_op_ledger_entry(&entry)
                 .expect("seed ledger");
         }
-        let mut ctx =
-            test_cycle_context(&dir, &db_path, bundle.program.clone(), Some(bundle.signer));
-        ctx.dispatch.write_store = store.clone();
+        let ctx = test_cycle_context(
+            &dir,
+            &db_path,
+            store.clone(),
+            bundle.program.clone(),
+            Some(bundle.signer),
+        );
         Self {
             store,
             _dir: dir,
@@ -63,17 +64,17 @@ impl CoinOpsPhaseHarness {
     }
 
     pub async fn run_with_market(&self, market: &MarketConfig, wallet_counts: &BTreeMap<i64, i64>) {
-        let store = lock_sqlite_store(&self.store).expect("lock");
-        run_coin_ops_phase(
-            &store,
-            &self.ctx.cycle_context(),
-            market,
-            &[],
-            wallet_counts,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .await
+        crate::with_locked_store!(&self.store, |store| {
+            run_coin_ops_phase(
+                &store,
+                &self.ctx.cycle_context(),
+                market,
+                &[],
+                wallet_counts,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+        })
         .expect("coin ops phase");
     }
 

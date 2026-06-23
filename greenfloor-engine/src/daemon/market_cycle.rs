@@ -1,7 +1,3 @@
-// Sequential phases hold the std mutex across short sqlite-bound awaits by design;
-// strategy parallel dispatch runs only after the lock is released between phases.
-#![allow(clippy::await_holding_lock)]
-
 use std::future::Future;
 use std::pin::Pin;
 
@@ -9,7 +5,7 @@ use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, MARKET_CYCLE_COMPLETED, MARKET_CYCLE_STARTED, MARKET_PHASE};
-use crate::storage::{lock_sqlite_store, SharedSqliteStore};
+use crate::storage::SharedSqliteStore;
 use tracing::Level;
 
 use super::cancel_phase::run_market_cancel_phase;
@@ -121,15 +117,12 @@ async fn execute_post_reconcile_phases(
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
-    let bucket_counts = {
-        let store = lock_sqlite_store(write_store)?;
-        run_logged_market_phase(
-            market.market_id.as_str(),
-            "inventory",
-            run_inventory_phase(&store, ctx.resources, market, cycle_state),
-        )
-        .await?
-    };
+    let bucket_counts = run_logged_market_phase(market.market_id.as_str(), "inventory", async {
+        crate::with_locked_store!(write_store, |store| {
+            run_inventory_phase(&store, ctx.resources, market, cycle_state)
+        })
+    })
+    .await?;
 
     let strategy = run_logged_market_phase(
         market.market_id.as_str(),
@@ -138,21 +131,19 @@ async fn execute_post_reconcile_phases(
     )
     .await?;
 
-    {
-        let store = lock_sqlite_store(write_store)?;
-        Box::pin(run_logged_market_phase(
-            market.market_id.as_str(),
-            "cancel",
-            run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state),
-        ))
-        .await?;
-    }
+    Box::pin(run_logged_market_phase(
+        market.market_id.as_str(),
+        "cancel",
+        async {
+            crate::with_locked_store!(write_store, |store| {
+                run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state)
+            })
+        },
+    ))
+    .await?;
 
-    {
-        let store = lock_sqlite_store(write_store)?;
-        run_logged_market_phase(
-            market.market_id.as_str(),
-            "coin_ops",
+    run_logged_market_phase(market.market_id.as_str(), "coin_ops", async {
+        crate::with_locked_store!(write_store, |store| {
             run_coin_ops_phase(
                 &store,
                 ctx,
@@ -161,10 +152,10 @@ async fn execute_post_reconcile_phases(
                 &bucket_counts,
                 &strategy.sell_active_counts,
                 &strategy.newly_executed_sell_counts,
-            ),
-        )
-        .await?;
-    }
+            )
+        })
+    })
+    .await?;
     Ok(())
 }
 
