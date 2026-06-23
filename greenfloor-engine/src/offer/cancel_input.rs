@@ -9,6 +9,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
     presplit_binding_from_coin_input, verify_fixed_delegated_puzzle_hash_for_binding,
+    PresplitCoinBinding,
 };
 use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
 use crate::vault::spend::VaultSpendContext;
@@ -29,12 +30,12 @@ pub enum CancellableMakerInput {
         coin: Coin,
         nonce: u32,
     },
-    VaultCat {
+    VaultCatDirect {
         cat: Cat,
-        mode: OfferReclaimMode,
     },
-    PresplitVaultXch {
+    PresplitMaker {
         coin: Coin,
+        cat: Option<Cat>,
         fixed_conditions_tree_hash: TreeHash,
     },
 }
@@ -108,7 +109,7 @@ fn presplit_fixed_conditions_tree_hash(
     launcher_id: Bytes32,
     coin: Coin,
     cat: Option<Cat>,
-    spend_bundle: &SpendBundle,
+    binding: Option<&PresplitCoinBinding>,
     fields: Option<&PresplitCancelFields>,
 ) -> SignerResult<TreeHash> {
     if let Some(hash_hex) = fields
@@ -121,33 +122,44 @@ fn presplit_fixed_conditions_tree_hash(
         verify_fixed_delegated_puzzle_hash_for_binding(launcher_id, binding_p2, hash)?;
         return Ok(hash);
     }
-    Ok(
-        presplit_binding_from_coin_input(launcher_id, coin, spend_bundle)?
-            .fixed_conditions_tree_hash,
-    )
+    binding
+        .map(|value| value.fixed_conditions_tree_hash)
+        .ok_or(SignerError::OfferCancelNoSpendableInput)
 }
 
-fn resolve_cat_reclaim_mode(
+fn presplit_maker_input(
+    launcher_id: Bytes32,
+    coin: Coin,
+    cat: Option<Cat>,
+    binding: Option<&PresplitCoinBinding>,
+    fields: Option<&PresplitCancelFields>,
+) -> SignerResult<CancellableMakerInput> {
+    Ok(CancellableMakerInput::PresplitMaker {
+        coin,
+        cat,
+        fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
+            launcher_id,
+            coin,
+            cat,
+            binding,
+            fields,
+        )?,
+    })
+}
+
+fn classify_coinset_cat(
     vault_ctx: &mut VaultSpendContext,
     coin: Coin,
     cat: Cat,
-    spend_bundle: &SpendBundle,
+    binding: Option<&PresplitCoinBinding>,
     metadata: Option<&StoredOfferCancelMetadata>,
-) -> SignerResult<OfferReclaimMode> {
+) -> SignerResult<CancellableMakerInput> {
     let fields = metadata.map(|value| &value.fields);
     if let Some(execution_mode) = metadata.and_then(|value| value.execution_mode) {
         return match execution_mode {
-            OfferExecutionMode::Direct => Ok(OfferReclaimMode::DirectVault),
+            OfferExecutionMode::Direct => Ok(CancellableMakerInput::VaultCatDirect { cat }),
             OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting => {
-                Ok(OfferReclaimMode::PresplitOffer {
-                    fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
-                        vault_ctx.launcher_id,
-                        coin,
-                        Some(cat),
-                        spend_bundle,
-                        fields,
-                    )?,
-                })
+                presplit_maker_input(vault_ctx.launcher_id, coin, Some(cat), binding, fields)
             }
         };
     }
@@ -155,17 +167,9 @@ fn resolve_cat_reclaim_mode(
         .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
         .is_some()
     {
-        Ok(OfferReclaimMode::DirectVault)
+        Ok(CancellableMakerInput::VaultCatDirect { cat })
     } else {
-        Ok(OfferReclaimMode::PresplitOffer {
-            fixed_conditions_tree_hash: presplit_fixed_conditions_tree_hash(
-                vault_ctx.launcher_id,
-                coin,
-                Some(cat),
-                spend_bundle,
-                fields,
-            )?,
-        })
+        presplit_maker_input(vault_ctx.launcher_id, coin, Some(cat), binding, fields)
     }
 }
 
@@ -186,7 +190,21 @@ fn is_not_vault_owned_presplit_err(err: &SignerError) -> bool {
     )
 }
 
+fn optional_presplit_binding(
+    launcher_id: Bytes32,
+    coin: Coin,
+    spend_bundle: &SpendBundle,
+) -> SignerResult<Option<PresplitCoinBinding>> {
+    match presplit_binding_from_coin_input(launcher_id, coin, spend_bundle) {
+        Ok(binding) => Ok(Some(binding)),
+        Err(err) if is_not_vault_owned_presplit_err(&err) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// Classify a cancellable maker coin as a vault-owned reclaim input.
+///
+/// Presplit binding is parsed at most once per coin and reused for mode resolution.
 ///
 /// # Errors
 ///
@@ -202,19 +220,23 @@ pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
         return Ok(CancellableMakerInput::DirectVaultP2 { coin, nonce });
     }
 
+    let binding = optional_presplit_binding(vault_ctx.launcher_id, coin, spend_bundle)?;
+
     if let Some(cat) = resolve_cancellable_cat(backend, spend_bundle, coin, metadata).await? {
-        let mode = resolve_cat_reclaim_mode(vault_ctx, coin, cat, spend_bundle, metadata)?;
-        return Ok(CancellableMakerInput::VaultCat { cat, mode });
+        return classify_coinset_cat(vault_ctx, coin, cat, binding.as_ref(), metadata);
     }
 
-    match presplit_binding_from_coin_input(vault_ctx.launcher_id, coin, spend_bundle) {
-        Ok(binding) => Ok(CancellableMakerInput::PresplitVaultXch {
+    let Some(binding) = binding else {
+        return Err(offer_cancel_input_not_vault_owned(
             coin,
-            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
-        }),
-        Err(err) if is_not_vault_owned_presplit_err(&err) => Err(
-            offer_cancel_input_not_vault_owned(coin, vault_ctx.launcher_id),
-        ),
-        Err(err) => Err(err),
-    }
+            vault_ctx.launcher_id,
+        ));
+    };
+    presplit_maker_input(
+        vault_ctx.launcher_id,
+        coin,
+        binding.parsed_cat,
+        Some(&binding),
+        metadata.map(|value| &value.fields),
+    )
 }

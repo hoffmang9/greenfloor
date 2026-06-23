@@ -644,6 +644,44 @@ async fn build_offer_cancel_spend_bundle_presplit_existing_returns_cat_to_vault(
 }
 
 #[tokio::test]
+async fn build_offer_cancel_presplit_cat_without_coinset_registration() {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
+    let result = build_offer_from_setup(&mut setup)
+        .await
+        .expect("presplit-existing offer");
+    let presplit_cat = setup.presplit_cat.expect("presplit cat");
+    let presplit_coin_id = presplit_cat.coin.coin_id();
+    // Deliberately omit coinset.register_cat to exercise offer-spend CAT parse fallback.
+    let coinset = SimulatorOfferCoinset::new(&setup.harness.chain);
+    let cancel_bundle = build_offer_cancel_spend_bundle(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &result.offer,
+        None,
+    )
+    .await
+    .expect("presplit-existing cancel without coinset cat");
+    setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .spend_coins(cancel_bundle.coin_spends, &[])
+        .expect("presplit cancel accepted");
+    assert!(setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .coin_state(presplit_coin_id)
+        .expect("presplit coin")
+        .spent_height
+        .is_some());
+}
+
+#[tokio::test]
 async fn build_vault_cat_reclaim_spend_returns_offered_coin_to_vault() {
     let mut harness = SimulatorVaultHarness::new();
     let cat = harness.fund_vault_cat(1_000);

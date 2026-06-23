@@ -33,7 +33,7 @@ fn build_presplit_reclaim_inner_spend(
     build_presplit_offer_cancel_inner_spend(ctx, delegated, vault_ctx, fixed_conditions_tree_hash)
 }
 
-fn append_presplit_reclaim_to_context(
+fn append_presplit_maker_reclaim(
     ctx: &mut SpendContext,
     coin: Coin,
     cat: Option<Cat>,
@@ -72,43 +72,31 @@ fn append_cancellable_input_reclaim(
             coin.puzzle_hash.into(),
             nonce,
         ),
-        CancellableMakerInput::VaultCat { cat, mode } => match mode {
-            OfferReclaimMode::DirectVault => {
-                let nonce = vault_ctx
-                    .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-                    .ok_or(SignerError::Driver(
-                        "failed to infer vault nonce for reclaim cat".to_string(),
-                    ))?;
-                let inner_spend = build_vault_change_inner_spend(
-                    ctx,
-                    change_puzzle_hash,
-                    cat.coin.amount,
-                    vault_ctx,
-                    nonce,
-                    cat.info.p2_puzzle_hash.into(),
-                )?;
-                Cat::spend_all(ctx, &[CatSpend::new(cat, inner_spend)])
-                    .map_err(SignerError::from)?;
-                Ok(())
-            }
-            OfferReclaimMode::PresplitOffer {
-                fixed_conditions_tree_hash,
-            } => append_presplit_reclaim_to_context(
+        CancellableMakerInput::VaultCatDirect { cat } => {
+            let nonce = vault_ctx
+                .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
+                .ok_or(SignerError::Driver(
+                    "failed to infer vault nonce for reclaim cat".to_string(),
+                ))?;
+            let inner_spend = build_vault_change_inner_spend(
                 ctx,
-                cat.coin,
-                Some(cat),
                 change_puzzle_hash,
+                cat.coin.amount,
                 vault_ctx,
-                fixed_conditions_tree_hash,
-            ),
-        },
-        CancellableMakerInput::PresplitVaultXch {
+                nonce,
+                cat.info.p2_puzzle_hash.into(),
+            )?;
+            Cat::spend_all(ctx, &[CatSpend::new(cat, inner_spend)]).map_err(SignerError::from)?;
+            Ok(())
+        }
+        CancellableMakerInput::PresplitMaker {
             coin,
+            cat,
             fixed_conditions_tree_hash,
-        } => append_presplit_reclaim_to_context(
+        } => append_presplit_maker_reclaim(
             ctx,
             coin,
-            None,
+            cat,
             change_puzzle_hash,
             vault_ctx,
             fixed_conditions_tree_hash,
@@ -133,13 +121,18 @@ where
     F: FnOnce(Vec<u8>) -> Fut,
     Fut: std::future::Future<Output = SignerResult<chia_secp::R1Signature>>,
 {
+    let input = match mode {
+        OfferReclaimMode::DirectVault => CancellableMakerInput::VaultCatDirect { cat },
+        OfferReclaimMode::PresplitOffer {
+            fixed_conditions_tree_hash,
+        } => CancellableMakerInput::PresplitMaker {
+            coin: cat.coin,
+            cat: Some(cat),
+            fixed_conditions_tree_hash,
+        },
+    };
     let mut ctx = SpendContext::new();
-    append_cancellable_input_reclaim(
-        &mut ctx,
-        &CancellableMakerInput::VaultCat { cat, mode },
-        change_puzzle_hash,
-        vault_ctx,
-    )?;
+    append_cancellable_input_reclaim(&mut ctx, &input, change_puzzle_hash, vault_ctx)?;
     finalize_vault_reclaim_spend_bundle(ctx, vault_ctx, vault, sign_digest).await
 }
 

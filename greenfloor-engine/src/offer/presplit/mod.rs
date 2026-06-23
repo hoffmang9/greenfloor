@@ -24,6 +24,7 @@ use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 pub(crate) use cancel_binding::{
     presplit_binding_from_coin_input, verify_fixed_delegated_puzzle_hash_for_binding,
+    PresplitCoinBinding,
 };
 
 #[must_use]

@@ -19,6 +19,8 @@ use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
 pub(crate) struct PresplitCoinBinding {
     pub fixed_conditions_tree_hash: TreeHash,
     pub binding_p2_puzzle_hash: Bytes32,
+    /// Set when the maker input spend is a CAT (presplit CAT cancel must use `Cat::spend_all`).
+    pub parsed_cat: Option<Cat>,
 }
 
 fn binding_parse_err(detail: impl Into<String>) -> SignerError {
@@ -167,7 +169,7 @@ fn presplit_binding_from_coin_spend(
     let puzzle = Puzzle::parse(&allocator, puzzle_ptr);
     let solution_ptr = node_from_bytes(&mut allocator, coin_spend.solution.as_ref())
         .map_err(|err| binding_parse_err(err.to_string()))?;
-    let (fixed_conditions_tree_hash, binding_p2_puzzle_hash) =
+    let (fixed_conditions_tree_hash, binding_p2_puzzle_hash, parsed_cat) =
         if let Some((parsed_cat, inner_puzzle, inner_solution)) =
             Cat::parse(&allocator, coin_spend.coin, puzzle, solution_ptr)
                 .map_err(SignerError::from)?
@@ -180,11 +182,11 @@ fn presplit_binding_from_coin_spend(
                 inner_puzzle,
                 inner_solution,
             )?;
-            (hash, parsed_cat.info.p2_puzzle_hash)
+            (hash, parsed_cat.info.p2_puzzle_hash, Some(parsed_cat))
         } else {
             let hash =
                 presplit_fixed_delegated_puzzle_hash_from_inner(&allocator, puzzle, solution_ptr)?;
-            (hash, coin.puzzle_hash)
+            (hash, coin.puzzle_hash, None)
         };
     verify_fixed_delegated_puzzle_hash_for_binding(
         launcher_id,
@@ -194,6 +196,7 @@ fn presplit_binding_from_coin_spend(
     Ok(PresplitCoinBinding {
         fixed_conditions_tree_hash,
         binding_p2_puzzle_hash,
+        parsed_cat,
     })
 }
 
