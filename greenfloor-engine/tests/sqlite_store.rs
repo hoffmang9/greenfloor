@@ -282,6 +282,28 @@ fn upsert_offer_cancel_submitted_seeds_tx_signal_state() {
 }
 
 #[test]
+fn cancel_tracking_columns_cleared_on_open_upsert() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("greenfloor.sqlite"));
+    let tx_id = "e".repeat(64);
+    store
+        .upsert_offer_cancel_submitted("offer-1", "m1", &tx_id, Some(0))
+        .expect("seed cancel submitted");
+    store
+        .upsert_offer_state("offer-1", "m1", "open", Some(0))
+        .expect("open reconcile");
+    let row = store
+        .list_offer_states_for_ids(&["offer-1".to_string()])
+        .expect("offer state")
+        .into_iter()
+        .next()
+        .expect("row");
+    assert_eq!(row.state, "open");
+    assert!(row.cancel_submitted_tx_id.is_none());
+    assert!(row.cancel_submitted_at.is_none());
+}
+
+#[test]
 fn cancel_submitted_at_survives_reconcile_preserve_upsert() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));

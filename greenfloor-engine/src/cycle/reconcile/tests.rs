@@ -12,7 +12,6 @@ use super::metadata::{
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
 };
 use super::{
-    cancel_submitted_policy::chain_confirmed_tx_ids_for_cancel,
     decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
     unsupported_venue_offer_transition, CycleOfferTransition, DexieCoinsetSignals, ReconcileState,
@@ -220,7 +219,7 @@ fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
         confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
         mempool_tx_ids: coinset_mempool_tx_ids,
     };
-    let chain_confirmed = chain_confirmed_tx_ids_for_cancel(None, &coinset_confirmed_tx_ids);
+    let chain_confirmed = coinset_confirmed_tx_ids.clone();
     resolve_watched_offer_decision(
         &current,
         case.status,
@@ -284,7 +283,7 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
     for case in DISPATCH_CASES {
         let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
             case.coinset.vecs();
-        let chain_confirmed = chain_confirmed_tx_ids_for_cancel(None, &coinset_confirmed_tx_ids);
+        let chain_confirmed = coinset_confirmed_tx_ids.clone();
         let transition = resolve_watched_offer_transition_from_signals(
             case.current_state,
             case.status,

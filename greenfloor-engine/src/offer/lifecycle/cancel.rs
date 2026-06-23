@@ -7,6 +7,34 @@ use crate::offer::reclaim::build_offer_cancel_spend_bundle;
 use crate::offer::types::StoredOfferCancelMetadata;
 use crate::storage::SqliteStore;
 use crate::vault::session::resolve_vault_spend_context;
+const CANCEL_SUBMIT_PERSIST_RETRIES: u32 = 2;
+
+fn persist_cancel_submitted_after_broadcast(
+    store: &SqliteStore,
+    offer_id: &str,
+    market_id: &str,
+    cancel_tx_id: &str,
+    last_seen_status: Option<i64>,
+) -> SignerResult<()> {
+    let mut last_err = None;
+    for _ in 0..CANCEL_SUBMIT_PERSIST_RETRIES {
+        match store.upsert_offer_cancel_submitted(
+            offer_id,
+            market_id,
+            cancel_tx_id,
+            last_seen_status,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(err) => last_err = Some(err),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        SignerError::Other(
+            "cancel broadcast succeeded but cancel_submitted persist failed after retries"
+                .to_string(),
+        )
+    }))
+}
 
 /// Cancel target for on-chain offer reclaim.
 #[derive(Debug, Clone)]
@@ -165,7 +193,8 @@ pub async fn cancel_offers_on_chain(
             Ok(result) => {
                 let mut error = String::new();
                 if target.persists_state() {
-                    if let Err(err) = store.upsert_offer_cancel_submitted(
+                    if let Err(err) = persist_cancel_submitted_after_broadcast(
+                        store,
                         target.offer_id(),
                         &market_id,
                         &result.operation_id,

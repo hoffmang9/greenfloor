@@ -60,32 +60,6 @@ pub(crate) fn chain_confirmed_tx_ids_from_signals(
         .collect()
 }
 
-/// Chain-confirmed tx ids for cancel-submit policy (Dexie-linked + tracked cancel tx).
-#[must_use]
-pub(crate) fn chain_confirmed_tx_ids_for_cancel(
-    ctx: Option<&CancelSubmittedContext>,
-    dexie_confirmed_tx_ids: &[String],
-) -> Vec<String> {
-    let mut chain_confirmed = dexie_confirmed_tx_ids.to_vec();
-    let Some(ctx) = ctx else {
-        return chain_confirmed;
-    };
-    let Some(cancel_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
-        return chain_confirmed;
-    };
-    if ctx
-        .cancel_tx_signal
-        .as_ref()
-        .is_some_and(|signal| signal.tx_block_confirmed_at.is_some())
-        && !chain_confirmed
-            .iter()
-            .any(|id| canonical_tx_id(id).as_deref() == Some(cancel_id.as_str()))
-    {
-        chain_confirmed.push(cancel_id);
-    }
-    chain_confirmed
-}
-
 /// Drop offer ids whose cancel submit is still in flight (pure policy; no I/O).
 #[must_use]
 pub(crate) fn allowed_cancel_target_offer_ids(
@@ -99,6 +73,14 @@ pub(crate) fn allowed_cancel_target_offer_ids(
         .iter()
         .filter_map(|row| {
             if !ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_submitted()) {
+                return None;
+            }
+            if row
+                .cancel_submitted_tx_id
+                .as_deref()
+                .map(str::trim)
+                .is_none_or(str::is_empty)
+            {
                 return None;
             }
             let ctx = CancelSubmittedContext::from_row_and_signals(row, tx_signals);

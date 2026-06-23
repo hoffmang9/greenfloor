@@ -6,7 +6,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
 use crate::cycle::reconcile::{
-    allowed_cancel_target_offer_ids, CancelSubmittedContext, ReconcileState,
+    allowed_cancel_target_offer_ids, cancel_tx_chain_confirmed, CancelSubmittedContext,
+    ReconcileState,
 };
 use crate::error::SignerResult;
 use crate::hex::canonical_tx_id;
@@ -14,6 +15,38 @@ use crate::storage::{OfferStateListRow, SqliteStore, TxSignalStateRow};
 
 /// CLI/daemon skip reason when a tracked offer's cancel submit is still in flight.
 pub const CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON: &str = "cancel_submit_in_flight";
+
+/// Merged chain-confirmed tx ids for reconcile (Dexie-linked + tracked cancel tx).
+///
+/// Refreshes the tracked cancel tx signal from `SQLite` when preloaded context is stale.
+///
+/// # Errors
+///
+/// Returns an error if cancel tx signal lookup fails.
+pub fn chain_confirmed_tx_ids_for_transition(
+    store: &SqliteStore,
+    cancel_submitted: Option<&CancelSubmittedContext>,
+    dexie_confirmed_tx_ids: &[String],
+) -> SignerResult<Vec<String>> {
+    let mut chain_confirmed = dexie_confirmed_tx_ids.to_vec();
+    let Some(ctx) = cancel_submitted else {
+        return Ok(chain_confirmed);
+    };
+    if cancel_tx_chain_confirmed(ctx, &chain_confirmed) {
+        return Ok(chain_confirmed);
+    }
+    let Some(cancel_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
+        return Ok(chain_confirmed);
+    };
+    let signals = store.get_tx_signal_state(std::slice::from_ref(&cancel_id))?;
+    if signals
+        .get(&cancel_id)
+        .is_some_and(|row| row.tx_block_confirmed_at.is_some())
+    {
+        chain_confirmed.push(cancel_id);
+    }
+    Ok(chain_confirmed)
+}
 
 #[derive(Debug, Clone)]
 pub struct DeferInFlightCancelPartition<T> {
@@ -179,6 +212,7 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+    use crate::storage::TxSignalStateRow;
 
     #[test]
     fn defer_in_flight_cancel_offer_ids_skips_pending_cancel_submitted() {
@@ -245,5 +279,29 @@ mod tests {
         .expect("context")
         .expect("cancel context");
         assert_eq!(ctx.cancel_tx_id.as_deref(), Some(tx_id.as_str()));
+    }
+
+    #[test]
+    fn chain_confirmed_for_transition_refreshes_stale_cancel_tx_signal() {
+        let tx_id = "d".repeat(64);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        store
+            .observe_mempool_tx_ids(std::slice::from_ref(&tx_id))
+            .expect("mempool");
+        store
+            .confirm_tx_ids(std::slice::from_ref(&tx_id))
+            .expect("confirm");
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some(tx_id.clone()),
+            cancel_tx_signal: Some(TxSignalStateRow {
+                mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+                tx_block_confirmed_at: None,
+            }),
+            cancel_submitted_at: None,
+        };
+        let chain =
+            chain_confirmed_tx_ids_for_transition(&store, Some(&ctx), &[]).expect("confirmed");
+        assert!(chain.iter().any(|id| id == &tx_id));
     }
 }

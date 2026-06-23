@@ -108,7 +108,11 @@ impl SqliteStore {
                       THEN COALESCE(excluded.cancel_submitted_tx_id, offer_state.cancel_submitted_tx_id)
                     ELSE NULL
                   END,
-                  cancel_submitted_at = COALESCE(excluded.cancel_submitted_at, offer_state.cancel_submitted_at)
+                  cancel_submitted_at = CASE
+                    WHEN excluded.state = 'cancel_submitted'
+                      THEN COALESCE(excluded.cancel_submitted_at, offer_state.cancel_submitted_at)
+                    ELSE NULL
+                  END
                 ",
                 params![
                     offer_id,
