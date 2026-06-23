@@ -526,6 +526,39 @@ fn get_latest_xch_price_snapshot_returns_latest() {
 }
 
 #[test]
+fn get_latest_xch_price_snapshot_accepts_integer_price_usd() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("gf.sqlite"));
+    store
+        .add_audit_event("xch_price_snapshot", &json!({"price_usd": 42}), None)
+        .expect("integer price");
+    assert_eq!(
+        store.get_latest_xch_price_snapshot().expect("latest"),
+        Some(42.0)
+    );
+}
+
+#[test]
+fn recent_audit_payload_matches_finds_field_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("gf.sqlite"));
+    store
+        .add_audit_event_at(
+            "config_reloaded",
+            &json!({"reload_id": "reload-abc"}),
+            None,
+            "2020-01-01T00:00:00Z",
+        )
+        .expect("audit");
+    assert!(store
+        .recent_audit_payload_matches("config_reloaded", "reload_id", "reload-abc", 5)
+        .expect("match"));
+    assert!(!store
+        .recent_audit_payload_matches("config_reloaded", "reload_id", "other", 5)
+        .expect("no match"));
+}
+
+#[test]
 fn get_latest_xch_price_snapshot_ignores_non_price_events() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
@@ -644,6 +677,25 @@ fn offer_reservation_lease_roundtrip() {
         .expect("reserved");
     assert_eq!(reserved.get("xch"), Some(&1000));
     assert_eq!(reserved.get("cat-1"), Some(&2500));
+}
+
+#[test]
+fn list_offer_reservation_leases_without_filter_returns_all_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("gf.sqlite"));
+    let mut first = BTreeMap::default();
+    first.insert("xch".to_string(), 100);
+    acquire_test_reservation_lease(&store, "res-a", "vault-a", &first, 120);
+    let mut second = BTreeMap::default();
+    second.insert("cat-1".to_string(), 200);
+    acquire_test_reservation_lease(&store, "res-b", "vault-b", &second, 120);
+    assert_eq!(
+        store
+            .list_offer_reservation_leases(None)
+            .expect("list all")
+            .len(),
+        2
+    );
 }
 
 #[test]

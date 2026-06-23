@@ -330,4 +330,57 @@ mod tests {
             Some(&json!("prior_batch_combine_failed"))
         );
     }
+
+    #[test]
+    fn all_batches_failed_marks_every_combinable_batch_and_orphans() {
+        let plan = sample_plan();
+        let (failed, batches) = all_batches_failed(&plan, "client unavailable");
+        assert!(failed);
+        let entries = batches.as_array().expect("batch array");
+        assert_eq!(entries.len(), 4);
+        assert!(entries
+            .iter()
+            .take(3)
+            .all(|entry| entry.get("status") == Some(&json!("failed"))));
+        assert_eq!(entries[3].get("status"), Some(&json!("orphan")));
+    }
+
+    #[tokio::test]
+    async fn run_dust_combine_batch_rejects_zero_total_batch() {
+        let err = run_dust_combine_batch(
+            crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1"),
+            "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+            &"f".repeat(64),
+            &[DustCoin {
+                coin_id: "a".repeat(64),
+                amount: 0,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("dust batch total is zero"));
+    }
+
+    #[tokio::test]
+    async fn execute_combine_batches_marks_invalid_coin_id_batch_failed() {
+        let plan = DustBatchPlan {
+            combinable_batches: vec![vec![DustCoin {
+                coin_id: "not-valid-hex".to_string(),
+                amount: 100,
+            }]],
+            uncombinable: vec![],
+        };
+        let signer = crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1");
+        let (failed, batches) = Box::pin(execute_combine_batches(
+            &signer,
+            "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+            &"f".repeat(64),
+            &plan,
+            CoinSpentVerifyConfig::default(),
+        ))
+        .await;
+        assert!(failed);
+        let entries = batches.as_array().expect("batch array");
+        assert_eq!(entries[0].get("status"), Some(&json!("failed")));
+    }
 }

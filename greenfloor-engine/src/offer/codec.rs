@@ -277,9 +277,17 @@ pub fn from_input_spend_bundle_xch_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_xch_bytes,
-        offer_has_duplicate_spent_coin_ids, verify_offer_for_dexie,
+        encode_offer_from_spend_bundle_bytes, expires_at_seconds_from_coin_spend,
+        expires_at_seconds_from_offer_spend, from_input_spend_bundle_xch_bytes,
+        offer_has_duplicate_spent_coin_ids, offer_has_expiration_condition,
+        validate_offer_structure, validate_offer_text, verify_offer_for_dexie,
     };
+    use crate::bech32m::decode_offer;
+    use crate::hex::hex_to_bytes32;
+    use crate::offer::build::build_vault_cat_offer_with_spend;
+    use crate::offer::types::{CreateOfferRequest, OfferInput};
+    use crate::test_support::simulator::harness::SimulatorVaultHarness;
+    use crate::test_support::simulator::SimulatorOfferCoinset;
     use chia_bls;
     use chia_protocol::{Coin, SpendBundle};
     use chia_traits::Streamable;
@@ -325,5 +333,51 @@ mod tests {
         let err =
             from_input_spend_bundle_xch_bytes(&bytes, vec![(vec![0x01], vec![])]).unwrap_err();
         assert!(err.to_string().contains("nonce must be 32 bytes"));
+    }
+
+    #[tokio::test]
+    async fn simulator_offer_passes_structure_expiry_and_dexie_gates() {
+        let mut harness = SimulatorVaultHarness::new();
+        harness.mint_vault();
+        let cat = harness.fund_vault_cat(5_000);
+        let expires_at = 4_000_000_000_u64;
+        let receive_address =
+            crate::bech32m::encode_address(harness.chain.p2_message_hash, "xch").expect("address");
+        let request = CreateOfferRequest {
+            receive_address,
+            offer_asset_id: hex::encode(harness.chain.asset_id),
+            offer_amount: cat.coin.amount,
+            request_asset_id: "xch".to_string(),
+            request_amount: 1_000,
+            offer_coin_ids: vec![cat.coin.coin_id()],
+            presplit_coin_ids: vec![],
+            split_input_coins: false,
+            broadcast_split: false,
+            expires_at: Some(expires_at),
+        };
+        let coinset = SimulatorOfferCoinset::new(&harness.chain);
+        coinset.register_cat(cat);
+        let input = OfferInput::try_from(request).expect("offer input");
+        let result = build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
+            .await
+            .expect("build offer");
+        validate_offer_structure(&result.offer).expect("structure");
+        validate_offer_text(&result.offer).expect("validate text");
+        assert!(verify_offer_for_dexie(&result.offer).is_none());
+        let spend_bundle = decode_offer(&result.offer).expect("decode");
+        assert!(offer_has_expiration_condition(&spend_bundle).expect("expiration"));
+        let coin_id = hex_to_bytes32(&result.selected_coin_ids[0]).expect("coin id");
+        let parsed_expiry =
+            expires_at_seconds_from_offer_spend(&spend_bundle, coin_id).expect("expiry");
+        assert_eq!(parsed_expiry, Some(expires_at));
+        let coin_spend = spend_bundle
+            .coin_spends
+            .iter()
+            .find(|spend| spend.coin.coin_id() == coin_id)
+            .expect("maker spend");
+        assert_eq!(
+            expires_at_seconds_from_coin_spend(coin_spend).expect("coin spend expiry"),
+            Some(expires_at)
+        );
     }
 }
