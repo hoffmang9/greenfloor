@@ -31,7 +31,8 @@ impl PeriodicGate {
         }
     }
 
-    pub fn run_if_due(&self, interval_seconds: u64, task: impl FnOnce()) {
+    /// Runs `task` when due. Advances the next deadline only when `task` returns `true`.
+    pub fn run_if_due(&self, interval_seconds: u64, task: impl FnOnce() -> bool) {
         let now = monotonic_seconds();
         let Ok(mut next_deadline) = self.next_deadline.lock() else {
             return;
@@ -40,8 +41,9 @@ impl PeriodicGate {
         if !is_periodic_due(now, deadline) {
             return;
         }
-        *next_deadline = Some(next_periodic_deadline(now, interval_seconds));
-        task();
+        if task() {
+            *next_deadline = Some(next_periodic_deadline(now, interval_seconds));
+        }
     }
 
     pub fn seed_next_deadline(&self, interval_seconds: u64) {
@@ -66,8 +68,26 @@ mod tests {
     fn periodic_gate_runs_once_until_interval_elapses() {
         let gate = PeriodicGate::new();
         let mut runs = 0_u8;
-        gate.run_if_due(3600, || runs += 1);
-        gate.run_if_due(3600, || runs += 1);
+        gate.run_if_due(3600, || {
+            runs += 1;
+            true
+        });
+        gate.run_if_due(3600, || {
+            runs += 1;
+            true
+        });
+        assert_eq!(runs, 1);
+    }
+
+    #[test]
+    fn periodic_gate_does_not_advance_deadline_when_task_returns_false() {
+        let gate = PeriodicGate::new();
+        let mut runs = 0_u8;
+        gate.run_if_due(3600, || false);
+        gate.run_if_due(3600, || {
+            runs += 1;
+            true
+        });
         assert_eq!(runs, 1);
     }
 }

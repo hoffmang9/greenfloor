@@ -5,7 +5,12 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
+use crate::cycle::lifecycle::OfferLifecycleState;
 use crate::cycle::periodic::PeriodicGate;
+use crate::cycle::reconcile::{
+    REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK,
+    REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK,
+};
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
     COIN_OPS_EXECUTED, COIN_OP_LEDGER_EXECUTED, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION,
@@ -22,17 +27,14 @@ const PRESERVED_EVENT_TYPES: &[&str] =
 
 const PRESERVED_LIFECYCLE_TRANSITIONS: &[(&str, &[&str])] = &[
     (
-        "mempool_observed",
-        &["potential_take_seen", "coinset_mempool_observed"],
+        OfferLifecycleState::MempoolObserved.as_str(),
+        &[REASON_POTENTIAL_TAKE_SEEN, REASON_COINSET_MEMPOOL],
     ),
     (
-        "tx_block_confirmed",
-        &[
-            "take_confirmed_on_tx_block",
-            "coinset_tx_block_webhook_confirmed",
-        ],
+        OfferLifecycleState::TxBlockConfirmed.as_str(),
+        &[REASON_TAKE_CONFIRMED_ON_TX_BLOCK, REASON_COINSET_CONFIRMED],
     ),
-    ("cancelled", &["cancel_tx_chain_confirmed", "ok"]),
+    ("cancelled", &[REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_OK]),
 ];
 
 static PRESERVE_PREDICATE_SQL: LazyLock<String> = LazyLock::new(build_preserve_predicate_sql);
@@ -135,17 +137,19 @@ pub fn maybe_prune_stale_audit_events(store: &SqliteStore, retention_days: u64) 
     AUDIT_PRUNE_GATE.run_if_due(interval_seconds, || {
         let options = PruneAuditEventsOptions::daemon();
         match store.prune_stale_audit_events(retention_days, options) {
-            Ok(report) if report.deleted_count > 0 => {
-                tracing::info!(
-                    deleted = report.deleted_count,
-                    retention_days = report.retention_days,
-                    cutoff = %report.cutoff.to_rfc3339(),
-                    interval_seconds,
-                    event = "audit_event_pruned",
-                    "pruned non-financial audit events"
-                );
+            Ok(report) => {
+                if report.deleted_count > 0 {
+                    tracing::info!(
+                        deleted = report.deleted_count,
+                        retention_days = report.retention_days,
+                        cutoff = %report.cutoff.to_rfc3339(),
+                        interval_seconds,
+                        event = "audit_event_pruned",
+                        "pruned non-financial audit events"
+                    );
+                }
+                true
             }
-            Ok(_) => {}
             Err(err) => {
                 tracing::warn!(
                     error = %err,
@@ -153,6 +157,7 @@ pub fn maybe_prune_stale_audit_events(store: &SqliteStore, retention_days: u64) 
                     event = "audit_event_prune_failed",
                     "audit retention prune failed; continuing daemon cycle"
                 );
+                false
             }
         }
     });

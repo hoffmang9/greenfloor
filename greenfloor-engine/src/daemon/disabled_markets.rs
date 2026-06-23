@@ -45,22 +45,23 @@ pub fn log_disabled_markets_startup_once(markets: &MarketsConfig) {
 }
 
 pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
+    let disabled_count = markets
+        .markets
+        .iter()
+        .filter(|market| !market.enabled)
+        .count();
+    if disabled_count == 0 {
+        return;
+    }
     let interval_seconds = disabled_market_log_interval_seconds();
     PERIODIC_GATE.run_if_due(interval_seconds, || {
-        let disabled_count = markets
-            .markets
-            .iter()
-            .filter(|market| !market.enabled)
-            .count();
-        if disabled_count == 0 {
-            return;
-        }
         tracing::info!(
             count = disabled_count,
             interval_seconds,
             event = "disabled_markets_periodic",
             "disabled_markets"
         );
+        true
     });
 }
 
@@ -117,5 +118,26 @@ mod tests {
         };
         log_disabled_markets_periodic(&markets);
         log_disabled_markets_periodic(&markets);
+    }
+
+    #[test]
+    fn periodic_log_skips_gate_when_no_disabled_markets() {
+        let enabled_only = MarketsConfig {
+            markets: vec![sample_market("enabled", true)],
+        };
+        log_disabled_markets_periodic(&enabled_only);
+        log_disabled_markets_periodic(&enabled_only);
+    }
+
+    #[test]
+    fn periodic_log_runs_when_disabled_markets_present() {
+        let with_disabled = MarketsConfig {
+            markets: vec![
+                sample_market("enabled", true),
+                sample_market("disabled-a", false),
+            ],
+        };
+        log_disabled_markets_periodic(&with_disabled);
+        log_disabled_markets_periodic(&with_disabled);
     }
 }

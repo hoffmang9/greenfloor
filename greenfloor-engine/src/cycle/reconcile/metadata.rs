@@ -8,6 +8,8 @@ pub(crate) const SIGNAL_SOURCE_DEXIE_GET_OFFER_404: &str = "dexie_get_offer_404"
 pub(crate) const SIGNAL_SOURCE_CANCEL_TX_CHAIN: &str = "cancel_tx_chain";
 
 pub(crate) const REASON_OK: &str = "ok";
+pub(crate) const REASON_POTENTIAL_TAKE_SEEN: &str = "potential_take_seen";
+pub(crate) const REASON_TAKE_CONFIRMED_ON_TX_BLOCK: &str = "take_confirmed_on_tx_block";
 pub(crate) const REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN: &str =
     "cancel_submitted_stale_dexie_still_open";
 pub(crate) const REASON_CANCEL_SUBMIT_CONTEXT_MISSING: &str = "cancel_submitted_context_missing";

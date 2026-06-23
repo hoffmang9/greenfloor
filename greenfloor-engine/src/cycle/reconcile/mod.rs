@@ -21,6 +21,10 @@ pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
 pub(crate) use cancel_submitted_policy::cancel_tx_chain_confirmed;
 pub use cancel_submitted_policy::CancelSubmittedContext;
 pub use coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
+pub(crate) use metadata::{
+    REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK,
+    REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK,
+};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 

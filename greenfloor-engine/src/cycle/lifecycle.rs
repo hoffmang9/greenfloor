@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::cycle::reconcile::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OfferLifecycleState {
@@ -12,7 +14,7 @@ pub enum OfferLifecycleState {
 
 impl OfferLifecycleState {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
             Self::MempoolObserved => "mempool_observed",
@@ -80,7 +82,7 @@ pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> Of
             new_state: OfferLifecycleState::MempoolObserved,
             signal,
             action: "mark_mempool_observed".to_string(),
-            reason: "potential_take_seen".to_string(),
+            reason: REASON_POTENTIAL_TAKE_SEEN.to_string(),
         },
         (
             OfferLifecycleState::Open | OfferLifecycleState::MempoolObserved,
@@ -90,7 +92,7 @@ pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> Of
             new_state: OfferLifecycleState::TxBlockConfirmed,
             signal,
             action: "reconcile_coins_and_offers".to_string(),
-            reason: "take_confirmed_on_tx_block".to_string(),
+            reason: REASON_TAKE_CONFIRMED_ON_TX_BLOCK.to_string(),
         },
         (OfferLifecycleState::Open, OfferSignal::ExpiryNear) => OfferTransition {
             old_state: state,
