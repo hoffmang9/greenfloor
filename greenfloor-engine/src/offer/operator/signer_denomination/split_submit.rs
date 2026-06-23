@@ -13,7 +13,19 @@ async fn submit_bootstrap_vault_mixed_split(
     receive_address: &str,
     coin_ids: &[String],
     output_amounts_mojos: Vec<u64>,
+    #[cfg(test)] test_overrides: Option<&super::test_overrides::SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
+    #[cfg(test)]
+    if let Some(stub) = super::test_overrides::vault_mixed_split_stub_response(test_overrides) {
+        let _ = (
+            signer_config,
+            split_asset_id,
+            receive_address,
+            coin_ids,
+            output_amounts_mojos,
+        );
+        return Ok(stub);
+    }
     let result = build_and_optionally_broadcast_vault_cat_mixed_split(
         signer_config.clone(),
         MixedSplitRequest {
@@ -43,25 +55,28 @@ pub(super) async fn submit_bootstrap_combine(
     split_asset_id: &str,
     receive_address: &str,
     split_asset_mojo_multiplier: i64,
+    #[cfg(test)] test_overrides: Option<&super::test_overrides::SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
-    let BootstrapFundingSource::CombineFirst(prereq) = &bootstrap_plan.funding else {
+    let BootstrapFundingSource::CombineFirst(inputs) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
     let multiplier = split_asset_mojo_multiplier.max(1);
-    let total_mojos = prereq.selected_total.saturating_mul(multiplier);
+    let total_mojos = inputs.selected_total.saturating_mul(multiplier);
     let output_amounts = combine_output_amounts(total_mojos, 1)?;
     let mut result = submit_bootstrap_vault_mixed_split(
         signer_config,
         split_asset_id,
         receive_address,
-        &prereq.input_coin_ids,
+        &inputs.input_coin_ids,
         output_amounts,
+        #[cfg(test)]
+        test_overrides,
     )
     .await?;
     if let Some(obj) = result.as_object_mut() {
         obj.insert(
             "input_coin_count".to_string(),
-            json!(prereq.input_coin_ids.len()),
+            json!(inputs.input_coin_ids.len()),
         );
     }
     Ok(result)
@@ -73,6 +88,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
     split_asset_id: &str,
     receive_address: &str,
     split_asset_mojo_multiplier: i64,
+    #[cfg(test)] test_overrides: Option<&super::test_overrides::SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
     let BootstrapFundingSource::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
@@ -94,6 +110,8 @@ pub(super) async fn submit_bootstrap_mixed_split(
         receive_address,
         std::slice::from_ref(coin_id),
         output_amounts_mojos,
+        #[cfg(test)]
+        test_overrides,
     )
     .await
 }
@@ -128,6 +146,7 @@ mod tests {
             "not-a-valid-asset-id",
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             1,
+            None,
         )
         .await
         .expect_err("invalid asset hex");
@@ -146,6 +165,7 @@ mod tests {
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             1,
+            None,
         )
         .await
         .expect_err("invalid coin id");

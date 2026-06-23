@@ -1,4 +1,4 @@
-use super::plan::CoinOpPlan;
+use super::plan::{CoinOpPlan, CoinOpPlanReason};
 
 #[must_use]
 pub fn projected_coin_ops_fee_mojos(
@@ -68,13 +68,13 @@ pub fn partition_plans_by_budget(
             op_type: plan.op_type,
             size_base_units: plan.size_base_units,
             op_count: affordable_ops,
-            reason: plan.reason.clone(),
+            reason: plan.reason,
         });
         skipped.push(CoinOpPlan {
             op_type: plan.op_type,
             size_base_units: plan.size_base_units,
             op_count: plan.op_count - affordable_ops,
-            reason: "fee_budget_partial_overflow".to_string(),
+            reason: CoinOpPlanReason::FeeBudgetPartialOverflow,
         });
         remaining = 0;
     }
@@ -87,7 +87,7 @@ mod tests {
     use super::{
         fee_budget_allows_execution, partition_plans_by_budget, projected_coin_ops_fee_mojos,
     };
-    use crate::coin_ops::plan::{CoinOpKind, CoinOpPlan};
+    use crate::coin_ops::plan::{CoinOpKind, CoinOpPlan, CoinOpPlanReason};
 
     #[test]
     fn projected_fee_sums_per_op_type() {
@@ -97,13 +97,13 @@ mod tests {
                     op_type: CoinOpKind::Split,
                     size_base_units: 1,
                     op_count: 3,
-                    reason: "x".to_string(),
+                    reason: CoinOpPlanReason::ExcessOnlyPolicy,
                 },
                 CoinOpPlan {
                     op_type: CoinOpKind::Combine,
                     size_base_units: 10,
                     op_count: 2,
-                    reason: "y".to_string(),
+                    reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
                 },
             ],
             5,
@@ -125,7 +125,7 @@ mod tests {
                 op_type: CoinOpKind::Split,
                 size_base_units: 1,
                 op_count: 5,
-                reason: "r".to_string(),
+                reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
             }],
             10,
             10,

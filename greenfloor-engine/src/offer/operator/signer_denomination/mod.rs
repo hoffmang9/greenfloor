@@ -7,6 +7,8 @@ mod bootstrap_execute;
 mod futures;
 mod planning;
 mod split_submit;
+#[cfg(test)]
+mod test_overrides;
 mod types;
 mod wait;
 
@@ -209,6 +211,8 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         fee_source,
         fee_lookup_error,
         existing_coin_ids,
+        #[cfg(test)]
+        test_overrides: test_overrides::SignerDenominationTestOverrides::default(),
     }))
 }
 

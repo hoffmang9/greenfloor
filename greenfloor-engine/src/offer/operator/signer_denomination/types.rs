@@ -205,8 +205,9 @@ impl BootstrapPhaseFailure {
 #[cfg(test)]
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
-    use crate::coin_ops::SplitCombinePrereqPlan;
-    use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPlan};
+    use crate::offer::bootstrap::{
+        BootstrapCombineInputs, BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPlan,
+    };
 
     #[test]
     fn from_snapshot_block_error_matches_snapshot_gate() {
@@ -233,14 +234,12 @@ mod tests {
     #[test]
     fn plan_output_omits_source_coin_id_for_combine_first() {
         let plan = BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(SplitCombinePrereqPlan {
+            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
                 input_coin_ids: vec!["coin-a".to_string(), "coin-b".to_string()],
                 target_amount: 100,
                 selected_total: 100,
                 exact_match: true,
                 cap_applied: false,
-                selected_count_before_cap: 2,
-                combine_input_cap: 5,
             }),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

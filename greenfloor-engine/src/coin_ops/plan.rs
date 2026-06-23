@@ -39,12 +39,31 @@ pub struct BucketSpec {
     pub current_count: i64,
 }
 
+/// Typed reason tag for a planned coin operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoinOpPlanReason {
+    LowWatermarkBufferDeficit,
+    ExcessOnlyPolicy,
+    FeeBudgetPartialOverflow,
+}
+
+impl CoinOpPlanReason {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LowWatermarkBufferDeficit => "low_watermark_buffer_deficit",
+            Self::ExcessOnlyPolicy => "excess_only_policy",
+            Self::FeeBudgetPartialOverflow => "fee_budget_partial_overflow",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoinOpPlan {
     pub op_type: CoinOpKind,
     pub size_base_units: i64,
     pub op_count: i64,
-    pub reason: String,
+    pub reason: CoinOpPlanReason,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -126,7 +145,7 @@ pub fn plan_coin_ops(
             op_type: CoinOpKind::Split,
             size_base_units: bucket.size_base_units,
             op_count,
-            reason: crate::coin_ops::LOW_WATERMARK_BUFFER_DEFICIT.to_string(),
+            reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
         });
         remaining_ops -= op_count;
         remaining_fee -= split_fee_mojos;
@@ -154,7 +173,7 @@ pub fn plan_coin_ops(
             op_type: CoinOpKind::Combine,
             size_base_units: bucket.size_base_units,
             op_count,
-            reason: "excess_only_policy".to_string(),
+            reason: CoinOpPlanReason::ExcessOnlyPolicy,
         });
         remaining_ops -= op_count;
         remaining_fee -= combine_fee_mojos;

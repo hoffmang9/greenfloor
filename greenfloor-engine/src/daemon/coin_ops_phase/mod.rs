@@ -341,7 +341,7 @@ fn plan_summary(plan: &CoinOpPlan) -> serde_json::Value {
         "op_type": plan.op_type.as_str(),
         "size_base_units": plan.size_base_units,
         "op_count": plan.op_count,
-        "reason": plan.reason,
+        "reason": plan.reason.as_str(),
     })
 }
 

@@ -4,7 +4,7 @@ use super::ladder::build_valid_sell_ladder;
 use super::ladder::classify_sell_ladder_entries;
 use super::ladder::record_sub_minimum_sell_ladder_skips;
 use super::{apply_overflow_plan_skips, skipped_coin_ops_result};
-use crate::coin_ops::{CoinOpKind, CoinOpPlan};
+use crate::coin_ops::{CoinOpKind, CoinOpPlan, CoinOpPlanReason};
 use crate::config::{LadderEntry, ManagerProgramConfig};
 use crate::daemon::coin_ops_execution::CoinOpExecutionResult;
 use crate::daemon::CoinOpsPhaseHarness;
@@ -148,7 +148,7 @@ fn apply_overflow_plan_skips_marks_fee_budget_guard() {
         op_type: CoinOpKind::Split,
         size_base_units: 10,
         op_count: 2,
-        reason: "deficit".to_string(),
+        reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
     }];
 
     apply_overflow_plan_skips(&mut execution, &overflow);
@@ -170,7 +170,7 @@ fn skipped_coin_ops_result_marks_all_plans_skipped() {
         op_type: CoinOpKind::Combine,
         size_base_units: 5,
         op_count: 1,
-        reason: "test".to_string(),
+        reason: CoinOpPlanReason::ExcessOnlyPolicy,
     }];
 
     let result = skipped_coin_ops_result(&program, &market, &plans, "signer_unavailable");

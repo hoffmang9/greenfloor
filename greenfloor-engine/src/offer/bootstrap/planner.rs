@@ -5,8 +5,9 @@
 
 use crate::coin_ops::{
     aggregate_covers_without_single_coin, build_combine_prereq_plan, SpendableCoin,
-    SplitCombinePrereqPlan,
 };
+
+use super::combine_inputs::BootstrapCombineInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -32,7 +33,7 @@ pub struct BootstrapCoin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapFundingSource {
     SingleCoin { coin_id: String, amount: i64 },
-    CombineFirst(SplitCombinePrereqPlan),
+    CombineFirst(BootstrapCombineInputs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,22 +63,22 @@ impl BootstrapPlan {
     pub fn source_amount(&self) -> i64 {
         match &self.funding {
             BootstrapFundingSource::SingleCoin { amount, .. } => *amount,
-            BootstrapFundingSource::CombineFirst(prereq) => prereq.selected_total,
+            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total,
         }
     }
 
     #[must_use]
-    pub fn combine_prereq(&self) -> Option<&SplitCombinePrereqPlan> {
+    pub fn combine_inputs(&self) -> Option<&BootstrapCombineInputs> {
         match &self.funding {
-            BootstrapFundingSource::CombineFirst(prereq) => Some(prereq),
+            BootstrapFundingSource::CombineFirst(inputs) => Some(inputs),
             BootstrapFundingSource::SingleCoin { .. } => None,
         }
     }
 
     #[must_use]
     pub fn combine_input_coin_ids(&self) -> Option<&[String]> {
-        self.combine_prereq()
-            .map(|prereq| prereq.input_coin_ids.as_slice())
+        self.combine_inputs()
+            .map(|inputs| inputs.input_coin_ids.as_slice())
     }
 }
 
@@ -221,7 +222,9 @@ pub fn plan_bootstrap_mixed_outputs(
         };
         let selected_total = prereq.selected_total;
         return BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(prereq),
+            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs::from_coin_ops(
+                prereq,
+            )),
             output_amounts_base_units: output_amounts,
             total_output_amount,
             change_amount: selected_total - total_output_amount,

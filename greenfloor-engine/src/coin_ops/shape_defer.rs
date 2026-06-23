@@ -1,6 +1,6 @@
 //! Post-bootstrap vs daemon coin-op shaping coordination.
 
-use super::{CoinOpKind, CoinOpPlan, SpendableCoin};
+use super::{CoinOpKind, CoinOpPlan, CoinOpPlanReason, SpendableCoin};
 
 /// Reason tag for a single low-watermark split plan emitted by coin-op planning.
 pub const LOW_WATERMARK_BUFFER_DEFICIT: &str = "low_watermark_buffer_deficit";
@@ -46,7 +46,7 @@ pub fn defer_low_watermark_split_to_post_bootstrap(
 ) -> bool {
     plan.op_type == CoinOpKind::Split
         && plan.op_count == 1
-        && plan.reason == LOW_WATERMARK_BUFFER_DEFICIT
+        && plan.reason == CoinOpPlanReason::LowWatermarkBufferDeficit
         && aggregate_covers_without_single_coin(plan.size_base_units, spendable_amounts_base_units)
 }
 
@@ -68,9 +68,8 @@ mod tests {
     use super::{
         aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,
         defer_low_watermark_split_to_post_bootstrap, spendable_amounts_in_base_units,
-        LOW_WATERMARK_BUFFER_DEFICIT,
     };
-    use crate::coin_ops::{CoinOpKind, CoinOpPlan, SpendableCoin};
+    use crate::coin_ops::{CoinOpKind, CoinOpPlan, CoinOpPlanReason, SpendableCoin};
 
     #[test]
     fn spendable_amounts_in_base_units_divides_by_multiplier() {
@@ -94,7 +93,7 @@ mod tests {
             op_type: CoinOpKind::Split,
             size_base_units: 100,
             op_count: 1,
-            reason: LOW_WATERMARK_BUFFER_DEFICIT.to_string(),
+            reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
         };
         assert!(defer_low_watermark_split_to_post_bootstrap(
             &plan,
@@ -112,7 +111,7 @@ mod tests {
             op_type: CoinOpKind::Split,
             size_base_units: 100,
             op_count: 1,
-            reason: LOW_WATERMARK_BUFFER_DEFICIT.to_string(),
+            reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
         };
         let spendable = vec![
             SpendableCoin {
