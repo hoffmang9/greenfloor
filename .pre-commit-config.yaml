@@ -1,9 +1,8 @@
 ---
 # Lint/type/fmt gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
-# Clippy runs on ubuntu in the Test job (`shared-key: test` cache). That job must not
-# share the lint job's `shared-key: coverage` cache: clippy rebuilds target/ without
-# instrumentation and would invalidate llvm-cov artifacts saved on the lint runner.
-# Test jobs run full `cargo nextest run` in parallel with lint.
+# That job runs clippy (via pre-commit cargo-clippy) on `shared-key: test`, then
+# restores `shared-key: coverage` before llvm-cov when diff coverage is in scope.
+# Cross-platform plain nextest uses `shared-key: test` on arm/macos.
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml --features test-support
 #

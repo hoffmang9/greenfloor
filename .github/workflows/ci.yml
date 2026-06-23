@@ -21,7 +21,7 @@ env:
 
 jobs:
   lint:
-    name: Lint, format, and coverage (ubuntu-latest)
+    name: Lint, format, and tests (ubuntu-latest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -68,11 +68,54 @@ jobs:
           path: .venv
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
+      - name: Cache pre-commit environment
+        uses: actions/cache@v4
+        with:
+          path: ./.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
+
+      # Clippy always uses the non-instrumented test cache. When diff coverage is in
+      # scope, a second coverage-cache step below restores instrumented target/ artifacts
+      # before llvm-cov runs (see .github/actions/rust-cache-greenfloor/action.yml).
       - uses: ./.github/actions/rust-cache-greenfloor
+        with:
+          shared-key: test
+          save-cache: "true"
+          install-nextest: ${{ steps.scope.outputs.run_rust_cov != 'true' }}
+
+      - name: Lint, format, clippy, and script tests (parallel)
+        if: steps.scope.outputs.run_rust_cov != 'true'
+        env:
+          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+          RUN_PY_COV: ${{ steps.scope.outputs.run_py_cov }}
+        run: bash .github/scripts/ubuntu-all-checks-parallel.sh
+
+      - name: Lint and format (parallel)
+        if: steps.scope.outputs.run_rust_cov == 'true'
+        env:
+          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+        run: bash .github/scripts/ubuntu-lint-parallel.sh
+
+      - name: Script adapter tests
+        if: steps.scope.outputs.run_rust_cov == 'true'
+        env:
+          RUN_PY_COV: ${{ steps.scope.outputs.run_py_cov }}
+        run: bash .github/scripts/ubuntu-script-tests.sh
+
+      - name: Clippy
+        if: steps.scope.outputs.run_rust_cov == 'true'
+        env:
+          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+        run: pre-commit run cargo-clippy --all-files
+
+      - uses: ./.github/actions/rust-cache-greenfloor
+        if: steps.scope.outputs.run_rust_cov == 'true'
         with:
           shared-key: coverage
           save-cache: "true"
-          install-nextest: ${{ steps.scope.outputs.run_rust_cov }}
+          install-nextest: "true"
 
       - name: Install cargo-llvm-cov
         if: steps.scope.outputs.run_rust_cov == 'true'
@@ -84,49 +127,17 @@ jobs:
         if: steps.scope.outputs.run_rust_cov == 'true'
         run: rustup component add llvm-tools-preview
 
-      - name: Cache pre-commit environment
-        uses: actions/cache@v4
-        with:
-          path: ./.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
-          restore-keys: |
-            pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
-
-      - name: Lint, format, and coverage (parallel)
+      - name: Rust tests (coverage)
+        if: steps.scope.outputs.run_rust_cov == 'true'
         env:
-          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: |
-          set -euo pipefail
-          pids=()
-          for hook in ruff ruff-format pyright yamllint prettier audit-event-direct-calls cargo-fmt; do
-            pre-commit run "${hook}" --all-files &
-            pids+=($!)
-          done
-          if [ "${{ steps.scope.outputs.run_rust_cov }}" = "true" ]; then
-            (
-              cargo llvm-cov nextest \
-                --manifest-path "${{ env.CARGO_MANIFEST }}" \
-                --features test-support
-              cargo llvm-cov report \
-                --manifest-path "${{ env.CARGO_MANIFEST }}" \
-                --lcov \
-                --output-path lcov.info
-            ) &
-            pids+=($!)
-          fi
-          if [ "${{ steps.scope.outputs.run_py_cov }}" = "true" ]; then
-            (
-              cd scripts
-              python -m coverage run -m unittest greenfloor_scripts.test_adapters
-              python -m coverage xml -o ../coverage-python.xml
-            ) &
-            pids+=($!)
-          fi
-          status=0
-          for pid in "${pids[@]}"; do
-            wait "${pid}" || status=1
-          done
-          exit "${status}"
+          CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+        run: bash .github/scripts/ubuntu-rust-coverage.sh
+
+      - name: Rust tests
+        if: steps.scope.outputs.run_rust_cov != 'true'
+        env:
+          CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+        run: bash .github/scripts/ubuntu-rust-tests.sh
 
       - name: Diff coverage gate (changed lines only)
         if: >-
@@ -174,7 +185,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
+          # ubuntu-latest Rust/Python tests run in the lint job (plain nextest or llvm-cov).
           - ubuntu-24.04-arm
           - macos-14
     steps:
@@ -214,12 +225,6 @@ jobs:
         with:
           shared-key: test
           install-nextest: "true"
-
-      - name: Clippy (ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: >-
-          cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}"
-          --lib --bins --tests --no-deps --features test-support
 
       - name: Build and test greenfloor-engine
         run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}" --features test-support

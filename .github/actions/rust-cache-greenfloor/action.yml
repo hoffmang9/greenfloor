@@ -9,8 +9,10 @@ inputs:
     default: "true"
   shared-key:
     description: >-
-      Swatinem/rust-cache shared-key namespace. Use `coverage` on the lint job so
-      instrumented llvm-cov artifacts are not overwritten by test/clippy builds.
+      Swatinem/rust-cache shared-key namespace. Use `test` for clippy and plain
+      nextest. Use `coverage` for llvm-cov instrumented builds. The ubuntu lint job
+      runs clippy on `test`, then restores `coverage` before llvm-cov so non-instrumented
+      clippy artifacts are not saved into the coverage cache.
     required: false
     default: "test"
   install-nextest:
