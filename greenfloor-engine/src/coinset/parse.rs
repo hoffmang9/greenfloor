@@ -305,4 +305,56 @@ mod tests {
     fn coin_id_from_record_returns_empty_when_coin_missing() {
         assert!(coin_id_from_record(&json!({})).is_empty());
     }
+
+    #[test]
+    fn u64_from_value_prefers_u64_and_parses_i64() {
+        assert_eq!(u64_from_value(Some(&json!(42_u64)), 0), 42);
+        assert_eq!(u64_from_value(Some(&json!(7_i64)), 0), 7);
+        assert_eq!(u64_from_value(Some(&json!("bad")), 99), 99);
+        assert_eq!(u64_from_value(None, 5), 5);
+    }
+
+    #[test]
+    fn coin_from_record_builds_coin_from_nested_payload() {
+        use chia_protocol::{Bytes32, Coin};
+
+        let parent = Bytes32::new([0x11; 32]);
+        let puzzle_hash = Bytes32::new([0x22; 32]);
+        let record = json!({
+            "coin": {
+                "parent_coin_info": format!("0x{}", hex::encode(parent)),
+                "puzzle_hash": format!("0x{}", hex::encode(puzzle_hash)),
+                "amount": 99,
+            }
+        });
+        let coin = coin_from_record(&record).expect("coin");
+        assert_eq!(coin, Coin::new(parent, puzzle_hash, 99));
+        assert!(coin_from_record(&json!({"coin": {"amount": 1}})).is_none());
+    }
+
+    #[test]
+    fn coin_spend_from_solution_payload_decodes_hex_fields() {
+        use chia_protocol::{Bytes32, Coin};
+
+        let parent = Coin::new(Bytes32::new([0x01; 32]), Bytes32::new([0x02; 32]), 1);
+        let puzzle = "0102";
+        let solution = "0304";
+        let spend = coin_spend_from_solution_payload(
+            parent,
+            &json!({
+                "puzzle_reveal": format!("0x{puzzle}"),
+                "solution": solution,
+            }),
+        )
+        .expect("spend");
+        assert_eq!(hex::encode(spend.puzzle_reveal.as_ref()), puzzle);
+        assert_eq!(hex::encode(spend.solution.as_ref()), solution);
+    }
+
+    #[test]
+    fn chunk_values_zero_batch_returns_single_chunk() {
+        let values = vec![1, 2, 3];
+        assert_eq!(chunk_values(&values, 0), vec![vec![1, 2, 3]]);
+        assert!(chunk_values::<i32>(&[], 2).is_empty());
+    }
 }

@@ -247,4 +247,101 @@ mod tests {
         assert_eq!(state.cancel_planned, 3);
         assert_eq!(state.cancel_executed, 1);
     }
+
+    #[test]
+    fn market_cycle_phase_labels_and_order() {
+        assert_eq!(MarketCyclePhase::Reconcile.as_str(), "reconcile");
+        assert_eq!(market_cycle_phases().len(), 5);
+        assert_eq!(post_reconcile_market_cycle_phases().len(), 4);
+        assert!(!post_reconcile_market_cycle_phases().contains(&MarketCyclePhase::Reconcile));
+    }
+
+    #[test]
+    fn market_cycle_result_state_tracks_errors_and_requeue() {
+        let mut state = MarketCycleResultState::default();
+        state.record_phase_error();
+        state.record_phase_error();
+        state.request_immediate_requeue(Some("taker_fill".to_string()));
+        state.request_immediate_requeue(Some("  ".to_string()));
+        state.request_immediate_requeue(None);
+        assert_eq!(state.cycle_errors, 2);
+        assert!(state.immediate_requeue_requested);
+        assert_eq!(
+            state.immediate_requeue_signals,
+            vec!["taker_fill".to_string()]
+        );
+    }
+
+    #[test]
+    fn needs_inventory_fallback_and_wallet_source_labels() {
+        assert!(needs_inventory_fallback(false, false));
+        assert!(needs_inventory_fallback(true, true));
+        assert!(!needs_inventory_fallback(true, false));
+        assert_eq!(wallet_fallback_source_label(false), "wallet_adapter");
+        assert_eq!(
+            wallet_fallback_source_label(true),
+            "wallet_adapter_fallback_after_empty_coinset_scan"
+        );
+    }
+
+    #[test]
+    fn resolve_inventory_scan_source_uses_wallet_when_coinset_empty() {
+        assert_eq!(
+            resolve_inventory_scan_source(
+                CoinsetInventoryScanState {
+                    found_coins: false,
+                    empty: true,
+                },
+                SupplementalInventoryScanState {
+                    cat_found_coins: false,
+                    wallet_found_coins: true,
+                },
+            ),
+            "wallet_adapter_fallback_after_empty_coinset_scan"
+        );
+        assert_eq!(
+            resolve_inventory_scan_source(
+                CoinsetInventoryScanState {
+                    found_coins: false,
+                    empty: false,
+                },
+                SupplementalInventoryScanState {
+                    cat_found_coins: false,
+                    wallet_found_coins: false,
+                },
+            ),
+            "config_seed_or_no_asset_scan"
+        );
+    }
+
+    #[test]
+    fn aggregate_and_one_sided_offer_counts() {
+        let buy = BTreeMap::from([(1, 2), (10, 1)]);
+        let sell = BTreeMap::from([(1, 1), (10, 0)]);
+        let tracked = vec![1, 10, 100];
+        let total = aggregate_two_sided_offer_counts(&buy, &sell, &tracked);
+        assert_eq!(total.get(&1), Some(&3));
+        assert_eq!(total.get(&10), Some(&1));
+        assert_eq!(total.get(&100), Some(&0));
+
+        let (buy_only, sell_only) = one_sided_offer_counts_by_side(&sell, &tracked);
+        assert_eq!(buy_only.get(&1), Some(&0));
+        assert_eq!(sell_only.get(&1), Some(&1));
+    }
+
+    #[test]
+    fn is_two_sided_market_mode_is_case_insensitive() {
+        assert!(is_two_sided_market_mode("two_sided"));
+        assert!(is_two_sided_market_mode(" TWO_SIDED "));
+        assert!(!is_two_sided_market_mode("one_sided"));
+    }
+
+    #[test]
+    fn filter_positive_repeat_actions_counts_only_positive() {
+        let actions = vec![(0_i64, 0), (1, 2), (2, -1)];
+        assert_eq!(
+            filter_positive_repeat_actions(&actions, |action| action.1),
+            1
+        );
+    }
 }

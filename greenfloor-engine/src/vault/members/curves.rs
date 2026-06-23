@@ -184,3 +184,76 @@ pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResu
     let key_bytes = hex_to_bytes(&key.public_key_hex)?;
     curve.hash_key(config, &key_bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use chia_sdk_test::{BlsPair, K1Pair, R1Pair};
+
+    use super::*;
+    use crate::hex::hex_to_bytes32;
+    use crate::test_support::golden::LAUNCHER_ID_HEX;
+
+    fn wallet_key(curve: &str, public_key_hex: &str) -> WalletKey {
+        WalletKey {
+            curve: curve.to_string(),
+            public_key_hex: public_key_hex.to_string(),
+        }
+    }
+
+    #[test]
+    fn member_hash_for_key_supports_all_wallet_curves() {
+        let config = MemberConfig::default();
+        let r1 = R1Pair::new(7);
+        let k1 = K1Pair::new(8);
+        let bls = BlsPair::new(9);
+        let passkey = R1Pair::new(10);
+
+        assert!(r1_member_hash(&config, r1.pk, true).is_ok());
+        assert!(k1_member_hash(&config, k1.pk, false).is_ok());
+        assert!(bls_member_hash(&config, bls.pk, false).is_ok());
+        assert!(passkey_member_hash(&config, passkey.pk, true).is_ok());
+
+        let launcher_id = hex_to_bytes32(LAUNCHER_ID_HEX).expect("launcher");
+        let normal = singleton_member_hash(&config, launcher_id, false).expect("normal");
+        let fast_forward = singleton_member_hash(&config, launcher_id, true).expect("ff");
+        assert_ne!(normal, fast_forward);
+
+        assert!(member_hash_for_key(
+            &config,
+            &wallet_key("SECP256R1", &hex::encode(r1.pk.to_bytes()))
+        )
+        .is_ok());
+        assert!(member_hash_for_key(
+            &config,
+            &wallet_key("SECP256K1", &hex::encode(k1.pk.to_bytes()))
+        )
+        .is_ok());
+        assert!(member_hash_for_key(
+            &config,
+            &wallet_key("WEBAUTHN", &hex::encode(passkey.pk.to_bytes()))
+        )
+        .is_ok());
+        assert!(member_hash_for_key(
+            &config,
+            &wallet_key("BLS12_381", &hex::encode(bls.pk.to_bytes()))
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn member_hash_for_key_rejects_unknown_curve() {
+        let config = MemberConfig::default();
+        let err = member_hash_for_key(&config, &wallet_key("ED25519", &hex::encode([0u8; 32])))
+            .expect_err("unsupported curve");
+        assert!(matches!(err, SignerError::UnsupportedVaultCurve(_)));
+    }
+
+    #[test]
+    fn fast_forward_flag_changes_r1_member_hash() {
+        let config = MemberConfig::default();
+        let pk = R1Pair::new(3).pk;
+        let normal = r1_member_hash(&config, pk, false).expect("normal");
+        let fast_forward = r1_member_hash(&config, pk, true).expect("ff");
+        assert_ne!(normal, fast_forward);
+    }
+}

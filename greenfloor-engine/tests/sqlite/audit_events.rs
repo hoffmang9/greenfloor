@@ -45,3 +45,18 @@ fn list_recent_audit_events_non_positive_limit_returns_empty() {
         .expect("zero limit")
         .is_empty());
 }
+
+#[test]
+fn recent_audit_payload_matches_finds_field_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("greenfloor.sqlite"));
+    store
+        .add_audit_event("config_reloaded", &json!({"reload_id": "reload-42"}), None)
+        .expect("audit");
+    assert!(store
+        .recent_audit_payload_matches("config_reloaded", "reload_id", "reload-42", 5)
+        .expect("match"));
+    assert!(!store
+        .recent_audit_payload_matches("config_reloaded", "reload_id", "missing", 5)
+        .expect("no match"));
+}

@@ -104,3 +104,177 @@ pub(super) fn offer_post_persist_record(
         execution_mode,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use mockito::Matcher;
+    use serde_json::json;
+
+    use super::*;
+    use crate::adapters::{DexieClient, SplashClient};
+    use crate::offer::operator::build_and_post::context::sample_resolved_build_and_post_context;
+    use crate::offer::publish::{ExpectedPublishAssetFields, PublishAssetSide};
+    use crate::offer::types::{CreateOfferResult, OfferExecutionMode, PresplitCancelFields};
+
+    fn expected_fields() -> ExpectedPublishAssetFields {
+        ExpectedPublishAssetFields {
+            offered: PublishAssetSide {
+                asset_id: "basecat".to_string(),
+                symbol: "A1".to_string(),
+            },
+            requested: PublishAssetSide {
+                asset_id: "xch".to_string(),
+                symbol: "xch".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn finalize_publish_payload_adds_execution_mode_and_view_url() {
+        let publish = PublishResult {
+            success: true,
+            offer_id: Some("offer-99".to_string()),
+            body: json!({"success": true, "id": "offer-99"}),
+        };
+        let payload = finalize_publish_payload(
+            publish,
+            "direct",
+            json!({"total_ms": 12}),
+            Some("https://api.dexie.space"),
+        );
+        assert_eq!(payload.get("execution_mode"), Some(&json!("direct")));
+        assert_eq!(payload.get("timing_ms"), Some(&json!({"total_ms": 12})));
+        assert_eq!(
+            payload
+                .get("offer_view_url")
+                .and_then(|value| value.as_str()),
+            Some("https://dexie.space/offers/offer-99")
+        );
+    }
+
+    #[test]
+    fn offer_post_persist_record_uses_create_result_execution_mode() {
+        let ctx = sample_resolved_build_and_post_context();
+        let publish = PublishResult {
+            success: true,
+            offer_id: Some("offer-1".to_string()),
+            body: json!({"success": true}),
+        };
+        let create = CreateOfferResult {
+            offer: "offer1".to_string(),
+            spend_bundle_hex: String::new(),
+            selected_coin_ids: Vec::new(),
+            offer_nonce: String::new(),
+            execution_mode: OfferExecutionMode::PresplitNew,
+            split_spend_bundle_hex: None,
+            presplit_coin_id: Some("cc".repeat(64)),
+            split_broadcast_status: None,
+            presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
+                "coin".to_string(),
+                "puzzle".to_string(),
+            )),
+        };
+        let record = offer_post_persist_record(&publish, "sell", "direct", &ctx, 10, Some(&create))
+            .expect("record");
+        assert_eq!(record.execution_mode, Some(OfferExecutionMode::PresplitNew));
+        assert_eq!(record.cancel_fields.input_coin_id.as_deref(), Some("coin"));
+    }
+
+    #[tokio::test]
+    async fn publish_offer_routes_to_dexie_local_server() {
+        let mut server = mockito::Server::new_async().await;
+        let offer_id = "offer-dexie";
+        let _post = server
+            .mock("POST", "/v1/offers")
+            .with_status(200)
+            .with_body(json!({"success": true, "id": offer_id}).to_string())
+            .create_async()
+            .await;
+        let _get = server
+            .mock("GET", Matcher::Regex(r"/v1/offers/.*".to_string()))
+            .with_status(200)
+            .with_body(
+                json!({
+                    "offer": {
+                        "id": offer_id,
+                        "offered": [{"id": "basecat"}],
+                        "requested": [{"code": "xch"}],
+                    }
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let dexie = DexieClient::new(server.url());
+        let result = publish_offer(
+            "dexie",
+            Some(&dexie),
+            None,
+            "offer1test",
+            true,
+            false,
+            &expected_fields(),
+        )
+        .await
+        .expect("publish");
+        assert!(result.success);
+        assert_eq!(result.offer_id.as_deref(), Some(offer_id));
+    }
+
+    #[tokio::test]
+    async fn publish_offer_routes_to_splash_local_server() {
+        let mut server = mockito::Server::new_async().await;
+        let offer_id = "offer-splash";
+        let _post = server
+            .mock("POST", "/")
+            .with_status(200)
+            .with_body(json!({"success": true, "id": offer_id}).to_string())
+            .create_async()
+            .await;
+
+        let splash = SplashClient::new(server.url());
+        let result = publish_offer(
+            "splash",
+            None,
+            Some(&splash),
+            "offer1test",
+            false,
+            false,
+            &expected_fields(),
+        )
+        .await
+        .expect("publish");
+        assert!(result.success);
+        assert_eq!(result.offer_id.as_deref(), Some(offer_id));
+    }
+
+    #[tokio::test]
+    async fn publish_offer_rejects_missing_adapter_and_unknown_venue() {
+        let err = publish_offer(
+            "dexie",
+            None,
+            None,
+            "offer1",
+            false,
+            false,
+            &expected_fields(),
+        )
+        .await
+        .expect_err("missing dexie");
+        assert!(err.to_string().contains("dexie adapter missing"));
+
+        let err = publish_offer(
+            "unknown",
+            None,
+            None,
+            "offer1",
+            false,
+            false,
+            &expected_fields(),
+        )
+        .await
+        .expect_err("unknown venue");
+        assert!(err.to_string().contains("unsupported publish venue"));
+    }
+}

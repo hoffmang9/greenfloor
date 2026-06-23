@@ -171,3 +171,78 @@ async fn fetch_xch_price_usd() -> SignerResult<f64> {
     }
     Err(SignerError::Other("xch_price_unavailable".to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ManagerProgramConfig;
+    use crate::daemon::watchlist::CoinWatchlistCache;
+    use crate::operator_log::{XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT};
+    use crate::storage::SqliteStore;
+    use crate::test_env::EnvRestoreGuard;
+
+    fn open_store(path: &std::path::Path) -> SqliteStore {
+        SqliteStore::open(path).expect("open sqlite store")
+    }
+
+    fn sample_program() -> ManagerProgramConfig {
+        ManagerProgramConfig {
+            network: "mainnet".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn run_cycle_preamble_handles_price_env_mempool_and_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = open_store(&dir.path().join("state.sqlite"));
+        let watchlist = CoinWatchlistCache::new();
+        let program = sample_program();
+
+        {
+            let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
+            let result = run_cycle_preamble(&program, &store, "", &watchlist, false, false)
+                .await
+                .expect("price preamble");
+            assert_eq!(result.xch_price_usd, Some(42.5));
+            assert_eq!(result.cycle_error_count, 0);
+            let events = store
+                .list_recent_audit_events(Some(&[XCH_PRICE_SNAPSHOT]), None, 1)
+                .expect("audit");
+            assert_eq!(events[0].payload.get("price_usd"), Some(&json!(42.5)));
+        }
+
+        {
+            let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "not-a-number")]);
+            let result = run_cycle_preamble(&program, &store, "", &watchlist, false, false)
+                .await
+                .expect("invalid price preamble");
+            assert!(result.xch_price_usd.is_none());
+            assert_eq!(result.cycle_error_count, 1);
+            let events = store
+                .list_recent_audit_events(Some(&[XCH_PRICE_ERROR]), None, 1)
+                .expect("audit");
+            assert!(events[0]
+                .payload
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| value.contains("invalid GREENFLOOR_XCH_PRICE_USD")));
+        }
+
+        {
+            let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
+            let result = run_cycle_preamble(
+                &program,
+                &store,
+                "http://127.0.0.1:1",
+                &watchlist,
+                true,
+                false,
+            )
+            .await
+            .expect("mempool preamble");
+            assert_eq!(result.xch_price_usd, Some(33.0));
+            assert_eq!(result.cycle_error_count, 1);
+        }
+    }
+}

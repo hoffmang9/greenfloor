@@ -303,4 +303,15 @@ mod tests {
         assert_eq!(actions[0].size, 50);
         assert_eq!(actions[0].repeat, 1);
     }
+
+    #[test]
+    fn evaluate_market_xch_respects_min_and_max_price_bounds() {
+        let state = sample_state();
+        let mut config = sample_config();
+        config.min_xch_price_usd = Some(40.0);
+        assert!(evaluate_market(&state, &config).is_empty());
+        config.min_xch_price_usd = None;
+        config.max_xch_price_usd = Some(20.0);
+        assert!(evaluate_market(&state, &config).is_empty());
+    }
 }

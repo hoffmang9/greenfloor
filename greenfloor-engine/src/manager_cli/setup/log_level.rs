@@ -33,3 +33,49 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     }))?;
     Ok(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manager_cli::test_support::{
+        pop_json, write_program_with_signer, ManagerContextBuilder,
+    };
+
+    #[test]
+    fn run_set_log_level_updates_program_yaml_and_emits_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        write_program_with_signer(&program, dir.path());
+        let harness =
+            ManagerContextBuilder::new(program.clone(), dir.path().join("unused-markets.yaml"))
+                .scratch_dir(dir.path().to_path_buf())
+                .build_capturing();
+        let code = run_set_log_level(&harness.ctx, "debug").expect("set log level");
+        assert_eq!(code, 0);
+        let payload = pop_json(&harness.captured);
+        assert_eq!(payload.get("updated"), Some(&json!(true)));
+        assert_eq!(payload.get("log_level"), Some(&json!("DEBUG")));
+        assert_eq!(payload.get("previous_log_level"), Some(&json!("INFO")));
+
+        let updated = read_program_yaml(&program).expect("read program");
+        assert_eq!(
+            updated
+                .get("app")
+                .and_then(|app| app.get("log_level"))
+                .and_then(serde_json::Value::as_str),
+            Some("DEBUG")
+        );
+    }
+
+    #[test]
+    fn run_set_log_level_rejects_invalid_level() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        write_program_with_signer(&program, dir.path());
+        let ctx = ManagerContextBuilder::new(program, dir.path().join("unused-markets.yaml"))
+            .scratch_dir(dir.path().to_path_buf())
+            .build();
+        let err = run_set_log_level(&ctx, "verbose").expect_err("invalid level");
+        assert!(err.to_string().contains("log level must be one of"));
+    }
+}

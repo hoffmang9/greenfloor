@@ -251,3 +251,108 @@ impl CreateOfferResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chia_protocol::Bytes32;
+
+    fn sample_coin_id(byte: u8) -> Bytes32 {
+        Bytes32::new([byte; 32])
+    }
+
+    fn base_request() -> CreateOfferRequest {
+        CreateOfferRequest {
+            receive_address: "xch1addr".to_string(),
+            offer_asset_id: "cat".to_string(),
+            offer_amount: 1000,
+            request_asset_id: "xch".to_string(),
+            request_amount: 500,
+            offer_coin_ids: vec![sample_coin_id(0x01)],
+            presplit_coin_ids: Vec::new(),
+            split_input_coins: false,
+            broadcast_split: false,
+            expires_at: Some(1_700_000_000),
+        }
+    }
+
+    #[test]
+    fn offer_input_try_from_direct_and_presplit_paths() {
+        let direct = OfferInput::try_from(base_request()).expect("direct");
+        assert!(matches!(direct, OfferInput::Direct { .. }));
+
+        let mut presplit_new = base_request();
+        presplit_new.split_input_coins = true;
+        presplit_new.broadcast_split = true;
+        let presplit_new = OfferInput::try_from(presplit_new).expect("presplit new");
+        assert!(matches!(presplit_new, OfferInput::PresplitNew { .. }));
+
+        let mut presplit_existing = base_request();
+        presplit_existing.presplit_coin_ids = vec![sample_coin_id(0x02)];
+        let presplit_existing = OfferInput::try_from(presplit_existing).expect("presplit existing");
+        assert!(matches!(
+            presplit_existing,
+            OfferInput::PresplitExisting { .. }
+        ));
+
+        let mut invalid = base_request();
+        invalid.presplit_coin_ids = vec![sample_coin_id(0x02), sample_coin_id(0x03)];
+        assert!(matches!(
+            OfferInput::try_from(invalid),
+            Err(SignerError::PresplitOfferRequiresSingleCoin)
+        ));
+    }
+
+    #[test]
+    fn offer_execution_mode_parse_db_and_display() {
+        assert_eq!(
+            OfferExecutionMode::parse_db("presplit_new"),
+            Some(OfferExecutionMode::PresplitNew)
+        );
+        assert_eq!(OfferExecutionMode::PresplitNew.to_string(), "presplit_new");
+        assert!(OfferExecutionMode::parse_db("unknown").is_none());
+    }
+
+    #[test]
+    fn create_offer_result_assembled_carries_presplit_fields() {
+        let cancel =
+            PresplitCancelFields::from_presplit_build("coin".to_string(), "puzzle".to_string());
+        let result = CreateOfferResult::assembled(
+            OfferExecutionMode::PresplitExisting,
+            OfferArtifacts {
+                offer: "offer1".to_string(),
+                spend_bundle_hex: "ff".to_string(),
+                offer_nonce: "nonce".to_string(),
+                selected_coin_ids: vec!["aa".repeat(64)],
+            },
+            PresplitArtifacts {
+                split_spend_bundle_hex: Some("bb".to_string()),
+                presplit_coin_id: Some("cc".repeat(64)),
+                split_broadcast_status: Some("submitted".to_string()),
+            },
+            Some(cancel.clone()),
+        );
+        assert_eq!(result.execution_mode, OfferExecutionMode::PresplitExisting);
+        assert_eq!(result.presplit_cancel_fields, Some(cancel));
+    }
+
+    #[test]
+    fn create_offer_request_deserializes_coin_ids_from_hex_strings() {
+        let coin = "a".repeat(64);
+        let raw = format!(
+            r#"{{
+                "receive_address": "xch1",
+                "offer_asset_id": "cat",
+                "offer_amount": 1,
+                "request_asset_id": "xch",
+                "request_amount": 1,
+                "offer_coin_ids": ["{coin}"],
+                "split_input_coins": false,
+                "broadcast_split": false
+            }}"#
+        );
+        let request: CreateOfferRequest = serde_json::from_str(&raw).expect("request");
+        assert_eq!(request.offer_coin_ids.len(), 1);
+        assert_eq!(hex::encode(request.offer_coin_ids[0]), coin);
+    }
+}

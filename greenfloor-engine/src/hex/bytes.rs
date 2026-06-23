@@ -81,4 +81,17 @@ mod tests {
         assert!(fixed_bytes::<33>(&[0u8; 32]).is_err());
         assert_eq!(fixed_bytes::<33>(&[1u8; 33]).expect("33"), [1u8; 33]);
     }
+
+    #[test]
+    fn hex_to_bytes_and_parse_coin_ids_validate_input() {
+        use super::{hex_to_bytes, parse_coin_ids};
+
+        assert_eq!(hex_to_bytes("0x0102").expect("bytes"), vec![1, 2]);
+        assert!(hex_to_bytes("0x0").is_err());
+        let coin = "cd".repeat(32);
+        let ids = parse_coin_ids(std::slice::from_ref(&coin)).expect("coin ids");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(hex::encode(ids[0]), coin);
+        assert!(parse_coin_ids(&["not-hex".to_string()]).is_err());
+    }
 }
