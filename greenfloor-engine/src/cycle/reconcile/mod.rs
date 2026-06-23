@@ -18,8 +18,9 @@ mod tests;
 use chrono::{DateTime, Utc};
 
 pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
+pub(crate) use cancel_submitted_policy::chain_confirmed_tx_ids_for_cancel;
 pub use cancel_submitted_policy::CancelSubmittedContext;
-pub use coinset_signals::CoinsetSignalSummary;
+pub use coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
@@ -80,9 +81,8 @@ pub fn resolve_missing_watched_offer_transition(
 pub fn resolve_watched_offer_transition_from_signals(
     current_state: &str,
     status: Option<i64>,
-    coinset_tx_ids: Vec<String>,
-    coinset_confirmed_tx_ids: Vec<String>,
-    coinset_mempool_tx_ids: Vec<String>,
+    dexie: DexieCoinsetSignals,
+    chain_confirmed_tx_ids: &[String],
     cancel_submitted: Option<&CancelSubmittedContext>,
     now: DateTime<Utc>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
@@ -90,16 +90,15 @@ pub fn resolve_watched_offer_transition_from_signals(
     Ok(resolve_watched_offer_decision(
         &old_state,
         status,
-        &coinset_tx_ids,
-        &coinset_confirmed_tx_ids,
-        &coinset_mempool_tx_ids,
+        &dexie,
+        chain_confirmed_tx_ids,
         cancel_submitted,
         now,
     )
     .into_cycle_transition(
         old_state,
-        coinset_tx_ids,
-        coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids,
+        dexie.tx_ids,
+        dexie.confirmed_tx_ids,
+        dexie.mempool_tx_ids,
     ))
 }

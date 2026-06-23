@@ -12,7 +12,7 @@ use crate::storage::{OfferStateListRow, TxSignalStateRow};
 use super::builders::{
     cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status,
 };
-use super::coinset_signals::CoinsetSignalSummary;
+use super::coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
@@ -49,6 +49,43 @@ impl CancelSubmittedContext {
     }
 }
 
+#[must_use]
+pub(crate) fn chain_confirmed_tx_ids_from_signals(
+    signals: &HashMap<String, TxSignalStateRow>,
+) -> Vec<String> {
+    signals
+        .iter()
+        .filter(|(_, row)| row.tx_block_confirmed_at.is_some())
+        .map(|(tx_id, _)| tx_id.clone())
+        .collect()
+}
+
+/// Chain-confirmed tx ids for cancel-submit policy (Dexie-linked + tracked cancel tx).
+#[must_use]
+pub(crate) fn chain_confirmed_tx_ids_for_cancel(
+    ctx: Option<&CancelSubmittedContext>,
+    dexie_confirmed_tx_ids: &[String],
+) -> Vec<String> {
+    let mut chain_confirmed = dexie_confirmed_tx_ids.to_vec();
+    let Some(ctx) = ctx else {
+        return chain_confirmed;
+    };
+    let Some(cancel_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
+        return chain_confirmed;
+    };
+    if ctx
+        .cancel_tx_signal
+        .as_ref()
+        .is_some_and(|signal| signal.tx_block_confirmed_at.is_some())
+        && !chain_confirmed
+            .iter()
+            .any(|id| canonical_tx_id(id).as_deref() == Some(cancel_id.as_str()))
+    {
+        chain_confirmed.push(cancel_id);
+    }
+    chain_confirmed
+}
+
 /// Drop offer ids whose cancel submit is still in flight (pure policy; no I/O).
 #[must_use]
 pub(crate) fn allowed_cancel_target_offer_ids(
@@ -57,6 +94,7 @@ pub(crate) fn allowed_cancel_target_offer_ids(
     tx_signals: &HashMap<String, TxSignalStateRow>,
     now: DateTime<Utc>,
 ) -> Vec<String> {
+    let chain_confirmed = chain_confirmed_tx_ids_from_signals(tx_signals);
     let defer_targets: std::collections::HashSet<&str> = db_rows
         .iter()
         .filter_map(|row| {
@@ -64,7 +102,7 @@ pub(crate) fn allowed_cancel_target_offer_ids(
                 return None;
             }
             let ctx = CancelSubmittedContext::from_row_and_signals(row, tx_signals);
-            is_cancel_submit_in_flight(&ctx, now).then_some(row.offer_id.as_str())
+            is_cancel_submit_in_flight(&ctx, now, &chain_confirmed).then_some(row.offer_id.as_str())
         })
         .collect();
     offer_ids
@@ -77,44 +115,47 @@ pub(crate) fn allowed_cancel_target_offer_ids(
 /// Resolve reconcile transition for an offer already in `cancel_submitted`.
 pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
-    coinset: CoinsetSignalSummary,
+    dexie: &DexieCoinsetSignals,
+    chain_confirmed_tx_ids: &[String],
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
-    cancel_tx_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
     let current = ReconcileState::CancelSubmitted;
-    if cancel_tx_chain_confirmed(ctx, cancel_tx_confirmed_tx_ids) {
+    if cancel_tx_chain_confirmed(ctx, chain_confirmed_tx_ids) {
         return cancel_tx_chain_confirmed_transition();
     }
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    if let Some(taker) = apply_coinset_taker_dispatch_if_present(coinset, dexie_status, &current) {
+    let taker_coinset = dexie.summary();
+    if let Some(taker) =
+        apply_coinset_taker_dispatch_if_present(taker_coinset, dexie_status, &current)
+    {
         return taker;
     }
     cancel_submitted_dexie_status_transition(
         dexie_status,
-        coinset,
+        taker_coinset,
         ctx,
         now,
-        cancel_tx_confirmed_tx_ids,
+        chain_confirmed_tx_ids,
     )
 }
 
 fn cancel_submitted_dexie_status_transition(
     dexie_status: Option<i64>,
-    coinset: CoinsetSignalSummary,
+    dexie: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
-    cancel_tx_confirmed_tx_ids: &[String],
+    chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
     match dexie_status {
-        None if coinset.has_tx_ids => {
+        None if dexie.has_tx_ids => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
         Some(DEXIE_STATUS_OPEN)
-            if cancel_submit_stale_reset_eligible(ctx, now, cancel_tx_confirmed_tx_ids) =>
+            if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids) =>
         {
             ReconcileTransition::new(
                 ReconcileState::Lifecycle(OfferLifecycleState::Open),
@@ -130,21 +171,21 @@ fn cancel_submitted_dexie_status_transition(
 }
 
 #[must_use]
-fn cancel_tx_confirmed(ctx: &CancelSubmittedContext) -> bool {
-    ctx.cancel_tx_signal
+pub(crate) fn cancel_tx_chain_confirmed(
+    ctx: &CancelSubmittedContext,
+    chain_confirmed_tx_ids: &[String],
+) -> bool {
+    if ctx
+        .cancel_tx_signal
         .as_ref()
         .is_some_and(|signal| signal.tx_block_confirmed_at.is_some())
-}
-
-#[must_use]
-fn cancel_tx_chain_confirmed(ctx: &CancelSubmittedContext, confirmed_tx_ids: &[String]) -> bool {
-    if cancel_tx_confirmed(ctx) {
+    {
         return true;
     }
     let Some(cancel_tx_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
         return false;
     };
-    confirmed_tx_ids
+    chain_confirmed_tx_ids
         .iter()
         .any(|tx_id| canonical_tx_id(tx_id).as_deref() == Some(cancel_tx_id.as_str()))
 }
@@ -178,8 +219,12 @@ fn cancel_submit_within_grace_at(cancel_submitted_at: Option<&str>, now: DateTim
 }
 
 #[must_use]
-fn is_cancel_submit_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
-    !cancel_tx_confirmed(ctx) && cancel_submit_within_grace(ctx, now)
+fn is_cancel_submit_in_flight(
+    ctx: &CancelSubmittedContext,
+    now: DateTime<Utc>,
+    chain_confirmed_tx_ids: &[String],
+) -> bool {
+    !cancel_tx_chain_confirmed(ctx, chain_confirmed_tx_ids) && cancel_submit_within_grace(ctx, now)
 }
 
 /// Unconfirmed cancel submit past orphan grace — eligible for stale reset to `open`.
@@ -187,10 +232,9 @@ fn is_cancel_submit_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) 
 fn cancel_submit_stale_reset_eligible(
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
-    cancel_tx_confirmed_tx_ids: &[String],
+    chain_confirmed_tx_ids: &[String],
 ) -> bool {
-    !cancel_tx_chain_confirmed(ctx, cancel_tx_confirmed_tx_ids)
-        && !cancel_submit_within_grace(ctx, now)
+    !cancel_tx_chain_confirmed(ctx, chain_confirmed_tx_ids) && !cancel_submit_within_grace(ctx, now)
 }
 
 #[cfg(test)]

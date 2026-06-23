@@ -134,29 +134,6 @@ pub fn preload_cancel_submitted_contexts(
         .collect())
 }
 
-/// Include the tracked cancel tx id when building reconcile tx-signal lookups.
-#[must_use]
-pub(crate) fn signal_tx_ids_including_cancel_tx(
-    coinset_tx_ids: Vec<String>,
-    cancel_submitted: Option<&CancelSubmittedContext>,
-) -> Vec<String> {
-    let mut signal_tx_ids = coinset_tx_ids;
-    let Some(ctx) = cancel_submitted else {
-        return signal_tx_ids;
-    };
-    let Some(cancel_tx_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
-        return signal_tx_ids;
-    };
-    if signal_tx_ids
-        .iter()
-        .any(|tx_id| canonical_tx_id(tx_id).as_deref() == Some(cancel_tx_id.as_str()))
-    {
-        return signal_tx_ids;
-    }
-    signal_tx_ids.push(cancel_tx_id);
-    signal_tx_ids
-}
-
 /// Resolve cancel-submit context for one offer during reconcile.
 ///
 /// # Errors
@@ -202,18 +179,6 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-
-    #[test]
-    fn signal_tx_ids_including_cancel_tx_appends_tracked_id() {
-        let ctx = CancelSubmittedContext {
-            cancel_tx_id: Some("a".repeat(64)),
-            cancel_tx_signal: None,
-            cancel_submitted_at: None,
-        };
-        let merged = signal_tx_ids_including_cancel_tx(vec!["b".repeat(64)], Some(&ctx));
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[1], "a".repeat(64));
-    }
 
     #[test]
     fn defer_in_flight_cancel_offer_ids_skips_pending_cancel_submitted() {

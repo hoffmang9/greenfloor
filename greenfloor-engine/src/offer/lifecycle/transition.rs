@@ -20,9 +20,8 @@ use crate::offer::dexie_payload::{
 };
 use crate::storage::SqliteStore;
 
-use super::cancel_context::{
-    cancel_submitted_context_for_offer, signal_tx_ids_including_cancel_tx,
-};
+use super::cancel_context::cancel_submitted_context_for_offer;
+use crate::cycle::reconcile::{chain_confirmed_tx_ids_for_cancel, DexieCoinsetSignals};
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
 #[derive(Debug, Clone, Copy)]
@@ -96,16 +95,20 @@ pub fn transition_from_dexie_offer_payload(
         current_state,
         env.cancel_submitted_by_offer,
     )?;
-    let signal_tx_ids =
-        signal_tx_ids_including_cancel_tx(coinset_tx_ids, cancel_submitted.as_ref());
     let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
-        coinset_signal_lists(store, &signal_tx_ids)?;
+        coinset_signal_lists(store, &coinset_tx_ids)?;
+    let dexie = DexieCoinsetSignals {
+        tx_ids: coinset_tx_ids,
+        confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
+        mempool_tx_ids: coinset_mempool_tx_ids,
+    };
+    let chain_confirmed_tx_ids =
+        chain_confirmed_tx_ids_for_cancel(cancel_submitted.as_ref(), &dexie.confirmed_tx_ids);
     resolve_watched_offer_transition_from_signals(
         current_state,
         status,
-        signal_tx_ids,
-        coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids,
+        dexie,
+        &chain_confirmed_tx_ids,
         cancel_submitted.as_ref(),
         env.now,
     )

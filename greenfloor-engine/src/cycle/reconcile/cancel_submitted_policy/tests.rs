@@ -3,10 +3,16 @@ use std::collections::HashMap;
 use chrono::TimeZone;
 
 use super::*;
+use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::reconcile::metadata::{
-    REASON_CANCEL_TX_CHAIN_CONFIRMED, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
-    TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED,
+    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_CANCEL_TX_CHAIN_CONFIRMED,
+    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
+    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_COINSET_TX_BLOCK_WEBHOOK,
+    TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
+use crate::cycle::reconcile::ReconcileState;
 use crate::storage::OfferStateListRow;
 
 fn row(
@@ -27,6 +33,34 @@ fn row(
     }
 }
 
+fn coinset_id(label: char) -> String {
+    label.to_string().repeat(64)
+}
+
+fn dexie_signals(
+    tx_ids: &[String],
+    confirmed: &[String],
+    mempool: &[String],
+) -> DexieCoinsetSignals {
+    DexieCoinsetSignals {
+        tx_ids: tx_ids.to_vec(),
+        confirmed_tx_ids: confirmed.to_vec(),
+        mempool_tx_ids: mempool.to_vec(),
+    }
+}
+
+fn stale_cancel_ctx(now: chrono::DateTime<Utc>) -> CancelSubmittedContext {
+    let anchor = (now - chrono::Duration::seconds(600)).to_rfc3339();
+    CancelSubmittedContext {
+        cancel_tx_id: Some(coinset_id('a')),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(anchor.clone()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some(anchor),
+    }
+}
+
 #[test]
 fn cancel_submit_in_flight_while_mempool_unconfirmed_within_grace() {
     let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
@@ -40,7 +74,30 @@ fn cancel_submit_in_flight_while_mempool_unconfirmed_within_grace() {
     };
     assert!(is_cancel_submit_in_flight(
         &ctx,
-        submitted + chrono::Duration::seconds(60)
+        submitted + chrono::Duration::seconds(60),
+        &[]
+    ));
+}
+
+#[test]
+fn defer_stops_when_cancel_tx_chain_confirmed_within_grace() {
+    let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some("tx1".to_string()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(submitted.to_rfc3339()),
+            tx_block_confirmed_at: Some((submitted + chrono::Duration::seconds(30)).to_rfc3339()),
+        }),
+        cancel_submitted_at: Some(submitted.to_rfc3339()),
+    };
+    let chain_confirmed = chain_confirmed_tx_ids_from_signals(&HashMap::from([(
+        "tx1".to_string(),
+        ctx.cancel_tx_signal.clone().expect("signal"),
+    )]));
+    assert!(!is_cancel_submit_in_flight(
+        &ctx,
+        submitted + chrono::Duration::seconds(60),
+        &chain_confirmed,
     ));
 }
 
@@ -87,14 +144,14 @@ fn tracked_mempool_only_unconfirmed_unwedges_after_grace() {
         }),
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
-    assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+    assert!(!is_cancel_submit_in_flight(&ctx, after_grace, &[]));
     assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        CoinsetSignalSummary::default(),
+        &dexie_signals(&[], &[], &[]),
+        &[],
         &ctx,
         after_grace,
-        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(
@@ -123,10 +180,10 @@ fn stale_reset_blocked_when_cancel_tx_in_confirmed_list() {
     ));
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        CoinsetSignalSummary::default(),
+        &dexie_signals(&[], &[], &[]),
+        std::slice::from_ref(&cancel_tx_id),
         &ctx,
         after_grace,
-        std::slice::from_ref(&cancel_tx_id),
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -141,7 +198,7 @@ fn tracked_cancel_tx_id_allows_stale_reset_without_signal_after_grace() {
         cancel_tx_signal: None,
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
-    assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+    assert!(!is_cancel_submit_in_flight(&ctx, after_grace, &[]));
     assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
 }
 
@@ -154,7 +211,7 @@ fn stale_reset_still_allowed_without_recorded_cancel_tx_id() {
         cancel_tx_signal: None,
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
-    assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+    assert!(!is_cancel_submit_in_flight(&ctx, after_grace, &[]));
     assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
 }
 
@@ -202,11 +259,13 @@ fn grace_anchor_ignores_refreshed_updated_at_without_cancel_submitted_at() {
     assert_eq!(ctx.cancel_submitted_at, None);
     assert!(is_cancel_submit_in_flight(
         &ctx,
-        submitted + chrono::Duration::seconds(60)
+        submitted + chrono::Duration::seconds(60),
+        &[]
     ));
     assert!(!is_cancel_submit_in_flight(
         &ctx,
-        submitted + chrono::Duration::seconds(600)
+        submitted + chrono::Duration::seconds(600),
+        &[]
     ));
 }
 
@@ -222,10 +281,10 @@ fn cancel_tx_chain_confirmed_moves_to_cancelled() {
     };
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        CoinsetSignalSummary::default(),
+        &dexie_signals(&[], &[], &[]),
+        &[],
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -247,16 +306,17 @@ fn cancel_tx_chain_confirmed_beats_dexie_linked_taker_confirm() {
         }),
         cancel_submitted_at: None,
     };
+    let taker_tx = "b".repeat(64);
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        CoinsetSignalSummary {
-            has_tx_ids: true,
-            has_confirmed: true,
-            has_mempool: false,
-        },
+        &dexie_signals(
+            std::slice::from_ref(&taker_tx),
+            std::slice::from_ref(&taker_tx),
+            &[],
+        ),
+        &[],
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -264,8 +324,10 @@ fn cancel_tx_chain_confirmed_beats_dexie_linked_taker_confirm() {
 
 #[test]
 fn taker_confirmed_while_cancel_in_flight_promotes_to_tx_block_confirmed() {
+    let cancel_tx = "a".repeat(64);
+    let taker_tx = "b".repeat(64);
     let ctx = CancelSubmittedContext {
-        cancel_tx_id: Some("a".repeat(64)),
+        cancel_tx_id: Some(cancel_tx),
         cancel_tx_signal: Some(TxSignalStateRow {
             mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
             tx_block_confirmed_at: None,
@@ -274,20 +336,147 @@ fn taker_confirmed_while_cancel_in_flight_promotes_to_tx_block_confirmed() {
     };
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        CoinsetSignalSummary {
-            has_tx_ids: true,
-            has_confirmed: true,
-            has_mempool: false,
-        },
+        &dexie_signals(
+            std::slice::from_ref(&taker_tx),
+            std::slice::from_ref(&taker_tx),
+            &[],
+        ),
+        &[],
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(
         transition.new_state,
         ReconcileState::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
     );
+}
+
+#[test]
+fn cancel_tx_mempool_only_does_not_promote_to_mempool_observed() {
+    let cancel_tx = "a".repeat(64);
+    let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some(cancel_tx.clone()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(submitted.to_rfc3339()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some(submitted.to_rfc3339()),
+    };
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_OPEN),
+        &dexie_signals(&[], &[], &[]),
+        &[],
+        &ctx,
+        submitted + chrono::Duration::seconds(60),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert!(!transition.changed);
+}
+
+#[test]
+fn cancel_submitted_moves_to_cancelled_on_dexie_status_3() {
+    let now = Utc::now();
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_CANCELLED),
+        &dexie_signals(&[], &[], &[]),
+        &[],
+        &stale_cancel_ctx(now),
+        now,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::Cancelled);
+    assert_eq!(transition.reason, REASON_OK);
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
+    assert!(transition.changed);
+}
+
+#[test]
+fn cancel_submitted_moves_to_mempool_observed_on_dexie_taker_mempool() {
+    let now = Utc::now();
+    let taker_tx = coinset_id('x');
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_OPEN),
+        &dexie_signals(
+            std::slice::from_ref(&taker_tx),
+            &[],
+            std::slice::from_ref(&coinset_id('m')),
+        ),
+        &[],
+        &stale_cancel_ctx(now),
+        now,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(
+        transition.new_state,
+        ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved)
+    );
+    assert_eq!(transition.reason, REASON_COINSET_MEMPOOL);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_MEMPOOL);
+    assert_eq!(transition.signal, Some(OfferSignal::MempoolSeen));
+    assert_eq!(
+        transition.taker_diagnostic,
+        TAKER_DIAGNOSTIC_COINSET_MEMPOOL
+    );
+}
+
+#[test]
+fn cancel_submitted_moves_to_tx_block_confirmed_on_dexie_taker_confirm() {
+    let now = Utc::now();
+    let taker_tx = coinset_id('x');
+    let confirmed = coinset_id('c');
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_OPEN),
+        &dexie_signals(
+            std::slice::from_ref(&taker_tx),
+            std::slice::from_ref(&confirmed),
+            &[],
+        ),
+        &[],
+        &stale_cancel_ctx(now),
+        now,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(
+        transition.new_state,
+        ReconcileState::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
+    );
+    assert_eq!(transition.reason, REASON_COINSET_CONFIRMED);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_WEBHOOK);
+    assert_eq!(transition.signal, Some(OfferSignal::TxConfirmed));
+    assert_eq!(transition.taker_signal, TAKER_COINSET_TX_BLOCK_WEBHOOK);
+    assert_eq!(
+        transition.taker_diagnostic,
+        TAKER_DIAGNOSTIC_COINSET_CONFIRMED
+    );
+}
+
+#[test]
+fn cancel_submitted_dexie_open_resets_to_open_for_cancel_retry() {
+    let now = Utc::now();
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_OPEN),
+        &dexie_signals(&[], &[], &[]),
+        &[],
+        &stale_cancel_ctx(now),
+        now,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(
+        transition.new_state,
+        ReconcileState::Lifecycle(OfferLifecycleState::Open)
+    );
+    assert_eq!(transition.reason, REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN);
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
+    assert_eq!(transition.taker_signal, TAKER_NONE);
 }
 
 #[test]
