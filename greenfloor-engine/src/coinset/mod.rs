@@ -26,7 +26,7 @@ pub use api::{
 };
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
-pub use backend::{LiveCoinset, OfferCoinsetBackend, OfferInputCatLookup};
+pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
 pub use cats::{
     cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats,

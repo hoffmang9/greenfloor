@@ -8,7 +8,7 @@ use super::harness::{
     fetch_cat_from_sim, fetch_cat_from_sim_by_id, fetch_vault_from_sim, SimChain,
 };
 use crate::coinset::coin_select::{finalize_selected_cats, SelectedCats};
-use crate::coinset::{OfferCoinsetBackend, OfferInputCatLookup};
+use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 
@@ -56,33 +56,6 @@ impl<'a> SimulatorOfferCoinset<'a> {
         }
         fetch_cat_from_sim_by_id(self.chain, coin_id).map_err(SignerError::Other)
     }
-
-    fn fetch_by_inner_puzzle(&self, inner_puzzle_hash: Bytes32, amount: u64) -> SignerResult<Cat> {
-        let sim = self.chain.sim.lock().expect("sim lock");
-        for cat in self
-            .known_cats
-            .lock()
-            .expect("known cats lock")
-            .values()
-            .copied()
-        {
-            if cat.info.p2_puzzle_hash == inner_puzzle_hash
-                && cat.coin.amount == amount
-                && sim
-                    .coin_state(cat.coin.coin_id())
-                    .is_some_and(|state| state.spent_height.is_none())
-            {
-                return Ok(cat);
-            }
-        }
-        for coin in sim.unspent_coins(self.chain.p2_message_hash, false) {
-            let cat = fetch_cat_from_sim(&sim, coin).map_err(SignerError::Other)?;
-            if cat.info.p2_puzzle_hash == inner_puzzle_hash && cat.coin.amount == amount {
-                return Ok(cat);
-            }
-        }
-        Err(SignerError::PresplitCoinNotFound)
-    }
 }
 
 impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
@@ -118,20 +91,13 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         .map_err(SignerError::Other)
     }
 
-    async fn fetch_offer_input_cat(&self, lookup: OfferInputCatLookup) -> SignerResult<Cat> {
-        match lookup {
-            OfferInputCatLookup::ByCoinId(coin_id) => match self.fetch_by_id(coin_id) {
-                Ok(cat) => Ok(cat),
-                Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
-                    Err(SignerError::PresplitCoinNotFound)
-                }
-                Err(err) => Err(err),
-            },
-            OfferInputCatLookup::ByCatFingerprint {
-                inner_puzzle_hash,
-                amount,
-                ..
-            } => self.fetch_by_inner_puzzle(inner_puzzle_hash, amount),
+    async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
+        match self.fetch_by_id(coin_id) {
+            Ok(cat) => Ok(cat),
+            Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
+                Err(SignerError::PresplitCoinNotFound)
+            }
+            Err(err) => Err(err),
         }
     }
 

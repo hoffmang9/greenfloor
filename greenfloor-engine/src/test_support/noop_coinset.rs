@@ -1,7 +1,7 @@
 use chia_protocol::{Bytes32, SpendBundle};
 use clvm_utils::TreeHash;
 
-use crate::coinset::{OfferCoinsetBackend, OfferInputCatLookup};
+use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 
@@ -27,7 +27,7 @@ impl OfferCoinsetBackend for EmptyOfferCoinset {
         Err(SignerError::Other("unused".to_string()))
     }
 
-    async fn fetch_offer_input_cat(&self, _lookup: OfferInputCatLookup) -> SignerResult<Cat> {
+    async fn fetch_offer_input_cat(&self, _coin_id: Bytes32) -> SignerResult<Cat> {
         Err(SignerError::Other("unused".to_string()))
     }
 

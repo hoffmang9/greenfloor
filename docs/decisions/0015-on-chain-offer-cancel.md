@@ -36,9 +36,11 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
 prefers stored metadata; when absent (legacy rows, DB loss, manual posts), cancel falls
 back to extraction from the Dexie offer file.
 
-4. **Input CAT resolution uses `OfferCoinsetBackend::fetch_unspent_offer_input_cat`.**
-   Lookup tries coin id from the offer spend bundle (authoritative for on-chain coins),
-   then optional inner-puzzle + amount fallback when decoded-offer coin ids differ.
+4. **Input CAT resolution is coin-id authoritative.** Cancel resolves the offered input
+   via stored `presplit_input_coin_id` when present, then scans coin ids from the decoded
+   offer spend bundle (offered coin id plus same-amount maker spends). Ambiguous inner-puzzle
+   - amount fingerprint lookup is not used — it can select a different vault coin when the
+     offer input is already spent.
 
 5. **Optimistic operator state is `cancel_submitted`, not `cancelled`.**
    Successful cancel **submit** atomically records:

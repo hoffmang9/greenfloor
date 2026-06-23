@@ -4,7 +4,7 @@ use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{Action, Id, Offer, Spends};
 use clvmr::Allocator;
 
-use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, OfferInputCatLookup, SelectedCats};
+use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::tree_hash_to_hex;
 use crate::offer::plan::{
@@ -152,9 +152,7 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
         ));
     };
 
-    let presplit_cat = coinset
-        .fetch_offer_input_cat(OfferInputCatLookup::ByCoinId(*presplit_coin_id))
-        .await?;
+    let presplit_cat = coinset.fetch_offer_input_cat(*presplit_coin_id).await?;
     validate_existing_presplit_cat(&presplit_cat, offer_asset_id, terms.offer_amount)?;
     let binding = plan_presplit_binding(
         terms,

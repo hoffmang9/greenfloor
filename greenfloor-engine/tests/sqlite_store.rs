@@ -285,15 +285,20 @@ fn upsert_offer_cancel_submitted_seeds_tx_signal_state() {
 fn cancel_submitted_at_survives_reconcile_preserve_upsert() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));
+    let tx_id = "c".repeat(64);
     store
-        .upsert_offer_state_at(
-            "offer-1",
-            "m1",
-            "cancel_submitted",
-            Some(0),
-            "2020-01-01T00:00:00Z",
-        )
+        .upsert_offer_cancel_submitted("offer-1", "m1", &tx_id, Some(0))
         .expect("initial cancel submitted");
+    let submitted_at = store
+        .list_offer_states_for_ids(&["offer-1".to_string()])
+        .expect("offer state")
+        .into_iter()
+        .next()
+        .and_then(|row| row.cancel_submitted_at);
+    assert!(
+        submitted_at.is_some(),
+        "cancel submit should record timestamp"
+    );
     store
         .upsert_offer_state_at(
             "offer-1",
@@ -310,10 +315,7 @@ fn cancel_submitted_at_survives_reconcile_preserve_upsert() {
         .next()
         .expect("row");
     assert_eq!(row.updated_at, "2020-01-01T00:10:00Z");
-    assert_eq!(
-        row.cancel_submitted_at.as_deref(),
-        Some("2020-01-01T00:00:00Z")
-    );
+    assert_eq!(row.cancel_submitted_at, submitted_at);
 }
 
 #[test]

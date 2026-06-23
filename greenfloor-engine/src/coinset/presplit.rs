@@ -1,50 +1,20 @@
 use chia_protocol::Bytes32;
-use chia_puzzle_types::cat::CatArgs;
 use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 
-use super::backend::OfferInputCatLookup;
 use super::poll::{run_poll_loop, PollConfig};
 use super::{cats, CoinsetClient};
-use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::Cat;
 
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
-/// Fetch an unspent offer-input CAT using an explicit lookup strategy.
+/// Fetch an unspent offer-input CAT by coin id.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn fetch_offer_input_cat(
-    client: &CoinsetClient,
-    lookup: OfferInputCatLookup,
-) -> SignerResult<Cat> {
-    match lookup {
-        OfferInputCatLookup::ByCoinId(coin_id) => {
-            fetch_unspent_offer_input_cat_by_id(client, coin_id).await
-        }
-        OfferInputCatLookup::ByCatFingerprint {
-            asset_id,
-            inner_puzzle_hash,
-            amount,
-        } => {
-            fetch_unspent_offer_input_cat_by_inner_puzzle(
-                client,
-                asset_id,
-                inner_puzzle_hash,
-                amount,
-            )
-            .await
-        }
-    }
-}
-
-async fn fetch_unspent_offer_input_cat_by_id(
-    client: &CoinsetClient,
-    coin_id: Bytes32,
-) -> SignerResult<Cat> {
+pub async fn fetch_offer_input_cat(client: &CoinsetClient, coin_id: Bytes32) -> SignerResult<Cat> {
     let response = client
         .get_coin_record_by_name(coin_id)
         .await
@@ -58,34 +28,6 @@ async fn fetch_unspent_offer_input_cat_by_id(
     cats::cat_from_record(client, &record)
         .await?
         .ok_or(SignerError::PresplitCoinNotFound)
-}
-
-async fn fetch_unspent_offer_input_cat_by_inner_puzzle(
-    client: &CoinsetClient,
-    asset_id: Bytes32,
-    inner_puzzle_hash: Bytes32,
-    amount: u64,
-) -> SignerResult<Cat> {
-    let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, inner_puzzle_hash.into()).into();
-    let response = with_coinset_client_retries(|| async {
-        client
-            .get_coin_records_by_puzzle_hash(cat_outer_puzzle_hash, None, None, Some(false), None)
-            .await
-    })
-    .await?;
-    let records = cats::coin_records_from_response(response)?;
-    for record in cats::unspent_coin_records(records) {
-        if record.coin.amount != amount {
-            continue;
-        }
-        let Some(cat) = cats::cat_from_record(client, &record).await? else {
-            continue;
-        };
-        if cat.info.p2_puzzle_hash == inner_puzzle_hash && cat.coin.amount == amount {
-            return Ok(cat);
-        }
-    }
-    Err(SignerError::PresplitCoinNotFound)
 }
 
 /// Wait for unspent cat.

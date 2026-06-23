@@ -6,7 +6,7 @@ use chia_sdk_types::Conditions;
 use clvm_utils::TreeHash;
 
 use crate::bech32m::decode_offer;
-use crate::coinset::{OfferCoinsetBackend, OfferInputCatLookup};
+use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
@@ -46,9 +46,7 @@ async fn fetch_input_cat_by_coin_id<C: OfferCoinsetBackend>(
     coin_id: Bytes32,
     offered_amount: u64,
 ) -> SignerResult<Option<Cat>> {
-    let cat = backend
-        .fetch_offer_input_cat(OfferInputCatLookup::ByCoinId(coin_id))
-        .await?;
+    let cat = backend.fetch_offer_input_cat(coin_id).await?;
     if cat.coin.amount == offered_amount {
         Ok(Some(cat))
     } else {
@@ -121,17 +119,7 @@ async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
     if let Some(cat) = resolve_by_scanning_offer_spends(backend, spend_bundle, offered).await? {
         return Ok(cat);
     }
-    backend
-        .fetch_offer_input_cat(OfferInputCatLookup::ByCatFingerprint {
-            asset_id: offered.info.asset_id,
-            inner_puzzle_hash: offered.info.p2_puzzle_hash,
-            amount: offered.coin.amount,
-        })
-        .await
-        .map_err(|err| match err {
-            SignerError::PresplitCoinNotFound => SignerError::OfferCancelInputCoinAlreadySpent,
-            other => other,
-        })
+    Err(SignerError::OfferCancelInputCoinAlreadySpent)
 }
 
 fn presplit_fixed_conditions_tree_hash(

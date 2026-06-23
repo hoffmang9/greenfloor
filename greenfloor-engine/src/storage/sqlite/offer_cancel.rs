@@ -33,7 +33,6 @@ fn resolve_cancel_submitted_at_for_upsert(
     conn: &rusqlite::Connection,
     offer_id: &str,
     state: &str,
-    updated_at: &str,
     explicit: Option<&str>,
 ) -> SignerResult<Option<String>> {
     if state != "cancel_submitted" {
@@ -42,7 +41,7 @@ fn resolve_cancel_submitted_at_for_upsert(
     if let Some(value) = explicit {
         return Ok(Some(value.to_string()));
     }
-    let existing = conn
+    Ok(conn
         .query_row(
             "SELECT cancel_submitted_at FROM offer_state WHERE offer_id = ?1",
             params![offer_id],
@@ -54,8 +53,7 @@ fn resolve_cancel_submitted_at_for_upsert(
                 "failed to read offer_state cancel_submitted_at for {offer_id}: {err}"
             ))
         })?
-        .flatten();
-    Ok(existing.or_else(|| Some(updated_at.to_string())))
+        .flatten())
 }
 
 impl SqliteStore {
@@ -79,7 +77,6 @@ impl SqliteStore {
             &self.conn,
             offer_id,
             state,
-            updated_at,
             cancel.cancel_submitted_at,
         )?;
         self.conn
@@ -111,7 +108,7 @@ impl SqliteStore {
                       THEN COALESCE(excluded.cancel_submitted_tx_id, offer_state.cancel_submitted_tx_id)
                     ELSE NULL
                   END,
-                  cancel_submitted_at = excluded.cancel_submitted_at
+                  cancel_submitted_at = COALESCE(excluded.cancel_submitted_at, offer_state.cancel_submitted_at)
                 ",
                 params![
                     offer_id,
