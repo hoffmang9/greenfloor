@@ -1,6 +1,3 @@
 [build]
 # Canonical artifact directory for greenfloor-engine builds invoked from repo root.
 target-dir = "greenfloor-engine/target"
-
-[alias]
-nextest = "nextest run --manifest-path greenfloor-engine/Cargo.toml --features test-support"
