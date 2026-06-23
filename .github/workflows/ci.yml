@@ -2,16 +2,12 @@
 name: CI
 
 "on":
-  # Branch pushes run CI for every commit (including before a PR exists). When the PR is
-  # opened, GitHub attaches those commit checks to the PR — do not also run on opened
-  # (that duplicates push and cancel-in-progress kills the in-flight push run).
-  # reopened / ready_for_review cover draft→ready and re-open without a new push.
+  # Run on PR open, new commits to an open PR, re-open, and draft→ready (no branch-push CI).
   pull_request:
-    types: [reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
-      - "**"
   workflow_dispatch:
 
 concurrency:
