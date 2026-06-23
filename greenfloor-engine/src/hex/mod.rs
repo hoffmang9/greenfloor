@@ -55,13 +55,19 @@ pub fn legacy_prefixed_tx_id(canonical: &str) -> Option<String> {
 /// Canonical and legacy-prefixed tx ids for tolerant sqlite lookups.
 #[must_use]
 pub fn tx_id_lookup_candidates(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    let input_was_prefixed = trimmed
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x"));
     let Some(canonical) = canonical_tx_id(value) else {
         return Vec::new();
     };
     let mut out = vec![canonical.clone()];
-    if let Some(legacy) = legacy_prefixed_tx_id(&canonical) {
-        if legacy != canonical {
-            out.push(legacy);
+    if !input_was_prefixed {
+        if let Some(legacy) = legacy_prefixed_tx_id(&canonical) {
+            if legacy != canonical {
+                out.push(legacy);
+            }
         }
     }
     out
