@@ -1,4 +1,4 @@
-use chia_protocol::{Bytes32, Coin};
+use chia_protocol::Bytes32;
 use chia_puzzle_types::cat::CatArgs;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
@@ -23,24 +23,6 @@ pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
     })
     .await?;
     coin_records_from_response(response)
-}
-
-/// List unspent CAT coins for a known asset id and receive address (single puzzle-hash RPC).
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub(crate) async fn list_unspent_cat_coins(
-    client: &CoinsetClient,
-    receive_address: &str,
-    asset_id: Bytes32,
-) -> SignerResult<Vec<Coin>> {
-    Ok(unspent_coin_records(
-        coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?,
-    )
-    .map(|record| record.coin)
-    .filter(|coin| coin.amount > 0)
-    .collect())
 }
 
 /// Resolve spendable [`Cat`] values with lineage proofs for coin records.
@@ -89,6 +71,34 @@ pub(crate) async fn coin_records_for_coin_ids(
         .collect())
 }
 
+async fn unspent_cats_from_records(
+    client: &CoinsetClient,
+    records: Vec<CoinRecord>,
+) -> SignerResult<Vec<Cat>> {
+    let records: Vec<CoinRecord> = unspent_coin_records(records).collect();
+    cats_with_lineage_from_records(client, &records).await
+}
+
+/// List unspent cats for a receive address with lineage resolution.
+///
+/// Coins whose parent spend cannot be resolved are omitted.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn list_unspent_cats(
+    client: &CoinsetClient,
+    receive_address: &str,
+    asset_id: Bytes32,
+) -> SignerResult<Vec<Cat>> {
+    let records = coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?;
+    let records: Vec<CoinRecord> = records
+        .into_iter()
+        .filter(|record| record.coin.amount > 0)
+        .collect();
+    unspent_cats_from_records(client, records).await
+}
+
 /// List unspent cats by ids.
 ///
 /// # Errors
@@ -98,9 +108,8 @@ pub async fn list_unspent_cats_by_ids(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],
 ) -> SignerResult<Vec<Cat>> {
-    let records: Vec<CoinRecord> =
-        unspent_coin_records(coin_records_for_coin_ids(client, coin_ids).await?).collect();
-    cats_with_lineage_from_records(client, &records).await
+    let records = coin_records_for_coin_ids(client, coin_ids).await?;
+    unspent_cats_from_records(client, records).await
 }
 
 #[cfg(test)]
@@ -110,7 +119,7 @@ mod tests {
     const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
 
     #[tokio::test]
-    async fn list_unspent_cat_coins_uses_puzzle_hash_query_only() {
+    async fn list_unspent_cats_uses_puzzle_hash_query() {
         let body = r#"{
         "success": true,
         "coin_records": [{
@@ -133,13 +142,18 @@ mod tests {
             .with_body(body)
             .create_async()
             .await;
+        let _parent_lookup = server
+            .mock("POST", "/get_coin_record_by_name")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_record":null}"#)
+            .create_async()
+            .await;
         let client = CoinsetClient::new(server.url());
         let asset_id = Bytes32::new([0xae; 32]);
-        let coins = list_unspent_cat_coins(&client, RECEIVE_ADDRESS, asset_id)
+        let cats = list_unspent_cats(&client, RECEIVE_ADDRESS, asset_id)
             .await
-            .expect("coins");
+            .expect("cats");
         mock.assert_async().await;
-        assert_eq!(coins.len(), 1);
-        assert_eq!(coins[0].amount, 5000);
+        assert!(cats.is_empty(), "unresolved lineage records are omitted");
     }
 }

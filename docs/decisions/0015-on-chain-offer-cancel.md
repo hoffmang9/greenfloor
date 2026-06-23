@@ -56,11 +56,19 @@ back to extraction from the Dexie offer file.
      `allowed_cancel_target_offer_ids`, `resolve_cancel_submitted_transition`).
    - SQLite I/O adapter: `offer/lifecycle/cancel_context.rs` (`preload_cancel_submitted_contexts`,
      `defer_in_flight_cancel_offer_ids`, `partition_defer_in_flight_cancel_targets`).
-   - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) uses
+   - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) anchors on
      `cancel_submitted_at`, not `updated_at`, so reconcile preserve upserts do not extend
-     the grace window.
-   - While cancel submit is in flight (tracked tx unconfirmed or within orphan grace),
-     daemon cancel policy and CLI `--offer-id` / `--cancel-open` defer re-submit.
+     the grace window. When `cancel_submitted_at` is missing (legacy rows before migration),
+     grace falls back to `tx_signal_state.mempool_observed_at` for the tracked cancel tx id.
+   - **In-flight defer is grace-bounded.** Cancel submit is in flight only while the tracked
+     cancel tx is unconfirmed **and** still within orphan grace from the anchor timestamp.
+     Daemon cancel policy and CLI `--offer-id` / `--cancel-open` defer re-submit only during
+     that window.
+   - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) but the
+     cancel tx remains unconfirmed past grace, reconcile resets `cancel_submitted` → `open`
+     (`REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN`). This avoids an indefinite wedge when Coinset
+     shows mempool-only observation with no chain confirmation. Chain-confirmed cancel txs
+     still promote to `cancelled` regardless of Dexie status.
 
 7. **CLI and audit naming reflects submit semantics.**
    - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item

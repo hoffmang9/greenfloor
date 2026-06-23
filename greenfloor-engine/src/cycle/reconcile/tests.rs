@@ -1,6 +1,6 @@
 use crate::cycle::lifecycle::OfferSignal;
 
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 use super::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
@@ -527,7 +527,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
             mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
             tx_block_confirmed_at: None,
         }),
-        cancel_submitted_at: None,
+        cancel_submitted_at: Some("2020-01-01T00:00:00Z".to_string()),
     };
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,
@@ -536,7 +536,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
         &[],
         &[],
         Some(&ctx),
-        Utc::now(),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);

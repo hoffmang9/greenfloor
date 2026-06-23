@@ -21,7 +21,7 @@ use super::metadata::{
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
 
-/// Grace period before treating orphan `cancel_submitted` (no recorded tx id) as stale.
+/// Grace period before treating an unconfirmed cancel submit as stale.
 pub(crate) const CANCEL_SUBMIT_TRACKING_GRACE_SECS: i64 = 5 * 60;
 
 #[derive(Debug, Clone, Default)]
@@ -108,7 +108,7 @@ fn cancel_submitted_dexie_status_transition(
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
-        Some(DEXIE_STATUS_OPEN) if stale_cancel_submit_eligible(ctx, now) => {
+        Some(DEXIE_STATUS_OPEN) if cancel_submit_stale_reset_eligible(ctx, now) => {
             ReconcileTransition::new(
                 ReconcileState::Lifecycle(OfferLifecycleState::Open),
                 REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
@@ -130,20 +130,21 @@ fn cancel_tx_confirmed(ctx: &CancelSubmittedContext) -> bool {
 }
 
 #[must_use]
-fn tracked_cancel_tx_pending(ctx: &CancelSubmittedContext) -> bool {
-    if ctx.cancel_tx_id.as_deref().is_none_or(str::is_empty) {
-        return false;
-    }
-    ctx.cancel_tx_signal
-        .as_ref()
-        .is_none_or(|signal| signal.tx_block_confirmed_at.is_none())
+fn cancel_submit_grace_anchor(ctx: &CancelSubmittedContext) -> Option<&str> {
+    ctx.cancel_submitted_at.as_deref().or_else(|| {
+        ctx.cancel_tx_signal
+            .as_ref()
+            .and_then(|signal| signal.mempool_observed_at.as_deref())
+    })
 }
 
 #[must_use]
-fn orphan_cancel_submit_within_grace(
-    cancel_submitted_at: Option<&str>,
-    now: DateTime<Utc>,
-) -> bool {
+fn cancel_submit_within_grace(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
+    cancel_submit_within_grace_at(cancel_submit_grace_anchor(ctx), now)
+}
+
+#[must_use]
+fn cancel_submit_within_grace_at(cancel_submitted_at: Option<&str>, now: DateTime<Utc>) -> bool {
     let Some(raw) = cancel_submitted_at
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -158,13 +159,13 @@ fn orphan_cancel_submit_within_grace(
 
 #[must_use]
 fn is_cancel_submit_in_flight(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
-    tracked_cancel_tx_pending(ctx)
-        || orphan_cancel_submit_within_grace(ctx.cancel_submitted_at.as_deref(), now)
+    !cancel_tx_confirmed(ctx) && cancel_submit_within_grace(ctx, now)
 }
 
+/// Unconfirmed cancel submit past orphan grace — eligible for stale reset to `open`.
 #[must_use]
-fn stale_cancel_submit_eligible(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
-    !is_cancel_submit_in_flight(ctx, now) && !cancel_tx_confirmed(ctx)
+fn cancel_submit_stale_reset_eligible(ctx: &CancelSubmittedContext, now: DateTime<Utc>) -> bool {
+    !cancel_tx_confirmed(ctx) && !cancel_submit_within_grace(ctx, now)
 }
 
 #[cfg(test)]
@@ -196,18 +197,19 @@ mod tests {
     }
 
     #[test]
-    fn cancel_submit_in_flight_while_mempool_unconfirmed() {
+    fn cancel_submit_in_flight_while_mempool_unconfirmed_within_grace() {
+        let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let ctx = CancelSubmittedContext {
             cancel_tx_id: Some("tx1".to_string()),
             cancel_tx_signal: Some(TxSignalStateRow {
-                mempool_observed_at: Some("2020-01-01T00:00:00Z".to_string()),
+                mempool_observed_at: Some(submitted.to_rfc3339()),
                 tx_block_confirmed_at: None,
             }),
-            cancel_submitted_at: None,
+            cancel_submitted_at: Some(submitted.to_rfc3339()),
         };
         assert!(is_cancel_submit_in_flight(
             &ctx,
-            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
+            submitted + chrono::Duration::seconds(60)
         ));
     }
 
@@ -221,7 +223,7 @@ mod tests {
             }),
             cancel_submitted_at: None,
         };
-        assert!(!stale_cancel_submit_eligible(
+        assert!(!cancel_submit_stale_reset_eligible(
             &ctx,
             Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
         ));
@@ -231,18 +233,45 @@ mod tests {
     fn grace_allows_orphan_cancel_shortly_after_submit() {
         let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let now = submitted + chrono::Duration::seconds(60);
-        assert!(orphan_cancel_submit_within_grace(
+        assert!(cancel_submit_within_grace_at(
             Some(&submitted.to_rfc3339()),
             now
         ));
-        assert!(!orphan_cancel_submit_within_grace(
+        assert!(!cancel_submit_within_grace_at(
             Some(&submitted.to_rfc3339()),
             submitted + chrono::Duration::seconds(600)
         ));
     }
 
     #[test]
-    fn tracked_cancel_tx_id_stays_in_flight_without_signal_after_grace() {
+    fn tracked_mempool_only_unconfirmed_unwedges_after_grace() {
+        let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let after_grace = submitted + chrono::Duration::seconds(600);
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some("a".repeat(64)),
+            cancel_tx_signal: Some(TxSignalStateRow {
+                mempool_observed_at: Some(submitted.to_rfc3339()),
+                tx_block_confirmed_at: None,
+            }),
+            cancel_submitted_at: Some(submitted.to_rfc3339()),
+        };
+        assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+        assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
+        let transition = resolve_cancel_submitted_transition(
+            Some(DEXIE_STATUS_OPEN),
+            CoinsetSignalSummary::default(),
+            &ctx,
+            after_grace,
+        )
+        .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+        assert_eq!(
+            transition.new_state,
+            ReconcileState::Lifecycle(OfferLifecycleState::Open)
+        );
+    }
+
+    #[test]
+    fn tracked_cancel_tx_id_allows_stale_reset_without_signal_after_grace() {
         let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let after_grace = submitted + chrono::Duration::seconds(600);
         let ctx = CancelSubmittedContext {
@@ -250,9 +279,8 @@ mod tests {
             cancel_tx_signal: None,
             cancel_submitted_at: Some(submitted.to_rfc3339()),
         };
-        assert!(tracked_cancel_tx_pending(&ctx));
-        assert!(is_cancel_submit_in_flight(&ctx, after_grace));
-        assert!(!stale_cancel_submit_eligible(&ctx, after_grace));
+        assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
+        assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
     }
 
     #[test]
@@ -264,9 +292,8 @@ mod tests {
             cancel_tx_signal: None,
             cancel_submitted_at: Some(submitted.to_rfc3339()),
         };
-        assert!(!tracked_cancel_tx_pending(&ctx));
         assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
-        assert!(stale_cancel_submit_eligible(&ctx, after_grace));
+        assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
     }
 
     #[test]
@@ -286,7 +313,7 @@ mod tests {
             ctx.cancel_submitted_at.as_deref(),
             Some(submitted.to_rfc3339().as_str())
         );
-        assert!(stale_cancel_submit_eligible(&ctx, after_grace));
+        assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
     }
 
     #[test]

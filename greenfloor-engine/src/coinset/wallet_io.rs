@@ -84,10 +84,11 @@ pub(crate) async fn list_wallet_unspent_coins(
             .collect());
     }
     let asset_bytes = hex_to_bytes32(asset_id)?;
-    let coins = cats::list_unspent_cat_coins(&client, receive_address, asset_bytes).await?;
-    Ok(coins
+    let cats = cats::list_unspent_cats(&client, receive_address, asset_bytes).await?;
+    Ok(cats
         .into_iter()
-        .map(|coin| wallet_coin_from_id(coin.coin_id(), coin.amount))
+        .filter(|cat| cat.coin.amount > 0)
+        .map(|cat| wallet_coin_from_id(cat.coin.coin_id(), cat.coin.amount))
         .collect())
 }
 
