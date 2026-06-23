@@ -5,12 +5,8 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
-use crate::cycle::lifecycle::OfferLifecycleState;
 use crate::cycle::periodic::{PeriodicGate, PeriodicOutcome};
-use crate::cycle::reconcile::{
-    REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK,
-    REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK, STATE_CANCELLED,
-};
+use crate::cycle::reconcile::PRESERVED_LIFECYCLE_TRANSITIONS;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
     COIN_OPS_EXECUTED, COIN_OP_LEDGER_EXECUTED, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION,
@@ -25,21 +21,6 @@ pub const DEFAULT_AUDIT_PRUNE_BATCH_SIZE: u64 = 10_000;
 
 const PRESERVED_EVENT_TYPES: &[&str] =
     &[TAKER_DETECTION, COIN_OP_LEDGER_EXECUTED, COIN_OPS_EXECUTED];
-
-const PRESERVED_LIFECYCLE_TRANSITIONS: &[(&str, &[&str])] = &[
-    (
-        OfferLifecycleState::MempoolObserved.as_str(),
-        &[REASON_POTENTIAL_TAKE_SEEN, REASON_COINSET_MEMPOOL],
-    ),
-    (
-        OfferLifecycleState::TxBlockConfirmed.as_str(),
-        &[REASON_TAKE_CONFIRMED_ON_TX_BLOCK, REASON_COINSET_CONFIRMED],
-    ),
-    (
-        STATE_CANCELLED,
-        &[REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_OK],
-    ),
-];
 
 static PRESERVE_PREDICATE_SQL: LazyLock<String> = LazyLock::new(build_preserve_predicate_sql);
 static AUDIT_PRUNE_GATE: LazyLock<PeriodicGate> = LazyLock::new(PeriodicGate::new);
@@ -247,6 +228,10 @@ mod tests {
         assert!(is_preserved_audit_row(
             OFFER_LIFECYCLE_TRANSITION,
             &json!({"new_state":"tx_block_confirmed","reason":"take_confirmed_on_tx_block"}),
+        ));
+        assert!(is_preserved_audit_row(
+            OFFER_LIFECYCLE_TRANSITION,
+            &json!({"new_state":"tx_block_confirmed","reason":"ok"}),
         ));
         assert!(is_preserved_audit_row(
             OFFER_CANCEL_POLICY,

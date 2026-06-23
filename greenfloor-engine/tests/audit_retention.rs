@@ -1,4 +1,5 @@
 use chrono::{Duration, Utc};
+use greenfloor_engine::cycle::reconcile::preserved_lifecycle_transitions;
 use greenfloor_engine::operator_log::{
     COIN_OPS_EXECUTED, COIN_OP_LEDGER_EXECUTED, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION,
     TAKER_DETECTION,
@@ -151,7 +152,7 @@ fn sql_prune_preserves_rows_matching_rust_predicate() {
         .add_audit_event_at("daemon_cycle_summary", &json!({"ok": true}), None, &old)
         .expect("prunable noise");
 
-    let preserved_specs: Vec<(&str, serde_json::Value)> = vec![
+    let mut preserved_specs: Vec<(&str, serde_json::Value)> = vec![
         (TAKER_DETECTION, json!({"offer_id": "offer1"})),
         (
             COIN_OP_LEDGER_EXECUTED,
@@ -159,34 +160,18 @@ fn sql_prune_preserves_rows_matching_rust_predicate() {
         ),
         (COIN_OPS_EXECUTED, json!({"batch_id": "batch-1"})),
         (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"cancelled","reason":"cancel_tx_chain_confirmed"}),
-        ),
-        (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"cancelled","reason":"ok"}),
-        ),
-        (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"mempool_observed","reason":"potential_take_seen"}),
-        ),
-        (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"mempool_observed","reason":"coinset_mempool_observed"}),
-        ),
-        (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"tx_block_confirmed","reason":"take_confirmed_on_tx_block"}),
-        ),
-        (
-            OFFER_LIFECYCLE_TRANSITION,
-            json!({"new_state":"tx_block_confirmed","reason":"coinset_tx_block_webhook_confirmed"}),
-        ),
-        (
             OFFER_CANCEL_POLICY,
             json!({"executed_count": 1, "items": []}),
         ),
     ];
+    for (state, reasons) in preserved_lifecycle_transitions() {
+        for reason in *reasons {
+            preserved_specs.push((
+                OFFER_LIFECYCLE_TRANSITION,
+                json!({"new_state": state, "reason": reason}),
+            ));
+        }
+    }
 
     for (event_type, payload) in &preserved_specs {
         assert!(
