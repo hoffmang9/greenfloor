@@ -54,28 +54,17 @@ async fn fetch_input_cat_by_coin_id<C: OfferCoinsetBackend>(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OfferInputCatResolution {
-    StoredCoinId(Bytes32),
-    ScanOfferSpends,
-}
-
-fn offer_input_cat_resolution(
-    spend_bundle: &SpendBundle,
-    offered: &Cat,
+fn stored_input_coin_id(
     metadata: Option<&StoredOfferCancelMetadata>,
-) -> SignerResult<OfferInputCatResolution> {
-    if let Some(coin_id_hex) = metadata
+) -> SignerResult<Option<Bytes32>> {
+    let Some(coin_id_hex) = metadata
         .and_then(|value| value.fields.input_coin_id.as_deref())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        return Ok(OfferInputCatResolution::StoredCoinId(hex_to_bytes32(
-            coin_id_hex,
-        )?));
-    }
-    let _ = (spend_bundle, offered);
-    Ok(OfferInputCatResolution::ScanOfferSpends)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(hex_to_bytes32(coin_id_hex)?))
 }
 
 async fn resolve_by_scanning_offer_spends<C: OfferCoinsetBackend>(
@@ -107,9 +96,7 @@ async fn resolve_offer_input_cat<C: OfferCoinsetBackend>(
     offered: &Cat,
     metadata: Option<&StoredOfferCancelMetadata>,
 ) -> SignerResult<Cat> {
-    if let OfferInputCatResolution::StoredCoinId(coin_id) =
-        offer_input_cat_resolution(spend_bundle, offered, metadata)?
-    {
+    if let Some(coin_id) = stored_input_coin_id(metadata)? {
         match fetch_input_cat_by_coin_id(backend, coin_id, offered.coin.amount).await {
             Ok(Some(cat)) => return Ok(cat),
             Ok(None) | Err(SignerError::PresplitCoinNotFound) => {}

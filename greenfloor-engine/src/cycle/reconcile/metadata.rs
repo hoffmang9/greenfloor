@@ -10,6 +10,7 @@ pub(crate) const SIGNAL_SOURCE_CANCEL_TX_CHAIN: &str = "cancel_tx_chain";
 pub(crate) const REASON_OK: &str = "ok";
 pub(crate) const REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN: &str =
     "cancel_submitted_stale_dexie_still_open";
+pub(crate) const REASON_CANCEL_SUBMIT_CONTEXT_MISSING: &str = "cancel_submitted_context_missing";
 pub(crate) const REASON_CANCEL_TX_CHAIN_CONFIRMED: &str = "cancel_tx_chain_confirmed";
 pub(crate) const REASON_MISSING_STATUS: &str = "missing_status";
 pub(crate) const REASON_COINSET_UNAVAILABLE: &str = "coinset_signal_unavailable_for_offer";

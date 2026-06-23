@@ -56,7 +56,8 @@ fn stale_reset_ineligible_when_cancel_tx_confirmed_but_dexie_still_open() {
     };
     assert!(!cancel_submit_stale_reset_eligible(
         &ctx,
-        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+        &[]
     ));
 }
 
@@ -87,18 +88,48 @@ fn tracked_mempool_only_unconfirmed_unwedges_after_grace() {
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
     assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
-    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
+    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
         CoinsetSignalSummary::default(),
         &ctx,
         after_grace,
+        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(
         transition.new_state,
         ReconcileState::Lifecycle(OfferLifecycleState::Open)
     );
+}
+
+#[test]
+fn stale_reset_blocked_when_cancel_tx_in_confirmed_list() {
+    let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let after_grace = submitted + chrono::Duration::seconds(600);
+    let cancel_tx_id = "a".repeat(64);
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some(cancel_tx_id.clone()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(submitted.to_rfc3339()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some(submitted.to_rfc3339()),
+    };
+    assert!(!cancel_submit_stale_reset_eligible(
+        &ctx,
+        after_grace,
+        std::slice::from_ref(&cancel_tx_id)
+    ));
+    let transition = resolve_cancel_submitted_transition(
+        Some(DEXIE_STATUS_OPEN),
+        CoinsetSignalSummary::default(),
+        &ctx,
+        after_grace,
+        std::slice::from_ref(&cancel_tx_id),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::Cancelled);
 }
 
 #[test]
@@ -111,7 +142,7 @@ fn tracked_cancel_tx_id_allows_stale_reset_without_signal_after_grace() {
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
     assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
-    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
+    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
 }
 
 #[test]
@@ -124,7 +155,7 @@ fn stale_reset_still_allowed_without_recorded_cancel_tx_id() {
         cancel_submitted_at: Some(submitted.to_rfc3339()),
     };
     assert!(!is_cancel_submit_in_flight(&ctx, after_grace));
-    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
+    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
 }
 
 #[test]
@@ -144,7 +175,7 @@ fn stale_reset_uses_cancel_submitted_at_not_refreshed_updated_at() {
         ctx.cancel_submitted_at.as_deref(),
         Some(submitted.to_rfc3339().as_str())
     );
-    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace));
+    assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
 }
 
 #[test]
@@ -194,6 +225,7 @@ fn cancel_tx_chain_confirmed_moves_to_cancelled() {
         CoinsetSignalSummary::default(),
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -224,6 +256,7 @@ fn cancel_tx_chain_confirmed_beats_dexie_linked_taker_confirm() {
         },
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::Cancelled);
@@ -248,6 +281,7 @@ fn taker_confirmed_while_cancel_in_flight_promotes_to_tx_block_confirmed() {
         },
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+        &[],
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(

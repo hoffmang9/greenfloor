@@ -163,20 +163,26 @@ pub async fn cancel_offers_on_chain(
         .await
         {
             Ok(result) => {
+                let mut error = String::new();
                 if target.persists_state() {
-                    store.upsert_offer_cancel_submitted(
+                    if let Err(err) = store.upsert_offer_cancel_submitted(
                         target.offer_id(),
                         &market_id,
                         &result.operation_id,
                         None,
-                    )?;
+                    ) {
+                        error = format!(
+                            "cancel broadcast succeeded (tx {}) but state persist failed: {err}",
+                            result.operation_id
+                        );
+                    }
                 }
                 outcomes.push(CancelOfferOutcome {
                     offer_id: target.offer_id().to_string(),
                     market_id,
-                    success: true,
+                    success: error.is_empty(),
                     operation_id: result.operation_id,
-                    error: String::new(),
+                    error,
                 });
             }
             Err(err) => {

@@ -54,9 +54,10 @@ back to extraction from the Dexie offer file.
    cancelled.
 
 6. **`cancel_submitted` reconcile and defer policy.**
-   - Pure policy: `cycle/reconcile/cancel_submitted_policy.rs` (`CancelSubmittedContext`,
+   - Pure policy: `cycle/reconcile/cancel_submitted_policy/` (`CancelSubmittedContext`,
      `allowed_cancel_target_offer_ids`, `resolve_cancel_submitted_transition`).
    - SQLite I/O adapter: `offer/lifecycle/cancel_context.rs` (`preload_cancel_submitted_contexts`,
+     `cancel_submitted_context_for_offer`, `signal_tx_ids_including_cancel_tx`,
      `defer_in_flight_cancel_offer_ids`, `partition_defer_in_flight_cancel_targets`).
    - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) anchors on
      `cancel_submitted_at`, not `updated_at`, so reconcile preserve upserts do not extend
@@ -66,11 +67,28 @@ back to extraction from the Dexie offer file.
      cancel tx is unconfirmed **and** still within orphan grace from the anchor timestamp.
      Daemon cancel policy and CLI `--offer-id` / `--cancel-open` defer re-submit only during
      that window.
+   - **Confirmed-list semantics.** Reconcile passes the Coinset confirmed tx id list into
+     cancel-submitted policy. When the tracked cancel tx id appears in that list, stale
+     unwedge (`cancel_submitted` → `open`) is blocked even if Dexie still reports open
+     (`status = 1`) and the cancel tx has no `tx_block_confirmed_at` in SQLite yet. Chain
+     confirmation still promotes to `cancelled` via the cancel-tx signal path.
    - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) but the
-     cancel tx remains unconfirmed past grace, reconcile resets `cancel_submitted` → `open`
+     cancel tx remains unconfirmed past grace **and** is absent from the confirmed list,
+     reconcile resets `cancel_submitted` → `open`
      (`REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN`). This avoids an indefinite wedge when Coinset
-     shows mempool-only observation with no chain confirmation. Chain-confirmed cancel txs
-     still promote to `cancelled` regardless of Dexie status.
+     shows mempool-only observation with no chain confirmation.
+   - **Preload fallback.** Batch reconcile preloads cancel-submit context for all
+     `cancel_submitted` rows. Per-offer reconcile uses the preloaded map when present; on a
+     cache miss it falls through to a row + tx-signal lookup so a single offer is not left
+     without context.
+   - **Missing context preserves.** When state is `cancel_submitted` but cancel-submit
+     context cannot be loaded (no row, lookup failure surfaced as absent context), reconcile
+     preserves `cancel_submitted` (`REASON_CANCEL_SUBMIT_CONTEXT_MISSING`) rather than
+     applying stale-unwedge with empty defaults.
+   - **Broadcast vs persist on submit.** Successful Coinset broadcast with a failed SQLite
+     upsert records per-item `success: false` with `operation_id` and error text; the batch
+     continues. Operator state may lag until a later reconcile or retry — broadcast success
+     alone does not imply `cancel_submitted` in SQLite.
 
 7. **CLI and audit naming reflects submit semantics.**
    - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item

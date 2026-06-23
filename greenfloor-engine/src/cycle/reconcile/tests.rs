@@ -3,10 +3,10 @@ use crate::cycle::lifecycle::OfferSignal;
 use chrono::{TimeZone, Utc};
 
 use super::metadata::{
-    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
-    REASON_COINSET_UNAVAILABLE, REASON_DEXIE_OFFER_NOT_FOUND,
-    REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL, REASON_MISSING_STATUS, REASON_OK,
-    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    REASON_CANCEL_SUBMIT_CONTEXT_MISSING, REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
+    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
+    REASON_DEXIE_OFFER_NOT_FOUND, REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
+    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
     SIGNAL_SOURCE_DEXIE_GET_OFFER_404, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
     TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
@@ -541,6 +541,26 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
     assert!(!transition.changed);
+}
+
+#[test]
+fn cancel_submitted_preserves_when_context_missing() {
+    let transition = resolve_watched_offer_decision(
+        &ReconcileState::CancelSubmitted,
+        Some(1),
+        &[],
+        &[],
+        &[],
+        None,
+        Utc.with_ymd_and_hms(2020, 1, 1, 1, 0, 0).unwrap(),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert!(!transition.changed);
+    assert_eq!(
+        transition.reason,
+        REASON_CANCEL_SUBMIT_CONTEXT_MISSING.to_string()
+    );
 }
 
 #[test]

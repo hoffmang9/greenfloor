@@ -134,6 +134,29 @@ pub fn preload_cancel_submitted_contexts(
         .collect())
 }
 
+/// Include the tracked cancel tx id when building reconcile tx-signal lookups.
+#[must_use]
+pub(crate) fn signal_tx_ids_including_cancel_tx(
+    coinset_tx_ids: Vec<String>,
+    cancel_submitted: Option<&CancelSubmittedContext>,
+) -> Vec<String> {
+    let mut signal_tx_ids = coinset_tx_ids;
+    let Some(ctx) = cancel_submitted else {
+        return signal_tx_ids;
+    };
+    let Some(cancel_tx_id) = ctx.cancel_tx_id.as_deref().and_then(canonical_tx_id) else {
+        return signal_tx_ids;
+    };
+    if signal_tx_ids
+        .iter()
+        .any(|tx_id| canonical_tx_id(tx_id).as_deref() == Some(cancel_tx_id.as_str()))
+    {
+        return signal_tx_ids;
+    }
+    signal_tx_ids.push(cancel_tx_id);
+    signal_tx_ids
+}
+
 /// Resolve cancel-submit context for one offer during reconcile.
 ///
 /// # Errors
@@ -149,7 +172,9 @@ pub fn cancel_submitted_context_for_offer(
         return Ok(None);
     }
     if let Some(map) = preloaded {
-        return Ok(map.get(offer_id).cloned());
+        if let Some(ctx) = map.get(offer_id) {
+            return Ok(Some(ctx.clone()));
+        }
     }
     let rows = store.list_offer_states_for_ids(&[offer_id.to_string()])?;
     let Some(row) = rows.into_iter().next() else {
@@ -177,6 +202,18 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn signal_tx_ids_including_cancel_tx_appends_tracked_id() {
+        let ctx = CancelSubmittedContext {
+            cancel_tx_id: Some("a".repeat(64)),
+            cancel_tx_signal: None,
+            cancel_submitted_at: None,
+        };
+        let merged = signal_tx_ids_including_cancel_tx(vec!["b".repeat(64)], Some(&ctx));
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1], "a".repeat(64));
+    }
 
     #[test]
     fn defer_in_flight_cancel_offer_ids_skips_pending_cancel_submitted() {
@@ -223,5 +260,25 @@ mod tests {
             cancel_submit_in_flight_skip_result().get("reason"),
             Some(&json!(CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON))
         );
+    }
+
+    #[test]
+    fn cancel_submitted_context_falls_back_when_preload_misses_offer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let tx_id = "d".repeat(64);
+        store
+            .upsert_offer_cancel_submitted("offer-preload-miss", "m1", &tx_id, Some(0))
+            .expect("seed");
+        let preloaded = HashMap::new();
+        let ctx = cancel_submitted_context_for_offer(
+            &store,
+            "offer-preload-miss",
+            "cancel_submitted",
+            Some(&preloaded),
+        )
+        .expect("context")
+        .expect("cancel context");
+        assert_eq!(ctx.cancel_tx_id.as_deref(), Some(tx_id.as_str()));
     }
 }
