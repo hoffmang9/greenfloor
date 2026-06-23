@@ -30,6 +30,7 @@ impl ManagerCommands {
             | ManagerCommands::MaterializeMinimalProgram { .. }
             | ManagerCommands::KeysOnboard { .. }
             | ManagerCommands::Doctor
+            | ManagerCommands::AuditPrune { .. }
             | ManagerCommands::BootstrapHome { .. }
             | ManagerCommands::SetLogLevel { .. }) => setup::run_command(cmd, ctx),
             ManagerCommands::BuildAndPostOffer { .. } => build_offer::run_command(self, ctx).await,

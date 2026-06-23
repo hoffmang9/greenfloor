@@ -1,7 +1,9 @@
+use chrono::{DateTime, Utc};
 use rusqlite::params;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::storage::audit_retention::financially_important_audit_predicate_sql;
 
 use super::{utcnow_iso, AuditEventRow, SqliteStore};
 
@@ -193,5 +195,63 @@ impl SqliteStore {
         Ok(events
             .iter()
             .any(|row| row.payload.get(field).and_then(serde_json::Value::as_str) == Some(value)))
+    }
+
+    /// Count non-financial audit rows older than `cutoff`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn count_prunable_audit_events_older_than(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> SignerResult<u64> {
+        let cutoff_iso = cutoff.to_rfc3339();
+        let important = financially_important_audit_predicate_sql();
+        let sql = format!(
+            r"
+            SELECT COUNT(*)
+            FROM audit_event
+            WHERE created_at < ?1
+              AND NOT ({important})
+            "
+        );
+        let count: i64 = self
+            .conn
+            .query_row(&sql, params![cutoff_iso], |row| row.get(0))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to count prunable audit_event rows: {err}"))
+            })?;
+        u64::try_from(count.max(0)).map_err(|_| {
+            SignerError::Other("prunable audit_event count exceeds u64 max".to_string())
+        })
+    }
+
+    /// Delete non-financial audit rows older than `cutoff`.
+    ///
+    /// Financially important rows (taker detections, on-chain take lifecycle transitions,
+    /// executed coin ops) are kept regardless of age.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn prune_audit_events_older_than(&self, cutoff: DateTime<Utc>) -> SignerResult<u64> {
+        let cutoff_iso = cutoff.to_rfc3339();
+        let important = financially_important_audit_predicate_sql();
+        let sql = format!(
+            r"
+            DELETE FROM audit_event
+            WHERE created_at < ?1
+              AND NOT ({important})
+            "
+        );
+        let deleted = self
+            .conn
+            .execute(&sql, params![cutoff_iso])
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prune audit_event rows: {err}"))
+            })?;
+        u64::try_from(deleted)
+            .map_err(|_| SignerError::Other("pruned audit_event count exceeds u64 max".to_string()))
     }
 }

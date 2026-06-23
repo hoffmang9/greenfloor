@@ -88,6 +88,10 @@ pub enum ManagerCommands {
         splash_base_url: Option<String>,
     },
     Doctor,
+    AuditPrune {
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     OffersStatus {
         #[arg(long, default_value = "")]
         market_id: String,

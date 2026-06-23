@@ -1,5 +1,6 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, `inventory/strategy/coin_ops` planning, and cancel run in Rust.
 
+mod audit_retention;
 mod cancel_phase;
 mod cli;
 mod coin_ops_execution;
