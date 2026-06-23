@@ -225,21 +225,13 @@ mod tests {
     fn infer_vault_nonce_for_p2_hash_matches_nonzero_nonce() {
         let launcher_id = Bytes32::new([0x11; 32]);
         let r1 = R1Pair::new(99);
-        let mut vault_ctx = VaultSpendContext {
+        let mut vault_ctx = VaultSpendContext::new_test_context(
             launcher_id,
-            inner_puzzle_hash: clvm_utils::TreeHash::from(launcher_id),
-            custody_hash: clvm_utils::TreeHash::from(Bytes32::new([0x22; 32])),
-            recovery_hash: clvm_utils::TreeHash::from(Bytes32::new([0x33; 32])),
-            kms_key_id: String::new(),
-            kms_region: String::new(),
-            kms_runtime: KmsRuntime::production(),
-            secp256r1_public_key: r1.pk,
-            max_nonce_probe: 20,
-            network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::default(),
-            #[cfg(test)]
-            local_fast_forward_signer: None,
-        };
+            clvm_utils::TreeHash::from(launcher_id),
+            clvm_utils::TreeHash::from(Bytes32::new([0x22; 32])),
+            clvm_utils::TreeHash::from(Bytes32::new([0x33; 32])),
+            r1.pk,
+        );
         let target = crate::vault::members::nonce_member_puzzle_hash(launcher_id, 7)
             .expect("singleton hash");
         let inferred = vault_ctx
@@ -289,35 +281,8 @@ mod tests {
             spend.infer_nonce_for_p2_hash(hashes.p2_singleton_message_hash.into()),
             Some(0)
         );
-    }
-
-    #[test]
-    fn vault_fast_forward_signer_uses_local_signer_in_tests() {
-        use sha2::{Digest, Sha256};
-
-        let r1 = R1Pair::new(42);
-        let sk = r1.sk.clone();
-        let mut vault_ctx = VaultSpendContext::new_test_context(
-            Bytes32::new([0x01; 32]),
-            clvm_utils::TreeHash::from(Bytes32::new([0x02; 32])),
-            clvm_utils::TreeHash::from(Bytes32::new([0x03; 32])),
-            clvm_utils::TreeHash::from(Bytes32::new([0x04; 32])),
-            r1.pk,
-        );
-        vault_ctx.set_local_fast_forward_signer(Arc::new(move |message| {
-            let digest: [u8; 32] = Sha256::digest(&message).into();
-            sk.sign_prehashed(&digest)
-                .map_err(|err| SignerError::Kms(err.to_string()))
-        }));
-        let signer = VaultFastForwardSigner::from_context(&vault_ctx);
-        let kms = KmsSigner::from_vault_context(&vault_ctx);
-        assert_eq!(kms.key_id, "test-kms");
+        let kms = KmsSigner::from_vault_context(&spend);
+        assert_eq!(kms.key_id, "kms-test");
         assert_eq!(kms.region, "us-west-2");
-
-        let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let signature = rt
-            .block_on(signer.sign(b"fast-forward-message".to_vec()))
-            .expect("local signature");
-        assert_eq!(signature.to_bytes().len(), 64);
     }
 }

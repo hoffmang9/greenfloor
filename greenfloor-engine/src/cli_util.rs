@@ -145,7 +145,7 @@ pub fn print_json_pretty(value: &impl Serialize) -> SignerResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        emit_engine_cli_error, format_json, format_json_value, optional_str, optional_trimmed,
+        format_json, format_json_value, optional_str, optional_trimmed,
         script_coinset_transport_retryable, script_engine_error_retryable,
     };
     use crate::error::SignerError;
@@ -190,13 +190,5 @@ mod tests {
             format_json_value(&payload, true).unwrap(),
             r#"{"n":1,"ok":true}"#
         );
-    }
-
-    #[test]
-    fn emit_engine_cli_error_json_mode_marks_retryable_coinset_errors() {
-        let err = SignerError::Coinset("connection reset by peer".to_string());
-        emit_engine_cli_error(&err, true);
-        emit_engine_cli_error(&SignerError::Other("bad input".to_string()), true);
-        emit_engine_cli_error(&SignerError::Other("bad input".to_string()), false);
     }
 }

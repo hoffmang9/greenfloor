@@ -142,14 +142,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let _first = DaemonInstanceLock::acquire(dir.path(), "loop").expect("first acquire");
         let err = DaemonInstanceLock::acquire(dir.path(), "loop").expect_err("contention");
-        assert!(matches!(err, SignerError::DaemonAlreadyRunning { .. }));
-    }
-
-    #[test]
-    fn second_acquire_includes_existing_lock_metadata() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let _first = DaemonInstanceLock::acquire(dir.path(), "loop").expect("first acquire");
-        let err = DaemonInstanceLock::acquire(dir.path(), "loop").expect_err("contention");
         match err {
             SignerError::DaemonAlreadyRunning { detail, .. } => {
                 assert!(detail.contains("daemon_lock_metadata="));

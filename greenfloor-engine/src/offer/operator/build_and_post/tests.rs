@@ -10,8 +10,7 @@ use super::post_batch::{
 };
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
-use crate::cli_util::{format_json, format_json_value};
-use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+use crate::offer::types::{CreateOfferResult, OfferExecutionMode, PresplitCancelFields};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 use crate::test_support::build_and_post::unused_post_iteration_request;
@@ -118,13 +117,6 @@ fn persist_path_defers_failure_trace_until_flush() {
 }
 
 #[test]
-fn cli_json_formatting_respects_compact_flag() {
-    let payload = json!({"ok": true});
-    assert!(format_json(&payload, false).unwrap().contains('\n'));
-    assert_eq!(format_json_value(&payload, true).unwrap(), r#"{"ok":true}"#);
-}
-
-#[test]
 fn offer_post_persist_record_requires_success_and_offer_id() {
     let ctx = sample_resolved_build_and_post_context();
     let failed = PublishResult {
@@ -143,6 +135,31 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None).expect("record");
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
+
+    let create = CreateOfferResult {
+        offer: "offer1".to_string(),
+        spend_bundle_hex: String::new(),
+        selected_coin_ids: Vec::new(),
+        offer_nonce: String::new(),
+        execution_mode: OfferExecutionMode::PresplitNew,
+        split_spend_bundle_hex: None,
+        presplit_coin_id: Some("cc".repeat(64)),
+        split_broadcast_status: None,
+        presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
+            "coin".to_string(),
+            "puzzle".to_string(),
+        )),
+    };
+    let presplit = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&create))
+        .expect("presplit record");
+    assert_eq!(
+        presplit.execution_mode,
+        Some(OfferExecutionMode::PresplitNew)
+    );
+    assert_eq!(
+        presplit.cancel_fields.input_coin_id.as_deref(),
+        Some("coin")
+    );
 }
 
 #[test]

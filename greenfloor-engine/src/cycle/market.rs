@@ -200,42 +200,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_inventory_scan_source_prefers_coinset() {
-        assert_eq!(
-            resolve_inventory_scan_source(
-                CoinsetInventoryScanState {
-                    found_coins: true,
-                    empty: false,
-                },
-                SupplementalInventoryScanState {
-                    cat_found_coins: false,
-                    wallet_found_coins: false,
-                },
+    fn resolve_inventory_scan_source_labels() {
+        for (coinset_found, coinset_empty, cat_found, wallet_found, expected) in [
+            (true, false, false, false, "coinset"),
+            (
+                false,
+                true,
+                true,
+                false,
+                "coinset_cat_scan_fallback_after_empty_coinset_scan",
             ),
-            "coinset"
-        );
+            (
+                false,
+                true,
+                false,
+                true,
+                "wallet_adapter_fallback_after_empty_coinset_scan",
+            ),
+            (false, false, false, false, "config_seed_or_no_asset_scan"),
+        ] {
+            assert_eq!(
+                resolve_inventory_scan_source(
+                    CoinsetInventoryScanState {
+                        found_coins: coinset_found,
+                        empty: coinset_empty,
+                    },
+                    SupplementalInventoryScanState {
+                        cat_found_coins: cat_found,
+                        wallet_found_coins: wallet_found,
+                    },
+                ),
+                expected
+            );
+        }
     }
 
     #[test]
-    fn resolve_inventory_scan_source_uses_cat_after_empty_coinset() {
+    fn inventory_fallback_helpers() {
+        for (coinset_empty, wallet_found, expected) in [
+            (false, false, true),
+            (true, true, true),
+            (true, false, false),
+        ] {
+            assert_eq!(
+                needs_inventory_fallback(coinset_empty, wallet_found),
+                expected
+            );
+        }
+        assert_eq!(wallet_fallback_source_label(false), "wallet_adapter");
         assert_eq!(
-            resolve_inventory_scan_source(
-                CoinsetInventoryScanState {
-                    found_coins: false,
-                    empty: true,
-                },
-                SupplementalInventoryScanState {
-                    cat_found_coins: true,
-                    wallet_found_coins: false,
-                },
-            ),
-            "coinset_cat_scan_fallback_after_empty_coinset_scan"
+            wallet_fallback_source_label(true),
+            "wallet_adapter_fallback_after_empty_coinset_scan"
         );
-    }
-
-    #[test]
-    fn resolve_tracked_sizes_falls_back_to_strategy_defaults() {
         assert_eq!(resolve_tracked_sizes(&[], &[1, 10, 100]), vec![1, 10, 100]);
+    }
+
+    #[test]
+    fn market_cycle_and_action_helpers() {
+        assert_eq!(MarketCyclePhase::Reconcile.as_str(), "reconcile");
+        assert_eq!(market_cycle_phases().len(), 5);
+        assert_eq!(post_reconcile_market_cycle_phases().len(), 4);
+        assert!(!post_reconcile_market_cycle_phases().contains(&MarketCyclePhase::Reconcile));
+
+        for (mode, expected) in [
+            ("two_sided", true),
+            (" TWO_SIDED ", true),
+            ("one_sided", false),
+        ] {
+            assert_eq!(is_two_sided_market_mode(mode), expected);
+        }
+
+        let actions = vec![(0_i64, 0), (1, 2), (2, -1)];
+        assert_eq!(
+            filter_positive_repeat_actions(&actions, |action| action.1),
+            1
+        );
     }
 
     #[test]
@@ -246,14 +285,6 @@ mod tests {
         assert!(state.cancel_triggered);
         assert_eq!(state.cancel_planned, 3);
         assert_eq!(state.cancel_executed, 1);
-    }
-
-    #[test]
-    fn market_cycle_phase_labels_and_order() {
-        assert_eq!(MarketCyclePhase::Reconcile.as_str(), "reconcile");
-        assert_eq!(market_cycle_phases().len(), 5);
-        assert_eq!(post_reconcile_market_cycle_phases().len(), 4);
-        assert!(!post_reconcile_market_cycle_phases().contains(&MarketCyclePhase::Reconcile));
     }
 
     #[test]
@@ -273,48 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn needs_inventory_fallback_and_wallet_source_labels() {
-        assert!(needs_inventory_fallback(false, false));
-        assert!(needs_inventory_fallback(true, true));
-        assert!(!needs_inventory_fallback(true, false));
-        assert_eq!(wallet_fallback_source_label(false), "wallet_adapter");
-        assert_eq!(
-            wallet_fallback_source_label(true),
-            "wallet_adapter_fallback_after_empty_coinset_scan"
-        );
-    }
-
-    #[test]
-    fn resolve_inventory_scan_source_uses_wallet_when_coinset_empty() {
-        assert_eq!(
-            resolve_inventory_scan_source(
-                CoinsetInventoryScanState {
-                    found_coins: false,
-                    empty: true,
-                },
-                SupplementalInventoryScanState {
-                    cat_found_coins: false,
-                    wallet_found_coins: true,
-                },
-            ),
-            "wallet_adapter_fallback_after_empty_coinset_scan"
-        );
-        assert_eq!(
-            resolve_inventory_scan_source(
-                CoinsetInventoryScanState {
-                    found_coins: false,
-                    empty: false,
-                },
-                SupplementalInventoryScanState {
-                    cat_found_coins: false,
-                    wallet_found_coins: false,
-                },
-            ),
-            "config_seed_or_no_asset_scan"
-        );
-    }
-
-    #[test]
     fn aggregate_and_one_sided_offer_counts() {
         let buy = BTreeMap::from([(1, 2), (10, 1)]);
         let sell = BTreeMap::from([(1, 1), (10, 0)]);
@@ -327,21 +316,5 @@ mod tests {
         let (buy_only, sell_only) = one_sided_offer_counts_by_side(&sell, &tracked);
         assert_eq!(buy_only.get(&1), Some(&0));
         assert_eq!(sell_only.get(&1), Some(&1));
-    }
-
-    #[test]
-    fn is_two_sided_market_mode_is_case_insensitive() {
-        assert!(is_two_sided_market_mode("two_sided"));
-        assert!(is_two_sided_market_mode(" TWO_SIDED "));
-        assert!(!is_two_sided_market_mode("one_sided"));
-    }
-
-    #[test]
-    fn filter_positive_repeat_actions_counts_only_positive() {
-        let actions = vec![(0_i64, 0), (1, 2), (2, -1)];
-        assert_eq!(
-            filter_positive_repeat_actions(&actions, |action| action.1),
-            1
-        );
     }
 }

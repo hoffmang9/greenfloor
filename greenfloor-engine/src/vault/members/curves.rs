@@ -191,13 +191,22 @@ mod tests {
 
     use super::*;
     use crate::hex::hex_to_bytes32;
-    use crate::test_support::golden::LAUNCHER_ID_HEX;
+    use crate::hex::tree_hash_to_hex;
+    use crate::test_support::golden::{golden_snapshot, CUSTODY_HASH_HEX, LAUNCHER_ID_HEX};
 
     fn wallet_key(curve: &str, public_key_hex: &str) -> WalletKey {
         WalletKey {
             curve: curve.to_string(),
             public_key_hex: public_key_hex.to_string(),
         }
+    }
+
+    #[test]
+    fn member_hash_for_key_matches_golden_custody_vector() {
+        let snapshot = golden_snapshot();
+        let hash = member_hash_for_key(&MemberConfig::default(), &snapshot.custody_keys[0])
+            .expect("custody hash");
+        assert_eq!(tree_hash_to_hex(hash), CUSTODY_HASH_HEX);
     }
 
     #[test]
@@ -208,36 +217,34 @@ mod tests {
         let bls = BlsPair::new(9);
         let passkey = R1Pair::new(10);
 
-        assert!(r1_member_hash(&config, r1.pk, true).is_ok());
-        assert!(k1_member_hash(&config, k1.pk, false).is_ok());
-        assert!(bls_member_hash(&config, bls.pk, false).is_ok());
-        assert!(passkey_member_hash(&config, passkey.pk, true).is_ok());
+        let r1_hash = member_hash_for_key(
+            &config,
+            &wallet_key("SECP256R1", &hex::encode(r1.pk.to_bytes())),
+        )
+        .expect("r1");
+        let k1_hash = member_hash_for_key(
+            &config,
+            &wallet_key("SECP256K1", &hex::encode(k1.pk.to_bytes())),
+        )
+        .expect("k1");
+        let bls_hash = member_hash_for_key(
+            &config,
+            &wallet_key("BLS12_381", &hex::encode(bls.pk.to_bytes())),
+        )
+        .expect("bls");
+        let passkey_hash = member_hash_for_key(
+            &config,
+            &wallet_key("WEBAUTHN", &hex::encode(passkey.pk.to_bytes())),
+        )
+        .expect("passkey");
+        assert_ne!(r1_hash, k1_hash);
+        assert_ne!(r1_hash, bls_hash);
+        assert_ne!(passkey_hash, r1_hash);
 
         let launcher_id = hex_to_bytes32(LAUNCHER_ID_HEX).expect("launcher");
         let normal = singleton_member_hash(&config, launcher_id, false).expect("normal");
         let fast_forward = singleton_member_hash(&config, launcher_id, true).expect("ff");
         assert_ne!(normal, fast_forward);
-
-        assert!(member_hash_for_key(
-            &config,
-            &wallet_key("SECP256R1", &hex::encode(r1.pk.to_bytes()))
-        )
-        .is_ok());
-        assert!(member_hash_for_key(
-            &config,
-            &wallet_key("SECP256K1", &hex::encode(k1.pk.to_bytes()))
-        )
-        .is_ok());
-        assert!(member_hash_for_key(
-            &config,
-            &wallet_key("WEBAUTHN", &hex::encode(passkey.pk.to_bytes()))
-        )
-        .is_ok());
-        assert!(member_hash_for_key(
-            &config,
-            &wallet_key("BLS12_381", &hex::encode(bls.pk.to_bytes()))
-        )
-        .is_ok());
     }
 
     #[test]
