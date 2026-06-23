@@ -2,6 +2,7 @@
 
 mod cancel;
 mod cancel_cli;
+mod cancel_context;
 mod cancel_eligibility;
 mod persist;
 mod reconcile_watched_offers;
@@ -27,5 +28,6 @@ pub use status_cli::{
 pub use transition::{
     missing_offer_error_from_payload, resolve_watched_offer_transition_for_venue,
     resolve_watched_offer_transition_from_dexie_fetch, transition_from_dexie_offer_payload,
-    transition_from_list_offer_payload,
+    transition_from_list_offer_payload, WatchedOfferTransitionEnv,
 };
+pub(crate) use cancel_context::preload_cancel_submitted_contexts;

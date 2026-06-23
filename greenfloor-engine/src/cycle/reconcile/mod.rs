@@ -7,12 +7,15 @@ mod builders;
 mod cancel_submitted_policy;
 mod coinset_signals;
 mod decision;
+mod dispatch;
 mod metadata;
 mod state;
 mod transition;
 
 #[cfg(test)]
 mod tests;
+
+use chrono::{DateTime, Utc};
 
 pub use cancel_submitted_policy::{filter_defer_cancel_submitted_targets, CancelSubmittedContext};
 pub use coinset_signals::CoinsetSignalSummary;
@@ -80,6 +83,7 @@ pub fn resolve_watched_offer_transition_from_signals(
     coinset_confirmed_tx_ids: Vec<String>,
     coinset_mempool_tx_ids: Vec<String>,
     cancel_submitted: Option<&CancelSubmittedContext>,
+    now: DateTime<Utc>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
     Ok(resolve_watched_offer_decision(
@@ -89,6 +93,7 @@ pub fn resolve_watched_offer_transition_from_signals(
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
         cancel_submitted,
+        now,
     )
     .into_cycle_transition(
         old_state,

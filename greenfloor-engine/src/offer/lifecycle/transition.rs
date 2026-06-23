@@ -1,21 +1,53 @@
 //! Canonical watched-offer reconcile: Dexie lookup/transition resolution shared by
 //! daemon cycle reconcile, CLI batch reconcile, and watchlist augment.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
+
+use chrono::{DateTime, Utc};
 
 use crate::adapters::DexieClient;
 use crate::cycle::reconcile::CancelSubmittedContext;
-use crate::hex::canonical_tx_id;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
+    unsupported_venue_offer_transition, CycleOfferTransition,
 };
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::{
     dexie_offer_status, extract_coinset_tx_ids_from_offer_payload, DexieOfferPayload,
 };
 use crate::storage::SqliteStore;
+
+use super::cancel_context::cancel_submitted_context_for_offer;
+
+/// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
+#[derive(Debug, Clone, Copy)]
+pub struct WatchedOfferTransitionEnv<'a> {
+    pub now: DateTime<Utc>,
+    pub cancel_submitted_by_offer: Option<&'a HashMap<String, CancelSubmittedContext>>,
+}
+
+impl<'a> WatchedOfferTransitionEnv<'a> {
+    #[must_use]
+    pub fn new(
+        now: DateTime<Utc>,
+        cancel_submitted_by_offer: Option<&'a HashMap<String, CancelSubmittedContext>>,
+    ) -> Self {
+        Self {
+            now,
+            cancel_submitted_by_offer,
+        }
+    }
+
+    #[must_use]
+    pub fn at_now(
+        cancel_submitted_by_offer: Option<&'a HashMap<String, CancelSubmittedContext>>,
+    ) -> Self {
+        Self::new(Utc::now(), cancel_submitted_by_offer)
+    }
+}
 
 fn coinset_signal_lists(
     store: &SqliteStore,
@@ -42,34 +74,6 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
-fn cancel_submitted_context_for_offer(
-    store: &SqliteStore,
-    offer_id: &str,
-    current_state: &str,
-) -> SignerResult<Option<CancelSubmittedContext>> {
-    if !ReconcileState::parse(current_state).is_ok_and(|state| state.is_cancel_submitted()) {
-        return Ok(None);
-    }
-    let Some(tracking) = store.cancel_submitted_tracking_for_id(offer_id)? else {
-        return Ok(None);
-    };
-    let cancel_tx_signal = match tracking.cancel_tx_id.as_deref() {
-        Some(tx_id) => match canonical_tx_id(tx_id) {
-            Some(canonical) => store
-                .get_tx_signal_state(std::slice::from_ref(&canonical))?
-                .get(&canonical)
-                .cloned(),
-            None => None,
-        },
-        None => None,
-    };
-    Ok(Some(CancelSubmittedContext {
-        cancel_tx_id: tracking.cancel_tx_id,
-        cancel_tx_signal,
-        submitted_at: Some(tracking.updated_at),
-    }))
-}
-
 /// Transition from dexie offer payload.
 ///
 /// # Errors
@@ -80,12 +84,18 @@ pub fn transition_from_dexie_offer_payload(
     offer_id: &str,
     current_state: &str,
     offer_payload: &Value,
+    env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<CycleOfferTransition> {
     let status = dexie_offer_status(offer_payload);
     let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
     let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
         coinset_signal_lists(store, &coinset_tx_ids)?;
-    let cancel_submitted = cancel_submitted_context_for_offer(store, offer_id, current_state)?;
+    let cancel_submitted = cancel_submitted_context_for_offer(
+        store,
+        offer_id,
+        current_state,
+        env.cancel_submitted_by_offer,
+    )?;
     resolve_watched_offer_transition_from_signals(
         current_state,
         status,
@@ -93,6 +103,7 @@ pub fn transition_from_dexie_offer_payload(
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
         cancel_submitted.as_ref(),
+        env.now,
     )
     .map_err(|err| crate::error::SignerError::Other(err.to_string()))
 }
@@ -119,10 +130,11 @@ fn transition_from_offer_body(
     offer_id: &str,
     current_state: &str,
     offer_body: &Value,
+    env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
     let status = dexie_offer_status(offer_body);
     let transition =
-        transition_from_dexie_offer_payload(store, offer_id, current_state, offer_body)?;
+        transition_from_dexie_offer_payload(store, offer_id, current_state, offer_body, env)?;
     Ok((transition, status))
 }
 
@@ -136,9 +148,10 @@ pub fn transition_from_list_offer_payload(
     offer_id: &str,
     current_state: &str,
     offer_payload: &Value,
+    env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
     let offer = DexieOfferPayload::new(offer_payload.clone());
-    transition_from_offer_body(store, offer_id, current_state, offer.body())
+    transition_from_offer_body(store, offer_id, current_state, offer.body(), env)
 }
 
 /// Resolve a lifecycle transition by fetching a single offer from Dexie.
@@ -151,6 +164,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     dexie: &DexieClient,
     offer_id: &str,
     current_state: &str,
+    env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
     match dexie.get_offer(offer_id).await {
         Ok(response) => {
@@ -161,7 +175,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
             }
             let offer_body = payload.get("offer").unwrap_or(payload);
             let (transition, status) =
-                transition_from_offer_body(store, offer_id, current_state, offer_body)?;
+                transition_from_offer_body(store, offer_id, current_state, offer_body, env)?;
             Ok((transition, status, None))
         }
         Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
@@ -188,6 +202,7 @@ pub async fn resolve_watched_offer_transition_for_venue(
     target_venue: &str,
     offer_id: &str,
     current_state: &str,
+    env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
     if target_venue != "dexie" {
         let transition = unsupported_venue_offer_transition(current_state, target_venue)
@@ -199,7 +214,8 @@ pub async fn resolve_watched_offer_transition_for_venue(
             "dexie client required for dexie venue reconcile".to_string(),
         ));
     };
-    resolve_watched_offer_transition_from_dexie_fetch(store, dexie, offer_id, current_state).await
+    resolve_watched_offer_transition_from_dexie_fetch(store, dexie, offer_id, current_state, env)
+        .await
 }
 
 #[cfg(test)]
@@ -227,6 +243,7 @@ mod tests {
             &dexie,
             "offer-missing",
             "open",
+            WatchedOfferTransitionEnv::at_now(None),
         )
         .await
         .expect("transition");

@@ -251,6 +251,28 @@ fn confirm_tx_ids_updates_legacy_prefixed_row() {
 }
 
 #[test]
+fn upsert_offer_cancel_submitted_seeds_tx_signal_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(&dir.path().join("greenfloor.sqlite"));
+    let tx_id = "f".repeat(64);
+    store
+        .upsert_offer_cancel_submitted("offer-1", "m1", &tx_id, Some(0))
+        .expect("cancel submitted");
+    let state = store
+        .get_tx_signal_state(&[tx_id.clone()])
+        .expect("state");
+    assert!(state.get(&tx_id).is_some_and(|row| row.mempool_observed_at.is_some()));
+    assert_eq!(
+        store
+            .list_offer_states_for_ids(&["offer-1".to_string()])
+            .expect("offer state")
+            .first()
+            .map(|row| row.state.as_str()),
+        Some("cancel_submitted")
+    );
+}
+
+#[test]
 fn list_recent_audit_events_filters_by_event_type_and_market() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));

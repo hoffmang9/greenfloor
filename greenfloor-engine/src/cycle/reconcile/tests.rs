@@ -1,5 +1,7 @@
 use crate::cycle::lifecycle::OfferSignal;
 
+use chrono::Utc;
+
 use super::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
     REASON_COINSET_UNAVAILABLE, REASON_DEXIE_OFFER_NOT_FOUND,
@@ -271,6 +273,7 @@ fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
         None,
+        Utc::now(),
     )
     .into_cycle_transition_no_coinset(current)
 }
@@ -334,6 +337,7 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
             coinset_confirmed_tx_ids,
             coinset_mempool_tx_ids,
             None,
+            Utc::now(),
         )
         .unwrap_or_else(|err| panic!("{}: valid reconcile state: {err}", case.label));
         assert_eq!(
@@ -532,6 +536,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
         &[],
         &[],
         Some(&ctx),
+        Utc::now(),
     )
     .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
     assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
@@ -547,6 +552,7 @@ fn unknown_reconcile_state_is_rejected() {
         vec![],
         vec![],
         None,
+        Utc::now(),
     )
     .expect_err("unknown state should fail");
     assert_eq!(

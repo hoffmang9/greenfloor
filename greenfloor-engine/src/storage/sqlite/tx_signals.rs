@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rusqlite::params;
 
 use crate::error::{SignerError, SignerResult};
-use crate::hex::{canonical_tx_id, legacy_prefixed_tx_id};
+use crate::hex::{canonical_tx_id, extend_tx_id_lookup_candidates, tx_id_lookup_candidates};
 
 use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
 
@@ -19,16 +19,7 @@ impl SqliteStore {
     ) -> SignerResult<HashMap<String, TxSignalStateRow>> {
         let mut unique: Vec<String> = Vec::new();
         for tx_id in tx_ids {
-            let Some(normalized) = canonical_tx_id(tx_id) else {
-                continue;
-            };
-            for candidate in std::iter::once(normalized.clone()).chain(
-                legacy_prefixed_tx_id(&normalized).into_iter().filter(|legacy| legacy != &normalized),
-            ) {
-                if !unique.iter().any(|existing| existing == &candidate) {
-                    unique.push(candidate);
-                }
-            }
+            extend_tx_id_lookup_candidates(&mut unique, tx_id);
         }
         if unique.is_empty() {
             return Ok(HashMap::default());
@@ -131,13 +122,7 @@ impl SqliteStore {
     }
 
     fn confirm_one_tx_id(&self, now: &str, canonical: &str) -> SignerResult<u64> {
-        let mut candidates = vec![canonical.to_string()];
-        if let Some(legacy) = legacy_prefixed_tx_id(canonical) {
-            if legacy != canonical {
-                candidates.push(legacy);
-            }
-        }
-        for candidate in candidates {
+        for candidate in tx_id_lookup_candidates(canonical) {
             let changed = self
                 .conn
                 .execute(

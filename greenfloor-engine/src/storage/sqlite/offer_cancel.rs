@@ -141,52 +141,6 @@ impl SqliteStore {
         }))
     }
 
-    /// Load cancel-submit tracking fields for reconcile policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the operation fails.
-    pub fn cancel_submitted_tracking_for_id(
-        &self,
-        offer_id: &str,
-    ) -> SignerResult<Option<super::OfferCancelSubmittedTracking>> {
-        let clean = offer_id.trim();
-        if clean.is_empty() {
-            return Ok(None);
-        }
-        let mut stmt = self
-            .conn
-            .prepare(
-                r"
-            SELECT cancel_submitted_tx_id, updated_at
-            FROM offer_state
-            WHERE offer_id = ?1 AND state = 'cancel_submitted'
-            ",
-            )
-            .map_err(|err| {
-                SignerError::Other(format!(
-                    "failed to prepare cancel_submitted tracking query: {err}"
-                ))
-            })?;
-        let mut rows = stmt.query(params![clean]).map_err(|err| {
-            SignerError::Other(format!("failed to query cancel_submitted tracking: {err}"))
-        })?;
-        let Some(row) = rows.next().map_err(|err| {
-            SignerError::Other(format!(
-                "failed to read cancel_submitted tracking row: {err}"
-            ))
-        })?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(super::OfferCancelSubmittedTracking {
-            cancel_tx_id: row.get(0).ok(),
-            updated_at: row.get(1).map_err(|err| {
-                SignerError::Other(format!("failed to read cancel_submitted updated_at: {err}"))
-            })?,
-        }))
-    }
-
     /// Persist `cancel_submitted` and the submitted cancel transaction id.
     ///
     /// # Errors
@@ -219,16 +173,20 @@ impl SqliteStore {
         let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id).ok_or_else(|| {
             SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}"))
         })?;
-        self.upsert_offer_state_with_metadata_at(
-            offer_id,
-            market_id,
-            "cancel_submitted",
-            last_seen_status,
-            updated_at,
-            OfferCancelWrite {
-                cancel_submitted_tx_id: Some(stored_cancel_tx_id.as_str()),
-                ..OfferCancelWrite::default()
-            },
-        )
+        self.immediate_transaction("cancel_submitted", |store| {
+            store.upsert_offer_state_with_metadata_at(
+                offer_id,
+                market_id,
+                "cancel_submitted",
+                last_seen_status,
+                updated_at,
+                OfferCancelWrite {
+                    cancel_submitted_tx_id: Some(stored_cancel_tx_id.as_str()),
+                    ..OfferCancelWrite::default()
+                },
+            )?;
+            store.observe_mempool_tx_ids(std::slice::from_ref(&stored_cancel_tx_id))?;
+            Ok(())
+        })
     }
 }

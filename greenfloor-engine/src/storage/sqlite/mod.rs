@@ -71,12 +71,6 @@ pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) ->
     state_db_path_for_home(home_dir)
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct OfferCancelSubmittedTracking {
-    pub cancel_tx_id: Option<String>,
-    pub updated_at: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct OfferStateListRow {
     pub offer_id: String,

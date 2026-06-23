@@ -52,6 +52,30 @@ pub fn legacy_prefixed_tx_id(canonical: &str) -> Option<String> {
     canonical_tx_id(canonical).map(|id| format!("0x{id}"))
 }
 
+/// Canonical and legacy-prefixed tx ids for tolerant sqlite lookups.
+#[must_use]
+pub fn tx_id_lookup_candidates(value: &str) -> Vec<String> {
+    let Some(canonical) = canonical_tx_id(value) else {
+        return Vec::new();
+    };
+    let mut out = vec![canonical.clone()];
+    if let Some(legacy) = legacy_prefixed_tx_id(&canonical) {
+        if legacy != canonical {
+            out.push(legacy);
+        }
+    }
+    out
+}
+
+/// Append lookup candidates for *value* into *unique* without duplicates.
+pub fn extend_tx_id_lookup_candidates(unique: &mut Vec<String>, value: &str) {
+    for candidate in tx_id_lookup_candidates(value) {
+        if !unique.iter().any(|existing| existing == &candidate) {
+            unique.push(candidate);
+        }
+    }
+}
+
 #[must_use]
 pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
     if is_canonical_xch_asset(asset_id) {
@@ -64,7 +88,7 @@ pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex, normalize_hex_id};
-    use super::canonical_tx_id;
+    use super::{canonical_tx_id, tx_id_lookup_candidates};
 
     #[test]
     fn normalize_hex_strips_prefix_and_non_hex() {
@@ -90,6 +114,16 @@ mod tests {
     #[test]
     fn canonical_tx_id_rejects_invalid() {
         assert!(canonical_tx_id("not-hex").is_none());
+    }
+
+    #[test]
+    fn tx_id_lookup_candidates_include_canonical_and_legacy() {
+        let id = "a".repeat(64);
+        assert_eq!(
+            tx_id_lookup_candidates(&id),
+            vec![id.clone(), format!("0x{id}")]
+        );
+        assert_eq!(tx_id_lookup_candidates(&format!("0x{id}")), vec![id]);
     }
 
     #[test]
