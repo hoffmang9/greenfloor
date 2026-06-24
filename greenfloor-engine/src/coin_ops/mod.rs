@@ -17,7 +17,7 @@ mod shape_defer;
 pub mod shape_protection;
 mod wallet_coin;
 
-pub use amounts::{combine_output_amounts, total_for_coin_ids};
+pub use amounts::{combine_output_amounts, total_for_coin_ids, COMBINE_SINGLE_OUTPUT_COUNT};
 pub use effective_counts::effective_sell_bucket_counts_for_coin_ops;
 pub use execution::CoinOpExecContext;
 pub use fee_budget::{

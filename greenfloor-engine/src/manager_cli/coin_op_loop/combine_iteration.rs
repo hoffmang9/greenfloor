@@ -3,9 +3,7 @@ use std::collections::HashSet;
 
 use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::i64_to_usize;
-use crate::coin_ops::{
-    combine_output_amounts, plan_exact_amount_combine_inputs, total_for_coin_ids, SpendableCoin,
-};
+use crate::coin_ops::{plan_exact_amount_combine_inputs, SpendableCoin};
 use crate::error::{SignerError, SignerResult};
 
 use super::until_ready::LoopIterationOutcome;
@@ -18,7 +16,6 @@ pub(super) struct CombineIterationParams<'a> {
     pub number_of_coins: i64,
     pub target_coin_amount_mojos: i64,
     pub coin_ids: &'a [String],
-    pub combine_fee: u64,
     pub no_wait: bool,
 }
 
@@ -33,7 +30,6 @@ pub(super) async fn run_combine_iteration(
         number_of_coins,
         target_coin_amount_mojos,
         coin_ids,
-        combine_fee,
         no_wait,
     } = params;
     let requested_count = i64_to_usize(number_of_coins, "combine.number_of_coins")?;
@@ -61,10 +57,8 @@ pub(super) async fn run_combine_iteration(
         });
     }
 
-    let total = total_for_coin_ids(&spendable, &input_coin_ids);
-    let output_amounts = combine_output_amounts(total, 1)?;
     let operation_id = ctx
-        .execute_mixed_split(output_amounts, &input_coin_ids, combine_fee)
+        .execute_combine(&input_coin_ids, Some(&spendable))
         .await?;
     Ok(LoopIterationOutcome::Continue {
         operation: json!({

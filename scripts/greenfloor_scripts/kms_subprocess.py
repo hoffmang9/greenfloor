@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from greenfloor_scripts.engine_subprocess import run_engine_json
+from greenfloor_scripts.engine_subprocess import (
+    require_dict_payload,
+    require_str_field,
+    run_engine_json,
+)
 
 
 def get_public_key_compressed_hex(key_id: str, region: str) -> str:
-    payload = run_engine_json(
-        [
-            "kms-public-key-compressed-hex",
-            "--key-id",
-            key_id,
-            "--region",
-            region,
-        ]
+    payload = require_dict_payload(
+        run_engine_json(
+            [
+                "kms-public-key-compressed-hex",
+                "--key-id",
+                key_id,
+                "--region",
+                region,
+            ]
+        ),
+        "kms_cli_invalid_response",
     )
-    if not isinstance(payload, dict):
-        raise RuntimeError("kms_cli_invalid_response")
-    value = payload.get("public_key_compressed_hex")
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError("kms_cli_missing_public_key")
-    return value.strip()
+    return require_str_field(payload, "public_key_compressed_hex", "kms_cli_missing_public_key")

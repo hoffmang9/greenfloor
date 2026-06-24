@@ -1,12 +1,11 @@
 use crate::coinset::get_conservative_fee_estimate_for_signer;
 use crate::config::{
-    action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle_gated,
-    resolve_market_for_build, resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig,
-    SignerConfig,
+    action_side_from_pricing, load_gated_operator_market, resolve_offer_publish_settings,
+    ManagerProgramConfig, MarketConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
-use crate::offer::{normalize_offer_side, resolve_offer_assets_for_action};
+use crate::offer::{normalize_offer_side, resolve_market_offer_assets_for_action};
 
 use super::BuildAndPostOfferRequest;
 use crate::offer::operator::logging::{sync_manager_file_logging, warn_if_log_level_auto_healed};
@@ -34,20 +33,18 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    let bundle = load_program_bundle_gated(&request.program_path)?;
-    let program = bundle.program;
-    sync_manager_file_logging(&program.home_dir, &program.app_log_level)?;
-    warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
-    let markets = load_markets_config_with_overlay(
+    let loaded = load_gated_operator_market(
+        &request.program_path,
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
-    )?;
-    let market = resolve_market_for_build(
-        &markets,
+        &request.network,
         request.market_id.as_deref(),
         request.pair.as_deref(),
-        &request.network,
     )?;
+    let program = loaded.program;
+    sync_manager_file_logging(&program.home_dir, &program.app_log_level)?;
+    warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
+    let market = loaded.market;
     let (publish_venue, dexie_base_url, splash_base_url) = resolve_offer_publish_settings(
         &program,
         &request.network,
@@ -55,10 +52,9 @@ pub(super) async fn resolve_build_and_post_context(
         request.dexie_base_url.as_deref(),
         request.splash_base_url.as_deref(),
     )?;
-    let signer_config = bundle.signer;
-    let (resolved_base_asset_id, resolved_quote_asset_id) =
-        resolve_offer_assets_for_action(&signer_config, &market.base_asset, &market.quote_asset)
-            .await?;
+    let signer_config = loaded.signer;
+    let assets =
+        resolve_market_offer_assets_for_action(&signer_config, &market, &request.network).await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
     let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&signer_config).await;
@@ -70,8 +66,8 @@ pub(super) async fn resolve_build_and_post_context(
         publish_venue,
         dexie_base_url,
         splash_base_url,
-        resolved_base_asset_id,
-        resolved_quote_asset_id,
+        resolved_base_asset_id: assets.base_asset_id,
+        resolved_quote_asset_id: assets.quote_asset_id,
         quote_price,
         action_side,
         offer_fee_mojos,

@@ -1,6 +1,6 @@
 use crate::coin_ops::{
-    coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_exact_amount_combine_inputs, CoinOpPlan, SpendableCoin,
+    coin_op_target_amount_allowed, i64_to_usize, plan_exact_amount_combine_inputs, CoinOpPlan,
+    SpendableCoin,
 };
 
 use super::items::{
@@ -8,7 +8,6 @@ use super::items::{
 };
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::CoinOpExecContext;
-use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
 
 pub(crate) async fn execute_daemon_combine_plan(
     ctx: &CoinOpExecContext,
@@ -120,25 +119,8 @@ async fn submit_daemon_combine_plan(
         spendable,
     } = selection;
 
-    let total = total_for_coin_ids(spendable, combine_input_coin_ids);
-    let output_amounts = skip_on_signer_err(
-        op_type,
-        *size_base_units,
-        *op_count,
-        combine_output_amounts(total, combine_input_coin_ids.len()),
-    )?;
-    let fee_mojos = skip_on_signer_err(
-        op_type,
-        *size_base_units,
-        *op_count,
-        coin_op_non_negative_u64(
-            ctx.program.coin_ops_combine_fee_mojos,
-            "program.coin_ops_combine_fee_mojos",
-        ),
-    )?;
-
     match ctx
-        .execute_mixed_split(output_amounts, combine_input_coin_ids, fee_mojos)
+        .execute_combine(combine_input_coin_ids, Some(spendable))
         .await
     {
         Ok(operation_id) => Ok((

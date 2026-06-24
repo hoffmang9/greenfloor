@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from greenfloor_scripts.engine_subprocess import run_engine_json
+from greenfloor_scripts.engine_subprocess import (
+    require_dict_payload,
+    require_int_field,
+    require_list_field,
+    run_engine_json,
+)
 
 
 class HexNormalizer:
@@ -34,18 +39,23 @@ class HexNormalizer:
         unique = list(dict.fromkeys(values))
         if not unique:
             return
-        payload = run_engine_json(
-            [
-                "hex",
-                "normalize-batch",
-                "--values-json",
-                json.dumps(unique, separators=(",", ":")),
-            ]
+        payload = require_dict_payload(
+            run_engine_json(
+                [
+                    "hex",
+                    "normalize-batch",
+                    "--values-json",
+                    json.dumps(unique, separators=(",", ":")),
+                ]
+            ),
+            "hex_cli_invalid_response",
         )
-        if not isinstance(payload, dict):
-            raise RuntimeError("hex_cli_invalid_response")
-        normalized = payload.get("normalized")
-        if not isinstance(normalized, list) or len(normalized) != len(unique):
+        normalized = require_list_field(
+            payload,
+            "normalized",
+            "hex_cli_invalid_normalized_batch",
+        )
+        if len(normalized) != len(unique):
             raise RuntimeError("hex_cli_invalid_normalized_batch")
         for raw, normalized_value in zip(unique, normalized, strict=True):
             self._cache[raw] = str(normalized_value)
@@ -63,17 +73,16 @@ def normalize_hex_ids(values: list[str]) -> list[str]:
 
 
 def is_hex_id(value: str) -> bool:
-    payload = run_engine_json(["hex", "is-id", "--value", str(value)])
-    if not isinstance(payload, dict):
-        raise RuntimeError("hex_cli_invalid_response")
+    payload = require_dict_payload(
+        run_engine_json(["hex", "is-id", "--value", str(value)]),
+        "hex_cli_invalid_response",
+    )
     return bool(payload.get("is_hex_id"))
 
 
 def default_mojo_multiplier_for_asset(asset_id: str) -> int:
-    payload = run_engine_json(["hex", "default-mojo-multiplier", "--asset-id", asset_id])
-    if not isinstance(payload, dict):
-        raise RuntimeError("hex_cli_invalid_response")
-    multiplier = payload.get("multiplier")
-    if not isinstance(multiplier, int):
-        raise RuntimeError("hex_cli_missing_multiplier")
-    return multiplier
+    payload = require_dict_payload(
+        run_engine_json(["hex", "default-mojo-multiplier", "--asset-id", asset_id]),
+        "hex_cli_invalid_response",
+    )
+    return require_int_field(payload, "multiplier", "hex_cli_missing_multiplier")

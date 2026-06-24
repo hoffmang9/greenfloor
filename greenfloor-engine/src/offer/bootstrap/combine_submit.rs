@@ -2,7 +2,7 @@
 
 use super::amounts::base_units_to_mojos;
 use super::combine_inputs::BootstrapCombineInputs;
-use crate::coin_ops::combine_output_amounts;
+use crate::coin_ops::{combine_output_amounts, COMBINE_SINGLE_OUTPUT_COUNT};
 use crate::error::SignerResult;
 
 /// Single combine output in mojos for bootstrap combine-first (`target_amount` base units).
@@ -17,7 +17,7 @@ pub(crate) fn bootstrap_combine_vault_outputs(
     mojo_multiplier: i64,
 ) -> SignerResult<Vec<u64>> {
     let output_mojos = base_units_to_mojos(inputs.target_amount, mojo_multiplier);
-    combine_output_amounts(output_mojos, 1)
+    combine_output_amounts(output_mojos, COMBINE_SINGLE_OUTPUT_COUNT)
 }
 
 #[cfg(test)]

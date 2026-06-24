@@ -70,3 +70,34 @@ def run_engine_json(argv: list[str]) -> Any:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("engine_cli_invalid_json") from exc
+
+
+def require_dict_payload(payload: Any, error: str) -> dict[str, Any]:
+    """Return ``payload`` when it is a JSON object; otherwise raise ``RuntimeError``."""
+    if not isinstance(payload, dict):
+        raise RuntimeError(error)
+    return payload
+
+
+def require_str_field(payload: dict[str, Any], field: str, error: str) -> str:
+    """Return a non-empty string field from a JSON object payload."""
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(error)
+    return value.strip()
+
+
+def require_int_field(payload: dict[str, Any], field: str, error: str) -> int:
+    """Return an integer field from a JSON object payload."""
+    value = payload.get(field)
+    if not isinstance(value, int):
+        raise RuntimeError(error)
+    return value
+
+
+def require_list_field(payload: dict[str, Any], field: str, error: str) -> list[Any]:
+    """Return a list field from a JSON object payload."""
+    value = payload.get(field)
+    if not isinstance(value, list):
+        raise RuntimeError(error)
+    return value

@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from greenfloor_scripts.engine_subprocess import run_engine_json
+from greenfloor_scripts.engine_subprocess import (
+    require_dict_payload,
+    require_list_field,
+    require_str_field,
+    run_engine_json,
+)
 
 
 def _client_flags(network: str, base_url: str | None) -> list[str]:
@@ -29,13 +34,20 @@ def _height_flags(
 
 
 def resolve_client_cli(network: str, base_url: str | None) -> tuple[str, str]:
-    payload = run_engine_json(["coinset", "resolve-client", *_client_flags(network, base_url)])
-    if not isinstance(payload, dict):
-        raise RuntimeError("coinset_resolve_client_invalid_payload")
-    resolved_network = str(payload.get("network") or "").strip()
-    resolved_base_url = str(payload.get("base_url") or "").strip()
-    if not resolved_network or not resolved_base_url:
-        raise RuntimeError("coinset_resolve_client_missing_fields")
+    payload = require_dict_payload(
+        run_engine_json(["coinset", "resolve-client", *_client_flags(network, base_url)]),
+        "coinset_resolve_client_invalid_payload",
+    )
+    resolved_network = require_str_field(
+        payload,
+        "network",
+        "coinset_resolve_client_missing_fields",
+    )
+    resolved_base_url = require_str_field(
+        payload,
+        "base_url",
+        "coinset_resolve_client_missing_fields",
+    )
     return resolved_network, resolved_base_url
 
 
@@ -47,10 +59,10 @@ def push_tx_cli(network: str, base_url: str | None, spend_bundle_hex: str) -> di
         "--spend-bundle-hex",
         spend_bundle_hex,
     ]
-    payload = run_engine_json(argv)
-    if not isinstance(payload, dict):
-        raise RuntimeError("coinset_push_tx_invalid_response")
-    return payload
+    return require_dict_payload(
+        run_engine_json(argv),
+        "coinset_push_tx_invalid_response",
+    )
 
 
 def coin_records_cli(
@@ -72,12 +84,15 @@ def coin_records_cli(
         "--body-json",
         json.dumps(dict(body), separators=(",", ":")),
     ]
-    payload = run_engine_json(argv)
-    if not isinstance(payload, dict):
-        raise RuntimeError("coinset_coin_records_invalid_payload")
-    records = payload.get("coin_records")
-    if not isinstance(records, list):
-        raise RuntimeError("coinset_coin_records_missing_records")
+    payload = require_dict_payload(
+        run_engine_json(argv),
+        "coinset_coin_records_invalid_payload",
+    )
+    records = require_list_field(
+        payload,
+        "coin_records",
+        "coinset_coin_records_missing_records",
+    )
     return [record for record in records if isinstance(record, dict)]
 
 
@@ -99,8 +114,9 @@ def record_from_cli(
         "--key",
         key,
     ]
-    payload = run_engine_json(argv)
-    if not isinstance(payload, dict):
-        raise RuntimeError("coinset_record_invalid_payload")
+    payload = require_dict_payload(
+        run_engine_json(argv),
+        "coinset_record_invalid_payload",
+    )
     record = payload.get("record")
     return record if isinstance(record, dict) else None

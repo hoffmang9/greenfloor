@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, read_program_yaml, CycleProgramConfig,
-    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
+    load_daemon_cycle_config, CycleProgramConfig, ManagerProgramConfig, MarketConfig,
+    MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
@@ -104,22 +104,18 @@ pub struct MarketCycleContext<'a> {
 ///
 /// Returns an error if the operation fails.
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
-    let raw = read_program_yaml(&request.program_path)?;
-    let program = parse_program_config(&raw)?;
-    let program_config = CycleProgramConfig::from_parsed(program, &raw);
-    let network = program_config.program().network.clone();
-    let dexie_api_base = program_config.program().dexie_api_base.clone();
-    let markets = load_markets_config_with_overlay(
+    let loaded = load_daemon_cycle_config(
+        &request.program_path,
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
-    super::disabled_markets::log_disabled_markets_startup_once(&markets);
-    let dexie = DexieClient::new(dexie_api_base);
+    super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
+    let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
     let coin_watchlist = request.coin_watchlist.clone();
     Ok(DaemonCycleResources::with_program_config(
-        program_config,
-        markets,
-        network,
+        loaded.program_config,
+        loaded.markets,
+        loaded.network,
         dexie,
         DaemonCyclePaths::new(
             request.program_path.clone(),

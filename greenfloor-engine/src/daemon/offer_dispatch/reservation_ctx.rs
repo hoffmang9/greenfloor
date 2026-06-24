@@ -1,11 +1,10 @@
 use std::collections::BTreeSet;
 
-use crate::coinset::is_xch_like_asset;
 use crate::config::{MarketConfig, SignerConfig};
 use crate::cycle::ParallelReservationContext;
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
-use crate::offer::resolve_offer_assets_for_action;
+use crate::offer::{resolve_market_offer_assets_for_action, resolve_market_offer_fee_asset_id};
 
 pub fn reservation_wallet_id(signer: &SignerConfig) -> String {
     let encoded = hex::encode(signer.vault.launcher_id);
@@ -21,18 +20,9 @@ pub async fn parallel_reservation_context(
     market: &MarketConfig,
     fee_amount_mojos: i64,
 ) -> SignerResult<ParallelReservationContext> {
-    let quote_asset =
-        crate::config::resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
-    let (base_asset_id, quote_asset_id) =
-        resolve_offer_assets_for_action(signer_config, market.base_asset.trim(), &quote_asset)
-            .await?;
-    let fee_asset_id = if is_xch_like_asset(&quote_asset) {
-        quote_asset_id.clone()
-    } else {
-        resolve_offer_assets_for_action(signer_config, "xch", &quote_asset)
-            .await?
-            .0
-    };
+    let assets =
+        resolve_market_offer_assets_for_action(signer_config, market, program_network).await?;
+    let fee_asset_id = resolve_market_offer_fee_asset_id(signer_config, &assets).await?;
     let base_unit_mojo_multiplier = market
         .pricing
         .get("base_unit_mojo_multiplier")
@@ -45,8 +35,8 @@ pub async fn parallel_reservation_context(
         .unwrap_or(1000);
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     Ok(ParallelReservationContext {
-        base_asset_id: base_asset_id.trim().to_string(),
-        quote_asset_id: quote_asset_id.trim().to_string(),
+        base_asset_id: assets.base_asset_id.trim().to_string(),
+        quote_asset_id: assets.quote_asset_id.trim().to_string(),
         fee_asset_id: fee_asset_id.trim().to_string(),
         fee_amount_mojos,
         base_unit_mojo_multiplier,

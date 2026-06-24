@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::coinset::{
     self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset,
 };
-use crate::config::SignerConfig;
+use crate::config::{resolve_quote_asset_for_offer, MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
@@ -136,6 +136,70 @@ pub async fn resolve_offer_assets_for_action(
         }
         Err(_) => resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await,
     }
+}
+
+/// Resolve a market base asset id for coin-op and inventory paths (xch quote leg).
+///
+/// # Errors
+///
+/// Returns an error if asset resolution fails.
+pub async fn resolve_market_base_asset_id(
+    config: &SignerConfig,
+    base_asset: &str,
+) -> SignerResult<String> {
+    let (resolved_base_asset_id, _) =
+        resolve_offer_assets_for_action(config, base_asset.trim(), "xch").await?;
+    Ok(resolved_base_asset_id)
+}
+
+/// Resolved on-chain asset ids for a configured market row (offer build / reservations).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMarketOfferAssets {
+    pub base_asset_id: String,
+    pub quote_asset_id: String,
+    /// Network-normalized quote leg label used for asset resolution and fee routing.
+    pub quote_asset_for_offer: String,
+}
+
+/// Resolve base and quote asset ids for a configured market row (offer build / reservations).
+///
+/// # Errors
+///
+/// Returns an error if asset resolution fails.
+pub async fn resolve_market_offer_assets_for_action(
+    config: &SignerConfig,
+    market: &MarketConfig,
+    program_network: &str,
+) -> SignerResult<ResolvedMarketOfferAssets> {
+    let quote_asset_for_offer =
+        resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
+    let (base_asset_id, quote_asset_id) =
+        resolve_offer_assets_for_action(config, market.base_asset.trim(), &quote_asset_for_offer)
+            .await?;
+    Ok(ResolvedMarketOfferAssets {
+        base_asset_id,
+        quote_asset_id,
+        quote_asset_for_offer,
+    })
+}
+
+/// Resolve fee-leg asset id for parallel offer reservations.
+///
+/// # Errors
+///
+/// Returns an error if asset resolution fails.
+pub async fn resolve_market_offer_fee_asset_id(
+    config: &SignerConfig,
+    assets: &ResolvedMarketOfferAssets,
+) -> SignerResult<String> {
+    if is_xch_like_asset(&assets.quote_asset_for_offer) {
+        return Ok(assets.quote_asset_id.clone());
+    }
+    Ok(
+        resolve_offer_assets_for_action(config, "xch", &assets.quote_asset_for_offer)
+            .await?
+            .0,
+    )
 }
 
 fn leg_amounts_for_request(
