@@ -99,7 +99,7 @@ Applies to:
 
 **Height windows** (`start_height` / `end_height`) remain a separate, documented filter strategy for narrowing scans by confirmation height. They complement cursor pagination but do not replace it on very large single-puzzle-hash wallets.
 
-GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`) and script scans (`coinset/scan_client.rs`) follow cursor pages automatically.
+GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault singleton fetch (`coinset/vault_fetch.rs`), script scans (`coinset/scan_client.rs`), and the `post_coinset_coin_records` CLI adapter follow cursor pages automatically.
 
 ## Endpoint Catalog (Verified)
 

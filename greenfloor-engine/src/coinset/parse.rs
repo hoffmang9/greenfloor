@@ -103,19 +103,11 @@ pub(crate) fn ensure_complete_page(pagination: &CoinsetRecordsPagination) -> Sig
     Ok(())
 }
 
-pub(crate) fn coin_records_from_response(
-    response: GetCoinRecordsResponse,
-) -> SignerResult<Vec<CoinRecord>> {
-    let (records, _) = coin_records_page_from_response(response)?;
-    Ok(records)
-}
-
 pub(crate) fn coin_records_page_from_response(
     response: GetCoinRecordsResponse,
 ) -> SignerResult<(Vec<CoinRecord>, CoinsetRecordsPagination)> {
     ensure_coinset_typed_rpc_success(&response, "coinset request failed")?;
     let pagination = pagination_from_response(&response);
-    ensure_complete_page(&pagination)?;
     Ok((response.coin_records.unwrap_or_default(), pagination))
 }
 
@@ -420,6 +412,22 @@ mod tests {
         let pagination = pagination_from_payload(&payload);
         assert!(pagination.truncated);
         assert_eq!(pagination.next_cursor.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn coin_records_page_from_response_allows_truncated_without_cursor() {
+        let response = GetCoinRecordsResponse {
+            coin_records: Some(vec![]),
+            error: None,
+            success: true,
+            truncated: Some(true),
+            next_cursor: None,
+        };
+        let (records, pagination) =
+            coin_records_page_from_response(response).expect("single-page parse");
+        assert!(records.is_empty());
+        assert!(pagination.truncated);
+        assert!(pagination.next_cursor.is_none());
     }
 
     #[test]

@@ -7,16 +7,65 @@ use std::future::Future;
 
 use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient, GetCoinRecordsResponse};
-use serde_json::Value;
 
 use super::parse::{
-    coin_records_from_payload, coin_records_page_from_response, ensure_complete_page,
-    pagination_from_payload,
+    coin_records_page_from_response, ensure_complete_page, CoinsetRecordsPagination,
 };
 use super::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
+use crate::operator_log::LogContext;
 
 const MAX_COINSET_RECORD_PAGES: usize = 10_000;
+
+async fn fetch_all_coinset_pages<T, F, Fut>(
+    endpoint: &str,
+    mut fetch_page: F,
+) -> SignerResult<Vec<T>>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: Future<Output = SignerResult<(Vec<T>, CoinsetRecordsPagination)>>,
+{
+    let mut all = Vec::new();
+    let mut cursor = None;
+    for page_index in 0..MAX_COINSET_RECORD_PAGES {
+        let (page, pagination) = fetch_page(cursor.take()).await?;
+        let page_record_count = page.len();
+        all.extend(page);
+        crate::trace_event!(
+            DEBUG,
+            LogContext::COINSET,
+            "coinset_page_fetched",
+            {
+                endpoint = endpoint,
+                page_index = page_index,
+                page_record_count = page_record_count,
+                total_record_count = all.len(),
+                truncated = pagination.truncated,
+            };
+            "fetched coinset coin-record page"
+        );
+        if pagination.truncated {
+            ensure_complete_page(&pagination)?;
+            cursor = pagination.next_cursor;
+            continue;
+        }
+        return Ok(all);
+    }
+    Err(SignerError::Coinset(format!(
+        "coinset pagination exceeded {MAX_COINSET_RECORD_PAGES} pages for {endpoint}"
+    )))
+}
+
+async fn typed_coin_records_page<F, Fut>(
+    fetch: F,
+) -> SignerResult<(Vec<CoinRecord>, CoinsetRecordsPagination)>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<GetCoinRecordsResponse, reqwest::Error>>,
+{
+    let response = with_coinset_client_retries(fetch).await?;
+    coin_records_page_from_response(response)
+}
 
 /// Fetch all coin records for a puzzle hash, following Coinset cursor pages when present.
 ///
@@ -30,10 +79,11 @@ pub(crate) async fn coin_records_by_puzzle_hash(
     end_height: Option<u32>,
     include_spent_coins: Option<bool>,
 ) -> SignerResult<Vec<CoinRecord>> {
-    fetch_paginated_typed_records(|cursor| {
+    let client = client.clone();
+    fetch_all_coinset_pages("get_coin_records_by_puzzle_hash", move |cursor| {
         let client = client.clone();
         async move {
-            with_coinset_client_retries(|| {
+            typed_coin_records_page(|| {
                 let client = client.clone();
                 let cursor = cursor.clone();
                 async move {
@@ -54,27 +104,43 @@ pub(crate) async fn coin_records_by_puzzle_hash(
     .await
 }
 
-async fn fetch_paginated_typed_records<F, Fut>(mut fetch_page: F) -> SignerResult<Vec<CoinRecord>>
-where
-    F: FnMut(Option<String>) -> Fut,
-    Fut: Future<Output = SignerResult<GetCoinRecordsResponse>>,
-{
-    let mut all = Vec::new();
-    let mut cursor = None;
-    for _page_idx in 0..MAX_COINSET_RECORD_PAGES {
-        let response = fetch_page(cursor.take()).await?;
-        let (page, pagination) = coin_records_page_from_response(response)?;
-        all.extend(page);
-        if pagination.truncated {
-            ensure_complete_page(&pagination)?;
-            cursor = pagination.next_cursor;
-            continue;
+/// Fetch all coin records for parent ids, following Coinset cursor pages when present.
+///
+/// # Errors
+///
+/// Returns an error if any page fails or a truncated page lacks `next_cursor`.
+pub(crate) async fn coin_records_by_parent_ids(
+    client: &CoinsetClient,
+    parent_ids: Vec<Bytes32>,
+    start_height: Option<u32>,
+    end_height: Option<u32>,
+    include_spent_coins: Option<bool>,
+) -> SignerResult<Vec<CoinRecord>> {
+    let client = client.clone();
+    fetch_all_coinset_pages("get_coin_records_by_parent_ids", move |cursor| {
+        let client = client.clone();
+        let parent_ids = parent_ids.clone();
+        async move {
+            typed_coin_records_page(|| {
+                let client = client.clone();
+                let cursor = cursor.clone();
+                let parent_ids = parent_ids.clone();
+                async move {
+                    client
+                        .get_coin_records_by_parent_ids(
+                            parent_ids,
+                            start_height,
+                            end_height,
+                            include_spent_coins,
+                            cursor,
+                        )
+                        .await
+                }
+            })
+            .await
         }
-        return Ok(all);
-    }
-    Err(SignerError::Coinset(format!(
-        "coinset pagination exceeded {MAX_COINSET_RECORD_PAGES} pages"
-    )))
+    })
+    .await
 }
 
 /// Fetch all coin records from a JSON Coinset endpoint, following cursor pages when present.
@@ -82,36 +148,21 @@ where
 /// # Errors
 ///
 /// Returns an error if any page fails or a truncated page lacks `next_cursor`.
-pub(crate) async fn coin_records_from_json_endpoint<F, Fut>(
-    mut fetch_payload: F,
-) -> SignerResult<Vec<Value>>
+pub(crate) async fn coin_records_from_json_endpoint<T, F, Fut>(
+    endpoint: &str,
+    fetch_page: F,
+) -> SignerResult<Vec<T>>
 where
     F: FnMut(Option<String>) -> Fut,
-    Fut: Future<Output = SignerResult<Value>>,
+    Fut: Future<Output = SignerResult<(Vec<T>, CoinsetRecordsPagination)>>,
 {
-    let mut all = Vec::new();
-    let mut cursor = None;
-    for _page_idx in 0..MAX_COINSET_RECORD_PAGES {
-        let payload = fetch_payload(cursor.take()).await?;
-        let records = coin_records_from_payload(&payload)?;
-        let pagination = pagination_from_payload(&payload);
-        ensure_complete_page(&pagination)?;
-        all.extend(records);
-        if pagination.truncated {
-            cursor = pagination.next_cursor;
-            continue;
-        }
-        return Ok(all);
-    }
-    Err(SignerError::Coinset(format!(
-        "coinset pagination exceeded {MAX_COINSET_RECORD_PAGES} pages"
-    )))
+    fetch_all_coinset_pages(endpoint, fetch_page).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chia_sdk_coinset::CoinRecord;
+    use chia_sdk_coinset::{CoinRecord, GetCoinRecordsResponse};
     use serde_json::json;
 
     fn sample_record(amount: u64) -> CoinRecord {
@@ -128,28 +179,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_paginated_typed_records_follows_cursor() {
-        let pages = fetch_paginated_typed_records(|cursor| async move {
-            match cursor {
-                None => Ok(GetCoinRecordsResponse {
-                    coin_records: Some(vec![sample_record(1)]),
-                    error: None,
-                    success: true,
-                    truncated: Some(true),
-                    next_cursor: Some("page-2".to_string()),
-                }),
-                Some(cursor) if cursor == "page-2" => Ok(GetCoinRecordsResponse {
-                    coin_records: Some(vec![sample_record(2)]),
-                    error: None,
-                    success: true,
-                    truncated: None,
-                    next_cursor: None,
-                }),
-                Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
-            }
-        })
-        .await
-        .expect("paginated fetch");
+    async fn fetch_all_coinset_pages_follows_cursor_for_typed_responses() {
+        let pages =
+            fetch_all_coinset_pages("get_coin_records_by_puzzle_hash", |cursor| async move {
+                match cursor {
+                    None => coin_records_page_from_response(GetCoinRecordsResponse {
+                        coin_records: Some(vec![sample_record(1)]),
+                        error: None,
+                        success: true,
+                        truncated: Some(true),
+                        next_cursor: Some("page-2".to_string()),
+                    }),
+                    Some(cursor) if cursor == "page-2" => {
+                        coin_records_page_from_response(GetCoinRecordsResponse {
+                            coin_records: Some(vec![sample_record(2)]),
+                            error: None,
+                            success: true,
+                            truncated: None,
+                            next_cursor: None,
+                        })
+                    }
+                    Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
+                }
+            })
+            .await
+            .expect("paginated fetch");
 
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].coin.amount, 1);
@@ -157,9 +211,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_paginated_typed_records_errors_when_truncated_without_cursor() {
-        let err = fetch_paginated_typed_records(|_cursor| async {
-            Ok(GetCoinRecordsResponse {
+    async fn fetch_all_coinset_pages_errors_when_truncated_without_cursor() {
+        let err = fetch_all_coinset_pages("get_coin_records_by_puzzle_hash", |_cursor| async {
+            coin_records_page_from_response(GetCoinRecordsResponse {
                 coin_records: Some(vec![sample_record(1)]),
                 error: None,
                 success: true,
@@ -174,21 +228,28 @@ mod tests {
 
     #[tokio::test]
     async fn coin_records_from_json_endpoint_follows_cursor() {
-        let records = coin_records_from_json_endpoint(|cursor| async move {
-            match cursor {
-                None => Ok(json!({
-                    "success": true,
-                    "truncated": true,
-                    "next_cursor": "page-2",
-                    "coin_records": [{"coin": {"amount": 1}}]
-                })),
-                Some(cursor) if cursor == "page-2" => Ok(json!({
-                    "success": true,
-                    "coin_records": [{"coin": {"amount": 2}}]
-                })),
-                Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
-            }
-        })
+        let records = coin_records_from_json_endpoint(
+            "get_coin_records_by_puzzle_hashes",
+            |cursor| async move {
+                match cursor {
+                    None => Ok((
+                        vec![json!({"coin": {"amount": 1}})],
+                        CoinsetRecordsPagination {
+                            truncated: true,
+                            next_cursor: Some("page-2".to_string()),
+                        },
+                    )),
+                    Some(cursor) if cursor == "page-2" => Ok((
+                        vec![json!({"coin": {"amount": 2}})],
+                        CoinsetRecordsPagination {
+                            truncated: false,
+                            next_cursor: None,
+                        },
+                    )),
+                    Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
+                }
+            },
+        )
         .await
         .expect("json pagination");
 
