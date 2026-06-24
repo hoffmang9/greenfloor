@@ -8,6 +8,7 @@ use crate::coin_ops::aggregate_covers_without_single_coin;
 use super::amounts::BaseUnits;
 use super::combine_inputs::BootstrapCombineInputs;
 use super::combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
+use super::ladder::protected_ladder_coin_slots_by_size;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -161,12 +162,13 @@ pub fn plan_bootstrap_mixed_outputs(
         .map(|coin| coin.amount.get())
         .collect();
     let counts = count_exact_amount_coins(&spendable_amounts, &ladder_sizes);
+    let protected_slots = protected_ladder_coin_slots_by_size(&sorted_ladder);
 
     let mut deficits = Vec::new();
     let mut output_amounts = Vec::new();
     for row in &sorted_ladder {
         let size = row.size_base_units;
-        let required = row.target_count + row.split_buffer_count;
+        let required = protected_slots.get(&size).copied().unwrap_or(0);
         let current = *counts.get(&size).unwrap_or(&0);
         let deficit = required - current;
         if deficit <= 0 {
@@ -215,6 +217,7 @@ pub fn plan_bootstrap_mixed_outputs(
         let spendable_for_combine = spendable_for_combine(spendable_coins);
         let Some(combine_inputs) = build_bootstrap_combine_plan(
             &spendable_for_combine,
+            &sorted_ladder,
             BaseUnits::new(total_output_amount),
             combine_input_cap,
             combine_context,
@@ -587,5 +590,43 @@ mod tests {
         assert!(inputs.len() >= 2);
         assert!(inputs.len() <= 5);
         assert!(plan.source_amount() >= 100);
+    }
+
+    #[test]
+    fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
+        use crate::test_support::eco181_bootstrap_inventory::{
+            eco181_after_combine_coins, eco181_bootstrap_coins, eco181_bootstrap_ladder,
+        };
+
+        let ladder = eco181_bootstrap_ladder();
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &eco181_bootstrap_coins(),
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
+            panic!("expected combine-first plan")
+        };
+        assert_eq!(plan.total_output_amount, 100);
+
+        let remaining = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &eco181_after_combine_coins(),
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        );
+        match remaining {
+            BootstrapPlanOutcome::Ready => {}
+            BootstrapPlanOutcome::NeedsShape(ref split) => {
+                assert!(
+                    !split
+                        .deficits
+                        .iter()
+                        .any(|deficit| deficit.size_base_units == 100),
+                    "100 BU row must stay satisfied after combine: {remaining:?}"
+                );
+            }
+            other => panic!("unexpected post-combine outcome: {other:?}"),
+        }
     }
 }

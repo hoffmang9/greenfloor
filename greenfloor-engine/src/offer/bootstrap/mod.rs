@@ -5,8 +5,10 @@ mod combine_inputs;
 mod combine_plan;
 mod combine_submit;
 mod gate;
+mod ladder;
 mod phase;
 mod planner;
+mod replan;
 
 pub use amounts::{
     base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
@@ -25,3 +27,4 @@ pub use planner::{
     plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapFundingSource, BootstrapPlan,
     BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
 };
+pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};

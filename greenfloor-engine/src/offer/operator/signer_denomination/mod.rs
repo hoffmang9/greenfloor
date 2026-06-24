@@ -36,7 +36,7 @@ use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
 };
-use types::BootstrapPhaseFailure;
+use types::{BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure};
 
 #[cfg(test)]
 fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
@@ -94,15 +94,20 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> Bootstra
         bootstrap_plan,
         remaining,
     } = params;
-    let executed = bootstrap_executed_phase(&remaining);
-    let mut result = BootstrapPhaseResult::from_snapshot(executed);
-    result.fee_mojos = fee_mojos;
-    result.fee_source = fee_source;
-    result.fee_lookup_error = fee_lookup_error;
-    result.split_result = split_result;
-    result.wait_events = wait_events;
-    result.plan = Some(bootstrap_plan);
-    result
+    BootstrapPhaseResult::from_executed(
+        BootstrapExecutionMetadata {
+            fee_mojos,
+            fee_source,
+            fee_lookup_error,
+        },
+        bootstrap_executed_phase(&remaining),
+        BootstrapExecutedExtras {
+            wait_events,
+            split_result,
+            plan: Some(bootstrap_plan),
+            ..BootstrapExecutedExtras::empty()
+        },
+    )
 }
 
 pub(crate) async fn prepare_bootstrap_execution_plan(

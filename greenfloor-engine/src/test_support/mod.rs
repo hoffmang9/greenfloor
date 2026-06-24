@@ -6,6 +6,8 @@ pub mod bootstrap_shape;
 #[cfg(test)]
 pub mod build_and_post;
 #[cfg(test)]
+pub mod eco181_bootstrap_inventory;
+#[cfg(test)]
 mod export_fixtures_test;
 #[cfg(test)]
 pub mod fragmented_combine_cap_inventory;

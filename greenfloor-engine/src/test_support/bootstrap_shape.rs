@@ -41,29 +41,6 @@ pub fn coin_records_response(records: &[String]) -> String {
     )
 }
 
-/// Fragmented inventory (65+20+11+4) that requires combine-first for a 100 BU ladder row.
-#[must_use]
-pub fn fragmented_combine_first_spendable() -> Vec<BootstrapCoin> {
-    vec![
-        BootstrapCoin {
-            id: "sixty-five".to_string(),
-            amount: BaseUnits::new(65),
-        },
-        BootstrapCoin {
-            id: "twenty".to_string(),
-            amount: BaseUnits::new(20),
-        },
-        BootstrapCoin {
-            id: "eleven".to_string(),
-            amount: BaseUnits::new(11),
-        },
-        BootstrapCoin {
-            id: "four".to_string(),
-            amount: BaseUnits::new(4),
-        },
-    ]
-}
-
 /// ECO.181-style inventory (60 + four 10 BU) for cap-aware combine-first bootstrap tests.
 #[must_use]
 pub fn eco181_cap_combine_spendable() -> Vec<BootstrapCoin> {
@@ -127,23 +104,6 @@ pub fn eco181_cap_combine_shape_context(ladder: Vec<PlannerLadderRow>) -> Bootst
     combine_first_shape_context(
         BOOTSTRAP_TEST_RECEIVE,
         "xch",
-        BOOTSTRAP_TEST_MOJO_MULTIPLIER,
-        ladder,
-        &spendable,
-        5,
-    )
-}
-
-#[must_use]
-pub fn fragmented_combine_first_shape_context(
-    receive_address: &str,
-    split_asset_id: &str,
-    ladder: Vec<PlannerLadderRow>,
-) -> BootstrapShapeContext {
-    let spendable = fragmented_combine_first_spendable();
-    combine_first_shape_context(
-        receive_address,
-        split_asset_id,
         BOOTSTRAP_TEST_MOJO_MULTIPLIER,
         ladder,
         &spendable,
