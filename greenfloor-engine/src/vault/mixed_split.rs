@@ -60,16 +60,16 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
     Ok(())
 }
 
-/// Build and optionally broadcast vault cat mixed split.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
+enum CatSelection {
+    FetchFromCoinset,
+    Preselected(Vec<Cat>),
+}
+
+async fn build_vault_cat_mixed_split_with_selection(
     config: SignerConfig,
     request: MixedSplitRequest,
     broadcast: bool,
-    preselected_cats: Option<Vec<Cat>>,
+    selection_mode: CatSelection,
 ) -> SignerResult<MixedSplitResult> {
     validate_mixed_split_request(&request)?;
 
@@ -79,21 +79,24 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     let receive_puzzle_hash = decode_address(&request.receive_address)?;
 
     let target_total: u64 = request.output_amounts.iter().sum();
-    let selection = if let Some(cats) = preselected_cats {
-        coinset::coin_select::finalize_preselected_cats_for_spend(
-            cats,
-            &request.coin_ids,
-            target_total,
-        )?
-    } else {
-        backend
-            .select_cats_for_spend(
-                &request.receive_address,
-                request.asset_id,
+    let selection = match selection_mode {
+        CatSelection::Preselected(cats) => {
+            coinset::coin_select::finalize_preselected_cats_for_spend(
+                cats,
                 &request.coin_ids,
                 target_total,
-            )
-            .await?
+            )?
+        }
+        CatSelection::FetchFromCoinset => {
+            backend
+                .select_cats_for_spend(
+                    &request.receive_address,
+                    request.asset_id,
+                    &request.coin_ids,
+                    target_total,
+                )
+                .await?
+        }
     };
     let change_amount = selection.change_amount;
     if !request.allow_sub_cat_output && change_amount > 0 && change_amount < MIN_CAT_OUTPUT_MOJOS {
@@ -130,6 +133,48 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
         target_total,
         change_amount,
     })
+}
+
+/// Build and optionally broadcast vault cat mixed split.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
+    config: SignerConfig,
+    request: MixedSplitRequest,
+    broadcast: bool,
+) -> SignerResult<MixedSplitResult> {
+    build_vault_cat_mixed_split_with_selection(
+        config,
+        request,
+        broadcast,
+        CatSelection::FetchFromCoinset,
+    )
+    .await
+}
+
+/// Build and optionally broadcast a vault mixed split using lineage-proven CAT inputs.
+///
+/// Used by dust combine after lineage preflight; callers must pass cats that match
+/// `request.coin_ids` (enforced at selection time).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub(crate) async fn build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats(
+    config: SignerConfig,
+    request: MixedSplitRequest,
+    preselected_cats: Vec<Cat>,
+    broadcast: bool,
+) -> SignerResult<MixedSplitResult> {
+    build_vault_cat_mixed_split_with_selection(
+        config,
+        request,
+        broadcast,
+        CatSelection::Preselected(preselected_cats),
+    )
+    .await
 }
 
 async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(

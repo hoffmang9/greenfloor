@@ -121,7 +121,7 @@ async fn run_coin_combine_async(request: CoinCombineRequest<'_>) -> SignerResult
         .map(|entry| combine_threshold_count(entry.target_count, entry.combine_when_excess_factor))
         .transpose()?;
 
-    let (operations, completion) = run_until_ready_loop(
+    let (operations, completion) = Box::pin(run_until_ready_loop(
         &exec_ctx,
         UntilReadyLoopConfig {
             wait,
@@ -152,7 +152,7 @@ async fn run_coin_combine_async(request: CoinCombineRequest<'_>) -> SignerResult
                 no_wait: wait.no_wait,
             })
         },
-    )
+    ))
     .await?;
 
     finish_coin_op_command(

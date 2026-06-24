@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use crate::coinset::{
-    direct_coinset_client, explicit_coinset_url_override, resolve_direct_client, CoinsetClient,
-    DEFAULT_COINSET_BASE_URL,
+    direct_coinset_client, effective_coinset_base_url, explicit_coinset_url_override,
+    resolve_direct_client, CoinsetClient, DEFAULT_COINSET_BASE_URL,
 };
 use crate::config::{
     parse_signer_config, program_bundle_gated_from_parsed, ManagerProgramConfig, SignerConfig,
@@ -28,7 +28,7 @@ pub fn resolve_combine_coinset_context(
         .unwrap_or(program_network);
     let resolved = resolve_direct_client(network_source, coinset_base_url);
     let base_url = explicit_coinset_url_override(coinset_base_url).map_or_else(
-        || program_coinset_base_url.trim_end_matches('/').to_string(),
+        || effective_coinset_base_url(resolved.network, program_coinset_base_url),
         |url| url.trim_end_matches('/').to_string(),
     );
     CombineCoinsetContext {
@@ -41,13 +41,13 @@ impl CombineCoinsetContext {
     pub fn program_default_coinset_base_url(raw: &Value) -> String {
         parse_signer_config(raw).map_or_else(
             |_| DEFAULT_COINSET_BASE_URL.to_string(),
-            |cfg| cfg.coinset_msp_base_url,
+            |cfg| cfg.coinset_base_url,
         )
     }
 
     pub fn apply_to_execution_signer(&self, mut signer: SignerConfig) -> SignerConfig {
         signer.network.clone_from(&self.network);
-        signer.coinset_msp_base_url.clone_from(&self.base_url);
+        signer.coinset_base_url.clone_from(&self.base_url);
         signer
     }
 
@@ -77,7 +77,7 @@ pub(crate) fn load_execution_signer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coinset::MAINNET_DIRECT_BASE_URL;
+    use crate::coinset::{MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL};
     use crate::vault::context::VaultCustodySnapshot;
     use chia_sdk_coinset::ChiaRpcClient;
 
@@ -109,7 +109,31 @@ mod tests {
             "https://api.coinset.org",
         );
         assert_eq!(ctx.network, "testnet11");
-        assert_eq!(ctx.base_url, "https://api.coinset.org");
+        assert_eq!(ctx.base_url, TESTNET11_DIRECT_BASE_URL);
+    }
+
+    #[test]
+    fn resolve_context_uses_testnet11_coinset_when_program_has_mainnet_default() {
+        let ctx = resolve_combine_coinset_context(
+            Some("testnet11"),
+            None,
+            "mainnet",
+            DEFAULT_COINSET_BASE_URL,
+        );
+        assert_eq!(ctx.network, "testnet11");
+        assert_eq!(ctx.base_url, TESTNET11_DIRECT_BASE_URL);
+    }
+
+    #[test]
+    fn resolve_context_honors_custom_program_coinset_on_testnet11() {
+        let ctx = resolve_combine_coinset_context(
+            Some("testnet11"),
+            None,
+            "mainnet",
+            "https://coinset.custom",
+        );
+        assert_eq!(ctx.network, "testnet11");
+        assert_eq!(ctx.base_url, "https://coinset.custom");
     }
 
     #[test]
@@ -134,7 +158,7 @@ mod tests {
         );
         let signer = SignerConfig {
             network: "mainnet".to_string(),
-            coinset_msp_base_url: "https://api.coinset.org".to_string(),
+            coinset_base_url: "https://api.coinset.org".to_string(),
             kms_key_id: "key".to_string(),
             kms_region: "us-west-2".to_string(),
             kms_public_key_hex: None,
@@ -150,7 +174,14 @@ mod tests {
         };
         let got = ctx.apply_to_execution_signer(signer);
         assert_eq!(got.network, "testnet11");
-        assert_eq!(got.coinset_msp_base_url, "https://coinset.custom");
+        assert_eq!(got.coinset_base_url, "https://coinset.custom");
+    }
+
+    #[test]
+    fn resolve_context_falls_back_to_network_direct_default_when_program_empty() {
+        let ctx = resolve_combine_coinset_context(None, None, "testnet11", "");
+        assert_eq!(ctx.network, "testnet11");
+        assert_eq!(ctx.base_url, TESTNET11_DIRECT_BASE_URL);
     }
 
     #[test]

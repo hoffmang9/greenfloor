@@ -79,12 +79,37 @@ pub fn resolve_direct_client(network: &str, base_url: Option<&str>) -> ResolvedD
     }
 }
 
+fn canonical_coinset_base_url_mismatches_network(configured_url: &str, network: &str) -> bool {
+    match network {
+        "testnet11" => configured_url == MAINNET_DIRECT_BASE_URL,
+        "mainnet" => configured_url == TESTNET11_DIRECT_BASE_URL,
+        _ => false,
+    }
+}
+
+/// Pick the Coinset base URL for an operator network and configured signer value.
+///
+/// Empty configured URLs and canonical defaults for the wrong network fall back to the
+/// network-native direct Coinset host.
+#[must_use]
+pub fn effective_coinset_base_url(network: &str, configured_url: &str) -> String {
+    let network = normalize_coinset_network(network);
+    let configured = configured_url.trim().trim_end_matches('/');
+    if configured.is_empty() {
+        return resolve_direct_coinset_base_url(network, None);
+    }
+    if canonical_coinset_base_url_mismatches_network(configured, network) {
+        return resolve_direct_coinset_base_url(network, None);
+    }
+    configured.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        explicit_coinset_url_override, is_legacy_coinset_host_alias, normalize_coinset_network,
-        normalize_direct_base_url_input, resolve_direct_client, resolve_direct_coinset_base_url,
-        MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+        effective_coinset_base_url, explicit_coinset_url_override, is_legacy_coinset_host_alias,
+        normalize_coinset_network, normalize_direct_base_url_input, resolve_direct_client,
+        resolve_direct_coinset_base_url, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
     };
 
     #[test]
@@ -146,5 +171,29 @@ mod tests {
         let resolved = resolve_direct_client("testnet", Some("https://coinset.org"));
         assert_eq!(resolved.network, "testnet11");
         assert_eq!(resolved.base_url, TESTNET11_DIRECT_BASE_URL);
+    }
+
+    #[test]
+    fn effective_coinset_base_url_uses_network_default_when_configured_empty() {
+        assert_eq!(
+            effective_coinset_base_url("testnet11", ""),
+            TESTNET11_DIRECT_BASE_URL
+        );
+    }
+
+    #[test]
+    fn effective_coinset_base_url_replaces_mainnet_default_on_testnet11() {
+        assert_eq!(
+            effective_coinset_base_url("testnet11", MAINNET_DIRECT_BASE_URL),
+            TESTNET11_DIRECT_BASE_URL
+        );
+    }
+
+    #[test]
+    fn effective_coinset_base_url_honors_custom_configured_url() {
+        assert_eq!(
+            effective_coinset_base_url("testnet11", "https://coinset.custom"),
+            "https://coinset.custom"
+        );
     }
 }

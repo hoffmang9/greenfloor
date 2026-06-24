@@ -6,7 +6,7 @@ use chia_puzzle_types::cat::CatArgs;
 use chia_traits::Streamable;
 use serde::Serialize;
 
-use super::{cats, direct_coinset_client, is_xch_like_asset, msp, xch::list_unspent_xch};
+use super::{cats, direct_coinset_client, is_xch_like_asset, signer_client, xch::list_unspent_xch};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
@@ -56,7 +56,7 @@ pub async fn list_wallet_unspent_coins_for_signer(
         network,
         receive_address,
         asset_id,
-        msp::coinset_base_url_for_signer(signer),
+        signer_client::coinset_base_url_for_signer(signer),
     )
     .await
 }

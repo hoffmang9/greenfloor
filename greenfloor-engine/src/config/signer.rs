@@ -16,7 +16,7 @@ use crate::coinset::DEFAULT_COINSET_BASE_URL;
 #[derive(Debug, Clone)]
 pub struct SignerConfig {
     pub network: String,
-    pub coinset_msp_base_url: String,
+    pub coinset_base_url: String,
     pub kms_key_id: String,
     pub kms_region: String,
     pub kms_public_key_hex: Option<String>,
@@ -51,25 +51,32 @@ pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
         .unwrap_or("us-west-2")
         .to_string();
     let kms_public_key_hex = optional_trimmed_string(signer.get("kms_public_key_hex"));
-    let coinset_msp_base_url = signer
-        .get("coinset_msp_base_url")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_COINSET_BASE_URL)
-        .to_string();
+    let coinset_base_url = parse_signer_coinset_base_url(signer);
 
     let vault_snapshot = parse_vault_section(vault)?;
 
     Ok(SignerConfig {
         network,
-        coinset_msp_base_url,
+        coinset_base_url,
         kms_key_id,
         kms_region,
         kms_public_key_hex,
         kms_runtime: KmsRuntime::production(),
         vault: vault_snapshot,
     })
+}
+
+fn parse_signer_coinset_base_url(signer: &serde_json::Map<String, Value>) -> String {
+    let read = |key: &str| {
+        signer
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    read("coinset_base_url")
+        .unwrap_or(DEFAULT_COINSET_BASE_URL)
+        .to_string()
 }
 
 /// Load signer config.
@@ -185,7 +192,7 @@ app:
 signer:
   kms_key_id: arn:aws:kms:us-west-2:123:key/abc
   kms_region: us-west-2
-  coinset_msp_base_url: https://api.coinset.org
+  coinset_base_url: https://api.coinset.org
 vault:
   launcher_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   custody_threshold: 1

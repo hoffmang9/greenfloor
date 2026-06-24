@@ -41,7 +41,6 @@ async fn submit_bootstrap_vault_mixed_split(
             fee_mojos: 0,
         },
         true,
-        None,
     )
     .await?;
     Ok(json!({

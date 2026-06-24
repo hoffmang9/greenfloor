@@ -99,7 +99,7 @@ This file summarizes the public API docs at `https://dexie.space/api` and relate
 - Dexie does **not** expose a public cancel API. Cancelling an offer means spending an offered input coin on-chain (typically back to vault change). GreenFloor:
   1. Fetches the offer file via `GET /v1/offers/:id`
   2. Builds a reclaim/cancel spend bundle in Rust (`offer/reclaim.rs`)
-  3. Submits the spend through Coinset MSP (`push_tx` / broadcast helpers)
+  3. Submits the spend through the direct Coinset HTTP API (`push_tx` / broadcast helpers)
 - Dexie is **not** called to delete or cancel the listing; venue status updates follow chain observation.
 - After on-chain cancel submit, GreenFloor records operator state `cancel_submitted` until reconcile confirms cancellation.
 - After the cancel spend confirms on-chain, Dexie status may transition to `2` (Cancelling) then `3` (Cancelled).

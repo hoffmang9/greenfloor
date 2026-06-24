@@ -3,7 +3,7 @@ use chia_traits::Streamable;
 use serde_json::{json, Value};
 
 use super::super::broadcast::broadcast_spend_bundle;
-use super::super::msp::coinset_base_url_for_signer;
+use super::super::signer_client::coinset_base_url_for_signer;
 use super::rpc::{direct_coinset_client, post_coinset_rpc};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};

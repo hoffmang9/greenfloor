@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::coinset::{
-    self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset,
+    self, client_for_signer, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids,
 };
 use crate::config::{resolve_quote_asset_for_offer, MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
@@ -115,8 +115,8 @@ pub async fn resolve_offer_assets_via_coinset(
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    let msp = MspCoinset::for_signer(config)?;
-    resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
+    let client = client_for_signer(config)?;
+    resolve_offer_asset_ids(&client, base_asset, quote_asset).await
 }
 
 /// Resolve offer assets for action.

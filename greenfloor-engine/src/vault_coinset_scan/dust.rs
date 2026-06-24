@@ -18,10 +18,55 @@ pub struct DustCoin {
     pub amount: u64,
 }
 
+/// Lineage-proven dust coin paired with its spend-ready [`Cat`].
+#[derive(Debug, Clone)]
+pub struct ProvenDustCoin {
+    pub dust: DustCoin,
+    pub cat: Cat,
+}
+
+impl ProvenDustCoin {
+    /// Build a proven dust coin after validating coin id and amount alignment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SignerError::ProvenDustCoinMismatch`] when `dust` and `cat` disagree.
+    pub fn new(dust: DustCoin, cat: Cat) -> SignerResult<Self> {
+        let cat_coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
+        if dust.coin_id != cat_coin_id || dust.amount != cat.coin.amount {
+            return Err(crate::error::SignerError::ProvenDustCoinMismatch);
+        }
+        Ok(Self { dust, cat })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DustCombineBatch {
-    pub coins: Vec<DustCoin>,
-    pub cats: Vec<Cat>,
+    pub items: Vec<ProvenDustCoin>,
+}
+
+impl DustCombineBatch {
+    #[must_use]
+    pub fn total_amount(&self) -> u64 {
+        self.items.iter().map(|item| item.dust.amount).sum()
+    }
+
+    /// Coin ids for batch items in spend order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any dust coin id is not valid hex.
+    pub fn coin_ids(&self) -> SignerResult<Vec<Bytes32>> {
+        self.items
+            .iter()
+            .map(|item| hex_to_bytes32(&item.dust.coin_id))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn cats(&self) -> Vec<Cat> {
+        self.items.iter().map(|item| item.cat).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +110,7 @@ pub fn dust_coins_from_scan(coins: &[CoinRow], dust_threshold_mojos: u64) -> Vec
 
 /// Resolve spend-ready [`Cat`] values for dust coins (same bar as `list_unspent_cats`).
 ///
-/// Returns proven `(dust, cat)` pairs in scan order and coins that failed lineage.
+/// Returns proven dust/cat pairs in scan order and coins that failed lineage.
 ///
 /// # Errors
 ///
@@ -73,7 +118,7 @@ pub fn dust_coins_from_scan(coins: &[CoinRow], dust_threshold_mojos: u64) -> Vec
 pub async fn prove_dust_coins_lineage(
     client: &CoinsetClient,
     dust_coins: &[DustCoin],
-) -> SignerResult<(Vec<(DustCoin, Cat)>, Vec<DustCoin>)> {
+) -> SignerResult<(Vec<ProvenDustCoin>, Vec<DustCoin>)> {
     if dust_coins.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -94,7 +139,7 @@ pub async fn prove_dust_coins_lineage(
     let mut lineage_excluded = Vec::new();
     for coin in dust_coins {
         if let Some(cat) = cat_by_id.remove(&coin.coin_id) {
-            proven.push((coin.clone(), cat));
+            proven.push(ProvenDustCoin::new(coin.clone(), cat)?);
         } else {
             lineage_excluded.push(coin.clone());
         }
@@ -137,7 +182,7 @@ pub async fn plan_dust_from_scan_with_lineage(
 }
 
 #[must_use]
-pub fn plan_dust_batches(proven: &[(DustCoin, Cat)], batch_size: usize) -> DustBatchPlan {
+pub fn plan_dust_batches(proven: &[ProvenDustCoin], batch_size: usize) -> DustBatchPlan {
     let size = batch_size.max(2);
     if proven.is_empty() {
         return DustBatchPlan {
@@ -150,13 +195,12 @@ pub fn plan_dust_batches(proven: &[(DustCoin, Cat)], batch_size: usize) -> DustB
         .chunks(size)
         .take(full_batches)
         .map(|chunk| DustCombineBatch {
-            coins: chunk.iter().map(|(coin, _)| coin.clone()).collect(),
-            cats: chunk.iter().map(|(_, cat)| *cat).collect(),
+            items: chunk.to_vec(),
         })
         .collect();
     let uncombinable = proven[full_batches * size..]
         .iter()
-        .map(|(coin, _)| coin.clone())
+        .map(|item| item.dust.clone())
         .collect();
     DustBatchPlan {
         combinable_batches,
@@ -187,20 +231,15 @@ mod tests {
         }
     }
 
-    fn dust_pair(coin_id: &str, amount: u64) -> (DustCoin, Cat) {
+    fn proven_dust(coin_id: &str, amount: u64) -> ProvenDustCoin {
         let mut cat = cat_with_amount(amount);
         cat.coin = chia_protocol::Coin::new(
             hex_to_bytes32(coin_id).expect("coin id"),
             cat.coin.puzzle_hash,
             amount,
         );
-        (
-            DustCoin {
-                coin_id: normalize_hex_id(coin_id),
-                amount,
-            },
-            cat,
-        )
+        let coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
+        ProvenDustCoin::new(DustCoin { coin_id, amount }, cat).expect("proven dust")
     }
 
     #[test]
@@ -220,19 +259,57 @@ mod tests {
     }
 
     #[test]
+    fn proven_dust_coin_new_rejects_mismatched_coin_id_or_amount() {
+        let mut cat = cat_with_amount(100);
+        cat.coin = chia_protocol::Coin::new(
+            hex_to_bytes32(&"a".repeat(64)).expect("coin id"),
+            cat.coin.puzzle_hash,
+            100,
+        );
+        let err = ProvenDustCoin::new(
+            DustCoin {
+                coin_id: "b".repeat(64),
+                amount: 100,
+            },
+            cat,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::SignerError::ProvenDustCoinMismatch
+        ));
+
+        let mut cat = cat_with_amount(50);
+        cat.coin = chia_protocol::Coin::new(
+            hex_to_bytes32(&"a".repeat(64)).expect("coin id"),
+            cat.coin.puzzle_hash,
+            50,
+        );
+        let err = ProvenDustCoin::new(
+            DustCoin {
+                coin_id: "a".repeat(64),
+                amount: 100,
+            },
+            cat,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::SignerError::ProvenDustCoinMismatch
+        ));
+    }
+
+    #[test]
     fn plan_dust_batches_keeps_orphans_out_of_combinable_batches() {
-        let proven: Vec<(DustCoin, Cat)> =
-            (0..5).map(|i| dust_pair(&format!("{i:064x}"), 1)).collect();
+        let proven: Vec<ProvenDustCoin> = (0..5)
+            .map(|i| proven_dust(&format!("{i:064x}"), 1))
+            .collect();
         let plan = plan_dust_batches(&proven, 2);
         assert_eq!(plan.combinable_batches.len(), 2);
-        assert_eq!(plan.combinable_batches[0].coins.len(), 2);
-        assert_eq!(plan.combinable_batches[0].cats.len(), 2);
-        assert_eq!(plan.combinable_batches[1].coins.len(), 2);
+        assert_eq!(plan.combinable_batches[0].items.len(), 2);
+        assert_eq!(plan.combinable_batches[1].items.len(), 2);
         assert_eq!(plan.uncombinable.len(), 1);
-        assert_eq!(
-            plan.uncombinable[0].coin_id,
-            "0000000000000000000000000000000000000000000000000000000000000004"
-        );
+        assert_eq!(plan.uncombinable[0].coin_id, proven[4].dust.coin_id);
     }
 
     #[tokio::test]
@@ -320,8 +397,8 @@ mod tests {
             .await
             .expect("filter");
         assert_eq!(proven.len(), 1);
-        assert_eq!(proven[0].0.coin_id, dust[0].coin_id);
-        assert_eq!(proven[0].1.coin.amount, good_cat.coin.amount);
+        assert_eq!(proven[0].dust.coin_id, dust[0].coin_id);
+        assert_eq!(proven[0].cat.coin.amount, good_cat.coin.amount);
         assert_eq!(excluded.len(), 1);
         assert_eq!(excluded[0].coin_id, bad_coin_id);
     }

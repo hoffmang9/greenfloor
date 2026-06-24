@@ -1,7 +1,11 @@
 mod batches;
 mod coinset_context;
+#[cfg(test)]
+mod combine_test_support;
 mod execute;
 mod jobs;
+#[cfg(test)]
+mod lineage_e2e_test;
 mod report;
 #[cfg(test)]
 mod report_test;

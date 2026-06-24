@@ -93,7 +93,7 @@ pub(crate) fn attach_dust_plan_fields(
         .batches
         .combinable_batches
         .iter()
-        .map(|batch| batch.coins.len())
+        .map(|batch| batch.items.len())
         .sum::<usize>()
         + plan.batches.uncombinable.len();
     job_report["dust_coin_count"] = json!(plan.scan_dust_count);

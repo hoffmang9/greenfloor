@@ -87,7 +87,7 @@ async fn run_signer_denomination_phase_skips_missing_receive_address() {
 }
 
 #[tokio::test]
-async fn run_signer_denomination_phase_uses_signer_coinset_msp_base_url_for_coin_list() {
+async fn run_signer_denomination_phase_uses_signer_coinset_base_url_for_coin_list() {
     use crate::config::ManagerProgramConfig;
     use crate::test_support::ladder::market_with_side_ladder;
     use crate::test_support::signer_config::test_signer_config;

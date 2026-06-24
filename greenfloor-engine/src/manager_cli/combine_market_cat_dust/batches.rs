@@ -7,6 +7,14 @@ fn coin_ids_json(coins: &[DustCoin]) -> Value {
     json!(coins.iter().map(|coin| &coin.coin_id).collect::<Vec<_>>())
 }
 
+fn batch_coin_ids_json(batch: &DustCombineBatch) -> Value {
+    json!(batch
+        .items
+        .iter()
+        .map(|item| &item.dust.coin_id)
+        .collect::<Vec<_>>())
+}
+
 fn single_coin_status_entry(coin: &DustCoin, status: &str) -> Value {
     json!({
         "coin_ids": coin_ids_json(std::slice::from_ref(coin)),
@@ -18,7 +26,7 @@ pub fn preview_batches_report(plan: &DustPlan, can_combine: bool) -> Value {
     let mut entries = Vec::new();
     for batch in &plan.batches.combinable_batches {
         entries.push(json!({
-            "coin_ids": coin_ids_json(&batch.coins),
+            "coin_ids": batch_coin_ids_json(batch),
             "status": "preview",
             "would_combine": can_combine,
         }));
@@ -34,7 +42,7 @@ pub fn preview_batches_report(plan: &DustPlan, can_combine: bool) -> Value {
 
 pub fn executed_batch_entry(batch: &DustCombineBatch, result: &MixedSplitResult) -> Value {
     json!({
-        "coin_ids": coin_ids_json(&batch.coins),
+        "coin_ids": batch_coin_ids_json(batch),
         "status": "executed",
         "exit_code": 0,
         "payload": {
@@ -49,7 +57,7 @@ pub fn executed_batch_entry(batch: &DustCombineBatch, result: &MixedSplitResult)
 
 pub fn failed_batch_entry(batch: &DustCombineBatch, err: &str) -> Value {
     json!({
-        "coin_ids": coin_ids_json(&batch.coins),
+        "coin_ids": batch_coin_ids_json(batch),
         "status": "failed",
         "exit_code": 1,
         "stderr_tail": err,
@@ -77,28 +85,25 @@ pub fn append_lineage_excluded_entries(report: &mut Value, coins: &[DustCoin]) {
 mod tests {
     use super::*;
     use crate::coinset::test_support::cat_with_amount;
-    use crate::hex::hex_to_bytes32;
-    use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin};
+    use crate::hex::{hex_to_bytes32, normalize_hex_id};
+    use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin, ProvenDustCoin};
 
-    fn dust_pair(coin_id: &str, amount: u64) -> (DustCoin, chia_sdk_driver::Cat) {
+    fn proven_dust(coin_id: &str, amount: u64) -> ProvenDustCoin {
         let mut cat = cat_with_amount(amount);
         cat.coin = chia_protocol::Coin::new(
             hex_to_bytes32(coin_id).expect("coin id"),
             cat.coin.puzzle_hash,
             amount,
         );
-        (
-            DustCoin {
-                coin_id: coin_id.to_string(),
-                amount,
-            },
-            cat,
-        )
+        let coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
+        ProvenDustCoin::new(DustCoin { coin_id, amount }, cat).expect("proven dust")
     }
 
     #[test]
     fn preview_batches_report_uses_unified_schema() {
-        let proven: Vec<_> = (0..3).map(|i| dust_pair(&format!("{i:064x}"), 1)).collect();
+        let proven: Vec<_> = (0..3)
+            .map(|i| proven_dust(&format!("{i:064x}"), 1))
+            .collect();
         let batches = plan_dust_batches(&proven, 2);
         let plan = DustPlan {
             scan_dust_count: 3,

@@ -146,7 +146,6 @@ impl CoinOpExecContext {
             self.signer_config.clone(),
             request,
             true,
-            None,
         )
         .await?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)

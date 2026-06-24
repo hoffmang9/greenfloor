@@ -16,7 +16,7 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
 ## Decision
 
 1. **Cancel is on-chain only.** Dexie is used to fetch the offer file (`GET /v1/offers/:id`).
-   Coinset MSP submits the cancel spend bundle (`push_tx` / broadcast helpers in
+   Direct Coinset HTTP API submits the cancel spend bundle (`push_tx` / broadcast helpers in
    `greenfloor-engine/src/coinset/`).
 
 2. **Shared spend construction lives in `offer/reclaim.rs`.**

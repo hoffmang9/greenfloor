@@ -14,7 +14,7 @@ Accepted (2026-05); operator scope finalized by
 - **Operators:** vault KMS signing, offer creation, offer cancel/reclaim spends, bootstrap
   mixed-splits, and asset resolution run in-process in `greenfloor-engine`.
 - **Scripts:** Coinset push/fee via `greenfloor-engine coinset …` CLI subcommands.
-- **On-chain IO:** Coinset MSP via Rust (`greenfloor-engine/src/coinset/`).
+- **On-chain IO:** direct Coinset HTTP API via Rust (`greenfloor-engine/src/coinset/`).
 - Cloud Wallet GraphQL is removed from offer/bootstrap/asset paths.
 
 ## Original decision (2026-05)
@@ -26,7 +26,7 @@ PyO3 briefly provided in-process access for Python orchestration and parity test
 ## Rationale
 
 - Single canonical Rust implementation reduces drift (presplit nonce, MIPS signing).
-- Coinset MSP `get_singleton_info` replaces GraphQL custody snapshot reads.
+- Direct Coinset RPC (including asset lookup) replaces GraphQL custody snapshot reads.
 
 ## Deferred
 

@@ -9,7 +9,8 @@ use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
 use crate::vault::mixed_split::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
+    build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats, MixedSplitRequest,
+    MixedSplitResult,
 };
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
@@ -73,15 +74,11 @@ async fn run_dust_combine_batch(
     cat_asset_id: &str,
     batch: &DustCombineBatch,
 ) -> SignerResult<MixedSplitResult> {
-    let total: u64 = batch.coins.iter().map(|coin| coin.amount).sum();
+    let total = batch.total_amount();
     if total == 0 {
         return Err(SignerError::Other("dust batch total is zero".to_string()));
     }
-    let coin_ids = batch
-        .coins
-        .iter()
-        .map(|coin| hex_to_bytes32(&coin.coin_id))
-        .collect::<SignerResult<Vec<Bytes32>>>()?;
+    let coin_ids = batch.coin_ids()?;
     let request = MixedSplitRequest {
         receive_address: receive_address.to_string(),
         asset_id: hex_to_bytes32(cat_asset_id)?,
@@ -90,21 +87,13 @@ async fn run_dust_combine_batch(
         allow_sub_cat_output: total < MIN_CAT_OUTPUT_MOJOS,
         fee_mojos: 0,
     };
-    build_and_optionally_broadcast_vault_cat_mixed_split(
+    build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats(
         signer_config,
         request,
+        batch.cats(),
         true,
-        Some(batch.cats.clone()),
     )
     .await
-}
-
-fn batch_coin_ids(batch: &DustCombineBatch) -> SignerResult<Vec<Bytes32>> {
-    batch
-        .coins
-        .iter()
-        .map(|coin| hex_to_bytes32(&coin.coin_id))
-        .collect()
 }
 
 fn fail_remaining_batches(
@@ -137,7 +126,7 @@ async fn drive_combine_batch_plan<D: BatchDriver>(plan: &DustPlan, driver: &D) -
             Ok(result) => {
                 batch_results.push(executed_batch_entry(batch, &result));
                 if index + 1 < batch_count {
-                    match batch_coin_ids(batch) {
+                    match batch.coin_ids() {
                         Ok(coin_ids) => {
                             if let Err(err) = driver.wait_spent(&coin_ids).await {
                                 job_failed = true;
@@ -197,7 +186,7 @@ pub async fn execute_combine_batches(
         client,
         verify,
     );
-    drive_combine_batch_plan(plan, &driver).await
+    Box::pin(drive_combine_batch_plan(plan, &driver)).await
 }
 
 #[cfg(test)]
@@ -208,7 +197,7 @@ mod tests {
     use super::*;
     use crate::error::SignerError;
     use crate::vault::mixed_split::MixedSplitResult;
-    use crate::vault_coinset_scan::{DustBatchPlan, DustCoin};
+    use crate::vault_coinset_scan::{DustBatchPlan, DustCoin, DustCombineBatch, ProvenDustCoin};
 
     struct MockBatchDriver {
         batch_calls: Arc<AtomicUsize>,
@@ -238,14 +227,27 @@ mod tests {
 
     fn dust_batch(ids: &[u8]) -> DustCombineBatch {
         DustCombineBatch {
-            coins: ids
+            items: ids
                 .iter()
-                .map(|id| DustCoin {
-                    coin_id: format!("{id:064x}"),
-                    amount: 100,
+                .map(|id| {
+                    let parent = format!("{id:064x}");
+                    let mut cat = crate::coinset::test_support::cat_with_amount(100);
+                    cat.coin = chia_protocol::Coin::new(
+                        crate::hex::hex_to_bytes32(&parent).expect("coin id"),
+                        cat.coin.puzzle_hash,
+                        100,
+                    );
+                    let coin_id = crate::hex::normalize_hex_id(&hex::encode(cat.coin.coin_id()));
+                    ProvenDustCoin::new(
+                        DustCoin {
+                            coin_id,
+                            amount: 100,
+                        },
+                        cat,
+                    )
+                    .expect("proven dust")
                 })
                 .collect(),
-            cats: Vec::new(),
         }
     }
 
@@ -366,16 +368,21 @@ mod tests {
 
     #[tokio::test]
     async fn run_dust_combine_batch_rejects_zero_total_batch() {
+        let mut cat = crate::coinset::test_support::cat_with_amount(0);
+        cat.coin = chia_protocol::Coin::new(
+            crate::hex::hex_to_bytes32(&"a".repeat(64)).expect("coin id"),
+            cat.coin.puzzle_hash,
+            0,
+        );
+        let coin_id = crate::hex::normalize_hex_id(&hex::encode(cat.coin.coin_id()));
         let err = run_dust_combine_batch(
             crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1"),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             &"f".repeat(64),
             &DustCombineBatch {
-                coins: vec![DustCoin {
-                    coin_id: "a".repeat(64),
-                    amount: 0,
-                }],
-                cats: Vec::new(),
+                items: vec![
+                    ProvenDustCoin::new(DustCoin { coin_id, amount: 0 }, cat).expect("proven dust")
+                ],
             },
         )
         .await
@@ -390,11 +397,13 @@ mod tests {
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             &"f".repeat(64),
             &DustCombineBatch {
-                coins: vec![DustCoin {
-                    coin_id: "not-valid-hex".to_string(),
-                    amount: 100,
+                items: vec![ProvenDustCoin {
+                    dust: DustCoin {
+                        coin_id: "not-valid-hex".to_string(),
+                        amount: 100,
+                    },
+                    cat: crate::coinset::test_support::cat_with_amount(100),
                 }],
-                cats: Vec::new(),
             },
         )
         .await

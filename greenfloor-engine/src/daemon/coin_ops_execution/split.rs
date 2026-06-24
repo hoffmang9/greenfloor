@@ -401,14 +401,14 @@ async fn execute_daemon_split_plan_inner(
     let protection_ref = split_protection.as_ref();
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {
-        match attempt_daemon_split(
+        match Box::pin(attempt_daemon_split(
             ctx,
             &split_ctx,
             attempt_index,
             &attempted_coin_ids,
             prefetched,
             protection_ref,
-        )
+        ))
         .await?
         {
             DaemonSplitAttemptResult::Finished(result) => return Ok(result),

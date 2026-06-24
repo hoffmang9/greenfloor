@@ -283,7 +283,7 @@ async fn coins_list_requires_signer_backend() {
 async fn coins_list_returns_empty_wallet_with_signer_backend() {
     use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
     use crate::minimal_program_template::{
-        write_minimal_program_with_signer_msp, MinimalProgramParams,
+        write_minimal_program_with_signer_coinset, MinimalProgramParams,
     };
 
     let mut server = mockito::Server::new_async().await;
@@ -297,7 +297,7 @@ async fn coins_list_returns_empty_wallet_with_signer_backend() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
-    write_minimal_program_with_signer_msp(
+    write_minimal_program_with_signer_coinset(
         &program,
         &server.url(),
         MinimalProgramParams {

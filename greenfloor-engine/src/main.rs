@@ -111,7 +111,7 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let json_mode = std::env::args().any(|arg| arg == "--json");
-    if let Err(err) = run().await {
+    if let Err(err) = Box::pin(run()).await {
         emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }
@@ -307,7 +307,6 @@ async fn run_mixed_split(
             fee_mojos: 0,
         },
         broadcast,
-        None,
     )
     .await
 }

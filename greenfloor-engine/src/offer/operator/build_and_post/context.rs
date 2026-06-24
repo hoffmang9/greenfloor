@@ -128,7 +128,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         },
         signer_config: SignerConfig {
             network: "mainnet".to_string(),
-            coinset_msp_base_url: String::new(),
+            coinset_base_url: String::new(),
             kms_key_id: String::new(),
             kms_region: String::new(),
             kms_public_key_hex: None,
@@ -165,7 +165,7 @@ mod tests {
     use crate::test_support::signer_config::test_signer_config;
 
     #[tokio::test]
-    async fn resolve_maker_offer_fee_uses_signer_msp_endpoint() {
+    async fn resolve_maker_offer_fee_uses_signer_coinset_endpoint() {
         let mut server = mockito::Server::new_async().await;
         let _mock = server
             .mock("POST", "/get_fee_estimate")
