@@ -108,10 +108,11 @@ enum Commands {
     VaultCoinsetScan(VaultCoinsetScanCliArgs),
 }
 
+#[allow(clippy::large_futures)]
 #[tokio::main]
 async fn main() {
     let json_mode = std::env::args().any(|arg| arg == "--json");
-    if let Err(err) = Box::pin(run()).await {
+    if let Err(err) = run().await {
         emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }

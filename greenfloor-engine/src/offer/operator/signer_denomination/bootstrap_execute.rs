@@ -194,6 +194,7 @@ pub(crate) fn replan_after_combine(
     }
 }
 
+#[allow(clippy::large_futures)]
 pub(super) async fn execute_bootstrap_shape(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
@@ -204,7 +205,7 @@ pub(super) async fn execute_bootstrap_shape(
     if ctx.bootstrap_plan.requires_combine_first() {
         let combine_target_amount = ctx.bootstrap_plan.total_output_amount;
         let (events, replanned, spendable) =
-            match Box::pin(execute_bootstrap_combine_step(program, signer_config, &ctx)).await {
+            match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
                 Ok(result) => result,
                 Err(result) => return Ok(result),
             };

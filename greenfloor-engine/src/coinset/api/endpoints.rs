@@ -3,7 +3,7 @@ use chia_traits::Streamable;
 use serde_json::{json, Value};
 
 use super::super::broadcast::broadcast_spend_bundle;
-use super::super::signer_client::coinset_base_url_for_signer;
+use super::super::direct_api::resolve_coinset_endpoint;
 use super::rpc::{direct_coinset_client, post_coinset_rpc};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -86,9 +86,10 @@ pub async fn get_conservative_fee_estimate_for_signer(
     cost: u64,
     spend_count: Option<u64>,
 ) -> SignerResult<Option<u64>> {
+    let endpoint = resolve_coinset_endpoint(&signer.network, &signer.coinset_base_url, None);
     get_conservative_fee_estimate(
-        &signer.network,
-        coinset_base_url_for_signer(signer),
+        endpoint.network,
+        Some(endpoint.base_url.as_str()),
         cost,
         spend_count,
     )

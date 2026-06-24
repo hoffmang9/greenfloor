@@ -37,8 +37,9 @@ pub use cats::{
 pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{
     effective_coinset_base_url, explicit_coinset_url_override, normalize_coinset_network,
-    normalize_direct_base_url_input, resolve_direct_client, resolve_direct_coinset_base_url,
-    ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+    normalize_direct_base_url_input, resolve_coinset_endpoint, resolve_direct_client,
+    resolve_direct_coinset_base_url, ResolvedCoinsetEndpoint, ResolvedDirectClient,
+    MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
 pub use offer_assets::{
     lookup_asset_by_symbol, normalize_asset_id, resolve_offer_asset_ids, AssetInfo,
@@ -56,8 +57,8 @@ pub use retry::{
 };
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 pub use signer_client::{
-    client_for_config, client_for_network, client_for_signer, coinset_base_url_for_signer,
-    effective_coinset_base_url_for_signer_on_network, DEFAULT_COINSET_BASE_URL,
+    client_for_config, client_for_network, client_for_signer, client_for_signer_on_network,
+    DEFAULT_COINSET_BASE_URL,
 };
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;

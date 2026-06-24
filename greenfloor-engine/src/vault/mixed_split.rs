@@ -3,7 +3,7 @@ use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Cat, Id, Relation, SpendContext, Spends};
 
 use crate::bech32m::decode_address;
-use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
+use crate::coinset::{self, CoinsetClient, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
@@ -70,12 +70,12 @@ async fn build_vault_cat_mixed_split_with_selection(
     request: MixedSplitRequest,
     broadcast: bool,
     selection_mode: CatSelection,
+    client: &CoinsetClient,
 ) -> SignerResult<MixedSplitResult> {
     validate_mixed_split_request(&request)?;
 
-    let client = coinset::client_for_config(&config)?;
     let mut vault_ctx = resolve_vault_spend_context(config).await?;
-    let backend = LiveCoinset(&client);
+    let backend = LiveCoinset(client);
     let receive_puzzle_hash = decode_address(&request.receive_address)?;
 
     let target_total: u64 = request.output_amounts.iter().sum();
@@ -145,11 +145,13 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     request: MixedSplitRequest,
     broadcast: bool,
 ) -> SignerResult<MixedSplitResult> {
+    let client = coinset::client_for_signer(&config)?;
     build_vault_cat_mixed_split_with_selection(
         config,
         request,
         broadcast,
         CatSelection::FetchFromCoinset,
+        &client,
     )
     .await
 }
@@ -167,12 +169,14 @@ pub(crate) async fn build_and_optionally_broadcast_vault_cat_mixed_split_with_pr
     request: MixedSplitRequest,
     preselected_cats: Vec<Cat>,
     broadcast: bool,
+    client: &CoinsetClient,
 ) -> SignerResult<MixedSplitResult> {
     build_vault_cat_mixed_split_with_selection(
         config,
         request,
         broadcast,
         CatSelection::Preselected(preselected_cats),
+        client,
     )
     .await
 }

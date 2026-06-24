@@ -34,7 +34,7 @@ pub(super) fn dust_plan_from_scan_without_lineage(
         .map(|coin| {
             let coin_id = hex_to_bytes32(&coin.coin_id).expect("coin id");
             let cat = fetch_cat_from_sim_by_id(&harness.chain, coin_id).expect("sim cat");
-            ProvenDustCoin::new(coin.clone(), cat).expect("proven dust")
+            ProvenDustCoin::from_lineage(coin, cat).expect("proven dust")
         })
         .collect();
     DustPlan {

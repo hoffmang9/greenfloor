@@ -18,25 +18,55 @@ pub struct DustCoin {
     pub amount: u64,
 }
 
-/// Lineage-proven dust coin paired with its spend-ready [`Cat`].
+impl DustCoin {
+    /// Project scan/report metadata from a spend-ready CAT.
+    #[must_use]
+    pub fn from_cat(cat: &Cat) -> Self {
+        Self {
+            coin_id: normalize_hex_id(&hex::encode(cat.coin.coin_id())),
+            amount: cat.coin.amount,
+        }
+    }
+}
+
+/// Lineage-proven dust coin: spend-ready [`Cat`] retained after lineage validation.
 #[derive(Debug, Clone)]
 pub struct ProvenDustCoin {
-    pub dust: DustCoin,
-    pub cat: Cat,
+    cat: Cat,
 }
 
 impl ProvenDustCoin {
-    /// Build a proven dust coin after validating coin id and amount alignment.
+    /// Wrap a spend-ready CAT that already passed lineage resolution.
+    #[must_use]
+    pub fn from_cat(cat: Cat) -> Self {
+        Self { cat }
+    }
+
+    /// Validate scan dust metadata against a spend-ready CAT, then retain the CAT only.
     ///
     /// # Errors
     ///
     /// Returns [`SignerError::ProvenDustCoinMismatch`] when `dust` and `cat` disagree.
-    pub fn new(dust: DustCoin, cat: Cat) -> SignerResult<Self> {
-        let cat_coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
-        if dust.coin_id != cat_coin_id || dust.amount != cat.coin.amount {
+    pub fn from_lineage(dust: &DustCoin, cat: Cat) -> SignerResult<Self> {
+        let projected = DustCoin::from_cat(&cat);
+        if dust.coin_id != projected.coin_id || dust.amount != projected.amount {
             return Err(crate::error::SignerError::ProvenDustCoinMismatch);
         }
-        Ok(Self { dust, cat })
+        Ok(Self { cat })
+    }
+
+    pub fn cat(&self) -> &Cat {
+        &self.cat
+    }
+
+    pub fn into_cat(self) -> Cat {
+        self.cat
+    }
+
+    /// Scan/report projection for JSON batch entries and orphan lists.
+    #[must_use]
+    pub fn dust_coin(&self) -> DustCoin {
+        DustCoin::from_cat(&self.cat)
     }
 }
 
@@ -48,19 +78,20 @@ pub struct DustCombineBatch {
 impl DustCombineBatch {
     #[must_use]
     pub fn total_amount(&self) -> u64 {
-        self.items.iter().map(|item| item.dust.amount).sum()
+        self.items.iter().map(|item| item.cat.coin.amount).sum()
     }
 
     /// Coin ids for batch items in spend order.
     ///
     /// # Errors
     ///
-    /// Returns an error when any dust coin id is not valid hex.
+    /// Returns an error when any coin id cannot be encoded (should not happen for valid cats).
     pub fn coin_ids(&self) -> SignerResult<Vec<Bytes32>> {
-        self.items
+        Ok(self
+            .items
             .iter()
-            .map(|item| hex_to_bytes32(&item.dust.coin_id))
-            .collect()
+            .map(|item| item.cat.coin.coin_id())
+            .collect())
     }
 
     #[must_use]
@@ -139,7 +170,7 @@ pub async fn prove_dust_coins_lineage(
     let mut lineage_excluded = Vec::new();
     for coin in dust_coins {
         if let Some(cat) = cat_by_id.remove(&coin.coin_id) {
-            proven.push(ProvenDustCoin::new(coin.clone(), cat)?);
+            proven.push(ProvenDustCoin::from_lineage(coin, cat)?);
         } else {
             lineage_excluded.push(coin.clone());
         }
@@ -200,7 +231,7 @@ pub fn plan_dust_batches(proven: &[ProvenDustCoin], batch_size: usize) -> DustBa
         .collect();
     let uncombinable = proven[full_batches * size..]
         .iter()
-        .map(|item| item.dust.clone())
+        .map(ProvenDustCoin::dust_coin)
         .collect();
     DustBatchPlan {
         combinable_batches,
@@ -238,8 +269,7 @@ mod tests {
             cat.coin.puzzle_hash,
             amount,
         );
-        let coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
-        ProvenDustCoin::new(DustCoin { coin_id, amount }, cat).expect("proven dust")
+        ProvenDustCoin::from_cat(cat)
     }
 
     #[test]
@@ -259,15 +289,15 @@ mod tests {
     }
 
     #[test]
-    fn proven_dust_coin_new_rejects_mismatched_coin_id_or_amount() {
+    fn proven_dust_coin_from_lineage_rejects_mismatched_coin_id_or_amount() {
         let mut cat = cat_with_amount(100);
         cat.coin = chia_protocol::Coin::new(
             hex_to_bytes32(&"a".repeat(64)).expect("coin id"),
             cat.coin.puzzle_hash,
             100,
         );
-        let err = ProvenDustCoin::new(
-            DustCoin {
+        let err = ProvenDustCoin::from_lineage(
+            &DustCoin {
                 coin_id: "b".repeat(64),
                 amount: 100,
             },
@@ -285,8 +315,8 @@ mod tests {
             cat.coin.puzzle_hash,
             50,
         );
-        let err = ProvenDustCoin::new(
-            DustCoin {
+        let err = ProvenDustCoin::from_lineage(
+            &DustCoin {
                 coin_id: "a".repeat(64),
                 amount: 100,
             },
@@ -309,97 +339,6 @@ mod tests {
         assert_eq!(plan.combinable_batches[0].items.len(), 2);
         assert_eq!(plan.combinable_batches[1].items.len(), 2);
         assert_eq!(plan.uncombinable.len(), 1);
-        assert_eq!(plan.uncombinable[0].coin_id, proven[4].dust.coin_id);
-    }
-
-    #[tokio::test]
-    async fn prove_dust_coins_lineage_excludes_unresolvable_parent() {
-        use crate::coinset::test_support::{
-            coin_record_by_name_request_json, mock_get_coin_record_by_name_body,
-            mock_get_puzzle_and_solution_body, mock_unspent_coin_record_by_name_body,
-        };
-        use crate::test_support::simulator::harness::SimulatorVaultHarness;
-        use chia_protocol::{Bytes32, CoinSpend};
-        use chia_sdk_coinset::CoinsetClient;
-        use mockito::Matcher;
-        use serde_json::json;
-
-        let mut harness = SimulatorVaultHarness::new();
-        harness.mint_vault();
-        let good_cat = harness.fund_vault_cat(400);
-        let bad_coin_id = normalize_hex_id(&hex::encode(Bytes32::new([0xcc; 32])));
-        let bad_coin_name = hex_to_bytes32(&bad_coin_id).expect("bad coin id");
-        let dust = vec![
-            DustCoin {
-                coin_id: normalize_hex_id(&hex::encode(good_cat.coin.coin_id())),
-                amount: good_cat.coin.amount,
-            },
-            DustCoin {
-                coin_id: bad_coin_id.clone(),
-                amount: 300,
-            },
-        ];
-
-        let (parent_body, puzzle_body, parent_coin_id) = {
-            let sim = harness.chain.sim.lock().expect("sim lock");
-            let parent = sim
-                .coin_spend(good_cat.coin.parent_coin_info)
-                .expect("parent spend");
-            let spent_height = sim
-                .coin_state(parent.coin.coin_id())
-                .and_then(|state| state.spent_height)
-                .unwrap_or(1);
-            let parent_spend = CoinSpend {
-                coin: parent.coin,
-                puzzle_reveal: parent.puzzle_reveal.clone(),
-                solution: parent.solution.clone(),
-            };
-            (
-                mock_get_coin_record_by_name_body(&parent.coin, spent_height),
-                mock_get_puzzle_and_solution_body(&parent_spend),
-                parent.coin.coin_id(),
-            )
-        };
-
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("POST", "/get_coin_record_by_name")
-            .match_body(Matcher::PartialJson(coin_record_by_name_request_json(
-                good_cat.coin.coin_id(),
-            )))
-            .with_status(200)
-            .with_body(mock_unspent_coin_record_by_name_body(&good_cat.coin))
-            .create();
-        server
-            .mock("POST", "/get_coin_record_by_name")
-            .match_body(Matcher::PartialJson(coin_record_by_name_request_json(
-                bad_coin_name,
-            )))
-            .with_status(200)
-            .with_body(json!({"success": true, "coin_record": null}).to_string())
-            .create();
-        server
-            .mock("POST", "/get_coin_record_by_name")
-            .match_body(Matcher::PartialJson(coin_record_by_name_request_json(
-                parent_coin_id,
-            )))
-            .with_status(200)
-            .with_body(parent_body)
-            .create();
-        server
-            .mock("POST", "/get_puzzle_and_solution")
-            .with_status(200)
-            .with_body(puzzle_body)
-            .create();
-
-        let client = CoinsetClient::new(server.url());
-        let (proven, excluded) = prove_dust_coins_lineage(&client, &dust)
-            .await
-            .expect("filter");
-        assert_eq!(proven.len(), 1);
-        assert_eq!(proven[0].dust.coin_id, dust[0].coin_id);
-        assert_eq!(proven[0].cat.coin.amount, good_cat.coin.amount);
-        assert_eq!(excluded.len(), 1);
-        assert_eq!(excluded[0].coin_id, bad_coin_id);
+        assert_eq!(plan.uncombinable[0].coin_id, proven[4].dust_coin().coin_id);
     }
 }

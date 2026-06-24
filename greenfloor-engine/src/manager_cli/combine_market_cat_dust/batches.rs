@@ -11,7 +11,7 @@ fn batch_coin_ids_json(batch: &DustCombineBatch) -> Value {
     json!(batch
         .items
         .iter()
-        .map(|item| &item.dust.coin_id)
+        .map(|item| item.dust_coin().coin_id)
         .collect::<Vec<_>>())
 }
 
@@ -85,7 +85,7 @@ pub fn append_lineage_excluded_entries(report: &mut Value, coins: &[DustCoin]) {
 mod tests {
     use super::*;
     use crate::coinset::test_support::cat_with_amount;
-    use crate::hex::{hex_to_bytes32, normalize_hex_id};
+    use crate::hex::hex_to_bytes32;
     use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin, ProvenDustCoin};
 
     fn proven_dust(coin_id: &str, amount: u64) -> ProvenDustCoin {
@@ -95,8 +95,7 @@ mod tests {
             cat.coin.puzzle_hash,
             amount,
         );
-        let coin_id = normalize_hex_id(&hex::encode(cat.coin.coin_id()));
-        ProvenDustCoin::new(DustCoin { coin_id, amount }, cat).expect("proven dust")
+        ProvenDustCoin::from_cat(cat)
     }
 
     #[test]

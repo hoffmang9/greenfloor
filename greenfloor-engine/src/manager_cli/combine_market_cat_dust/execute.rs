@@ -2,7 +2,7 @@ use chia_protocol::Bytes32;
 use serde_json::{json, Value};
 
 use crate::coinset::{
-    client_for_config, wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient,
+    client_for_signer_on_network, wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient,
     MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::config::SignerConfig;
@@ -56,6 +56,7 @@ impl BatchDriver for ProductionBatchDriver<'_> {
     async fn run_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult> {
         run_dust_combine_batch(
             self.signer_config.clone(),
+            &self.client,
             &self.receive_address,
             &self.cat_asset_id,
             batch,
@@ -70,6 +71,7 @@ impl BatchDriver for ProductionBatchDriver<'_> {
 
 async fn run_dust_combine_batch(
     signer_config: SignerConfig,
+    client: &CoinsetClient,
     receive_address: &str,
     cat_asset_id: &str,
     batch: &DustCombineBatch,
@@ -92,6 +94,7 @@ async fn run_dust_combine_batch(
         request,
         batch.cats(),
         true,
+        client,
     )
     .await
 }
@@ -117,6 +120,7 @@ fn all_batches_failed(plan: &DustPlan, reason: &str) -> (bool, Value) {
     (true, batches_json)
 }
 
+#[allow(clippy::large_futures)]
 async fn drive_combine_batch_plan<D: BatchDriver>(plan: &DustPlan, driver: &D) -> (bool, Value) {
     let mut batch_results = Vec::new();
     let mut job_failed = false;
@@ -168,6 +172,7 @@ async fn drive_combine_batch_plan<D: BatchDriver>(plan: &DustPlan, driver: &D) -
     (job_failed, batches_json)
 }
 
+#[allow(clippy::large_futures)]
 pub async fn execute_combine_batches(
     signer_config: &SignerConfig,
     receive_address: &str,
@@ -175,7 +180,7 @@ pub async fn execute_combine_batches(
     plan: &DustPlan,
     verify: CoinSpentVerifyConfig,
 ) -> (bool, Value) {
-    let client = match client_for_config(signer_config) {
+    let client = match client_for_signer_on_network(signer_config, &signer_config.network) {
         Ok(client) => client,
         Err(err) => return all_batches_failed(plan, &err.to_string()),
     };
@@ -186,7 +191,7 @@ pub async fn execute_combine_batches(
         client,
         verify,
     );
-    Box::pin(drive_combine_batch_plan(plan, &driver)).await
+    drive_combine_batch_plan(plan, &driver).await
 }
 
 #[cfg(test)]
@@ -237,15 +242,7 @@ mod tests {
                         cat.coin.puzzle_hash,
                         100,
                     );
-                    let coin_id = crate::hex::normalize_hex_id(&hex::encode(cat.coin.coin_id()));
-                    ProvenDustCoin::new(
-                        DustCoin {
-                            coin_id,
-                            amount: 100,
-                        },
-                        cat,
-                    )
-                    .expect("proven dust")
+                    ProvenDustCoin::from_cat(cat)
                 })
                 .collect(),
         }
@@ -374,15 +371,14 @@ mod tests {
             cat.coin.puzzle_hash,
             0,
         );
-        let coin_id = crate::hex::normalize_hex_id(&hex::encode(cat.coin.coin_id()));
+        let client = CoinsetClient::new("http://127.0.0.1:1".to_string());
         let err = run_dust_combine_batch(
             crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1"),
+            &client,
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
             &"f".repeat(64),
             &DustCombineBatch {
-                items: vec![
-                    ProvenDustCoin::new(DustCoin { coin_id, amount: 0 }, cat).expect("proven dust")
-                ],
+                items: vec![ProvenDustCoin::from_cat(cat)],
             },
         )
         .await
@@ -391,20 +387,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_dust_combine_batch_rejects_invalid_coin_id() {
+    async fn run_dust_combine_batch_rejects_invalid_cat_asset_id() {
+        let client = CoinsetClient::new("http://127.0.0.1:1".to_string());
         let err = run_dust_combine_batch(
             crate::test_support::signer_config::test_signer_config("http://127.0.0.1:1"),
+            &client,
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-            &"f".repeat(64),
-            &DustCombineBatch {
-                items: vec![ProvenDustCoin {
-                    dust: DustCoin {
-                        coin_id: "not-valid-hex".to_string(),
-                        amount: 100,
-                    },
-                    cat: crate::coinset::test_support::cat_with_amount(100),
-                }],
-            },
+            "not-valid-hex",
+            &dust_batch(&[1]),
         )
         .await
         .unwrap_err();

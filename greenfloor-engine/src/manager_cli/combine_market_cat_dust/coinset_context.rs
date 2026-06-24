@@ -1,8 +1,7 @@
 use serde_json::Value;
 
 use crate::coinset::{
-    direct_coinset_client, effective_coinset_base_url, explicit_coinset_url_override,
-    resolve_direct_client, CoinsetClient, DEFAULT_COINSET_BASE_URL,
+    direct_coinset_client, resolve_coinset_endpoint, CoinsetClient, DEFAULT_COINSET_BASE_URL,
 };
 use crate::config::{
     parse_signer_config, program_bundle_gated_from_parsed, ManagerProgramConfig, SignerConfig,
@@ -26,14 +25,11 @@ pub fn resolve_combine_coinset_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(program_network);
-    let resolved = resolve_direct_client(network_source, coinset_base_url);
-    let base_url = explicit_coinset_url_override(coinset_base_url).map_or_else(
-        || effective_coinset_base_url(resolved.network, program_coinset_base_url),
-        |url| url.trim_end_matches('/').to_string(),
-    );
+    let endpoint =
+        resolve_coinset_endpoint(network_source, program_coinset_base_url, coinset_base_url);
     CombineCoinsetContext {
-        network: resolved.network.to_string(),
-        base_url,
+        network: endpoint.network.to_string(),
+        base_url: endpoint.base_url,
     }
 }
 

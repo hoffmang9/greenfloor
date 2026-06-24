@@ -4,6 +4,8 @@ pub mod cat_detect;
 pub mod checkpoint;
 pub mod cli;
 pub mod dust;
+#[cfg(test)]
+mod dust_lineage_test;
 pub mod launcher;
 pub mod metadata;
 pub mod request;

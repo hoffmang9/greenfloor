@@ -15,10 +15,10 @@ async fn dust_batch_coin_ids_resolve_in_simulator() {
     let (scan, harness) = sim_dust_scan_result(&[400, 300]);
     let plan = dust_plan_from_scan_without_lineage(&scan, &harness, 1000, 2);
     for item in &plan.batches.combinable_batches[0].items {
-        let coin = &item.dust;
-        let coin_id = hex_to_bytes32(&coin.coin_id).expect("coin id");
+        let dust = item.dust_coin();
+        let coin_id = hex_to_bytes32(&dust.coin_id).expect("coin id");
         let cat = fetch_cat_from_sim_by_id(&harness.chain, coin_id).expect("sim cat");
-        assert_eq!(cat.coin.amount, coin.amount);
+        assert_eq!(cat.coin.amount, dust.amount);
     }
 }
 
