@@ -1,6 +1,6 @@
 use greenfloor_engine::config::{
-    load_markets_config_with_overlay, parse_markets_config, resolve_market_for_build, MarketConfig,
-    MarketsConfig,
+    load_markets_config_with_overlay, parse_markets_config, resolve_coin_list_market,
+    resolve_market_for_build, MarketConfig, MarketsConfig,
 };
 use greenfloor_engine::error::SignerResult;
 use serde_json::{json, Value};
@@ -262,6 +262,43 @@ fn rejects_testnet_receive_address_in_base_file() {
     .expect("write markets");
     let err = load_markets_config_with_overlay(&path, None).expect_err("txch in base");
     assert!(err.to_string().contains("testnet receive_address"));
+}
+
+#[test]
+fn resolve_coin_list_market_defaults_to_smallest_mainnet_receive_address() {
+    let markets = parse_markets_config(&json!({
+        "markets": [
+            {
+                "id": "z-main",
+                "enabled": true,
+                "base_asset": "xch",
+                "base_symbol": "XCH",
+                "quote_asset": "xch",
+                "quote_asset_type": "stable",
+                "receive_address": "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+                "signer_key_id": "key-main-1",
+                "mode": "sell_only",
+                "inventory": { "low_watermark_base_units": 1 },
+                "ladders": {}
+            },
+            {
+                "id": "a-main",
+                "enabled": true,
+                "base_asset": "xch",
+                "base_symbol": "XCH",
+                "quote_asset": "xch",
+                "quote_asset_type": "stable",
+                "receive_address": "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3",
+                "signer_key_id": "key-main-1",
+                "mode": "sell_only",
+                "inventory": { "low_watermark_base_units": 1 },
+                "ladders": {}
+            }
+        ]
+    }))
+    .expect("markets");
+    let market = resolve_coin_list_market(&markets, "mainnet", None, None).expect("default market");
+    assert_eq!(market.market_id, "a-main");
 }
 
 #[test]

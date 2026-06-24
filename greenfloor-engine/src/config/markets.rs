@@ -102,7 +102,7 @@ fn validate_base_markets_no_testnet_receive_addresses(
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if receive_address.starts_with("txch1") {
+        if receive_address_matches_operator_network(&receive_address, "testnet11") {
             let market_id = row
                 .get("id")
                 .and_then(Value::as_str)
@@ -238,11 +238,13 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
 /// Resolve the market row for `coins-list` / `coin-status`.
 ///
 /// When `--market-id` or `--pair` is provided, uses the same rules as
-/// [`resolve_market_for_build`]. Otherwise requires exactly one enabled market.
+/// [`resolve_market_for_build`]. Otherwise picks the lexicographically smallest
+/// enabled market whose `receive_address` prefix matches the operator network
+/// (`xch1` on mainnet, `txch1` on testnet11).
 ///
 /// # Errors
 ///
-/// Returns an error if market resolution fails or selection is ambiguous.
+/// Returns an error if market resolution fails or no market matches the network.
 pub fn resolve_coin_list_market(
     markets: &MarketsConfig,
     network: &str,
@@ -256,27 +258,32 @@ pub fn resolve_coin_list_market(
     if has_market_id || has_pair {
         return resolve_market_for_build(markets, market_id, pair, network);
     }
-    let enabled: Vec<_> = markets
+    let mut candidates: Vec<&MarketConfig> = markets
         .markets
         .iter()
-        .filter(|market| market.enabled)
+        .filter(|market| {
+            market.enabled
+                && receive_address_matches_operator_network(&market.receive_address, network)
+        })
         .collect();
-    if enabled.is_empty() {
-        return Err(SignerError::Other(
-            "no enabled markets configured".to_string(),
-        ));
+    if candidates.is_empty() {
+        return Err(SignerError::Other(format!(
+            "no enabled market with receive_address for network {network}"
+        )));
     }
-    if enabled.len() == 1 {
-        return Ok(enabled[0].clone());
+    candidates.sort_by_key(|market| market.market_id.as_str());
+    Ok(candidates[0].clone())
+}
+
+/// Returns whether a market receive address belongs on the given operator network.
+#[must_use]
+pub fn receive_address_matches_operator_network(receive_address: &str, network: &str) -> bool {
+    let addr = receive_address.trim().to_ascii_lowercase();
+    if is_testnet_network(network) {
+        addr.starts_with("txch1")
+    } else {
+        addr.starts_with("xch1")
     }
-    let ids: Vec<_> = enabled
-        .iter()
-        .map(|market| market.market_id.as_str())
-        .collect();
-    Err(SignerError::Other(format!(
-        "multiple enabled markets; provide --market-id or --pair for coins-list (candidates: {})",
-        ids.join(", ")
-    )))
 }
 
 /// Resolve market for build.

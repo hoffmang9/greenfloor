@@ -54,6 +54,7 @@ impl DaemonCycleResources {
         Ok(crate::offer::OfferAssetResolver::new(
             self.signer_for_execution()?,
             &self.ticker_index,
+            &self.network,
         ))
     }
 

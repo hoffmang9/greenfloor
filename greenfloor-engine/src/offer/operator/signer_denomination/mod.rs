@@ -52,13 +52,13 @@ fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
 }
 
 async fn load_asset_scoped_coins(
-    program: &ManagerProgramConfig,
+    operator_network: &str,
     signer_config: &SignerConfig,
     receive_address: &str,
     split_asset_id: &str,
 ) -> Result<Vec<WalletUnspentCoin>, BootstrapPhaseResult> {
     crate::coinset::list_wallet_unspent_coins_for_signer(
-        &program.network,
+        operator_network,
         signer_config,
         receive_address,
         split_asset_id,
@@ -110,9 +110,11 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> Bootstra
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn prepare_bootstrap_execution_plan(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
+    operator_network: &str,
     market: &MarketConfig,
     action_side: &str,
     resolved_base_asset_id: &str,
@@ -160,13 +162,17 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         )));
     }
 
-    let asset_scoped_coins =
-        match load_asset_scoped_coins(program, signer_config, receive_address, &split_asset_id)
-            .await
-        {
-            Ok(coins) => coins,
-            Err(result) => return Ok(Err(result)),
-        };
+    let asset_scoped_coins = match load_asset_scoped_coins(
+        operator_network,
+        signer_config,
+        receive_address,
+        &split_asset_id,
+    )
+    .await
+    {
+        Ok(coins) => coins,
+        Err(result) => return Ok(Err(result)),
+    };
 
     let spendable_coins =
         bootstrap_coins_in_base_units(&asset_scoped_coins, split_asset_mojo_multiplier);
@@ -188,6 +194,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     let output_count = bootstrap_plan.output_amounts_base_units.len();
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
         signer_config,
+        operator_network,
         program.coin_ops_minimum_fee_mojos,
         output_count,
     )
@@ -217,10 +224,12 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 }
 
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn run_signer_denomination_phase<'a>(
     program: &'a ManagerProgramConfig,
     market: &'a MarketConfig,
     signer_config: &'a SignerConfig,
+    operator_network: &'a str,
     resolved_base_asset_id: &'a str,
     resolved_quote_asset_id: &'a str,
     quote_price: f64,
@@ -230,6 +239,7 @@ pub fn run_signer_denomination_phase<'a>(
         program,
         market,
         signer_config,
+        operator_network,
         resolved_base_asset_id,
         resolved_quote_asset_id,
         quote_price,
@@ -238,11 +248,12 @@ pub fn run_signer_denomination_phase<'a>(
 }
 
 // Clippy `large_futures`: the phase is already boxed at `run_signer_denomination_phase`.
-#[allow(clippy::large_futures)]
+#[allow(clippy::large_futures, clippy::too_many_arguments)]
 async fn run_signer_denomination_phase_async(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
     signer_config: &SignerConfig,
+    operator_network: &str,
     resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
     quote_price: f64,
@@ -251,6 +262,7 @@ async fn run_signer_denomination_phase_async(
     match prepare_bootstrap_execution_plan(
         program,
         signer_config,
+        operator_network,
         market,
         action_side,
         resolved_base_asset_id,

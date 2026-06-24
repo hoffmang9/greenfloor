@@ -1,4 +1,4 @@
-use super::coinset_context::{load_execution_signer, resolve_combine_coinset_context};
+use super::coinset_context::{load_gated_execution_signer, resolve_combine_coinset_context};
 use super::combine_test_support::{
     dust_plan_from_scan_without_lineage, sample_job, test_coinset_context,
 };
@@ -11,6 +11,7 @@ use crate::manager_cli::test_support::{
     pop_json, write_combine_test_configs, ManagerContextBuilder,
 };
 use crate::minimal_program_template::{materialize_minimal_program_text, MinimalProgramParams};
+use chia_sdk_coinset::ChiaRpcClient;
 use serde_json::json;
 
 #[tokio::test]
@@ -188,24 +189,24 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
 }
 
 #[test]
-fn load_execution_signer_applies_coinset_context_overrides() {
+fn load_gated_execution_signer_returns_program_signer_without_mutation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let cat_hex = "f".repeat(64);
     write_combine_test_configs(dir.path(), &cat_hex, true);
     let program_path = dir.path().join("program.yaml");
     let raw = read_program_yaml(&program_path).expect("read program");
     let program = parse_program_config(&raw).expect("parse program");
-    let default_coinset =
-        super::coinset_context::CombineCoinsetContext::program_default_coinset_base_url(&raw);
     let coinset_ctx = resolve_combine_coinset_context(
         Some("testnet"),
         Some("https://coinset.custom/"),
         &program.network,
-        &default_coinset,
+        "https://api.coinset.org",
     );
-    let signer = load_execution_signer(&raw, program, &coinset_ctx).expect("execution signer");
-    assert_eq!(signer.network, "testnet11");
-    assert_eq!(signer.coinset_base_url, "https://coinset.custom");
+    let signer = load_gated_execution_signer(&raw, program.clone()).expect("execution signer");
+    assert_eq!(signer.network, program.network);
+    assert_ne!(signer.network, coinset_ctx.network);
+    let client = coinset_ctx.client().expect("coinset client");
+    assert_eq!(client.base_url(), "https://coinset.custom");
 }
 
 #[tokio::test]

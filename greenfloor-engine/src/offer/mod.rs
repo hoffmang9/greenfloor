@@ -23,9 +23,8 @@ pub mod request;
 pub mod types;
 
 pub use action::{
-    build_signer_offer_for_action, expires_at_unix_from_pricing, resolve_market_base_asset_id,
-    resolve_market_offer_assets_for_action, resolve_market_offer_fee_asset_id,
-    BuildOfferForActionRequest, BuildOfferForActionResult,
+    build_signer_offer_for_action, expires_at_unix_from_pricing, BuildOfferForActionRequest,
+    BuildOfferForActionResult,
 };
 pub use assets::{
     resolve_offer_asset_ids, resolve_offer_assets, OfferAssetResolver, ResolvedMarketOfferAssets,

@@ -4,7 +4,7 @@
 //!
 //! | Loader | Entrypoints | Signer parse | Resolves one market |
 //! | --- | --- | --- | --- |
-//! | [`load_gated_operator_market`] | `build-and-post-offer`, coin-op CLI | hard fail on missing signer | yes (`market_id` / `pair` / `network`) |
+//! | [`load_gated_operator_market`] | `build-and-post-offer`, coin-op CLI, `coins-list` | hard fail on missing signer | yes (see [`OperatorMarketCommand`]) |
 //! | [`load_daemon_cycle_config`] | daemon cycle (`load_cycle_resources`) | soft (`CycleProgramConfig`) | no (full markets list) |
 //! | [`load_raw_program_and_markets`] | `combine-market-cat-dust` (needs raw YAML) | parse program only | no (full markets list) |
 //!
@@ -18,11 +18,20 @@ use serde_json::Value;
 use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
     load_markets_config_with_overlay, load_program_bundle_gated, parse_program_config,
-    read_program_yaml, resolve_market_for_build, CycleProgramConfig, ManagerProgramConfig,
-    MarketConfig, MarketsConfig, SignerConfig,
+    read_program_yaml, resolve_coin_list_market, resolve_market_for_build, CycleProgramConfig,
+    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::paths::resolve_cats_config_path;
+
+/// Which market-resolution rules apply when loading a single operator market row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorMarketCommand {
+    /// `build-and-post-offer`, coin-split/combine: require exactly one of `--market-id` or `--pair`.
+    Build,
+    /// `coins-list` / `coin-status`: allow default market for the operator network.
+    CoinList,
+}
 
 /// Gated program bundle plus one resolved market row (manager CLI operator commands).
 #[derive(Debug, Clone)]
@@ -31,12 +40,17 @@ pub struct GatedOperatorMarket {
     pub signer: SignerConfig,
     pub market: MarketConfig,
     pub ticker_index: CatTickerIndex,
+    pub operator_network: String,
 }
 
 impl GatedOperatorMarket {
     #[must_use]
     pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'_> {
-        crate::offer::OfferAssetResolver::new(&self.signer, &self.ticker_index)
+        crate::offer::OfferAssetResolver::new(
+            &self.signer,
+            &self.ticker_index,
+            &self.operator_network,
+        )
     }
 }
 
@@ -72,6 +86,7 @@ pub struct RawProgramMarkets {
 /// # Errors
 ///
 /// Returns an error if config loading or market resolution fails.
+#[allow(clippy::too_many_arguments)]
 pub fn load_gated_operator_market(
     program_path: &Path,
     markets_path: &Path,
@@ -80,10 +95,11 @@ pub fn load_gated_operator_market(
     network: &str,
     market_id: Option<&str>,
     pair: Option<&str>,
+    command: OperatorMarketCommand,
 ) -> SignerResult<GatedOperatorMarket> {
     let bundle = load_program_bundle_gated(program_path)?;
     let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    let market = resolve_market_for_build(&markets, market_id, pair, network)?;
+    let market = resolve_operator_market(&markets, network, market_id, pair, command)?;
     let ticker_index =
         operator_ticker_index_from_paths(markets_path, testnet_markets_path, cats_path);
     Ok(GatedOperatorMarket {
@@ -91,7 +107,23 @@ pub fn load_gated_operator_market(
         signer: bundle.signer,
         market,
         ticker_index,
+        operator_network: network.trim().to_string(),
     })
+}
+
+fn resolve_operator_market(
+    markets: &MarketsConfig,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
+    command: OperatorMarketCommand,
+) -> SignerResult<MarketConfig> {
+    match command {
+        OperatorMarketCommand::Build => resolve_market_for_build(markets, market_id, pair, network),
+        OperatorMarketCommand::CoinList => {
+            resolve_coin_list_market(markets, network, market_id, pair)
+        }
+    }
 }
 
 /// Load daemon cycle program and markets config (soft signer parse).

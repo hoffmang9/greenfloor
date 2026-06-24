@@ -162,11 +162,11 @@ fn build_and_post_payload(
     batch: &PostIterationBatch,
 ) -> Value {
     json!({
-        "market_id": ctx.market.market_id,
-        "pair": format!("{}:{}", ctx.market.base_asset, ctx.market.quote_asset),
+        "market_id": ctx.gated.market.market_id,
+        "pair": format!("{}:{}", ctx.gated.market.base_asset, ctx.gated.market.quote_asset),
         "resolved_base_asset_id": ctx.offer_assets.base_asset_id,
         "resolved_quote_asset_id": ctx.offer_assets.quote_asset_id,
-        "network": ctx.program.network,
+        "network": ctx.gated.operator_network,
         "size_base_units": request.size_base_units,
         "repeat": request.repeat,
         "publish_venue": ctx.publish_venue,
@@ -267,7 +267,9 @@ async fn build_and_post_offer_async(
 ) -> SignerResult<BuildAndPostOfferResponse> {
     let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
     if let Some(artifacts) = artifacts {
-        let store = SqliteStore::open(&state_db_path_for_home(&artifacts.ctx.program.home_dir))?;
+        let store = SqliteStore::open(&state_db_path_for_home(
+            &artifacts.ctx.gated.program.home_dir,
+        ))?;
         flush_build_and_post_persist(&store, &artifacts)?;
     }
     Ok(response)

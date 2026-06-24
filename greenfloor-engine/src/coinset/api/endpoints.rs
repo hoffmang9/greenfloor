@@ -83,10 +83,11 @@ pub async fn get_conservative_fee_estimate(
 /// Returns an error if the operation fails.
 pub async fn get_conservative_fee_estimate_for_signer(
     signer: &SignerConfig,
+    operator_network: &str,
     cost: u64,
     spend_count: Option<u64>,
 ) -> SignerResult<Option<u64>> {
-    let endpoint = resolve_coinset_endpoint(&signer.network, &signer.coinset_base_url, None);
+    let endpoint = resolve_coinset_endpoint(operator_network, &signer.coinset_base_url, None);
     get_conservative_fee_estimate(
         endpoint.network,
         Some(endpoint.base_url.as_str()),

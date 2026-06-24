@@ -62,6 +62,7 @@ fn test_exec_context(
         },
         resolved_base_asset_id: "xch".to_string(),
         ticker_index: empty_cat_ticker_index(),
+        operator_network: "mainnet".to_string(),
         base_unit_mojo_multiplier: 1_000,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::new(),
@@ -95,7 +96,7 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
     ];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
         &bundle.program,
         &resolver,
@@ -127,7 +128,7 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
     let plans = vec![sample_plan(CoinOpKind::Split)];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
         &bundle.program,
         &resolver,
@@ -156,7 +157,7 @@ async fn execute_managed_coin_op_plans_skips_invalid_plans() {
     }];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
         &bundle.program,
         &resolver,
@@ -183,7 +184,7 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
     ];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans_with_test_overrides(
         &bundle.program,
         &resolver,

@@ -41,12 +41,6 @@ impl CombineCoinsetContext {
         )
     }
 
-    pub fn apply_to_execution_signer(&self, mut signer: SignerConfig) -> SignerConfig {
-        signer.network.clone_from(&self.network);
-        signer.coinset_base_url.clone_from(&self.base_url);
-        signer
-    }
-
     pub fn base_url(&self) -> &str {
         self.base_url.as_str()
     }
@@ -61,20 +55,17 @@ impl CombineCoinsetContext {
     }
 }
 
-pub(crate) fn load_execution_signer(
+pub(crate) fn load_gated_execution_signer(
     raw: &Value,
     program: ManagerProgramConfig,
-    coinset_ctx: &CombineCoinsetContext,
 ) -> SignerResult<SignerConfig> {
-    let bundle = program_bundle_gated_from_parsed(program, raw)?;
-    Ok(coinset_ctx.apply_to_execution_signer(bundle.signer))
+    Ok(program_bundle_gated_from_parsed(program, raw)?.signer)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::coinset::{MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL};
-    use crate::vault::context::VaultCustodySnapshot;
     use chia_sdk_coinset::ChiaRpcClient;
 
     #[test]
@@ -142,35 +133,6 @@ mod tests {
         );
         assert_eq!(ctx.network, "mainnet");
         assert_eq!(ctx.base_url, "https://api.coinset.org");
-    }
-
-    #[test]
-    fn apply_to_execution_signer_updates_network_and_coinset_base_url() {
-        let ctx = resolve_combine_coinset_context(
-            Some("testnet"),
-            Some("https://coinset.custom/"),
-            "mainnet",
-            "https://api.coinset.org",
-        );
-        let signer = SignerConfig {
-            network: "mainnet".to_string(),
-            coinset_base_url: "https://api.coinset.org".to_string(),
-            kms_key_id: "key".to_string(),
-            kms_region: "us-west-2".to_string(),
-            kms_public_key_hex: None,
-            kms_runtime: crate::kms::KmsRuntime::default(),
-            vault: VaultCustodySnapshot {
-                launcher_id: chia_protocol::Bytes32::default(),
-                custody_threshold: 1,
-                recovery_threshold: 1,
-                recovery_clawback_timelock: 3600,
-                custody_keys: Vec::new(),
-                recovery_keys: Vec::new(),
-            },
-        };
-        let got = ctx.apply_to_execution_signer(signer);
-        assert_eq!(got.network, "testnet11");
-        assert_eq!(got.coinset_base_url, "https://coinset.custom");
     }
 
     #[test]

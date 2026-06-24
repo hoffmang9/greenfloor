@@ -185,12 +185,22 @@ pub enum ManagerCommands {
         #[arg(long)]
         log_level: String,
     },
+    /// List spendable coins for a market row.
+    ///
+    /// Without `--market-id` or `--pair`, selects the lexicographically smallest enabled
+    /// market whose `receive_address` prefix matches `--network` (`xch1` / `txch1`).
     CoinsList {
+        /// Market row id (exactly one of `--market-id` or `--pair` when set).
         #[arg(long)]
         market_id: Option<String>,
+        /// Pair selector `base:quote` or `base/quote` (exactly one of `--market-id` or `--pair` when set).
         #[arg(long)]
         pair: Option<String>,
-        #[arg(long, default_value = "mainnet")]
+        #[arg(
+            long,
+            default_value = "mainnet",
+            help = "Operator network for Coinset and receive-address filtering"
+        )]
         network: String,
         #[arg(long, default_value = "")]
         asset: String,
@@ -199,12 +209,19 @@ pub enum ManagerCommands {
         #[arg(long, default_value = "")]
         cat_id: String,
     },
+    /// Summarize spendable coin counts for a market row (same market selection as [`CoinsList`]).
     CoinStatus {
+        /// Market row id (exactly one of `--market-id` or `--pair` when set).
         #[arg(long)]
         market_id: Option<String>,
+        /// Pair selector `base:quote` or `base/quote` (exactly one of `--market-id` or `--pair` when set).
         #[arg(long)]
         pair: Option<String>,
-        #[arg(long, default_value = "mainnet")]
+        #[arg(
+            long,
+            default_value = "mainnet",
+            help = "Operator network for Coinset and receive-address filtering"
+        )]
         network: String,
         #[arg(long, default_value = "")]
         asset: String,

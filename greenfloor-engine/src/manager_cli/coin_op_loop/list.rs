@@ -4,12 +4,8 @@ use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
-use crate::config::{
-    load_markets_config_with_overlay, load_program_bundle_for_coin_list,
-    operator_ticker_index_from_paths, resolve_coin_list_market, ProgramConfigBundle,
-};
+use crate::config::{load_gated_operator_market, OperatorMarketCommand};
 use crate::error::{SignerError, SignerResult};
-use crate::offer::OfferAssetResolver;
 
 use crate::manager_cli::context::ManagerContext;
 
@@ -28,7 +24,7 @@ struct CoinListSnapshot {
 }
 
 struct CoinListLoadParams<'a> {
-    bundle: &'a ProgramConfigBundle,
+    program_path: &'a Path,
     markets_path: &'a Path,
     testnet_markets_path: Option<&'a Path>,
     cats_path: &'a Path,
@@ -52,7 +48,7 @@ struct CoinListCommand<'a> {
 
 async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult<CoinListSnapshot> {
     let CoinListLoadParams {
-        bundle,
+        program_path,
         markets_path,
         testnet_markets_path,
         cats_path,
@@ -62,12 +58,18 @@ async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult
         asset,
         cat_id,
     } = params;
-    let ticker_index =
-        operator_ticker_index_from_paths(markets_path, testnet_markets_path, Some(cats_path));
-    let resolver = OfferAssetResolver::new(&bundle.signer, &ticker_index);
-    let program = &bundle.program;
-    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    let market = resolve_coin_list_market(&markets, network, market_id, pair)?;
+    let loaded = load_gated_operator_market(
+        program_path,
+        markets_path,
+        testnet_markets_path,
+        Some(cats_path),
+        network,
+        market_id,
+        pair,
+        OperatorMarketCommand::CoinList,
+    )?;
+    let market = loaded.market.clone();
+    let resolver = loaded.asset_resolver();
     let receive_address = market.receive_address.trim();
     if receive_address.is_empty() {
         return Err(SignerError::Other(
@@ -91,8 +93,8 @@ async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult
         market.base_asset.clone()
     };
     let coins = list_wallet_unspent_coins_for_signer(
-        &program.network,
-        &bundle.signer,
+        &loaded.operator_network,
+        &loaded.signer,
         receive_address,
         &list_asset_id,
     )
@@ -130,8 +132,8 @@ async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult
         .filter(|row| row.get("pending").and_then(Value::as_bool) == Some(true))
         .count();
     Ok(CoinListSnapshot {
-        network: program.network.clone(),
-        market_id: market.market_id.clone(),
+        network: loaded.operator_network,
+        market_id: market.market_id,
         receive_address: receive_address.to_string(),
         list_asset_id,
         filter_label,
@@ -154,20 +156,8 @@ async fn run_coin_list_command(cmd: CoinListCommand<'_>) -> SignerResult<i32> {
         op,
     } = cmd;
     let _ = vault_id;
-    let bundle = match load_program_bundle_for_coin_list(&mgr.program_config) {
-        Err(SignerError::SignerPathNotConfigured) => {
-            mgr.emit_json(&json!({
-                "ok": false,
-                "error": "coin_list_requires_signer_backend",
-                "detail": SignerError::SignerPathNotConfigured.to_string(),
-            }))?;
-            return Ok(2);
-        }
-        Err(err) => return Err(err),
-        Ok(bundle) => bundle,
-    };
-    let snapshot = load_coin_list_snapshot(CoinListLoadParams {
-        bundle: &bundle,
+    let snapshot = match load_coin_list_snapshot(CoinListLoadParams {
+        program_path: &mgr.program_config,
         markets_path: &mgr.markets_config,
         testnet_markets_path: mgr.testnet_markets_path(),
         cats_path: &mgr.cats_config,
@@ -177,7 +167,19 @@ async fn run_coin_list_command(cmd: CoinListCommand<'_>) -> SignerResult<i32> {
         asset,
         cat_id,
     })
-    .await?;
+    .await
+    {
+        Err(SignerError::SignerPathNotConfigured) => {
+            mgr.emit_json(&json!({
+                "ok": false,
+                "error": "coin_list_requires_signer_backend",
+                "detail": SignerError::SignerPathNotConfigured.to_string(),
+            }))?;
+            return Ok(2);
+        }
+        Err(err) => return Err(err),
+        Ok(snapshot) => snapshot,
+    };
     if op == "coin-status" {
         mgr.emit_json(&json!({
             "op": "coin-status",

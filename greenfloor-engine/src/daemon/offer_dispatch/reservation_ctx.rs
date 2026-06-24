@@ -16,13 +16,10 @@ pub fn reservation_wallet_id(signer: &crate::config::SignerConfig) -> String {
 
 pub async fn parallel_reservation_context(
     resolver: &OfferAssetResolver<'_>,
-    program_network: &str,
     market: &MarketConfig,
     fee_amount_mojos: i64,
 ) -> SignerResult<ParallelReservationContext> {
-    let assets = resolver
-        .resolve_market_assets(market, program_network)
-        .await?;
+    let assets = resolver.resolve_market_assets(market).await?;
     let fee_asset_id = resolver.resolve_fee_asset(&assets).await?;
     let base_unit_mojo_multiplier = market
         .pricing

@@ -122,11 +122,12 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
     };
     let signer = test_signer_config(&server.url());
 
-    let shape_ctx =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("plan result")
-            .expect("shape context");
+    let shape_ctx = prepare_bootstrap_execution_plan(
+        &program, &signer, "mainnet", &market, "sell", "xch", "xch", 1.0,
+    )
+    .await
+    .expect("plan result")
+    .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
     shape_ctx
         .test_overrides
@@ -164,11 +165,12 @@ async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split()
     };
     let signer = test_signer_config(&server.url());
 
-    let shape_ctx =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("plan result")
-            .expect("shape context");
+    let shape_ctx = prepare_bootstrap_execution_plan(
+        &program, &signer, "mainnet", &market, "sell", "xch", "xch", 1.0,
+    )
+    .await
+    .expect("plan result")
+    .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
     shape_ctx
         .test_overrides

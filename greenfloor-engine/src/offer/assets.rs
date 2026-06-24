@@ -2,9 +2,7 @@
 
 use chia_sdk_coinset::CoinsetClient;
 
-use crate::coinset::{
-    client_for_signer, is_xch_like_asset, lookup_asset_by_symbol, normalize_asset_id,
-};
+use crate::coinset::{is_xch_like_asset, lookup_asset_by_symbol, normalize_asset_id};
 use crate::config::{lookup_asset_id_from_ticker, resolve_quote_asset_for_offer, CatTickerIndex};
 use crate::config::{MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
@@ -22,12 +20,21 @@ pub struct ResolvedMarketOfferAssets {
 pub struct OfferAssetResolver<'a> {
     signer: &'a SignerConfig,
     index: &'a CatTickerIndex,
+    operator_network: &'a str,
 }
 
 impl<'a> OfferAssetResolver<'a> {
     #[must_use]
-    pub fn new(signer: &'a SignerConfig, index: &'a CatTickerIndex) -> Self {
-        Self { signer, index }
+    pub fn new(
+        signer: &'a SignerConfig,
+        index: &'a CatTickerIndex,
+        operator_network: &'a str,
+    ) -> Self {
+        Self {
+            signer,
+            index,
+            operator_network,
+        }
     }
 
     #[must_use]
@@ -40,6 +47,15 @@ impl<'a> OfferAssetResolver<'a> {
         self.index
     }
 
+    #[must_use]
+    pub fn operator_network(&self) -> &str {
+        self.operator_network
+    }
+
+    fn coinset_client(&self) -> SignerResult<CoinsetClient> {
+        crate::coinset::client_for_signer_on_network(self.signer, self.operator_network)
+    }
+
     /// Resolve offer base/quote labels to on-chain asset ids.
     ///
     /// # Errors
@@ -50,7 +66,7 @@ impl<'a> OfferAssetResolver<'a> {
         base_asset: &str,
         quote_asset: &str,
     ) -> SignerResult<(String, String)> {
-        let client = client_for_signer(self.signer)?;
+        let client = self.coinset_client()?;
         resolve_offer_asset_ids(&client, base_asset, quote_asset, self.index).await
     }
 
@@ -73,10 +89,9 @@ impl<'a> OfferAssetResolver<'a> {
     pub async fn resolve_market_assets(
         &self,
         market: &MarketConfig,
-        program_network: &str,
     ) -> SignerResult<ResolvedMarketOfferAssets> {
         let quote_asset_for_offer =
-            resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
+            resolve_quote_asset_for_offer(market.quote_asset.trim(), self.operator_network);
         let (base_asset_id, quote_asset_id) = self
             .resolve_pair(market.base_asset.trim(), &quote_asset_for_offer)
             .await?;
@@ -116,8 +131,9 @@ pub async fn resolve_offer_assets(
     base_asset: &str,
     quote_asset: &str,
     ticker_index: &CatTickerIndex,
+    operator_network: &str,
 ) -> SignerResult<(String, String)> {
-    OfferAssetResolver::new(config, ticker_index)
+    OfferAssetResolver::new(config, ticker_index, operator_network)
         .resolve_pair(base_asset, quote_asset)
         .await
 }
@@ -247,7 +263,7 @@ cats:
             .create_async()
             .await;
         let config = crate::test_support::signer_config::test_signer_config(&server.url());
-        let (base, quote) = OfferAssetResolver::new(&config, &index)
+        let (base, quote) = OfferAssetResolver::new(&config, &index, "mainnet")
             .resolve_pair("BYC", "wUSDC.b")
             .await
             .expect("ticker index resolution");
@@ -269,7 +285,7 @@ cats:
             .await;
         let config = crate::test_support::signer_config::test_signer_config(&server.url());
         let (base, quote) =
-            OfferAssetResolver::new(&config, &crate::config::empty_cat_ticker_index())
+            OfferAssetResolver::new(&config, &crate::config::empty_cat_ticker_index(), "mainnet")
                 .resolve_pair("HOA", "xch")
                 .await
                 .expect("coinset resolution");

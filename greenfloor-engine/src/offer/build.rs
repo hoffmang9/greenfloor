@@ -12,7 +12,7 @@ use crate::offer::types::{CreateOfferRequest, CreateOfferResult, OfferInput};
 use crate::vault::session::resolve_vault_session;
 use crate::vault::spend::VaultSpendContext;
 
-/// Build vault cat offer.
+/// Build vault cat offer on the operator network (CLI `--network` or program default).
 ///
 /// # Errors
 ///
@@ -20,19 +20,25 @@ use crate::vault::spend::VaultSpendContext;
 #[must_use]
 pub fn build_vault_cat_offer(
     config: SignerConfig,
+    operator_network: String,
     request: CreateOfferRequest,
 ) -> BuildVaultCatOfferFuture {
-    Box::pin(build_vault_cat_offer_async(config, request))
+    Box::pin(build_vault_cat_offer_async(
+        config,
+        operator_network,
+        request,
+    ))
 }
 
 async fn build_vault_cat_offer_async(
     config: SignerConfig,
+    operator_network: String,
     request: CreateOfferRequest,
 ) -> SignerResult<CreateOfferResult> {
     let input = OfferInput::try_from(request)?;
     validate_offer_input(&input)?;
 
-    let coinset = coinset::client_for_signer(&config)?;
+    let coinset = coinset::client_for_signer_on_network(&config, &operator_network)?;
     let mut session = resolve_vault_session(config).await?;
     let backend = LiveCoinset(&coinset);
     build_vault_cat_offer_with_spend(&mut session.spend, &backend, input).await

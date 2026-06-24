@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::coinset::parse_coin_ids;
-use crate::config::{CatTickerIndex, MarketConfig, SignerConfig};
+use crate::config::CatTickerIndex;
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::offer::assets::{OfferAssetResolver, ResolvedMarketOfferAssets};
+use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
@@ -75,43 +76,38 @@ fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64
     resolve_quote_price_for_pricing(&request.pricing)
 }
 
-/// Resolve a market base asset id for coin-op and inventory paths (xch quote leg).
+/// Build signer offer for action.
 ///
 /// # Errors
 ///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_base_asset_id(
-    resolver: &OfferAssetResolver<'_>,
-    base_asset: &str,
-) -> SignerResult<String> {
-    resolver.resolve_base(base_asset).await
-}
+/// Returns an error if the operation fails.
+pub async fn build_signer_offer_for_action(
+    config: SignerConfig,
+    request: BuildOfferForActionRequest,
+    ticker_index: &CatTickerIndex,
+    operator_network: &str,
+) -> SignerResult<BuildOfferForActionResult> {
+    let resolver = OfferAssetResolver::new(&config, ticker_index, operator_network);
+    let (resolved_base, resolved_quote) = resolver
+        .resolve_pair(&request.base_asset, &request.quote_asset)
+        .await?;
+    let quote_price = resolve_quote_price(&request)?;
+    let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
+    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
+    let side = normalize_offer_side(&request.action_side).to_string();
+    let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
+    let create_result =
+        build_vault_cat_offer(config, operator_network.to_string(), create_request).await?;
 
-/// Resolve base and quote asset ids for a configured market row (offer build / reservations).
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_offer_assets_for_action(
-    resolver: &OfferAssetResolver<'_>,
-    market: &MarketConfig,
-    program_network: &str,
-) -> SignerResult<ResolvedMarketOfferAssets> {
-    resolver
-        .resolve_market_assets(market, program_network)
-        .await
-}
-
-/// Resolve fee-leg asset id for parallel offer reservations.
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_offer_fee_asset_id(
-    resolver: &OfferAssetResolver<'_>,
-    assets: &ResolvedMarketOfferAssets,
-) -> SignerResult<String> {
-    resolver.resolve_fee_asset(assets).await
+    Ok(BuildOfferForActionResult {
+        offer_text: create_result.offer.clone(),
+        side,
+        expires_at_unix,
+        offer_amount: leg.offer_amount_mojos,
+        request_amount: leg.request_amount_mojos,
+        execution_mode: create_result.execution_mode.to_string(),
+        create_result: Some(create_result),
+    })
 }
 
 fn leg_amounts_for_request(
@@ -148,38 +144,6 @@ fn create_offer_request_from_leg(
         split_input_coins: request.split_input_coins,
         broadcast_split: request.broadcast_split,
         expires_at: Some(expires_at_unix),
-    })
-}
-
-/// Build signer offer for action.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn build_signer_offer_for_action(
-    config: SignerConfig,
-    request: BuildOfferForActionRequest,
-    ticker_index: &CatTickerIndex,
-) -> SignerResult<BuildOfferForActionResult> {
-    let resolver = OfferAssetResolver::new(&config, ticker_index);
-    let (resolved_base, resolved_quote) = resolver
-        .resolve_pair(&request.base_asset, &request.quote_asset)
-        .await?;
-    let quote_price = resolve_quote_price(&request)?;
-    let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
-    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
-    let side = normalize_offer_side(&request.action_side).to_string();
-    let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
-    let create_result = build_vault_cat_offer(config, create_request).await?;
-
-    Ok(BuildOfferForActionResult {
-        offer_text: create_result.offer.clone(),
-        side,
-        expires_at_unix,
-        offer_amount: leg.offer_amount_mojos,
-        request_amount: leg.request_amount_mojos,
-        execution_mode: create_result.execution_mode.to_string(),
-        create_result: Some(create_result),
     })
 }
 

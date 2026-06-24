@@ -26,9 +26,10 @@ async fn run_bootstrap_phase(
         BootstrapPhaseResult::skipped("dry_run")
     } else {
         run_signer_denomination_phase(
-            &ctx.program,
-            &ctx.market,
-            &ctx.signer_config,
+            &ctx.gated.program,
+            &ctx.gated.market,
+            &ctx.gated.signer,
+            &ctx.gated.operator_network,
             &ctx.offer_assets.base_asset_id,
             &ctx.offer_assets.quote_asset_id,
             ctx.quote_price,
@@ -103,7 +104,7 @@ async fn publish_created_offer(
     let side = created.side.as_str();
     let asset_fields = expected_publish_asset_fields(
         side,
-        &ctx.market.base_symbol,
+        &ctx.gated.market.base_symbol,
         &ctx.offer_assets.quote_asset_for_offer,
         &ctx.offer_assets.base_asset_id,
         &ctx.offer_assets.quote_asset_id,

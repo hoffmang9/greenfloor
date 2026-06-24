@@ -263,8 +263,10 @@ async fn run_create_offer_command(
     } else {
         parse_coin_ids(&presplit_coin_ids)?
     };
+    let operator_network = config.network.clone();
     let result = build_vault_cat_offer(
         config,
+        operator_network,
         CreateOfferRequest {
             receive_address,
             offer_asset_id,

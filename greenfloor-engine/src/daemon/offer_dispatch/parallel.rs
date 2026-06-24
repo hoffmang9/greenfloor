@@ -224,13 +224,8 @@ pub async fn execute_actions_parallel(
         return result;
     }
 
-    let reservation_ctx = parallel_reservation_context(
-        &ctx.resources.asset_resolver()?,
-        &ctx.resources.program().network,
-        market,
-        0,
-    )
-    .await?;
+    let reservation_ctx =
+        parallel_reservation_context(&ctx.resources.asset_resolver()?, market, 0).await?;
 
     let spendable_profiles =
         resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;

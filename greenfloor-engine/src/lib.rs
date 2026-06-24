@@ -67,8 +67,16 @@ pub async fn resolve_offer_assets(
     base_asset: &str,
     quote_asset: &str,
     ticker_index: &config::CatTickerIndex,
+    operator_network: &str,
 ) -> SignerResult<(String, String)> {
-    offer::resolve_offer_assets(&config, base_asset, quote_asset, ticker_index).await
+    offer::resolve_offer_assets(
+        &config,
+        base_asset,
+        quote_asset,
+        ticker_index,
+        operator_network,
+    )
+    .await
 }
 
 /// Deprecated: builds the default operator ticker index on each call.
@@ -92,7 +100,15 @@ pub async fn resolve_offer_assets_via_coinset(
 
     let (cats, markets, testnet) = default_operator_metadata_config_paths();
     let ticker_index = build_cat_ticker_index_lenient(&cats, &markets, testnet.as_deref());
-    resolve_offer_assets(config, base_asset, quote_asset, &ticker_index).await
+    let operator_network = config.network.clone();
+    resolve_offer_assets(
+        config,
+        base_asset,
+        quote_asset,
+        &ticker_index,
+        &operator_network,
+    )
+    .await
 }
 
 /// Deprecated alias for [`resolve_offer_assets_via_coinset`].

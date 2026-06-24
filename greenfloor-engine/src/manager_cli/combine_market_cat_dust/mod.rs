@@ -13,7 +13,7 @@ mod report_test;
 mod sim_harness;
 
 use coinset_context::{
-    load_execution_signer, resolve_combine_coinset_context, CombineCoinsetContext,
+    load_gated_execution_signer, resolve_combine_coinset_context, CombineCoinsetContext,
 };
 use jobs::{build_enabled_cat_jobs, CatDustJob};
 use report::{
@@ -177,7 +177,7 @@ pub async fn run_combine_market_cat_dust(
     let execution_signer: Option<SignerConfig> = if flags.is_preview() {
         None
     } else {
-        match load_execution_signer(&raw, program.clone(), &coinset_ctx) {
+        match load_gated_execution_signer(&raw, program.clone()) {
             Ok(signer) => Some(signer),
             Err(err) => return emit_command_error(mgr, signer_load_error_reason(&err), err),
         }

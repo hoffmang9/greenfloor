@@ -2,8 +2,7 @@ use chia_protocol::Bytes32;
 use serde_json::{json, Value};
 
 use crate::coinset::{
-    client_for_signer_on_network, wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient,
-    MIN_CAT_OUTPUT_MOJOS,
+    wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient, MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -109,7 +108,7 @@ fn fail_remaining_batches(
     }
 }
 
-fn all_batches_failed(plan: &DustPlan, reason: &str) -> (bool, Value) {
+pub(crate) fn all_batches_failed(plan: &DustPlan, reason: &str) -> (bool, Value) {
     let mut batch_results = Vec::new();
     for batch in &plan.batches.combinable_batches {
         batch_results.push(failed_batch_entry(batch, reason));
@@ -175,20 +174,17 @@ async fn drive_combine_batch_plan<D: BatchDriver>(plan: &DustPlan, driver: &D) -
 #[allow(clippy::large_futures)]
 pub async fn execute_combine_batches(
     signer_config: &SignerConfig,
+    client: &CoinsetClient,
     receive_address: &str,
     cat_asset_id: &str,
     plan: &DustPlan,
     verify: CoinSpentVerifyConfig,
 ) -> (bool, Value) {
-    let client = match client_for_signer_on_network(signer_config, &signer_config.network) {
-        Ok(client) => client,
-        Err(err) => return all_batches_failed(plan, &err.to_string()),
-    };
     let driver = ProductionBatchDriver::new(
         signer_config.clone(),
         receive_address.to_string(),
         cat_asset_id.to_string(),
-        client,
+        client.clone(),
         verify,
     );
     drive_combine_batch_plan(plan, &driver).await

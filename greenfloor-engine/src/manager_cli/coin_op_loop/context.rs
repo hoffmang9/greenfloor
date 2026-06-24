@@ -7,7 +7,7 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
-use crate::config::load_gated_operator_market;
+use crate::config::{load_gated_operator_market, OperatorMarketCommand};
 use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::offer::OfferAssetResolver;
@@ -35,24 +35,16 @@ pub(super) async fn build_coin_op_exec_context(
         network,
         market_id,
         pair,
+        OperatorMarketCommand::Build,
     )?;
-    let crate::config::GatedOperatorMarket {
-        program,
-        signer,
-        market,
-        ticker_index,
-    } = loaded;
-    let resolver = OfferAssetResolver::new(&signer, &ticker_index);
-    CoinOpExecContext::new(
-        program,
-        &resolver,
-        market,
-        asset_id_override,
-        HashSet::default(),
-        #[cfg(test)]
-        CoinOpTestOverrides::default(),
-    )
-    .await
+    loaded
+        .into_coin_op_exec_context(
+            asset_id_override,
+            HashSet::default(),
+            #[cfg(test)]
+            CoinOpTestOverrides::default(),
+        )
+        .await
 }
 
 pub(super) fn enforce_split_lockup_guardrail(

@@ -430,26 +430,18 @@ async fn coins_list_applies_testnet_markets_overlay_for_receive_address() {
         .testnet_markets(testnet_markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(
-        &harness.ctx,
-        "mainnet",
-        Some("a-testnet"),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect("coins-list");
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
+        .await
+        .expect("coins-list");
     assert_eq!(code, 0);
     let payload = pop_json(&harness.captured);
     assert_eq!(
         payload.get("receive_address"),
-        Some(&serde_json::json!(TESTNET_RECEIVE))
+        Some(&serde_json::json!(MAINNET_RECEIVE))
     );
     assert_eq!(
         payload.get("market_id"),
-        Some(&serde_json::json!("a-testnet"))
+        Some(&serde_json::json!("z-mainnet"))
     );
 }
 

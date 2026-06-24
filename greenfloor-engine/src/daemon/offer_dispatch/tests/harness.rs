@@ -170,8 +170,8 @@ pub(super) async fn generous_spendable_profiles(
 
     let bundle = load_program_bundle(program_path).expect("program bundle");
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
-    let reservation_ctx = parallel_reservation_context(&resolver, "mainnet", market, 0)
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
+    let reservation_ctx = parallel_reservation_context(&resolver, market, 0)
         .await
         .expect("reservation ctx");
     let mut spendable_profiles = BTreeMap::new();

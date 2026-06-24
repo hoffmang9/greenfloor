@@ -245,16 +245,6 @@ pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundl
     program_bundle_gated_from_parsed(program, &raw)
 }
 
-/// Load execution bundle for coin-list; maps missing signer path to
-/// [`SignerError::SignerPathNotConfigured`] for stable CLI exit handling.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn load_program_bundle_for_coin_list(path: &Path) -> SignerResult<ProgramConfigBundle> {
-    load_program_bundle_gated(path)
-}
-
 #[must_use]
 pub fn is_testnet_network(network: &str) -> bool {
     matches!(

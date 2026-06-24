@@ -7,7 +7,9 @@ use crate::coin_ops::{
     COMBINE_SINGLE_OUTPUT_COUNT,
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
-use crate::config::{CatTickerIndex, ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{
+    CatTickerIndex, GatedOperatorMarket, ManagerProgramConfig, MarketConfig, SignerConfig,
+};
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
 use crate::offer::OfferAssetResolver;
@@ -24,6 +26,7 @@ pub struct CoinOpExecContext {
     pub program: ManagerProgramConfig,
     pub resolved_base_asset_id: String,
     pub ticker_index: CatTickerIndex,
+    pub operator_network: String,
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
@@ -58,6 +61,7 @@ impl CoinOpExecContext {
             program,
             resolved_base_asset_id,
             ticker_index,
+            operator_network: resolver.operator_network().to_string(),
             base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
             combine_input_cap: resolve_combine_input_cap(),
             watched_coin_ids,
@@ -68,7 +72,11 @@ impl CoinOpExecContext {
 
     #[must_use]
     pub fn asset_resolver(&self) -> OfferAssetResolver<'_> {
-        OfferAssetResolver::new(&self.signer_config, &self.ticker_index)
+        OfferAssetResolver::new(
+            &self.signer_config,
+            &self.ticker_index,
+            &self.operator_network,
+        )
     }
 
     /// Submit a combine: merge `input_coin_ids` into a single output coin.
@@ -109,7 +117,7 @@ impl CoinOpExecContext {
             return Ok(coins.to_vec());
         }
         let coins = list_wallet_unspent_coins_for_signer(
-            &self.program.network,
+            &self.operator_network,
             &self.signer_config,
             &self.market.receive_address,
             &self.resolved_base_asset_id,
@@ -157,5 +165,38 @@ impl CoinOpExecContext {
         )
         .await?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
+    }
+}
+
+impl GatedOperatorMarket {
+    /// Build coin-op execution context without cloning program/market rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if asset resolution fails.
+    pub async fn into_coin_op_exec_context(
+        self,
+        asset_id_override: Option<&str>,
+        watched_coin_ids: HashSet<String>,
+        #[cfg(test)] test_overrides: CoinOpTestOverrides,
+    ) -> SignerResult<CoinOpExecContext> {
+        let Self {
+            program,
+            signer,
+            market,
+            ticker_index,
+            operator_network,
+        } = self;
+        let resolver = OfferAssetResolver::new(&signer, &ticker_index, &operator_network);
+        CoinOpExecContext::new(
+            program,
+            &resolver,
+            market,
+            asset_id_override,
+            watched_coin_ids,
+            #[cfg(test)]
+            test_overrides,
+        )
+        .await
     }
 }
