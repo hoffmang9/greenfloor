@@ -6,6 +6,8 @@ pub mod build_and_post;
 #[cfg(test)]
 mod export_fixtures_test;
 #[cfg(test)]
+pub mod fragmented_combine_cap_inventory;
+#[cfg(test)]
 pub mod golden;
 #[cfg(test)]
 pub mod injections;

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use super::*;
 use crate::coin_ops::selection::SpendableCoin;
+use crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins;
 
 fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
     rows.iter()
@@ -174,6 +175,18 @@ fn combine_prereq_plan_returns_none_when_cap_truncates_below_required_total() {
     assert!(build_combine_prereq_plan(&spendable, 10_000, 2).is_none());
     assert!(build_combine_prereq_plan(&spendable, 10_000, 3).is_none());
     assert!(build_combine_prereq_plan(&spendable, 10_000, 4).is_some());
+}
+
+#[test]
+fn combine_prereq_plan_fragmented_inventory_within_cap_five() {
+    let plan = build_combine_prereq_plan(&fragmented_combine_cap_spendable_coins(), 100, 5)
+        .expect("fragmented inventory should combine within cap=5");
+    assert!(plan.cap_applied);
+    assert_eq!(plan.selected_count_before_cap, 6);
+    assert_eq!(plan.input_coin_ids.len(), 4);
+    assert_eq!(plan.selected_total, 105);
+    assert!(!plan.exact_match);
+    assert_eq!(plan.target_amount, 100);
 }
 
 #[test]
