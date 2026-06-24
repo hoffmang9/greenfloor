@@ -1,5 +1,7 @@
 use crate::coinset::WalletUnspentCoin;
-use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlan, PlannerLadderRow};
+use crate::offer::bootstrap::{
+    BootstrapCombineContext, BootstrapFundingSource, BootstrapPlan, PlannerLadderRow,
+};
 
 use super::{
     bootstrap_skipped, executed_after_split, run_signer_denomination_phase,
@@ -68,6 +70,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
         bootstrap_plan,
         ladder_entries: &ladder_entries,
         refreshed_spendable: &refreshed,
+        combine_context: BootstrapCombineContext::for_tests(),
     });
 
     assert_eq!(result.split_result["operation_id"], "split-1");

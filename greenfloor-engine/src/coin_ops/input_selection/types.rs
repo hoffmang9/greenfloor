@@ -1,8 +1,10 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitCombinePrereqPlan {
     pub input_coin_ids: Vec<String>,
-    pub target_amount: i64,
-    pub selected_total: i64,
+    /// Required combine output in on-chain mojos.
+    pub target_amount_mojos: i64,
+    /// Sum of selected input coin amounts in mojos.
+    pub selected_total_mojos: i64,
     pub exact_match: bool,
     pub cap_applied: bool,
     pub selected_count_before_cap: usize,

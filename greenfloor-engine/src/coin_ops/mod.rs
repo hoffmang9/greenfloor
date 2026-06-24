@@ -26,6 +26,7 @@ pub use gate::{
     coin_op_should_stop, evaluate_coin_combine_gate, evaluate_coin_split_gate,
     CoinCombineGateResult, CoinSplitGateResult,
 };
+pub(crate) use input_selection::select_combine_inputs_for_target;
 pub use input_selection::{
     build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
     plan_exact_amount_combine_inputs, plan_largest_combine_inputs, CliSplitSelection,
@@ -38,7 +39,8 @@ pub use plan::{
     LadderTargetRow,
 };
 pub use policy::{
-    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+    amount_meets_coin_op_min_mojos, cat_overshoot_change_would_be_dust, coin_op_min_amount_mojos,
+    coin_op_target_amount_allowed,
 };
 pub use scalars::{
     coin_op_non_negative_u64, coin_op_non_negative_u64_saturating, i64_to_usize, usize_to_i64,

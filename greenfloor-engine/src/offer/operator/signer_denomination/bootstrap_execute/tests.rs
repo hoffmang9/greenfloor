@@ -36,9 +36,12 @@ fn combine_first_shape_context(
             amount: 4,
         },
     ];
-    let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) =
-        plan_bootstrap_mixed_outputs(&ladder, &spendable, 5)
-    else {
+    let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) = plan_bootstrap_mixed_outputs(
+        &ladder,
+        &spendable,
+        5,
+        &crate::offer::bootstrap::BootstrapCombineContext::for_tests(),
+    ) else {
         panic!("expected combine-first plan");
     };
     BootstrapShapeContext {

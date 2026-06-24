@@ -7,8 +7,8 @@ use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
-    bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapPlan, BootstrapPlanOutcome,
-    PlannerLadderRow,
+    bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCombineContext, BootstrapPlan,
+    BootstrapPlanOutcome, PlannerLadderRow,
 };
 
 use super::planning::bootstrap_coins_in_base_units;
@@ -159,6 +159,10 @@ async fn replan_after_combine(
         &ctx.ladder_entries,
         &refreshed_spendable,
         resolve_combine_input_cap(),
+        &BootstrapCombineContext {
+            mojo_multiplier: ctx.split_asset_mojo_multiplier,
+            canonical_asset_id: ctx.split_asset_id.clone(),
+        },
     );
     let BootstrapPlanOutcome::NeedsShape(split_plan) = replanned else {
         return Ok(Some(bootstrap_result_from_replan(
@@ -256,6 +260,10 @@ pub(super) async fn execute_bootstrap_shape(
         bootstrap_plan,
         ladder_entries: &ctx.ladder_entries,
         refreshed_spendable: &refreshed_spendable,
+        combine_context: BootstrapCombineContext {
+            mojo_multiplier: ctx.split_asset_mojo_multiplier,
+            canonical_asset_id: ctx.split_asset_id.clone(),
+        },
     }))
 }
 

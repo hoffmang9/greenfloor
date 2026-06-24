@@ -78,6 +78,26 @@ pub fn plan_daemon_auto_split_selection(
                 required_amount_mojos,
                 combine_input_cap,
             ) {
+                let (would_create_dust, remainder) = split_would_create_sub_cat_change(
+                    prereq.selected_total_mojos,
+                    prereq.target_amount_mojos,
+                    canonical_asset_id,
+                );
+                if would_create_dust {
+                    return SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(
+                        SubCatChangeSkipData {
+                            selected_coin_id: prereq
+                                .input_coin_ids
+                                .first()
+                                .cloned()
+                                .unwrap_or_default(),
+                            selected_amount_mojos: prereq.selected_total_mojos,
+                            required_amount_mojos: prereq.target_amount_mojos,
+                            remainder_mojos: remainder,
+                            minimum_allowed_mojos: coin_op_min_amount_mojos(canonical_asset_id),
+                        },
+                    ));
+                }
                 return SplitAutoSelectPlan::CombinePrereq(prereq);
             }
         }

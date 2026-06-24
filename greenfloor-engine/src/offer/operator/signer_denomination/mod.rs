@@ -20,7 +20,7 @@ use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
-    BootstrapPlanOutcome, PlannerLadderRow,
+    BootstrapCombineContext, BootstrapPlanOutcome, PlannerLadderRow,
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
@@ -79,6 +79,7 @@ pub(crate) struct ExecutedAfterSplitParams<'a> {
     pub(crate) bootstrap_plan: crate::offer::bootstrap::BootstrapPlan,
     pub(crate) ladder_entries: &'a [PlannerLadderRow],
     pub(crate) refreshed_spendable: &'a [BootstrapCoin],
+    pub(crate) combine_context: BootstrapCombineContext,
 }
 
 pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseResult {
@@ -91,11 +92,13 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> Boot
         bootstrap_plan,
         ladder_entries,
         refreshed_spendable,
+        combine_context,
     } = params;
     let remaining = plan_bootstrap_mixed_outputs(
         ladder_entries,
         refreshed_spendable,
         resolve_combine_input_cap(),
+        &combine_context,
     );
     let executed = bootstrap_executed_phase(&remaining);
     let mut result = BootstrapPhaseResult::from_snapshot(executed);
@@ -172,6 +175,10 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         &ladder_entries,
         &spendable_coins,
         resolve_combine_input_cap(),
+        &BootstrapCombineContext {
+            mojo_multiplier: split_asset_mojo_multiplier,
+            canonical_asset_id: split_asset_id.clone(),
+        },
     );
     if let Some(early) = bootstrap_early_phase(&outcome) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));

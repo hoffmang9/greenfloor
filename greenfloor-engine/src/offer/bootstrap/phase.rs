@@ -92,7 +92,8 @@ pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPh
 mod tests {
     use super::{bootstrap_early_phase, bootstrap_executed_phase};
     use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow,
+        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapCombineContext, BootstrapPlanOutcome,
+        PlannerLadderRow,
     };
 
     fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
@@ -114,7 +115,12 @@ mod tests {
     fn early_phase_skips_when_needs_split() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5);
+        let outcome = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            5,
+            &BootstrapCombineContext::for_tests(),
+        );
         assert!(bootstrap_early_phase(&outcome).is_none());
     }
 

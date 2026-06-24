@@ -20,10 +20,20 @@ pub fn coin_op_target_amount_allowed(amount_mojos: i64, canonical_asset_id: &str
     amount_meets_coin_op_min_mojos(amount_mojos, canonical_asset_id)
 }
 
+/// True when a positive CAT change remainder is below [`coin_op_min_amount_mojos`].
+///
+/// `remainder_mojos` must already be in on-chain mojos — not ladder base units.
+#[must_use]
+pub fn cat_overshoot_change_would_be_dust(remainder_mojos: i64, canonical_asset_id: &str) -> bool {
+    let min_cat_mojos = coin_op_min_amount_mojos(canonical_asset_id);
+    min_cat_mojos > 0 && remainder_mojos > 0 && remainder_mojos < min_cat_mojos
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+        amount_meets_coin_op_min_mojos, cat_overshoot_change_would_be_dust,
+        coin_op_min_amount_mojos, coin_op_target_amount_allowed,
     };
     use crate::coinset::is_canonical_xch_asset;
 
@@ -49,5 +59,13 @@ mod tests {
     fn xch_has_no_min_amount() {
         assert_eq!(coin_op_min_amount_mojos("xch"), 0);
         assert!(amount_meets_coin_op_min_mojos(1, "xch"));
+    }
+
+    #[test]
+    fn cat_overshoot_dust_rejects_sub_minimum_mojo_remainder() {
+        let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
+        assert!(cat_overshoot_change_would_be_dust(5, cat_id));
+        assert!(!cat_overshoot_change_would_be_dust(5_000, cat_id));
+        assert!(!cat_overshoot_change_would_be_dust(0, cat_id));
     }
 }

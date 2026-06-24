@@ -1,10 +1,11 @@
 use serde_json::{json, Value};
 
-use crate::coin_ops::coin_op_non_negative_u64;
-use crate::coin_ops::combine_output_amounts;
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
-use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlan};
+use crate::offer::bootstrap::{
+    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BootstrapFundingSource,
+    BootstrapPlan,
+};
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 async fn submit_bootstrap_vault_mixed_split(
@@ -60,9 +61,8 @@ pub(super) async fn submit_bootstrap_combine(
     let BootstrapFundingSource::CombineFirst(inputs) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
-    let multiplier = split_asset_mojo_multiplier.max(1);
-    let total_mojos = inputs.selected_total.saturating_mul(multiplier);
-    let output_amounts = combine_output_amounts(total_mojos, 1)?;
+    let output_amounts =
+        bootstrap_combine_vault_outputs(inputs, split_asset_mojo_multiplier.max(1))?;
     let mut result = submit_bootstrap_vault_mixed_split(
         signer_config,
         split_asset_id,
@@ -93,17 +93,10 @@ pub(super) async fn submit_bootstrap_mixed_split(
     let BootstrapFundingSource::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
-    let multiplier = split_asset_mojo_multiplier.max(1);
-    let output_amounts_mojos = bootstrap_plan
-        .output_amounts_base_units
-        .iter()
-        .map(|amount| {
-            coin_op_non_negative_u64(
-                amount.saturating_mul(multiplier),
-                "bootstrap.output_amount_mojos",
-            )
-        })
-        .collect::<SignerResult<Vec<_>>>()?;
+    let output_amounts_mojos = bootstrap_mixed_split_output_mojos(
+        &bootstrap_plan.output_amounts_base_units,
+        split_asset_mojo_multiplier.max(1),
+    )?;
     submit_bootstrap_vault_mixed_split(
         signer_config,
         split_asset_id,
@@ -118,9 +111,64 @@ pub(super) async fn submit_bootstrap_mixed_split(
 
 #[cfg(test)]
 mod tests {
-    use super::submit_bootstrap_mixed_split;
-    use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlan};
+    use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
+    use crate::offer::bootstrap::{
+        bootstrap_combine_vault_outputs, BootstrapCombineInputs, BootstrapFundingSource,
+        BootstrapPlan,
+    };
+    use crate::offer::operator::signer_denomination::test_overrides::{
+        sample_vault_mixed_split_stub, SignerDenominationTestOverrides,
+    };
     use crate::test_support::signer_config::test_signer_config;
+
+    fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
+        let selected_total = inputs.selected_total;
+        BootstrapPlan {
+            funding: BootstrapFundingSource::CombineFirst(inputs),
+            output_amounts_base_units: vec![100],
+            total_output_amount: 100,
+            change_amount: selected_total - 100,
+            deficits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn bootstrap_combine_vault_outputs_match_eco181_shape() {
+        let inputs = BootstrapCombineInputs {
+            input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
+            selected_total: 105,
+            target_amount: 100,
+            exact_match: false,
+            cap_applied: true,
+        };
+        let outputs = bootstrap_combine_vault_outputs(&inputs, 1_000).expect("outputs");
+        assert_eq!(outputs, vec![100_000]);
+    }
+
+    #[tokio::test]
+    async fn submit_bootstrap_combine_delegates_to_vault_outputs() {
+        let overrides = SignerDenominationTestOverrides::default();
+        overrides.enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
+        let plan = combine_first_plan(BootstrapCombineInputs {
+            input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
+            selected_total: 105,
+            target_amount: 100,
+            exact_match: false,
+            cap_applied: true,
+        });
+        let signer = test_signer_config("https://example.test");
+        let result = submit_bootstrap_combine(
+            &signer,
+            &plan,
+            &"aa".repeat(64),
+            "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+            1_000,
+            Some(&overrides),
+        )
+        .await
+        .expect("combine submit");
+        assert_eq!(result["input_coin_count"], 2);
+    }
 
     fn sample_split_plan(source_coin_id: &str) -> BootstrapPlan {
         BootstrapPlan {
