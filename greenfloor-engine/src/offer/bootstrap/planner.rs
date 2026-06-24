@@ -8,9 +8,8 @@ use crate::coin_ops::aggregate_covers_without_single_coin;
 use super::amounts::BaseUnits;
 use super::combine_inputs::BootstrapCombineInputs;
 use super::combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
-use super::ladder::ladder_shape_context_for_bootstrap;
-use crate::coin_ops::shape_protection::{
-    select_smallest_non_cannibalizing_index, SplittableCandidate,
+use super::ladder::{
+    ladder_shape_context_for_bootstrap, select_smallest_non_cannibalizing_bootstrap_coin,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,23 +177,12 @@ pub fn plan_bootstrap_mixed_outputs(
         return BootstrapPlanOutcome::InvalidLadder;
     }
 
-    let candidates: Vec<SplittableCandidate<'_>> = spendable_coins
-        .iter()
-        .filter(|coin| !coin.id.trim().is_empty())
-        .map(|coin| SplittableCandidate {
-            id: coin.id.as_str(),
-            amount_base_units: coin.amount.get(),
-        })
-        .collect();
-    let candidate =
-        select_smallest_non_cannibalizing_index(&candidates, total_output_amount, &shape_ctx)
-            .and_then(|index| {
-                let selected_id = candidates[index].id;
-                spendable_coins
-                    .iter()
-                    .find(|coin| coin.id == selected_id)
-                    .map(|coin| (coin.id.clone(), coin.amount))
-            });
+    let candidate = select_smallest_non_cannibalizing_bootstrap_coin(
+        spendable_coins,
+        total_output_amount,
+        &shape_ctx,
+    )
+    .map(|coin| (coin.id.clone(), coin.amount));
 
     let Some((source_coin_id, source_amount)) = candidate else {
         if !aggregate_covers_without_single_coin(total_output_amount, &spendable_amounts) {

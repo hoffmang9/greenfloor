@@ -27,14 +27,23 @@ pub fn required_ladder_row_slot(
 /// Required slot rows from daemon/market [`LadderEntry`] values.
 #[must_use]
 pub fn required_rows_from_ladder_entries(entries: &[LadderEntry]) -> Vec<(i64, i64)> {
-    entries
-        .iter()
-        .map(|row| {
-            required_ladder_row_slot(
-                row.size_base_units,
-                row.target_count,
-                row.split_buffer_count,
-            )
+    required_ladder_row_slots(entries.iter().map(|row| {
+        (
+            row.size_base_units,
+            row.target_count,
+            row.split_buffer_count,
+        )
+    }))
+}
+
+/// Required `(size, target+buffer)` rows from configured ladder rungs.
+#[must_use]
+pub fn required_ladder_row_slots(
+    rows: impl IntoIterator<Item = (i64, i64, i64)>,
+) -> Vec<(i64, i64)> {
+    rows.into_iter()
+        .map(|(size_base_units, target_count, split_buffer_count)| {
+            required_ladder_row_slot(size_base_units, target_count, split_buffer_count)
         })
         .collect()
 }
@@ -126,27 +135,13 @@ impl SplitSourceProtection {
         required_amount_base_units: i64,
         exclude_coin_ids: &HashSet<String>,
     ) -> Option<&'a SpendableCoin> {
-        let multiplier = self.base_unit_mojo_multiplier.max(1);
-        let required_mojos = required_amount_base_units.saturating_mul(multiplier);
-        let candidates: Vec<SplittableCandidate<'_>> = spendable
-            .iter()
-            .filter(|coin| {
-                !coin.id.is_empty()
-                    && !exclude_coin_ids.contains(&coin.id)
-                    && coin.amount >= required_mojos
-            })
-            .map(|coin| SplittableCandidate {
-                id: coin.id.as_str(),
-                amount_base_units: coin.amount / multiplier,
-            })
-            .collect();
-        let index = select_smallest_non_cannibalizing_index(
-            &candidates,
+        select_smallest_non_cannibalizing_spendable(
+            spendable,
             required_amount_base_units,
+            self.base_unit_mojo_multiplier,
+            exclude_coin_ids,
             &self.shape,
-        )?;
-        let selected_id = candidates[index].id;
-        spendable.iter().find(|coin| coin.id == selected_id)
+        )
     }
 }
 
@@ -250,6 +245,49 @@ pub fn select_smallest_non_cannibalizing_index(
         })
         .min_by_key(|(_, candidate)| candidate.amount_base_units)
         .map(|(index, _)| index)
+}
+
+/// ID of the smallest candidate that can fund `required_output_base_units` without cannibalizing a protected row.
+#[must_use]
+pub fn select_smallest_non_cannibalizing_candidate_id<'a>(
+    candidates: &'a [SplittableCandidate<'_>],
+    required_output_base_units: i64,
+    ctx: &LadderShapeContext,
+) -> Option<&'a str> {
+    let index =
+        select_smallest_non_cannibalizing_index(candidates, required_output_base_units, ctx)?;
+    Some(candidates[index].id)
+}
+
+/// Smallest non-cannibalizing spendable coin meeting `required_amount_base_units`.
+#[must_use]
+pub fn select_smallest_non_cannibalizing_spendable<'a>(
+    spendable: &'a [SpendableCoin],
+    required_amount_base_units: i64,
+    base_unit_mojo_multiplier: i64,
+    exclude_coin_ids: &HashSet<String>,
+    ctx: &LadderShapeContext,
+) -> Option<&'a SpendableCoin> {
+    let multiplier = base_unit_mojo_multiplier.max(1);
+    let required_mojos = required_amount_base_units.saturating_mul(multiplier);
+    let candidates: Vec<SplittableCandidate<'_>> = spendable
+        .iter()
+        .filter(|coin| {
+            !coin.id.is_empty()
+                && !exclude_coin_ids.contains(&coin.id)
+                && coin.amount >= required_mojos
+        })
+        .map(|coin| SplittableCandidate {
+            id: coin.id.as_str(),
+            amount_base_units: coin.amount / multiplier,
+        })
+        .collect();
+    let selected_id = select_smallest_non_cannibalizing_candidate_id(
+        candidates.as_slice(),
+        required_amount_base_units,
+        ctx,
+    )?;
+    spendable.iter().find(|coin| coin.id == selected_id)
 }
 
 #[cfg(test)]

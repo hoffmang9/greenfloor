@@ -6,17 +6,19 @@
 
 use super::ladder::ladder_shape_context_for_bootstrap;
 use super::planner::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
-use crate::coin_ops::shape_protection::{primary_row_satisfied, LadderShapeContext};
+use crate::coin_ops::shape_protection::primary_row_satisfied;
 
-fn combine_target_row_satisfied(
-    combine_target_amount: i64,
-    shape_ctx: &LadderShapeContext,
-) -> bool {
-    primary_row_satisfied(
-        combine_target_amount,
-        &shape_ctx.protected_slots,
-        &shape_ctx.exact_ladder_counts,
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapDeferScope {
+    PreflightPrimaryRow,
+    AfterCombineTarget { combine_target_amount: i64 },
+}
+
+fn spendable_amounts_base_units(spendable_coins: &[BootstrapCoin]) -> Vec<i64> {
+    spendable_coins
+        .iter()
+        .map(|coin| coin.amount.get())
+        .collect()
 }
 
 /// True when remaining shape work should defer to daemon coin ops instead of bootstrap.
@@ -55,6 +57,49 @@ pub(crate) fn sub_primary_shape_deferred_to_coin_ops(
     }
 }
 
+fn bootstrap_shape_deferred_to_coin_ops(
+    outcome: &BootstrapPlanOutcome,
+    ladder_entries: &[PlannerLadderRow],
+    spendable_coins: &[BootstrapCoin],
+    scope: BootstrapDeferScope,
+) -> bool {
+    let shape_ctx = ladder_shape_context_for_bootstrap(
+        ladder_entries,
+        &spendable_amounts_base_units(spendable_coins),
+    );
+    match scope {
+        BootstrapDeferScope::PreflightPrimaryRow => {
+            let Some(primary_size) = shape_ctx.primary_row_size() else {
+                return matches!(outcome, BootstrapPlanOutcome::Ready);
+            };
+            sub_primary_shape_deferred_to_coin_ops(
+                outcome,
+                primary_size,
+                shape_ctx.primary_row_satisfied(),
+            )
+        }
+        BootstrapDeferScope::AfterCombineTarget {
+            combine_target_amount,
+        } => {
+            if !ladder_entries
+                .iter()
+                .any(|row| row.size_base_units == combine_target_amount)
+            {
+                return false;
+            }
+            sub_primary_shape_deferred_to_coin_ops(
+                outcome,
+                combine_target_amount,
+                primary_row_satisfied(
+                    combine_target_amount,
+                    &shape_ctx.protected_slots,
+                    &shape_ctx.exact_ladder_counts,
+                ),
+            )
+        }
+    }
+}
+
 /// True when bootstrap preflight should skip shaping and let daemon coin ops backfill buffers.
 #[must_use]
 pub(crate) fn bootstrap_preflight_deferred_to_coin_ops(
@@ -62,15 +107,12 @@ pub(crate) fn bootstrap_preflight_deferred_to_coin_ops(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
 ) -> bool {
-    let amounts: Vec<i64> = spendable_coins
-        .iter()
-        .map(|coin| coin.amount.get())
-        .collect();
-    let ctx = ladder_shape_context_for_bootstrap(ladder_entries, &amounts);
-    let Some(primary_size) = ctx.primary_row_size() else {
-        return matches!(outcome, BootstrapPlanOutcome::Ready);
-    };
-    sub_primary_shape_deferred_to_coin_ops(outcome, primary_size, ctx.primary_row_satisfied())
+    bootstrap_shape_deferred_to_coin_ops(
+        outcome,
+        ladder_entries,
+        spendable_coins,
+        BootstrapDeferScope::PreflightPrimaryRow,
+    )
 }
 
 /// True when offer bootstrap should stop after combine mints the target ladder row on-chain.
@@ -81,21 +123,13 @@ pub(crate) fn offer_bootstrap_primary_row_complete(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
 ) -> bool {
-    if !ladder_entries
-        .iter()
-        .any(|row| row.size_base_units == combine_target_amount)
-    {
-        return false;
-    }
-    let amounts: Vec<i64> = spendable_coins
-        .iter()
-        .map(|coin| coin.amount.get())
-        .collect();
-    let shape_ctx = ladder_shape_context_for_bootstrap(ladder_entries, &amounts);
-    sub_primary_shape_deferred_to_coin_ops(
+    bootstrap_shape_deferred_to_coin_ops(
         outcome,
-        combine_target_amount,
-        combine_target_row_satisfied(combine_target_amount, &shape_ctx),
+        ladder_entries,
+        spendable_coins,
+        BootstrapDeferScope::AfterCombineTarget {
+            combine_target_amount,
+        },
     )
 }
 

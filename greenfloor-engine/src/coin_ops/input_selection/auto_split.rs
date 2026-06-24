@@ -45,6 +45,8 @@ fn sub_cat_change_skip(
     }))
 }
 
+/// Shared daemon auto-split planner. Without protection, picks the **largest** eligible coin;
+/// with protection, picks the **smallest non-cannibalizing** coin for ladder-row safety.
 fn plan_daemon_auto_split_with_optional_protection(
     params: &DaemonAutoSplitParams<'_>,
     protection: Option<&SplitSourceProtection>,
