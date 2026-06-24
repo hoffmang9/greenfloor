@@ -225,9 +225,8 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
     assert!(result.wait_events.iter().any(|event| {
         event.get("event") == Some(&serde_json::json!("bootstrap_combine_submitted"))
     }));
-    assert!(result
-        .wait_events
-        .iter()
-        .any(|event| { event.get("event") == Some(&serde_json::json!("bootstrap_shape_ready")) }));
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_shape_wait_complete"))
+    }));
     assert!(!result.split_result.is_null());
 }

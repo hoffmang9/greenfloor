@@ -7,7 +7,7 @@ use crate::offer::bootstrap::{
 };
 
 use super::split_submit::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-use super::wait::{wait_for_bootstrap_shape_ready, BootstrapWaitConfig};
+use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
 use super::{
     executed_after_split, BootstrapPhaseFailure, BootstrapPhaseResult, ExecutedAfterSplitParams,
 };
@@ -87,7 +87,7 @@ async fn execute_bootstrap_combine_step(
         ))
     })?;
 
-    let wait = wait_for_bootstrap_shape_ready(BootstrapWaitConfig {
+    let wait = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
         network: &program.network,
         signer: signer_config,
         ctx,
@@ -180,7 +180,7 @@ pub(super) async fn execute_bootstrap_shape(
         }
     };
 
-    let wait = match wait_for_bootstrap_shape_ready(BootstrapWaitConfig {
+    let wait = match wait_for_bootstrap_shape_step(BootstrapWaitConfig {
         network: &program.network,
         signer: signer_config,
         ctx: &ctx,
