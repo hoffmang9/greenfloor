@@ -5,18 +5,6 @@ use crate::coin_ops::selection::{
 };
 use crate::metrics::metric_non_negative_usize;
 
-const UNCONSTRAINED_PROBE: TargetAmountSelectionOptions = TargetAmountSelectionOptions {
-    max_input_count: None,
-    min_input_count: 1,
-};
-
-fn combine_cap_options(cap: usize) -> TargetAmountSelectionOptions {
-    TargetAmountSelectionOptions {
-        max_input_count: Some(cap),
-        min_input_count: 2,
-    }
-}
-
 #[must_use]
 pub fn build_combine_prereq_plan(
     candidate_spendable: &[SpendableCoin],
@@ -37,7 +25,7 @@ pub fn build_combine_prereq_plan(
         select_spendable_coins_for_target_amount_with_options(
             candidate_spendable,
             required,
-            UNCONSTRAINED_PROBE,
+            TargetAmountSelectionOptions::default(),
         );
     let selected_count_before_cap = unconstrained_ids.len();
     if selected_count_before_cap < 2 {
@@ -49,7 +37,7 @@ pub fn build_combine_prereq_plan(
         let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
             candidate_spendable,
             required,
-            combine_cap_options(cap),
+            TargetAmountSelectionOptions::combine_cap(cap),
         );
         if ids.is_empty() {
             return None;

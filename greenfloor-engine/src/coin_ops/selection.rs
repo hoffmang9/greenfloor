@@ -5,9 +5,16 @@ use std::collections::HashSet;
 use super::policy::coin_op_min_amount_mojos;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TargetAmountSelectionOptions {
+pub(crate) enum TargetAmountOvershootRank {
+    MinOvershoot,
+    MinInputCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TargetAmountSelectionOptions {
     pub max_input_count: Option<usize>,
     pub min_input_count: usize,
+    pub overshoot_rank: TargetAmountOvershootRank,
 }
 
 impl Default for TargetAmountSelectionOptions {
@@ -15,6 +22,17 @@ impl Default for TargetAmountSelectionOptions {
         Self {
             max_input_count: None,
             min_input_count: 1,
+            overshoot_rank: TargetAmountOvershootRank::MinOvershoot,
+        }
+    }
+}
+
+impl TargetAmountSelectionOptions {
+    pub(crate) fn combine_cap(cap: usize) -> Self {
+        Self {
+            max_input_count: Some(cap),
+            min_input_count: 2,
+            overshoot_rank: TargetAmountOvershootRank::MinInputCount,
         }
     }
 }
@@ -97,7 +115,7 @@ pub fn select_spendable_coins_for_target_amount(
 }
 
 #[must_use]
-pub fn select_spendable_coins_for_target_amount_with_options(
+pub(crate) fn select_spendable_coins_for_target_amount_with_options(
     coins: &[SpendableCoin],
     target_amount: i64,
     options: TargetAmountSelectionOptions,
@@ -110,6 +128,7 @@ pub fn select_spendable_coins_for_target_amount_with_options(
     let TargetAmountSelectionOptions {
         max_input_count,
         min_input_count,
+        overshoot_rank,
     } = options;
     if min_input_count == 0 || max_input_count.is_some_and(|max| max < min_input_count) {
         return (Vec::new(), 0, false);
@@ -132,7 +151,14 @@ pub fn select_spendable_coins_for_target_amount_with_options(
         return exact;
     }
 
-    choose_best_overshoot_subset(&best, &entries, required, min_input_count, max_input_count)
+    choose_best_overshoot_subset(
+        &best,
+        &entries,
+        required,
+        min_input_count,
+        max_input_count,
+        overshoot_rank,
+    )
 }
 
 fn positive_spendable_entries(coins: &[SpendableCoin]) -> Vec<(String, i64)> {
@@ -232,8 +258,8 @@ fn choose_best_overshoot_subset(
     required: i64,
     min_input_count: usize,
     max_input_count: Option<usize>,
+    overshoot_rank: TargetAmountOvershootRank,
 ) -> (Vec<String>, i64, bool) {
-    let cardinality_first = max_input_count.is_some();
     let mut chosen: Option<(i64, Vec<usize>)> = None;
     for (sum, subset) in best {
         if *sum < required || subset.len() < min_input_count {
@@ -249,7 +275,7 @@ fn choose_best_overshoot_subset(
                 *best_sum,
                 best_subset,
                 required,
-                cardinality_first,
+                overshoot_rank,
             )
         }) {
             chosen = Some((*sum, subset.clone()));
@@ -268,20 +294,23 @@ fn overshoot_subset_better(
     best_sum: i64,
     best_subset: &[usize],
     required: i64,
-    cardinality_first: bool,
+    overshoot_rank: TargetAmountOvershootRank,
 ) -> bool {
-    if cardinality_first {
-        (
-            candidate_subset.len(),
-            candidate_sum - required,
-            candidate_sum,
-        ) < (best_subset.len(), best_sum - required, best_sum)
-    } else {
-        (
-            candidate_sum - required,
-            candidate_subset.len(),
-            candidate_sum,
-        ) < (best_sum - required, best_subset.len(), best_sum)
+    match overshoot_rank {
+        TargetAmountOvershootRank::MinInputCount => {
+            (
+                candidate_subset.len(),
+                candidate_sum - required,
+                candidate_sum,
+            ) < (best_subset.len(), best_sum - required, best_sum)
+        }
+        TargetAmountOvershootRank::MinOvershoot => {
+            (
+                candidate_sum - required,
+                candidate_subset.len(),
+                candidate_sum,
+            ) < (best_sum - required, best_subset.len(), best_sum)
+        }
     }
 }
 
@@ -369,10 +398,7 @@ mod tests {
         let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
             &list,
             100,
-            TargetAmountSelectionOptions {
-                max_input_count: Some(5),
-                min_input_count: 2,
-            },
+            TargetAmountSelectionOptions::combine_cap(5),
         );
         assert!(!exact);
         assert_eq!(total, 105);

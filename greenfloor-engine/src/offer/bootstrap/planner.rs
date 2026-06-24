@@ -502,21 +502,18 @@ mod tests {
         assert_eq!(plan.combine_input_coin_ids().expect("inputs").len(), 4);
     }
 
-    fn eco181_bootstrap_coins() -> Vec<BootstrapCoin> {
-        crate::test_support::eco181_inventory::eco181_fragmented_inventory_rows()
-            .into_iter()
-            .map(|(id, amount)| coin(&id, amount))
-            .collect()
-    }
-
     #[test]
-    fn plans_combine_first_for_eco181_fragmented_inventory_with_cap_five() {
+    fn plans_combine_first_for_fragmented_inventory_with_cap_five() {
         let ladder = vec![row(1, 5, 1), row(10, 2, 1), row(100, 1, 0)];
-        let spendable = eco181_bootstrap_coins();
+        let spendable: Vec<BootstrapCoin> =
+            crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins()
+                .into_iter()
+                .map(|coin_row| coin(&coin_row.id, coin_row.amount))
+                .collect();
         let BootstrapPlanOutcome::NeedsShape(plan) =
             plan_bootstrap_mixed_outputs(&ladder, &spendable, 5)
         else {
-            panic!("expected combine-first plan for ECO.181 inventory")
+            panic!("expected combine-first plan for fragmented inventory")
         };
         assert_combine_first(&plan);
         assert_eq!(plan.total_output_amount, 100);
