@@ -131,6 +131,9 @@ pub enum SignerError {
     #[error("combine input verify timeout")]
     CombineInputVerifyTimeout,
 
+    #[error("bootstrap shape wait timeout")]
+    BootstrapShapeWaitTimeout,
+
     #[error("presplit offer step requires --offer-coin-ids of original source coins")]
     PresplitOfferRequiresSourceCoinIds,
 

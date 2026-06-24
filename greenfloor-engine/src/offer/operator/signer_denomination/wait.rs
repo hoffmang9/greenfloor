@@ -83,9 +83,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
             initial_sleep,
             max_sleep,
         ) else {
-            return Err(SignerError::Other(
-                "bootstrap_shape_wait_timeout".to_string(),
-            ));
+            return Err(SignerError::BootstrapShapeWaitTimeout);
         };
         let spendable = fetch_bootstrap_spendable(network, signer, ctx).await?;
         let snapshot = normalized_spendable_snapshot(&spendable);
@@ -128,6 +126,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
 #[cfg(test)]
 mod tests {
     use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
+    use crate::error::SignerError;
     use crate::offer::bootstrap::{BaseUnits, BootstrapCoin};
     use crate::offer::bootstrap::{BootstrapWaitStepKind, PlannerLadderRow};
     use crate::test_support::bootstrap_shape::{
@@ -223,7 +222,7 @@ mod tests {
         })
         .await
         .expect_err("timeout");
-        assert_eq!(err.to_string(), "bootstrap_shape_wait_timeout");
+        assert!(matches!(err, SignerError::BootstrapShapeWaitTimeout));
     }
 
     #[tokio::test]

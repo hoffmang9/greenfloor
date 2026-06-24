@@ -1,16 +1,20 @@
 use serde_json::json;
 
 use crate::config::{ManagerProgramConfig, SignerConfig};
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
-    bootstrap_executed_phase, BootstrapPlanOutcome, BootstrapWaitStepKind, PlannerLadderRow,
+    bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapPhaseSnapshot,
+    BootstrapPlanOutcome, BootstrapReplanAfterCombine, BootstrapWaitStepKind, PlannerLadderRow,
 };
 
+use super::executed_after_split;
 use super::split_submit::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
-use super::{
-    executed_after_split, BootstrapPhaseFailure, BootstrapPhaseResult, ExecutedAfterSplitParams,
+use super::types::{
+    BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure,
+    BootstrapPhaseResult,
 };
+use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
+use super::ExecutedAfterSplitParams;
 
 const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
@@ -28,22 +32,55 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
 }
 
-fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
-    BootstrapPhaseResult::failed(failure)
+impl BootstrapShapeContext {
+    fn execution_metadata(&self) -> BootstrapExecutionMetadata {
+        BootstrapExecutionMetadata {
+            fee_mojos: self.fee_mojos,
+            fee_source: self.fee_source.clone(),
+            fee_lookup_error: self.fee_lookup_error.clone(),
+        }
+    }
+
+    fn executed_result(
+        &self,
+        snapshot: BootstrapPhaseSnapshot,
+        extras: BootstrapExecutedExtras,
+    ) -> BootstrapPhaseResult {
+        BootstrapPhaseResult::from_executed(self.execution_metadata(), snapshot, extras)
+    }
+
+    fn executed_on_shape_wait_timeout(
+        &self,
+        reason: &'static str,
+        extras: BootstrapExecutedExtras,
+    ) -> BootstrapPhaseResult {
+        self.executed_result(
+            BootstrapPhaseSnapshot {
+                status: "executed",
+                reason: reason.to_string(),
+                ready: false,
+            },
+            extras,
+        )
+    }
+
+    fn executed_from_outcome(
+        &self,
+        outcome: &BootstrapPlanOutcome,
+        wait_events: Vec<serde_json::Value>,
+    ) -> BootstrapPhaseResult {
+        self.executed_result(
+            bootstrap_executed_phase(outcome),
+            BootstrapExecutedExtras {
+                wait_events,
+                ..BootstrapExecutedExtras::empty()
+            },
+        )
+    }
 }
 
-fn bootstrap_result_from_replan(
-    replanned: &BootstrapPlanOutcome,
-    ctx: &BootstrapShapeContext,
-    prepend_wait_events: Vec<serde_json::Value>,
-) -> BootstrapPhaseResult {
-    let executed = bootstrap_executed_phase(replanned);
-    let mut result = BootstrapPhaseResult::from_snapshot(executed);
-    result.fee_mojos = ctx.fee_mojos;
-    result.fee_source.clone_from(&ctx.fee_source);
-    result.fee_lookup_error.clone_from(&ctx.fee_lookup_error);
-    result.wait_events = prepend_wait_events;
-    result
+fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
+    BootstrapPhaseResult::failed(failure)
 }
 
 fn bootstrap_wait_failed(
@@ -96,7 +133,23 @@ async fn execute_bootstrap_combine_step(
         step: BootstrapWaitStepKind::AfterCombine,
     })
     .await
-    .map_err(|err| bootstrap_wait_failed(ctx, "bootstrap_combine_wait_failed", err))?;
+    .map_err(|err| {
+        if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
+            return ctx.executed_on_shape_wait_timeout(
+                "bootstrap_submitted:after_combine_wait_timeout",
+                BootstrapExecutedExtras {
+                    wait_events: vec![json!({
+                        "event": "bootstrap_combine_submitted",
+                        "combine_result": combine_result,
+                    })],
+                    plan: Some(ctx.bootstrap_plan.clone()),
+                    wait_error: Some(err.to_string()),
+                    ..BootstrapExecutedExtras::empty()
+                },
+            );
+        }
+        bootstrap_wait_failed(ctx, "bootstrap_combine_wait_failed", err)
+    })?;
 
     let mut wait_events = wait.events;
     wait_events.insert(
@@ -114,24 +167,17 @@ pub(crate) fn replan_after_combine(
     ctx: &mut BootstrapShapeContext,
     prepend_wait_events: Vec<serde_json::Value>,
     replanned: BootstrapPlanOutcome,
+    combine_target_amount: i64,
 ) -> Option<BootstrapPhaseResult> {
-    let BootstrapPlanOutcome::NeedsShape(split_plan) = replanned else {
-        return Some(bootstrap_result_from_replan(
-            &replanned,
-            ctx,
-            prepend_wait_events,
-        ));
-    };
-    if split_plan.requires_combine_first() {
-        ctx.bootstrap_plan = split_plan;
-        return Some(bootstrap_result_from_replan(
-            &BootstrapPlanOutcome::NeedsShape(ctx.bootstrap_plan.clone()),
-            ctx,
-            prepend_wait_events,
-        ));
+    match bootstrap_replan_after_combine(combine_target_amount, replanned) {
+        BootstrapReplanAfterCombine::Complete(outcome) => {
+            Some(ctx.executed_from_outcome(&outcome, prepend_wait_events))
+        }
+        BootstrapReplanAfterCombine::ContinueSplit(plan) => {
+            ctx.bootstrap_plan = plan;
+            None
+        }
     }
-    ctx.bootstrap_plan = split_plan;
-    None
 }
 
 pub(super) async fn execute_bootstrap_shape(
@@ -142,14 +188,19 @@ pub(super) async fn execute_bootstrap_shape(
     let mut prepend_wait_events = Vec::new();
 
     if ctx.bootstrap_plan.requires_combine_first() {
+        let combine_target_amount = ctx.bootstrap_plan.total_output_amount;
         let (events, replanned) =
             match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
                 Ok(result) => result,
                 Err(result) => return Ok(result),
             };
         prepend_wait_events = events;
-        if let Some(result) = replan_after_combine(&mut ctx, prepend_wait_events.clone(), replanned)
-        {
+        if let Some(result) = replan_after_combine(
+            &mut ctx,
+            prepend_wait_events.clone(),
+            replanned,
+            combine_target_amount,
+        ) {
             return Ok(result);
         }
     }
@@ -192,6 +243,17 @@ pub(super) async fn execute_bootstrap_shape(
     {
         Ok(wait) => wait,
         Err(err) => {
+            if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
+                return Ok(ctx.executed_on_shape_wait_timeout(
+                    "bootstrap_submitted:after_split_wait_timeout",
+                    BootstrapExecutedExtras {
+                        wait_events: prepend_wait_events,
+                        split_result,
+                        plan: Some(bootstrap_plan),
+                        wait_error: Some(err.to_string()),
+                    },
+                ));
+            }
             let mut failure = bootstrap_failed(
                 BootstrapPhaseFailure::new(
                     "bootstrap_wait_failed",

@@ -62,8 +62,7 @@ pub(crate) enum BootstrapWaitResolution {
     Complete(BootstrapPlanOutcome),
 }
 
-/// Whether a submitted split step has produced observable on-chain inventory movement
-/// worth treating as a settled post-split planner outcome.
+/// Whether a submitted split step has produced a settled post-split planner outcome.
 #[must_use]
 fn post_split_shape_step_settled(outcome: &BootstrapPlanOutcome) -> bool {
     match outcome {
@@ -79,8 +78,7 @@ fn post_split_shape_step_settled(outcome: &BootstrapPlanOutcome) -> bool {
 ///
 /// After combine, completion follows planner semantics so transient `CannotFund` from
 /// partial change coins does not exit early. After split, completion requires an on-chain
-/// inventory update plus a settled post-split planner outcome (success or executed-phase
-/// terminal reason).
+/// inventory update plus a settled post-split planner outcome.
 #[must_use]
 pub(crate) fn resolve_bootstrap_wait_poll(
     step: BootstrapWaitStepKind,

@@ -32,7 +32,7 @@ pub use input_selection::{
     SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
     SubCatChangeSkipData,
 };
-pub(crate) use input_selection::{select_combine_inputs_for_target, TargetAmountCoin};
+pub(crate) use input_selection::{select_combine_inputs_for_target_in, TargetAmountCoin};
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,

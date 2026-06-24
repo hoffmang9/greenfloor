@@ -124,6 +124,28 @@ impl BootstrapPhaseResult {
         }
     }
 
+    pub(super) fn from_executed(
+        metadata: BootstrapExecutionMetadata,
+        snapshot: BootstrapPhaseSnapshot,
+        extras: BootstrapExecutedExtras,
+    ) -> Self {
+        let BootstrapExecutedExtras {
+            wait_events,
+            split_result,
+            plan,
+            wait_error,
+        } = extras;
+        let mut result = Self::from_snapshot(snapshot);
+        result.fee_mojos = metadata.fee_mojos;
+        result.fee_source = metadata.fee_source;
+        result.fee_lookup_error = metadata.fee_lookup_error;
+        result.wait_error = wait_error;
+        result.split_result = split_result;
+        result.wait_events = wait_events;
+        result.plan = plan;
+        result
+    }
+
     pub(crate) fn skipped(reason: impl Into<String>) -> Self {
         Self {
             phase_status: BootstrapPhaseStatus::Skipped,
@@ -157,6 +179,31 @@ impl BootstrapPhaseResult {
             split_result: failure.split_result,
             wait_events: failure.wait_events,
             plan: failure.plan,
+        }
+    }
+}
+
+#[allow(clippy::struct_field_names)]
+pub(super) struct BootstrapExecutionMetadata {
+    pub fee_mojos: u64,
+    pub fee_source: String,
+    pub fee_lookup_error: Option<String>,
+}
+
+pub(super) struct BootstrapExecutedExtras {
+    pub wait_events: Vec<Value>,
+    pub split_result: Value,
+    pub plan: Option<BootstrapPlan>,
+    pub wait_error: Option<String>,
+}
+
+impl BootstrapExecutedExtras {
+    pub(super) fn empty() -> Self {
+        Self {
+            wait_events: Vec::new(),
+            split_result: json!({}),
+            plan: None,
+            wait_error: None,
         }
     }
 }

@@ -3,6 +3,8 @@
 //! Every coin in `coins` and the `target` argument must use the same unit system for
 //! the call: on-chain **mojos** (daemon coin ops) or ladder **base units** (bootstrap).
 
+use std::collections::HashSet;
+
 use crate::coin_ops::selection::{
     select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
@@ -33,6 +35,15 @@ pub(crate) fn select_combine_inputs_for_target(
     target: i64,
     combine_input_cap: i64,
 ) -> Option<TargetAmountCoinSelection> {
+    select_combine_inputs_for_target_in(coins, target, combine_input_cap, None)
+}
+
+pub(crate) fn select_combine_inputs_for_target_in(
+    coins: &[TargetAmountCoin],
+    target: i64,
+    combine_input_cap: i64,
+    allowed_coin_ids: Option<&HashSet<String>>,
+) -> Option<TargetAmountCoinSelection> {
     if target <= 0 {
         return None;
     }
@@ -44,6 +55,11 @@ pub(crate) fn select_combine_inputs_for_target(
 
     let spendable: Vec<SpendableCoin> = coins
         .iter()
+        .filter(|coin| {
+            allowed_coin_ids.is_none_or(|allowed| allowed.contains(&coin.id))
+                && !coin.id.trim().is_empty()
+                && coin.amount > 0
+        })
         .map(|coin| SpendableCoin {
             id: coin.id.clone(),
             amount: coin.amount,
