@@ -4,6 +4,21 @@ use std::collections::HashSet;
 
 use super::policy::coin_op_min_amount_mojos;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetAmountSelectionOptions {
+    pub max_input_count: Option<usize>,
+    pub min_input_count: usize,
+}
+
+impl Default for TargetAmountSelectionOptions {
+    fn default() -> Self {
+        Self {
+            max_input_count: None,
+            min_input_count: 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendableCoin {
     pub id: String,
@@ -74,81 +89,200 @@ pub fn select_spendable_coins_for_target_amount(
     coins: &[SpendableCoin],
     target_amount: i64,
 ) -> (Vec<String>, i64, bool) {
+    select_spendable_coins_for_target_amount_with_options(
+        coins,
+        target_amount,
+        TargetAmountSelectionOptions::default(),
+    )
+}
+
+#[must_use]
+pub fn select_spendable_coins_for_target_amount_with_options(
+    coins: &[SpendableCoin],
+    target_amount: i64,
+    options: TargetAmountSelectionOptions,
+) -> (Vec<String>, i64, bool) {
     let required = target_amount;
     if required <= 0 {
         return (Vec::new(), 0, false);
     }
-    let entries: Vec<(String, i64)> = coins
+
+    let TargetAmountSelectionOptions {
+        max_input_count,
+        min_input_count,
+    } = options;
+    if min_input_count == 0 || max_input_count.is_some_and(|max| max < min_input_count) {
+        return (Vec::new(), 0, false);
+    }
+
+    let entries = positive_spendable_entries(coins);
+    if entries.len() < min_input_count {
+        return (Vec::new(), 0, false);
+    }
+
+    let sum_cap = target_amount_sum_cap(required, &entries, max_input_count);
+    if max_input_count.is_none() && sum_cap > 500_000 {
+        return greedy_target_amount_selection(&entries, required, min_input_count);
+    }
+
+    let best = build_min_cardinality_subset_map(&entries, sum_cap, max_input_count);
+    if let Some(exact) =
+        exact_target_amount_subset(&best, &entries, required, min_input_count, max_input_count)
+    {
+        return exact;
+    }
+
+    choose_best_overshoot_subset(&best, &entries, required, min_input_count, max_input_count)
+}
+
+fn positive_spendable_entries(coins: &[SpendableCoin]) -> Vec<(String, i64)> {
+    coins
         .iter()
         .filter(|coin| !coin.id.is_empty() && coin.amount > 0)
         .map(|coin| (coin.id.clone(), coin.amount))
-        .collect();
-    if entries.is_empty() {
-        return (Vec::new(), 0, false);
-    }
+        .collect()
+}
 
+fn target_amount_sum_cap(
+    required: i64,
+    entries: &[(String, i64)],
+    max_input_count: Option<usize>,
+) -> i64 {
     let max_amount = entries.iter().map(|(_, amount)| *amount).max().unwrap_or(0);
-    let cap = required + max_amount;
-    if cap > 500_000 {
-        let mut ordered = entries.clone();
-        ordered.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
-        let mut picked_ids = Vec::new();
-        let mut running = 0i64;
-        for (coin_id, amount) in ordered {
-            picked_ids.push(coin_id);
-            running += amount;
-            if running >= required {
-                return (picked_ids, running, running == required);
-            }
-        }
-        return (Vec::new(), 0, false);
+    match max_input_count {
+        Some(max) => required
+            .saturating_add(max_amount.saturating_mul(i64::try_from(max).unwrap_or(i64::MAX))),
+        None => required + max_amount,
     }
+}
 
+fn greedy_target_amount_selection(
+    entries: &[(String, i64)],
+    required: i64,
+    min_input_count: usize,
+) -> (Vec<String>, i64, bool) {
+    let mut ordered = entries.to_vec();
+    ordered.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
+    let mut picked_ids = Vec::new();
+    let mut running = 0i64;
+    for (coin_id, amount) in ordered {
+        picked_ids.push(coin_id);
+        running += amount;
+        if running >= required && picked_ids.len() >= min_input_count {
+            return (picked_ids, running, running == required);
+        }
+    }
+    (Vec::new(), 0, false)
+}
+
+fn build_min_cardinality_subset_map(
+    entries: &[(String, i64)],
+    sum_cap: i64,
+    max_input_count: Option<usize>,
+) -> std::collections::BTreeMap<i64, Vec<usize>> {
+    let max_subset_len = max_input_count.unwrap_or(usize::MAX);
     let mut best: std::collections::BTreeMap<i64, Vec<usize>> =
         std::collections::BTreeMap::default();
     best.insert(0, Vec::new());
     for (idx, (_, amount)) in entries.iter().enumerate() {
         let snapshot: Vec<(i64, Vec<usize>)> = best.iter().map(|(s, v)| (*s, v.clone())).collect();
         for (prev_sum, subset) in snapshot {
+            if subset.len() >= max_subset_len {
+                continue;
+            }
             let next_sum = prev_sum + amount;
-            if next_sum > cap {
+            if next_sum > sum_cap {
                 continue;
             }
             let mut candidate = subset;
             candidate.push(idx);
-            let existing = best.get(&next_sum);
-            if existing.is_none_or(|e| candidate.len() < e.len()) {
+            if best
+                .get(&next_sum)
+                .is_none_or(|existing| candidate.len() < existing.len())
+            {
                 best.insert(next_sum, candidate);
             }
         }
     }
+    best
+}
 
-    if let Some(exact_subset) = best.get(&required) {
-        if !exact_subset.is_empty() {
-            let ids: Vec<String> = exact_subset.iter().map(|i| entries[*i].0.clone()).collect();
-            let total: i64 = exact_subset.iter().map(|i| entries[*i].1).sum();
-            return (ids, total, true);
+fn exact_target_amount_subset(
+    best: &std::collections::BTreeMap<i64, Vec<usize>>,
+    entries: &[(String, i64)],
+    required: i64,
+    min_input_count: usize,
+    max_input_count: Option<usize>,
+) -> Option<(Vec<String>, i64, bool)> {
+    let exact_subset = best.get(&required)?;
+    if exact_subset.len() < min_input_count {
+        return None;
+    }
+    if max_input_count.is_some_and(|max| exact_subset.len() > max) {
+        return None;
+    }
+    let ids: Vec<String> = exact_subset.iter().map(|i| entries[*i].0.clone()).collect();
+    let total: i64 = exact_subset.iter().map(|i| entries[*i].1).sum();
+    Some((ids, total, true))
+}
+
+fn choose_best_overshoot_subset(
+    best: &std::collections::BTreeMap<i64, Vec<usize>>,
+    entries: &[(String, i64)],
+    required: i64,
+    min_input_count: usize,
+    max_input_count: Option<usize>,
+) -> (Vec<String>, i64, bool) {
+    let cardinality_first = max_input_count.is_some();
+    let mut chosen: Option<(i64, Vec<usize>)> = None;
+    for (sum, subset) in best {
+        if *sum < required || subset.len() < min_input_count {
+            continue;
+        }
+        if max_input_count.is_some_and(|max| subset.len() > max) {
+            continue;
+        }
+        if chosen.as_ref().is_none_or(|(best_sum, best_subset)| {
+            overshoot_subset_better(
+                *sum,
+                subset,
+                *best_sum,
+                best_subset,
+                required,
+                cardinality_first,
+            )
+        }) {
+            chosen = Some((*sum, subset.clone()));
         }
     }
-
-    let overs: Vec<i64> = best.keys().copied().filter(|s| *s > required).collect();
-    if overs.is_empty() {
+    let Some((sum, subset)) = chosen else {
         return (Vec::new(), 0, false);
-    }
-    let best_over = overs
-        .into_iter()
-        .min_by_key(|sum| {
-            let subset = best.get(sum).map_or(0, Vec::len);
-            (sum - required, subset, *sum)
-        })
-        .unwrap_or(0);
-    let subset = best.get(&best_over).cloned().unwrap_or_default();
-    if subset.is_empty() {
-        return (Vec::new(), 0, false);
-    }
+    };
     let ids: Vec<String> = subset.iter().map(|i| entries[*i].0.clone()).collect();
-    let total: i64 = subset.iter().map(|i| entries[*i].1).sum();
-    (ids, total, false)
+    (ids, sum, sum == required)
+}
+
+fn overshoot_subset_better(
+    candidate_sum: i64,
+    candidate_subset: &[usize],
+    best_sum: i64,
+    best_subset: &[usize],
+    required: i64,
+    cardinality_first: bool,
+) -> bool {
+    if cardinality_first {
+        (
+            candidate_subset.len(),
+            candidate_sum - required,
+            candidate_sum,
+        ) < (best_subset.len(), best_sum - required, best_sum)
+    } else {
+        (
+            candidate_sum - required,
+            candidate_subset.len(),
+            candidate_sum,
+        ) < (best_sum - required, best_subset.len(), best_sum)
+    }
 }
 
 #[cfg(test)]
@@ -216,5 +350,37 @@ mod tests {
         assert_eq!(total, 11_000);
         let set: HashSet<_> = ids.into_iter().collect();
         assert_eq!(set, HashSet::from(["c5", "c3a", "c3b"].map(str::to_string)));
+    }
+
+    #[test]
+    fn target_amount_within_cap_prefers_minimum_cardinality_overshoot() {
+        let list = coins(&[
+            ("sixtyfive", 65),
+            ("twenty", 20),
+            ("ten_a", 10),
+            ("ten_b", 10),
+            ("ten_c", 10),
+            ("three_a", 3),
+            ("three_b", 3),
+            ("three_c", 3),
+            ("one_a", 1),
+            ("one_b", 1),
+        ]);
+        let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
+            &list,
+            100,
+            TargetAmountSelectionOptions {
+                max_input_count: Some(5),
+                min_input_count: 2,
+            },
+        );
+        assert!(!exact);
+        assert_eq!(total, 105);
+        assert_eq!(ids.len(), 4);
+        let set: HashSet<_> = ids.into_iter().collect();
+        assert_eq!(
+            set,
+            HashSet::from(["sixtyfive", "twenty", "ten_a", "ten_b"].map(str::to_string))
+        );
     }
 }

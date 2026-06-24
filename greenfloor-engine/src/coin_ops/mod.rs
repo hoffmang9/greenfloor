@@ -45,7 +45,9 @@ pub use scalars::{
 };
 pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
-    select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
+    select_spendable_coins_for_target_amount,
+    select_spendable_coins_for_target_amount_with_options, split_would_create_sub_cat_change,
+    SpendableCoin, TargetAmountSelectionOptions,
 };
 pub use shape_defer::{
     aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,

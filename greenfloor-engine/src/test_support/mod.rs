@@ -4,6 +4,8 @@
 #[cfg(test)]
 pub mod build_and_post;
 #[cfg(test)]
+pub mod eco181_inventory;
+#[cfg(test)]
 mod export_fixtures_test;
 #[cfg(test)]
 pub mod golden;
