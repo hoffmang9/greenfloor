@@ -11,7 +11,7 @@ use crate::vault::context::VaultCustodySnapshot;
 use crate::vault::members::WalletKey;
 use crate::vault::validate_vault_threshold;
 
-pub use crate::coinset::DEFAULT_MSP_BASE_URL;
+use crate::coinset::DEFAULT_COINSET_BASE_URL;
 
 #[derive(Debug, Clone)]
 pub struct SignerConfig {
@@ -56,7 +56,7 @@ pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_MSP_BASE_URL)
+        .unwrap_or(DEFAULT_COINSET_BASE_URL)
         .to_string();
 
     let vault_snapshot = parse_vault_section(vault)?;
@@ -185,7 +185,7 @@ app:
 signer:
   kms_key_id: arn:aws:kms:us-west-2:123:key/abc
   kms_region: us-west-2
-  coinset_msp_base_url: https://api-msp.coinset.org
+  coinset_msp_base_url: https://api.coinset.org
 vault:
   launcher_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   custody_threshold: 1

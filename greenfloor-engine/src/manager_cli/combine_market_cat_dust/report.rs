@@ -1,11 +1,12 @@
 use serde_json::{json, Value};
 
 use super::batches::preview_batches_report;
+use super::coinset_context::CombineCoinsetContext;
 use super::jobs::CatDustJob;
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::SignerResult;
-use crate::vault_coinset_scan::{DustBatchPlan, ScanResult};
+use crate::vault_coinset_scan::{DustPlan, ScanResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CombineExecutionFlags {
@@ -85,12 +86,22 @@ pub(crate) fn attach_list_summary(job_report: &mut Value, scan: &ScanResult) {
 
 pub(crate) fn attach_dust_plan_fields(
     job_report: &mut Value,
-    dust_coin_count: usize,
-    plan: &DustBatchPlan,
+    coinset: &CombineCoinsetContext,
+    plan: &DustPlan,
 ) {
-    job_report["dust_coin_count"] = json!(dust_coin_count);
-    job_report["combine_batches_planned"] = json!(plan.combinable_batches.len());
-    job_report["uncombinable_dust_count"] = json!(plan.uncombinable.len());
+    let lineage_proven = plan
+        .batches
+        .combinable_batches
+        .iter()
+        .map(|batch| batch.coins.len())
+        .sum::<usize>()
+        + plan.batches.uncombinable.len();
+    job_report["dust_coin_count"] = json!(plan.scan_dust_count);
+    job_report["lineage_proven_dust_count"] = json!(lineage_proven);
+    job_report["lineage_excluded_dust_count"] = json!(plan.lineage_excluded.len());
+    job_report["combine_batches_planned"] = json!(plan.batches.combinable_batches.len());
+    job_report["uncombinable_dust_count"] = json!(plan.batches.uncombinable.len());
+    job_report["coinset_base_url"] = json!(coinset.base_url());
 }
 
 pub(crate) fn list_failed_job_report(job: &CatDustJob, err: &str) -> Value {
@@ -114,13 +125,13 @@ pub(crate) fn signer_blocked_job_report(job: &CatDustJob, reason: &str) -> Value
 pub(crate) fn preview_job_report(
     job: &CatDustJob,
     scan: &ScanResult,
-    plan: &DustBatchPlan,
-    dust_coin_count: usize,
+    coinset: &CombineCoinsetContext,
+    plan: &DustPlan,
     readiness: VaultSignerReadiness,
 ) -> Value {
     let mut report = job_report_base(job);
     attach_list_summary(&mut report, scan);
-    attach_dust_plan_fields(&mut report, dust_coin_count, plan);
+    attach_dust_plan_fields(&mut report, coinset, plan);
     report["status"] = json!("ok");
     report["signer_config_ok"] = json!(readiness.can_combine);
     if let Some(note) = readiness.note {
@@ -133,44 +144,47 @@ pub(crate) fn preview_job_report(
 pub(crate) fn combine_job_report(
     job: &CatDustJob,
     scan: &ScanResult,
-    plan: &DustBatchPlan,
-    dust_coin_count: usize,
+    coinset: &CombineCoinsetContext,
+    plan: &DustPlan,
     batches: Value,
     job_failed: bool,
 ) -> Value {
     let mut report = job_report_base(job);
     attach_list_summary(&mut report, scan);
-    attach_dust_plan_fields(&mut report, dust_coin_count, plan);
+    attach_dust_plan_fields(&mut report, coinset, plan);
     report["status"] = json!(if job_failed { "error" } else { "ok" });
     report["batches"] = batches;
     report
 }
 
-pub(crate) fn plan_dust_for_scan(
+pub(crate) async fn plan_dust_for_scan(
+    coinset: &CombineCoinsetContext,
     scan: &ScanResult,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
-) -> (usize, DustBatchPlan) {
-    let dust_coins =
-        crate::vault_coinset_scan::dust_coins_from_scan(&scan.coins, dust_threshold_mojos);
-    let dust_coin_count = dust_coins.len();
-    let plan = crate::vault_coinset_scan::plan_dust_batches(&dust_coins, max_input_coins);
-    (dust_coin_count, plan)
+) -> SignerResult<DustPlan> {
+    let client = coinset.client()?;
+    crate::vault_coinset_scan::plan_dust_from_scan_with_lineage(
+        &client,
+        &scan.coins,
+        dust_threshold_mojos,
+        max_input_coins,
+    )
+    .await
 }
 
 pub(crate) async fn finalize_job_report(
     job: &CatDustJob,
     scan: ScanResult,
+    coinset: &CombineCoinsetContext,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
     run_mode: &CombineRunMode<'_>,
     readiness: VaultSignerReadiness,
 ) -> SignerResult<Value> {
-    let (dust_coin_count, plan) = plan_dust_for_scan(&scan, dust_threshold_mojos, max_input_coins);
+    let plan = plan_dust_for_scan(coinset, &scan, dust_threshold_mojos, max_input_coins).await?;
     Ok(match run_mode {
-        CombineRunMode::Preview => {
-            preview_job_report(job, &scan, &plan, dust_coin_count, readiness)
-        }
+        CombineRunMode::Preview => preview_job_report(job, &scan, coinset, &plan, readiness),
         CombineRunMode::Execute { signer, verify } => {
             let (job_failed, batches) = Box::pin(super::execute::execute_combine_batches(
                 signer,
@@ -180,7 +194,7 @@ pub(crate) async fn finalize_job_report(
                 *verify,
             ))
             .await;
-            combine_job_report(job, &scan, &plan, dust_coin_count, batches, job_failed)
+            combine_job_report(job, &scan, coinset, &plan, batches, job_failed)
         }
     })
 }

@@ -87,7 +87,7 @@ async fn run_vault_scan_for_job(
 ) -> SignerResult<ScanResult> {
     let request = build_cat_dust_scan_request(&CatDustScanParams {
         network: &coinset.network,
-        coinset_base_url: Some(coinset.direct_base_url_for_scan()),
+        coinset_base_url: Some(coinset.base_url()),
         launcher_id,
         max_nonce,
         cat_asset_id,
@@ -125,6 +125,7 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
     Box::pin(finalize_job_report(
         ctx.job,
         scan_result,
+        ctx.coinset,
         ctx.dust_threshold_mojos,
         ctx.max_input_coins,
         ctx.run_mode,
@@ -166,7 +167,7 @@ pub async fn run_combine_market_cat_dust(
         request.network,
         request.coinset_base_url,
         &program.network,
-        &CombineCoinsetContext::program_default_msp_base_url(&raw),
+        &CombineCoinsetContext::program_default_coinset_base_url(&raw),
     );
 
     let execution_signer: Option<SignerConfig> = if flags.is_preview() {

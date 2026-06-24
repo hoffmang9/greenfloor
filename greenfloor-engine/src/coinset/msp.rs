@@ -4,10 +4,15 @@ use serde::Deserialize;
 
 use super::asset::is_xch_like_asset;
 use super::direct_api;
+use crate::coinset::direct_coinset_client;
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 
-pub const DEFAULT_MSP_BASE_URL: &str = "https://api-msp.coinset.org";
+/// Default Coinset HTTP host for signer-backed operator paths.
+pub const DEFAULT_COINSET_BASE_URL: &str = direct_api::MAINNET_DIRECT_BASE_URL;
+
+/// Backward-compatible alias; new code should use [`DEFAULT_COINSET_BASE_URL`].
+pub const DEFAULT_MSP_BASE_URL: &str = DEFAULT_COINSET_BASE_URL;
 
 #[derive(Debug, Clone)]
 pub struct MspCoinset {
@@ -29,7 +34,7 @@ impl MspCoinset {
     pub fn for_network(network: &str, base_url: Option<&str>) -> SignerResult<Self> {
         let network = direct_api::normalize_coinset_network(network);
         match network {
-            "mainnet" | "testnet11" => Ok(Self::new(resolve_msp_base_url(base_url))),
+            "mainnet" | "testnet11" => Ok(Self::new(resolve_coinset_base_url(network, base_url))),
             other => Err(SignerError::Other(format!("unsupported network: {other}"))),
         }
     }
@@ -104,10 +109,16 @@ impl MspCoinset {
 ///
 /// Returns an error if the operation fails.
 pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
-    Ok(MspCoinset::for_network(network, None)?.client().clone())
+    direct_coinset_client(network, None)
 }
 
-/// Resolve the MSP coinset base URL from signer config, if configured.
+/// Returns the configured Coinset base URL from signer config, if non-empty.
+#[must_use]
+pub fn coinset_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
+    msp_base_url_for_signer(signer)
+}
+
+/// Resolve the Coinset base URL from signer config, if configured.
 #[must_use]
 pub fn msp_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
     let url = signer.coinset_msp_base_url.trim();
@@ -118,14 +129,8 @@ pub fn msp_base_url_for_signer(signer: &SignerConfig) -> Option<&str> {
     }
 }
 
-fn resolve_msp_base_url(base_url: Option<&str>) -> String {
-    base_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map_or_else(
-            || DEFAULT_MSP_BASE_URL.to_string(),
-            |value| value.trim_end_matches('/').to_string(),
-        )
+fn resolve_coinset_base_url(network: &str, base_url: Option<&str>) -> String {
+    direct_api::resolve_direct_coinset_base_url(network, base_url)
 }
 
 /// Coinset client for signer config (network + MSP base URL).
@@ -134,7 +139,7 @@ fn resolve_msp_base_url(base_url: Option<&str>) -> String {
 ///
 /// Returns an error if the operation fails.
 pub fn client_for_signer(signer: &SignerConfig) -> SignerResult<CoinsetClient> {
-    Ok(MspCoinset::for_signer(signer)?.client().clone())
+    direct_coinset_client(&signer.network, coinset_base_url_for_signer(signer))
 }
 
 /// Client for config.

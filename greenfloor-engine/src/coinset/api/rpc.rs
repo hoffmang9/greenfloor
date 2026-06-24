@@ -3,7 +3,6 @@ use serde_json::{json, Value};
 
 use super::super::{
     direct_api,
-    msp::{self, MspCoinset},
     pagination::coin_records_from_json_endpoint,
     parse::{coin_records_from_payload, pagination_from_payload, record_from_payload},
     retry::with_script_retries,
@@ -18,16 +17,6 @@ use crate::error::{SignerError, SignerResult};
 pub fn direct_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
     let resolved = direct_api::resolve_direct_client(network, base_url);
     Ok(CoinsetClient::new(resolved.base_url))
-}
-
-fn msp_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
-    if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        Ok(MspCoinset::for_network(network, Some(url))?
-            .client()
-            .clone())
-    } else {
-        msp::client_for_network(network)
-    }
 }
 
 fn apply_testnet11_network(body: &mut Value, network: &str) {
@@ -78,15 +67,6 @@ pub async fn post_coinset_rpc(
     body: Value,
 ) -> SignerResult<Value> {
     post_coinset_rpc_with(network, base_url, endpoint, body, direct_coinset_client).await
-}
-
-pub(super) async fn post_msp_coinset_rpc(
-    network: &str,
-    base_url: Option<&str>,
-    endpoint: &str,
-    body: Value,
-) -> SignerResult<Value> {
-    post_coinset_rpc_with(network, base_url, endpoint, body, msp_coinset_client).await
 }
 
 /// Fetch all coin records from a JSON coin-record endpoint, following cursor pages.

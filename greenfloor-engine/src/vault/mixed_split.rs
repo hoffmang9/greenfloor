@@ -69,6 +69,7 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     config: SignerConfig,
     request: MixedSplitRequest,
     broadcast: bool,
+    preselected_cats: Option<Vec<Cat>>,
 ) -> SignerResult<MixedSplitResult> {
     validate_mixed_split_request(&request)?;
 
@@ -78,14 +79,22 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     let receive_puzzle_hash = decode_address(&request.receive_address)?;
 
     let target_total: u64 = request.output_amounts.iter().sum();
-    let selection = backend
-        .select_cats_for_spend(
-            &request.receive_address,
-            request.asset_id,
+    let selection = if let Some(cats) = preselected_cats {
+        coinset::coin_select::finalize_preselected_cats_for_spend(
+            cats,
             &request.coin_ids,
             target_total,
-        )
-        .await?;
+        )?
+    } else {
+        backend
+            .select_cats_for_spend(
+                &request.receive_address,
+                request.asset_id,
+                &request.coin_ids,
+                target_total,
+            )
+            .await?
+    };
     let change_amount = selection.change_amount;
     if !request.allow_sub_cat_output && change_amount > 0 && change_amount < MIN_CAT_OUTPUT_MOJOS {
         return Err(SignerError::CatChangeBelowMinimum);

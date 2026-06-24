@@ -10,6 +10,7 @@ mod signer;
 mod yaml_fields;
 pub(crate) mod yaml_file;
 
+pub use crate::coinset::{DEFAULT_COINSET_BASE_URL, DEFAULT_MSP_BASE_URL};
 pub use cat_ticker_index::{
     build_cat_ticker_index, build_cat_ticker_index_lenient, normalize_label, CatTickerIndex,
 };
@@ -33,4 +34,4 @@ pub use runtime_load::{
     load_daemon_cycle_config, load_gated_operator_market, load_raw_program_and_markets,
     DaemonCycleConfig, GatedOperatorMarket, RawProgramMarkets,
 };
-pub use signer::{load_signer_config, parse_signer_config, SignerConfig, DEFAULT_MSP_BASE_URL};
+pub use signer::{load_signer_config, parse_signer_config, SignerConfig};

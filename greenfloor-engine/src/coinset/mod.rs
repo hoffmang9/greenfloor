@@ -40,9 +40,9 @@ pub use direct_api::{
     MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
 pub use msp::{
-    client_for_config, client_for_network, client_for_signer, msp_base_url_for_signer,
-    normalize_asset_id, resolve_offer_asset_ids, AssetInfo, MspCoinset, SingletonInfo,
-    DEFAULT_MSP_BASE_URL,
+    client_for_config, client_for_network, client_for_signer, coinset_base_url_for_signer,
+    msp_base_url_for_signer, normalize_asset_id, resolve_offer_asset_ids, AssetInfo, MspCoinset,
+    SingletonInfo, DEFAULT_COINSET_BASE_URL, DEFAULT_MSP_BASE_URL,
 };
 pub use parse::{
     chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,

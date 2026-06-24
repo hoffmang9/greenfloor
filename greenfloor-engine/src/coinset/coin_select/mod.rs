@@ -147,6 +147,14 @@ pub(crate) fn finalize_selected_cats(
     })
 }
 
+pub(crate) fn finalize_preselected_cats_for_spend(
+    cats: Vec<Cat>,
+    explicit_coin_ids: &[Bytes32],
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+}
+
 pub(crate) async fn select_cats_for_spend(
     client: &CoinsetClient,
     receive_address: &str,

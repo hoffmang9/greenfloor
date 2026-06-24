@@ -60,6 +60,20 @@ pub fn mock_get_coin_record_by_name_body(parent_coin: &Coin, spent_block_index: 
     .to_string()
 }
 
+pub fn mock_unspent_coin_record_by_name_body(coin: &Coin) -> String {
+    json!({
+        "success": true,
+        "coin_record": coin_record_json(coin, false, 0),
+    })
+    .to_string()
+}
+
+pub fn coin_record_by_name_request_json(coin_id: Bytes32) -> serde_json::Value {
+    json!({
+        "name": format!("0x{}", hex::encode(coin_id.to_bytes())),
+    })
+}
+
 pub fn mock_get_puzzle_and_solution_body(spend: &CoinSpend) -> String {
     json!({
         "success": true,
