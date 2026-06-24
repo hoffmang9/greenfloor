@@ -235,4 +235,38 @@ mod tests {
         ));
         assert!(matches!(replanned, BootstrapPlanOutcome::NeedsShape(_)));
     }
+
+    #[test]
+    fn sub_primary_deferred_for_post_combine_split_plan() {
+        use crate::test_support::eco181_bootstrap_inventory::{
+            eco181_after_combine_coins, eco181_bootstrap_ladder,
+        };
+
+        let ladder = eco181_bootstrap_ladder();
+        let coins = eco181_after_combine_coins();
+        let outcome =
+            plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &BootstrapCombineContext::for_tests());
+        assert!(sub_primary_shape_deferred_to_coin_ops(&outcome, 100, true,));
+        assert!(bootstrap_preflight_deferred_to_coin_ops(
+            &outcome, &ladder, &coins,
+        ));
+    }
+
+    #[test]
+    fn sub_primary_not_deferred_for_invalid_ladder_outcome() {
+        assert!(!sub_primary_shape_deferred_to_coin_ops(
+            &BootstrapPlanOutcome::InvalidLadder,
+            100,
+            true,
+        ));
+    }
+
+    #[test]
+    fn preflight_ready_without_ladder_rows_defers_to_coin_ops() {
+        assert!(bootstrap_preflight_deferred_to_coin_ops(
+            &BootstrapPlanOutcome::Ready,
+            &[],
+            &[],
+        ));
+    }
 }

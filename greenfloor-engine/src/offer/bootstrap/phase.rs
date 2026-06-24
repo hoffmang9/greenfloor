@@ -266,6 +266,17 @@ mod tests {
     }
 
     #[test]
+    fn early_phase_reports_already_ready() {
+        let ladder = vec![row(10, 2, 0)];
+        let spendable = vec![coin("coin-a", 10), coin("coin-b", 10)];
+        let phase = bootstrap_early_phase(&BootstrapPlanOutcome::Ready, &ladder, &spendable)
+            .expect("ready snapshot");
+        assert_eq!(phase.status, "skipped");
+        assert_eq!(phase.reason, "already_ready");
+        assert!(!phase.ready);
+    }
+
+    #[test]
     fn executed_phase_reports_still_underfunded() {
         let remaining = BootstrapPlanOutcome::CannotFund {
             total_output_amount: 20,
@@ -343,6 +354,40 @@ mod tests {
             ),
             BootstrapWaitResolution::Complete(_)
         ));
+    }
+
+    #[test]
+    fn after_combine_wait_completes_on_ready_outcome() {
+        let ladder = vec![row(100, 1, 0)];
+        let spendable = vec![coin("combined", 100)];
+        assert_eq!(
+            resolve_bootstrap_wait_poll(
+                after_combine_poll(100, &ladder, &spendable),
+                &BootstrapPlanOutcome::Ready,
+                false,
+            ),
+            BootstrapWaitResolution::Complete(BootstrapPlanOutcome::Ready),
+        );
+    }
+
+    #[test]
+    fn after_combine_wait_continues_while_combine_first_still_pending() {
+        use crate::test_support::eco181_bootstrap_inventory::{
+            eco181_bootstrap_coins, eco181_bootstrap_ladder,
+        };
+
+        let ladder = eco181_bootstrap_ladder();
+        let coins = eco181_bootstrap_coins();
+        let outcome =
+            plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &BootstrapCombineContext::for_tests());
+        let BootstrapPlanOutcome::NeedsShape(plan) = &outcome else {
+            panic!("expected combine-first plan");
+        };
+        assert!(plan.requires_combine_first());
+        assert_eq!(
+            resolve_bootstrap_wait_poll(after_combine_poll(100, &ladder, &coins), &outcome, false,),
+            BootstrapWaitResolution::Continue,
+        );
     }
 
     #[test]

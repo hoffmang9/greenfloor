@@ -162,6 +162,14 @@ assert_contains "${filter}" "test(/bootstrap/)" "bootstrap path token"
 assert_contains "${filter}" "test(/offer/)" "offer path token"
 
 filter="$(
+  {
+    printf '%s\n' 'greenfloor-engine/src/offer/bootstrap/replan.rs'
+    printf '%s\n' 'greenfloor-engine/src/test_support/eco181_shape_cases.rs'
+  } | bash "${repo_root}/.github/scripts/rust-coverage-nextest-filter.sh"
+)"
+assert_contains "${filter}" "test(/eco181_shape_cases/)" "changed test_support path token"
+
+filter="$(
   printf '%s\n' 'greenfloor-engine/src/storage/sqlite/schema.rs' \
     | bash "${repo_root}/.github/scripts/rust-coverage-nextest-filter.sh"
 )"

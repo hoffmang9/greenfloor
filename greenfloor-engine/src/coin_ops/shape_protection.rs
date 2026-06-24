@@ -295,6 +295,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn from_sell_ladder_entries_builds_shape_context() {
+        use crate::config::LadderEntry;
+
+        let entries = vec![LadderEntry {
+            size_base_units: 10,
+            target_count: 2,
+            split_buffer_count: 1,
+            combine_when_excess_factor: 2.0,
+        }];
+        let ctx = LadderShapeContext::from_sell_ladder_entries(&entries);
+        assert_eq!(ctx.primary_row_size(), Some(10));
+        assert!(!ctx.primary_row_satisfied());
+    }
+
+    #[test]
+    fn primary_row_not_satisfied_when_required_slots_missing() {
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 0)], &[]);
+        assert!(!ctx.primary_row_satisfied());
+    }
+
+    #[test]
+    fn cannibalization_skips_when_no_required_slots() {
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 3)], &[]);
+        assert!(!split_would_cannibalize_protected_row(
+            10,
+            10,
+            &ctx.ladder_sizes,
+            &ctx.protected_slots,
+            &ctx.exact_ladder_counts,
+        ));
+    }
+
+    #[test]
+    fn spendable_selector_picks_smallest_non_cannibalizing_coin() {
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[100, 50]);
+        let spendable = vec![
+            SpendableCoin {
+                id: "combined".to_string(),
+                amount: 100_000,
+            },
+            SpendableCoin {
+                id: "spare".to_string(),
+                amount: 50_000,
+            },
+        ];
+        let selected = select_smallest_non_cannibalizing_spendable(
+            &spendable,
+            20,
+            1_000,
+            &HashSet::new(),
+            &ctx,
+        )
+        .expect("eligible spendable");
+        assert_eq!(selected.id, "spare");
+    }
+
+    #[test]
     fn detects_cannibalizing_satisfied_primary_row() {
         let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[]);
         let counts = HashMap::from([(100, 1), (10, 2)]);

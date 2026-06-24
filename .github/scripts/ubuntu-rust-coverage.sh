@@ -11,6 +11,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 manifest="${CARGO_MANIFEST:?CARGO_MANIFEST is required}"
 compare_branch="${COMPARE_BRANCH:-origin/main}"
+# Keep in sync with `.llvm-cov.toml` → report.ignore-filename-regex.
+llvm_cov_ignore_regex='(tests/|test_support/|test_env/|test_overrides|/tests\.rs$|/bin/|/main\.rs$|storage/sqlite/|storage/test_support\.rs$)'
 
 if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
   changed_files="$(
@@ -22,8 +24,11 @@ if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
   fi
 
   if ! filter="$(
-    printf '%s\n' "${changed_files}" \
-      | bash "${script_dir}/rust-coverage-nextest-filter.sh"
+    {
+      printf '%s\n' "${changed_files}"
+      git diff --name-only "${compare_branch}"...HEAD \
+        | grep -E '^greenfloor-engine/src/test_support/.*\.rs$' || true
+    } | bash "${script_dir}/rust-coverage-nextest-filter.sh"
   )"; then
     echo "Production Rust files changed but no nextest filter could be built:" >&2
     printf '%s\n' "${changed_files}" >&2
@@ -35,12 +40,21 @@ if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
   cargo llvm-cov nextest \
     --manifest-path "${manifest}" \
     --features test-support \
+    --ignore-filename-regex "${llvm_cov_ignore_regex}" \
     -E "${filter}"
   cargo llvm-cov report \
     --manifest-path "${manifest}" \
+    --ignore-filename-regex "${llvm_cov_ignore_regex}" \
     --lcov \
     --output-path lcov.info
 else
-  cargo llvm-cov nextest --manifest-path "${manifest}" --features test-support
-  cargo llvm-cov report --manifest-path "${manifest}" --lcov --output-path lcov.info
+  cargo llvm-cov nextest \
+    --manifest-path "${manifest}" \
+    --features test-support \
+    --ignore-filename-regex "${llvm_cov_ignore_regex}"
+  cargo llvm-cov report \
+    --manifest-path "${manifest}" \
+    --ignore-filename-regex "${llvm_cov_ignore_regex}" \
+    --lcov \
+    --output-path lcov.info
 fi

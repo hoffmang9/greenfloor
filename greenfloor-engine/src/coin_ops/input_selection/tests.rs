@@ -37,6 +37,12 @@ fn cli_auto_picks_largest_without_required_enforcement() {
 }
 
 #[test]
+fn cli_auto_skips_when_no_spendable_coins() {
+    let plan = plan_cli_auto_split_selection(&[]);
+    assert!(matches!(plan, CliSplitSelection::Skip(_)));
+}
+
+#[test]
 fn daemon_auto_requires_single_coin_at_least_required() {
     let spendable = coins(&[("Coin_small", 500), ("Coin_big", 1500)]);
     let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 1000, "xch", false));
