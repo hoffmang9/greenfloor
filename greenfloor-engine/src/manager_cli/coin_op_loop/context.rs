@@ -7,7 +7,7 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
-use crate::config::{load_gated_operator_market, MarketConfig};
+use crate::config::{load_gated_operator_market, CatTickerIndex, MarketConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::offer::resolve_market_base_asset_id;
@@ -16,10 +16,12 @@ pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
     "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn build_coin_op_exec_context(
     program_path: &Path,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
+    cats_path: Option<&Path>,
     network: &str,
     market_id: Option<&str>,
     pair: Option<&str>,
@@ -29,6 +31,7 @@ pub(super) async fn build_coin_op_exec_context(
         program_path,
         markets_path,
         testnet_markets_path,
+        cats_path,
         network,
         market_id,
         pair,
@@ -39,6 +42,7 @@ pub(super) async fn build_coin_op_exec_context(
         loaded.market,
         asset_id_override,
         HashSet::default(),
+        loaded.ticker_index,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     )
@@ -85,11 +89,12 @@ pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value
 pub(super) async fn resolve_asset_filter(
     signer_config: &crate::config::SignerConfig,
     filter: &str,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
     if is_hex_id(filter) {
         return Ok(normalize_hex_id(filter));
     }
-    resolve_market_base_asset_id(signer_config, filter).await
+    resolve_market_base_asset_id(signer_config, filter, ticker_index).await
 }
 
 pub(super) fn select_list_market(

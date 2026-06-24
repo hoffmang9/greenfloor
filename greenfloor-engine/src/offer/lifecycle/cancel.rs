@@ -1,5 +1,5 @@
 use crate::adapters::DexieClient;
-use crate::coinset::{self, client_for_config, LiveCoinset};
+use crate::coinset::{self, client_for_signer, LiveCoinset};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::dexie_payload::DexieOfferPayload;
@@ -142,7 +142,7 @@ pub async fn cancel_offer_on_chain(
     } else {
         fetch_dexie_offer_text(params.dexie, params.offer_id).await?
     };
-    let coinset_client = client_for_config(&params.signer_config)?;
+    let coinset_client = client_for_signer(&params.signer_config)?;
     let backend = LiveCoinset(&coinset_client);
     let mut vault_ctx = resolve_vault_spend_context(params.signer_config).await?;
     let spend_bundle = build_offer_cancel_spend_bundle(

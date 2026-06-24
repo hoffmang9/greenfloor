@@ -32,7 +32,7 @@ async fn build_vault_cat_offer_async(
     let input = OfferInput::try_from(request)?;
     validate_offer_input(&input)?;
 
-    let coinset = coinset::client_for_config(&config)?;
+    let coinset = coinset::client_for_signer(&config)?;
     let mut session = resolve_vault_session(config).await?;
     let backend = LiveCoinset(&coinset);
     build_vault_cat_offer_with_spend(&mut session.spend, &backend, input).await

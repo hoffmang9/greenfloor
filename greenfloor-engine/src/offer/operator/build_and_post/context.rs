@@ -1,7 +1,7 @@
 use crate::coinset::get_conservative_fee_estimate_for_signer;
 use crate::config::{
     action_side_from_pricing, load_gated_operator_market, resolve_offer_publish_settings,
-    ManagerProgramConfig, MarketConfig, SignerConfig,
+    CatTickerIndex, ManagerProgramConfig, MarketConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
@@ -23,6 +23,7 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub dexie_base_url: String,
     pub splash_base_url: String,
     pub offer_assets: ResolvedMarketOfferAssets,
+    pub ticker_index: CatTickerIndex,
     pub quote_price: f64,
     pub action_side: String,
     pub offer_fee_mojos: u64,
@@ -38,6 +39,7 @@ pub(super) async fn resolve_build_and_post_context(
         &request.program_path,
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
+        None,
         &request.network,
         request.market_id.as_deref(),
         request.pair.as_deref(),
@@ -54,8 +56,14 @@ pub(super) async fn resolve_build_and_post_context(
         request.splash_base_url.as_deref(),
     )?;
     let signer_config = loaded.signer;
-    let assets =
-        resolve_market_offer_assets_for_action(&signer_config, &market, &request.network).await?;
+    let ticker_index = loaded.ticker_index;
+    let assets = resolve_market_offer_assets_for_action(
+        &signer_config,
+        &market,
+        &request.network,
+        &ticker_index,
+    )
+    .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
     let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&signer_config).await;
@@ -68,6 +76,7 @@ pub(super) async fn resolve_build_and_post_context(
         dexie_base_url,
         splash_base_url,
         offer_assets: assets,
+        ticker_index,
         quote_price,
         action_side,
         offer_fee_mojos,
@@ -150,6 +159,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             quote_asset_id: "xch".to_string(),
             quote_asset_for_offer: "xch".to_string(),
         },
+        ticker_index: crate::config::empty_cat_ticker_index(),
         quote_price: 1.0,
         action_side: "sell".to_string(),
         offer_fee_mojos: 0,
@@ -224,9 +234,14 @@ mod tests {
         };
         let signer = test_signer_config("http://127.0.0.1:1");
 
-        let assets = resolve_market_offer_assets_for_action(&signer, &market, "testnet11")
-            .await
-            .expect("resolve offer assets");
+        let assets = resolve_market_offer_assets_for_action(
+            &signer,
+            &market,
+            "testnet11",
+            &crate::config::empty_cat_ticker_index(),
+        )
+        .await
+        .expect("resolve offer assets");
 
         assert_eq!(market.quote_asset, "xch");
         assert_eq!(assets.quote_asset_for_offer, "txch");

@@ -9,19 +9,22 @@
 //! | [`load_raw_program_and_markets`] | `combine-market-cat-dust` (needs raw YAML) | parse program only | no (full markets list) |
 //!
 //! Asset id resolution after load is separate: coin-op/inventory use
-//! [`crate::offer::resolve_market_base_asset_id`]; offer build and reservations use
-//! [`crate::offer::resolve_market_offer_assets_for_action`].
+//! [`crate::offer::resolve_market_base_asset_id`] with an explicit [`CatTickerIndex`]; offer build
+//! and reservations use [`crate::offer::resolve_market_offer_assets_for_action`]. Ticker symbols
+//! resolve via the index built from operator metadata paths before Coinset fallback.
 
 use std::path::Path;
 
 use serde_json::Value;
 
+use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
     load_markets_config_with_overlay, load_program_bundle_gated, parse_program_config,
     read_program_yaml, resolve_market_for_build, CycleProgramConfig, ManagerProgramConfig,
     MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
+use crate::paths::resolve_cats_config_path;
 
 /// Gated program bundle plus one resolved market row (manager CLI operator commands).
 #[derive(Debug, Clone)]
@@ -29,6 +32,18 @@ pub struct GatedOperatorMarket {
     pub program: ManagerProgramConfig,
     pub signer: SignerConfig,
     pub market: MarketConfig,
+    pub ticker_index: CatTickerIndex,
+}
+
+/// Build the operator ticker index from resolved metadata config paths.
+#[must_use]
+pub fn operator_ticker_index_from_paths(
+    markets_path: &Path,
+    testnet_markets_path: Option<&Path>,
+    cats_path: Option<&Path>,
+) -> CatTickerIndex {
+    let cats = resolve_cats_config_path(markets_path, cats_path);
+    build_cat_ticker_index_lenient(&cats, markets_path, testnet_markets_path)
 }
 
 /// Program and markets config loaded once per daemon cycle.
@@ -56,6 +71,7 @@ pub fn load_gated_operator_market(
     program_path: &Path,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
+    cats_path: Option<&Path>,
     network: &str,
     market_id: Option<&str>,
     pair: Option<&str>,
@@ -63,10 +79,13 @@ pub fn load_gated_operator_market(
     let bundle = load_program_bundle_gated(program_path)?;
     let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     let market = resolve_market_for_build(&markets, market_id, pair, network)?;
+    let ticker_index =
+        operator_ticker_index_from_paths(markets_path, testnet_markets_path, cats_path);
     Ok(GatedOperatorMarket {
         program: bundle.program,
         signer: bundle.signer,
         market,
+        ticker_index,
     })
 }
 

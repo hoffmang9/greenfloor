@@ -41,7 +41,7 @@ pub(super) async fn create_offer(
         });
     }
     let request = build_create_offer_request(ctx, size_base_units);
-    build_signer_offer_for_action(ctx.signer_config.clone(), request).await
+    build_signer_offer_for_action(ctx.signer_config.clone(), request, &ctx.ticker_index).await
 }
 
 #[cfg(test)]

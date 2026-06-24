@@ -5,7 +5,9 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use crate::adapters::DexieClient;
-use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
+use crate::config::{
+    empty_cat_ticker_index, CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig,
+};
 use crate::cycle::StaleSweepProgress;
 use crate::storage::{CycleWriteStore, SqliteStore};
 
@@ -66,6 +68,7 @@ pub fn test_cycle_context(
                 None,
             ),
             super::watchlist::CoinWatchlistCache::new(),
+            empty_cat_ticker_index(),
         ),
         dispatch: MarketDispatchContext {
             write_store,

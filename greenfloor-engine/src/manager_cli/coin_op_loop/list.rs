@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{
-    load_markets_config_with_overlay, load_program_bundle_for_coin_list, ProgramConfigBundle,
+    load_markets_config_with_overlay, load_program_bundle_for_coin_list,
+    operator_ticker_index_from_paths, ProgramConfigBundle,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -28,9 +29,13 @@ struct CoinListSnapshot {
 async fn load_coin_list_snapshot(
     bundle: &ProgramConfigBundle,
     markets_path: &Path,
+    testnet_markets_path: Option<&Path>,
+    cats_path: &Path,
     asset: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<CoinListSnapshot> {
+    let ticker_index =
+        operator_ticker_index_from_paths(markets_path, testnet_markets_path, Some(cats_path));
     let program = &bundle.program;
     let markets = load_markets_config_with_overlay(markets_path, None)?;
     let market = select_list_market(&markets)?;
@@ -52,7 +57,7 @@ async fn load_coin_list_snapshot(
         });
     let filter_label = filter.clone();
     let list_asset_id = if let Some(filter_value) = filter {
-        resolve_asset_filter(&bundle.signer, &filter_value).await?
+        resolve_asset_filter(&bundle.signer, &filter_value, &ticker_index).await?
     } else {
         market.base_asset.clone()
     };
@@ -128,7 +133,15 @@ async fn run_coin_list_command(
         Err(err) => return Err(err),
         Ok(bundle) => bundle,
     };
-    let snapshot = load_coin_list_snapshot(&bundle, &mgr.markets_config, asset, cat_id).await?;
+    let snapshot = load_coin_list_snapshot(
+        &bundle,
+        &mgr.markets_config,
+        mgr.testnet_markets_path(),
+        &mgr.cats_config,
+        asset,
+        cat_id,
+    )
+    .await?;
     if op == "coin-status" {
         mgr.emit_json(&json!({
             "op": "coin-status",

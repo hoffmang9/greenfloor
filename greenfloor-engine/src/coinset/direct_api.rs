@@ -3,6 +3,9 @@
 pub const MAINNET_DIRECT_BASE_URL: &str = "https://api.coinset.org";
 pub const TESTNET11_DIRECT_BASE_URL: &str = "https://testnet11.api.coinset.org";
 
+/// Default Coinset HTTP host for signer-backed operator paths.
+pub const DEFAULT_COINSET_BASE_URL: &str = MAINNET_DIRECT_BASE_URL;
+
 const LEGACY_MAINNET_HOST_ALIASES: &[&str] = &[
     "coinset.org",
     "https://coinset.org",

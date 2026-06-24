@@ -5,11 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::coinset::{
-    self, client_for_signer, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids,
-};
-use crate::config::{resolve_quote_asset_for_offer, MarketConfig, SignerConfig};
+use crate::coinset::{self, is_xch_like_asset, normalize_asset_id};
+use crate::config::{resolve_quote_asset_for_offer, CatTickerIndex, MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
+use crate::offer::assets::resolve_offer_assets;
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
@@ -105,36 +104,23 @@ pub fn try_normalize_resolved_assets(
     resolved_assets_or_collision_error(resolved_base, resolved_quote)
 }
 
-/// Resolve offer assets via coinset.
+/// Resolve offer asset labels to on-chain ids (hex, ticker index, Coinset fallback).
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
-pub async fn resolve_offer_assets_via_coinset(
-    config: &SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    let client = client_for_signer(config)?;
-    resolve_offer_asset_ids(&client, base_asset, quote_asset).await
-}
-
-/// Resolve offer assets for action.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
+/// Returns an error if asset resolution fails.
 pub async fn resolve_offer_assets_for_action(
     config: &SignerConfig,
     base_asset: &str,
     quote_asset: &str,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<(String, String)> {
     match try_normalize_resolved_assets(base_asset, quote_asset) {
         Ok(resolved) => Ok(resolved),
         Err(SignerError::ResolvedAssetsCollideForNonXchPair) => {
             Err(SignerError::ResolvedAssetsCollideForNonXchPair)
         }
-        Err(_) => resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await,
+        Err(_) => resolve_offer_assets(config, base_asset, quote_asset, ticker_index).await,
     }
 }
 
@@ -146,9 +132,10 @@ pub async fn resolve_offer_assets_for_action(
 pub async fn resolve_market_base_asset_id(
     config: &SignerConfig,
     base_asset: &str,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
     let (resolved_base_asset_id, _) =
-        resolve_offer_assets_for_action(config, base_asset.trim(), "xch").await?;
+        resolve_offer_assets_for_action(config, base_asset.trim(), "xch", ticker_index).await?;
     Ok(resolved_base_asset_id)
 }
 
@@ -170,12 +157,17 @@ pub async fn resolve_market_offer_assets_for_action(
     config: &SignerConfig,
     market: &MarketConfig,
     program_network: &str,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<ResolvedMarketOfferAssets> {
     let quote_asset_for_offer =
         resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
-    let (base_asset_id, quote_asset_id) =
-        resolve_offer_assets_for_action(config, market.base_asset.trim(), &quote_asset_for_offer)
-            .await?;
+    let (base_asset_id, quote_asset_id) = resolve_offer_assets_for_action(
+        config,
+        market.base_asset.trim(),
+        &quote_asset_for_offer,
+        ticker_index,
+    )
+    .await?;
     Ok(ResolvedMarketOfferAssets {
         base_asset_id,
         quote_asset_id,
@@ -191,12 +183,13 @@ pub async fn resolve_market_offer_assets_for_action(
 pub async fn resolve_market_offer_fee_asset_id(
     config: &SignerConfig,
     assets: &ResolvedMarketOfferAssets,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
     if is_xch_like_asset(&assets.quote_asset_for_offer) {
         return Ok(assets.quote_asset_id.clone());
     }
     Ok(
-        resolve_offer_assets_for_action(config, "xch", &assets.quote_asset_for_offer)
+        resolve_offer_assets_for_action(config, "xch", &assets.quote_asset_for_offer, ticker_index)
             .await?
             .0,
     )
@@ -247,9 +240,15 @@ fn create_offer_request_from_leg(
 pub async fn build_signer_offer_for_action(
     config: SignerConfig,
     request: BuildOfferForActionRequest,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<BuildOfferForActionResult> {
-    let (resolved_base, resolved_quote) =
-        resolve_offer_assets_for_action(&config, &request.base_asset, &request.quote_asset).await?;
+    let (resolved_base, resolved_quote) = resolve_offer_assets_for_action(
+        &config,
+        &request.base_asset,
+        &request.quote_asset,
+        ticker_index,
+    )
+    .await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
@@ -303,7 +302,46 @@ mod tests {
         ));
     }
 
+    use crate::config::{build_cat_ticker_index_lenient, empty_cat_ticker_index};
+    use crate::offer::assets::resolve_offer_asset_ids;
     use crate::test_support::signer_config::test_signer_config;
+
+    #[tokio::test]
+    async fn resolve_via_ticker_index_without_coinset_lookup() {
+        let byc_id = "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac";
+        let wusdc_id = "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cats = dir.path().join("cats.yaml");
+        std::fs::write(
+            &cats,
+            format!(
+                r"
+cats:
+  - asset_id: {byc_id}
+    base_symbol: BYC
+  - asset_id: {wusdc_id}
+    base_symbol: wUSDC.b
+"
+            ),
+        )
+        .expect("write cats");
+        let markets = dir.path().join("markets.yaml");
+        std::fs::write(&markets, "markets: []\n").expect("write markets");
+        let ticker_index = build_cat_ticker_index_lenient(&cats, &markets, None);
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/lookup_asset_by_symbol")
+            .expect(0)
+            .create_async()
+            .await;
+        let config = test_signer_config(&server.url());
+        let client = crate::coinset::client_for_signer(&config).expect("client");
+        let (base, quote) = resolve_offer_asset_ids(&client, "BYC", "wUSDC.b", &ticker_index)
+            .await
+            .expect("ticker index resolution");
+        assert_eq!(base, byc_id);
+        assert_eq!(quote, wusdc_id);
+    }
 
     #[tokio::test]
     async fn resolve_via_coinset_looks_up_ticker_symbols() {
@@ -318,9 +356,11 @@ mod tests {
             .create_async()
             .await;
         let config = test_signer_config(&server.url());
-        let (base, quote) = resolve_offer_assets_via_coinset(&config, "HOA", "xch")
-            .await
-            .expect("coinset resolution");
+        let client = crate::coinset::client_for_signer(&config).expect("client");
+        let (base, quote) =
+            resolve_offer_asset_ids(&client, "HOA", "xch", &empty_cat_ticker_index())
+                .await
+                .expect("coinset resolution");
         assert_eq!(base, cat_id);
         assert_eq!(quote, "xch");
     }

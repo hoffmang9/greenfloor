@@ -84,6 +84,7 @@ pub fn execute_managed_coin_op_plans<'a>(
     market: &'a MarketConfig,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
+    ticker_index: &'a crate::config::CatTickerIndex,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
         program,
@@ -91,6 +92,7 @@ pub fn execute_managed_coin_op_plans<'a>(
         market,
         plans,
         watched_coin_ids,
+        ticker_index,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     ))
@@ -105,6 +107,7 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
     market: &'a MarketConfig,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
+    ticker_index: &'a crate::config::CatTickerIndex,
     test_overrides: CoinOpTestOverrides,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
@@ -113,6 +116,7 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
         market,
         plans,
         watched_coin_ids,
+        ticker_index,
         test_overrides,
     ))
 }
@@ -123,6 +127,7 @@ async fn execute_managed_coin_op_plans_async(
     market: &MarketConfig,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
+    ticker_index: &crate::config::CatTickerIndex,
     #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
     if market.receive_address.trim().is_empty() {
@@ -141,6 +146,7 @@ async fn execute_managed_coin_op_plans_async(
         market.clone(),
         None,
         watched_coin_ids.iter().cloned().collect(),
+        ticker_index.clone(),
         #[cfg(test)]
         test_overrides,
     )

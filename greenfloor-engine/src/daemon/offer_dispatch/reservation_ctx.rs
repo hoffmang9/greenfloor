@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::config::{MarketConfig, SignerConfig};
+use crate::config::{CatTickerIndex, MarketConfig, SignerConfig};
 use crate::cycle::ParallelReservationContext;
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
@@ -19,10 +19,17 @@ pub async fn parallel_reservation_context(
     program_network: &str,
     market: &MarketConfig,
     fee_amount_mojos: i64,
+    ticker_index: &CatTickerIndex,
 ) -> SignerResult<ParallelReservationContext> {
-    let assets =
-        resolve_market_offer_assets_for_action(signer_config, market, program_network).await?;
-    let fee_asset_id = resolve_market_offer_fee_asset_id(signer_config, &assets).await?;
+    let assets = resolve_market_offer_assets_for_action(
+        signer_config,
+        market,
+        program_network,
+        ticker_index,
+    )
+    .await?;
+    let fee_asset_id =
+        resolve_market_offer_fee_asset_id(signer_config, &assets, ticker_index).await?;
     let base_unit_mojo_multiplier = market
         .pricing
         .get("base_unit_mojo_multiplier")

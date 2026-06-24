@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{
-    load_daemon_cycle_config, CycleProgramConfig, ManagerProgramConfig, MarketConfig,
-    MarketsConfig, SignerConfig,
+    load_daemon_cycle_config, operator_ticker_index_from_paths, CatTickerIndex, CycleProgramConfig,
+    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
@@ -22,6 +22,7 @@ pub struct DaemonCycleResources {
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
     pub coin_watchlist: Arc<CoinWatchlistCache>,
+    pub ticker_index: CatTickerIndex,
 }
 
 impl DaemonCycleResources {
@@ -51,6 +52,7 @@ impl DaemonCycleResources {
         dexie: DexieClient,
         paths: DaemonCyclePaths,
         coin_watchlist: Arc<CoinWatchlistCache>,
+        ticker_index: CatTickerIndex,
     ) -> Self {
         Self {
             program_config,
@@ -59,6 +61,7 @@ impl DaemonCycleResources {
             dexie,
             paths,
             coin_watchlist,
+            ticker_index,
         }
     }
 
@@ -112,6 +115,11 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
     let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
     let coin_watchlist = request.coin_watchlist.clone();
+    let ticker_index = operator_ticker_index_from_paths(
+        &request.markets_path,
+        request.testnet_markets_path.as_deref(),
+        None,
+    );
     Ok(DaemonCycleResources::with_program_config(
         loaded.program_config,
         loaded.markets,
@@ -123,6 +131,7 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
             request.testnet_markets_path.clone(),
         ),
         coin_watchlist,
+        ticker_index,
     ))
 }
 
@@ -132,6 +141,8 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    use crate::config::empty_cat_ticker_index;
 
     fn sample_market(market_id: &str, enabled: bool) -> MarketConfig {
         MarketConfig {
@@ -171,6 +182,7 @@ mod tests {
                 None,
             ),
             CoinWatchlistCache::new(),
+            empty_cat_ticker_index(),
         )
     }
 

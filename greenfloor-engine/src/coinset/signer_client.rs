@@ -6,13 +6,10 @@
 
 use chia_sdk_coinset::CoinsetClient;
 
-use super::direct_api::{resolve_coinset_endpoint, MAINNET_DIRECT_BASE_URL};
+use super::direct_api::resolve_coinset_endpoint;
 use super::direct_coinset_client;
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
-
-/// Default Coinset HTTP host for signer-backed operator paths.
-pub const DEFAULT_COINSET_BASE_URL: &str = MAINNET_DIRECT_BASE_URL;
 
 /// Coinset client for signer config on the given operator network.
 ///
@@ -39,15 +36,6 @@ pub fn client_for_signer(signer: &SignerConfig) -> SignerResult<CoinsetClient> {
     client_for_signer_on_network(signer, &signer.network)
 }
 
-/// Coinset client for signer config.
-///
-/// # Errors
-///
-/// Returns an error if the signer network is unsupported.
-pub fn client_for_config(config: &SignerConfig) -> SignerResult<CoinsetClient> {
-    client_for_signer(config)
-}
-
 /// Coinset client for network.
 ///
 /// # Errors
@@ -63,6 +51,7 @@ mod tests {
     use chia_sdk_coinset::ChiaRpcClient;
 
     use crate::coinset::direct_api::TESTNET11_DIRECT_BASE_URL;
+    use crate::coinset::DEFAULT_COINSET_BASE_URL;
     use crate::test_support::signer_config::test_signer_config;
 
     #[test]

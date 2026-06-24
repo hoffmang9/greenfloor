@@ -53,6 +53,47 @@ pub fn resolve_config_path_from_optional(raw: &str, default: impl FnOnce() -> Pa
 }
 
 const DEFAULT_TESTNET_MARKETS_CONFIG: &str = "~/.greenfloor/config/testnet-markets.yaml";
+const HOME_CATS_CONFIG: &str = "~/.greenfloor/config/cats.yaml";
+const REPO_CATS_CONFIG: &str = "config/cats.yaml";
+const HOME_MARKETS_CONFIG: &str = "~/.greenfloor/config/markets.yaml";
+const REPO_MARKETS_CONFIG: &str = "config/markets.yaml";
+
+/// Default cats catalog path (`~/.greenfloor/config/cats.yaml` when present, else repo `config/cats.yaml`).
+#[must_use]
+pub fn default_cats_config_path() -> PathBuf {
+    default_home_or_repo_config_path(HOME_CATS_CONFIG, REPO_CATS_CONFIG)
+}
+
+/// Default markets config path (`~/.greenfloor/config/markets.yaml` when present, else repo `config/markets.yaml`).
+#[must_use]
+pub fn default_markets_config_path() -> PathBuf {
+    default_home_or_repo_config_path(HOME_MARKETS_CONFIG, REPO_MARKETS_CONFIG)
+}
+
+/// Default operator metadata paths for ticker index construction.
+#[must_use]
+pub fn default_operator_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
+    (
+        default_cats_config_path(),
+        default_markets_config_path(),
+        default_testnet_markets_config_path(),
+    )
+}
+
+/// Resolve cats catalog path: explicit override, sibling of `markets_config`, then default.
+#[must_use]
+pub fn resolve_cats_config_path(markets_config: &Path, cats_override: Option<&Path>) -> PathBuf {
+    if let Some(path) = cats_override.filter(|value| !value.as_os_str().is_empty()) {
+        return path.to_path_buf();
+    }
+    if let Some(parent) = markets_config.parent() {
+        let sibling = parent.join("cats.yaml");
+        if sibling.is_file() {
+            return sibling;
+        }
+    }
+    default_cats_config_path()
+}
 
 /// Default testnet markets overlay when `~/.greenfloor/config/testnet-markets.yaml` exists.
 #[must_use]

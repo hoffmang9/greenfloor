@@ -61,8 +61,12 @@ pub async fn run_inventory_phase(
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
         let signer_config = resources.signer_for_execution()?;
-        let resolved_base_asset_id =
-            resolve_market_base_asset_id(signer_config, market.base_asset.trim()).await?;
+        let resolved_base_asset_id = resolve_market_base_asset_id(
+            signer_config,
+            market.base_asset.trim(),
+            &resources.ticker_index,
+        )
+        .await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let amounts = list_spendable_base_unit_amounts_for_signer(
             &resources.network,

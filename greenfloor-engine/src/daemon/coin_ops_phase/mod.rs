@@ -158,6 +158,7 @@ async fn execute_coin_ops_plans(
             market,
             &planning.executable_plans,
             &watched_coin_ids,
+            &ctx.resources.ticker_index,
         )
         .await),
         Err(err) => Ok(skipped_coin_ops_result(

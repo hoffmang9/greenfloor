@@ -7,7 +7,7 @@ use crate::coin_ops::{
     COMBINE_SINGLE_OUTPUT_COUNT,
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
-use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{CatTickerIndex, ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
 use crate::offer::resolve_market_base_asset_id;
@@ -23,6 +23,7 @@ pub struct CoinOpExecContext {
     pub market: MarketConfig,
     pub program: ManagerProgramConfig,
     pub resolved_base_asset_id: String,
+    pub ticker_index: CatTickerIndex,
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
@@ -42,6 +43,7 @@ impl CoinOpExecContext {
         market: MarketConfig,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
+        ticker_index: CatTickerIndex,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
         let canonical = canonical_base_asset
@@ -49,12 +51,13 @@ impl CoinOpExecContext {
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| market.base_asset.trim());
         let resolved_base_asset_id =
-            resolve_market_base_asset_id(&signer_config, canonical).await?;
+            resolve_market_base_asset_id(&signer_config, canonical, &ticker_index).await?;
         Ok(Self {
             signer_config,
             market: market.clone(),
             program,
             resolved_base_asset_id,
+            ticker_index,
             base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
             combine_input_cap: resolve_combine_input_cap(),
             watched_coin_ids,

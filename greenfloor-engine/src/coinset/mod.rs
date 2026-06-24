@@ -39,11 +39,9 @@ pub use direct_api::{
     effective_coinset_base_url, explicit_coinset_url_override, normalize_coinset_network,
     normalize_direct_base_url_input, resolve_coinset_endpoint, resolve_direct_client,
     resolve_direct_coinset_base_url, ResolvedCoinsetEndpoint, ResolvedDirectClient,
-    MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+    DEFAULT_COINSET_BASE_URL, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
-pub use offer_assets::{
-    lookup_asset_by_symbol, normalize_asset_id, resolve_offer_asset_ids, AssetInfo,
-};
+pub use offer_assets::{lookup_asset_by_symbol, normalize_asset_id, AssetInfo};
 pub use parse::{
     chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
@@ -56,10 +54,7 @@ pub use retry::{
     with_script_retries_with_policy, ScriptRetryPolicy,
 };
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
-pub use signer_client::{
-    client_for_config, client_for_network, client_for_signer, client_for_signer_on_network,
-    DEFAULT_COINSET_BASE_URL,
-};
+pub use signer_client::{client_for_network, client_for_signer, client_for_signer_on_network};
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{

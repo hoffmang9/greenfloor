@@ -38,6 +38,7 @@ pub(super) async fn prepare_coin_op_loop_common(
         &prep.mgr.program_config,
         &prep.mgr.markets_config,
         prep.mgr.testnet_markets_path(),
+        Some(&prep.mgr.cats_config),
         prep.network,
         prep.market_id,
         prep.pair,

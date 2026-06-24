@@ -42,6 +42,9 @@ pub mod vault_coinset_scan;
 use config::SignerConfig;
 use error::SignerResult;
 
+pub use config::operator_ticker_index_from_paths;
+pub use paths::resolve_cats_config_path;
+
 pub use error::SignerError as Error;
 
 /// Resolve vault context.
@@ -53,24 +56,54 @@ pub async fn resolve_vault_context(config: SignerConfig) -> SignerResult<vault::
     Ok(vault::session::resolve_vault_session(config).await?.display)
 }
 
-/// Resolve offer assets via coinset.
+/// Resolve offer asset labels to on-chain ids using an explicit ticker index.
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
+/// Returns an error if asset resolution fails.
+pub async fn resolve_offer_assets(
+    config: SignerConfig,
+    base_asset: &str,
+    quote_asset: &str,
+    ticker_index: &config::CatTickerIndex,
+) -> SignerResult<(String, String)> {
+    offer::resolve_offer_assets(&config, base_asset, quote_asset, ticker_index).await
+}
+
+/// Deprecated: builds the default operator ticker index on each call.
+///
+/// Prefer [`resolve_offer_assets`] with an index from [`operator_ticker_index_from_paths`].
+///
+/// # Errors
+///
+/// Returns an error if asset resolution fails.
+#[deprecated(
+    since = "0.2.0",
+    note = "pass an explicit CatTickerIndex from operator metadata paths"
+)]
 pub async fn resolve_offer_assets_via_coinset(
     config: SignerConfig,
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    offer::resolve_offer_assets_via_coinset(&config, base_asset, quote_asset).await
+    use config::build_cat_ticker_index_lenient;
+    use paths::default_operator_metadata_config_paths;
+
+    let (cats, markets, testnet) = default_operator_metadata_config_paths();
+    let ticker_index = build_cat_ticker_index_lenient(&cats, &markets, testnet.as_deref());
+    resolve_offer_assets(config, base_asset, quote_asset, &ticker_index).await
 }
 
 /// Deprecated alias for [`resolve_offer_assets_via_coinset`].
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
+/// Returns an error if asset resolution fails.
+#[deprecated(
+    since = "0.2.0",
+    note = "use resolve_offer_assets with an explicit CatTickerIndex"
+)]
+#[allow(deprecated)]
 pub async fn resolve_offer_asset_ids(
     config: SignerConfig,
     base_asset: &str,

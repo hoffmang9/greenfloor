@@ -1,9 +1,8 @@
-//! Offer asset resolution against the direct Coinset HTTP API.
+//! Coinset HTTP helpers for offer asset metadata lookup.
 
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 use serde::Deserialize;
 
-use super::asset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -21,7 +20,7 @@ struct LookupAssetResponse {
     asset: Option<AssetInfo>,
 }
 
-/// Lookup asset metadata by ticker symbol.
+/// Lookup asset metadata by ticker symbol via Coinset HTTP.
 ///
 /// # Errors
 ///
@@ -65,37 +64,6 @@ pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
     Err(SignerError::Other(format!(
         "invalid asset id (expected 64-hex cat id or xch/txch): {raw}"
     )))
-}
-
-/// Resolve offer asset ids.
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_offer_asset_ids(
-    client: &CoinsetClient,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    let resolved_base = resolve_one_asset(client, base_asset).await?;
-    let resolved_quote = resolve_one_asset(client, quote_asset).await?;
-    if resolved_base == resolved_quote
-        && !is_xch_like_asset(&resolved_base)
-        && !is_xch_like_asset(&resolved_quote)
-    {
-        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
-    }
-    Ok((resolved_base, resolved_quote))
-}
-
-async fn resolve_one_asset(client: &CoinsetClient, raw: &str) -> SignerResult<String> {
-    if let Ok(normalized) = normalize_asset_id(raw) {
-        return Ok(normalized);
-    }
-    if let Ok(Some(asset)) = lookup_asset_by_symbol(client, raw).await {
-        return normalize_asset_id(&asset.asset_id);
-    }
-    Err(SignerError::Other(format!("asset_resolution_failed:{raw}")))
 }
 
 #[cfg(test)]
