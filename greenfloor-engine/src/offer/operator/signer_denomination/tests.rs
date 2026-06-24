@@ -1,6 +1,6 @@
 use crate::coinset::WalletUnspentCoin;
 use crate::offer::bootstrap::{
-    BaseUnits, BootstrapCombineContext, BootstrapFundingSource, BootstrapPlan, PlannerLadderRow,
+    BaseUnits, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome,
 };
 
 use super::{
@@ -51,16 +51,6 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
         change_amount: 49_800,
         deficits: Vec::new(),
     };
-    let ladder_entries = vec![PlannerLadderRow {
-        size_base_units: 100,
-        target_count: 2,
-        split_buffer_count: 0,
-    }];
-    let refreshed = vec![crate::offer::bootstrap::BootstrapCoin {
-        id: "coin-a".to_string(),
-        amount: BaseUnits::new(50_000),
-    }];
-
     let result = executed_after_split(ExecutedAfterSplitParams {
         fee_mojos: 0,
         fee_source: String::new(),
@@ -68,9 +58,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
         split_result: serde_json::json!({"operation_id": "split-1"}),
         wait_events: vec![serde_json::json!({"event": "confirmed"})],
         bootstrap_plan,
-        ladder_entries: &ladder_entries,
-        refreshed_spendable: &refreshed,
-        combine_context: BootstrapCombineContext::for_tests(),
+        remaining: BootstrapPlanOutcome::Ready,
     });
 
     assert_eq!(result.split_result["operation_id"], "split-1");

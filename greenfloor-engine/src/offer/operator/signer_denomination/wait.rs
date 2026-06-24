@@ -6,11 +6,18 @@ use crate::config::SignerConfig;
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
-    bootstrap_wait_step_satisfied, plan_bootstrap_mixed_outputs, BootstrapWaitStepKind,
+    bootstrap_wait_step_satisfied, plan_bootstrap_mixed_outputs, BootstrapPlanOutcome,
+    BootstrapWaitStepKind,
 };
 
 use super::planning::bootstrap_coins_in_base_units;
 use super::BootstrapShapeContext;
+
+#[derive(Debug)]
+pub(super) struct BootstrapShapeWaitResult {
+    pub events: Vec<Value>,
+    pub outcome: BootstrapPlanOutcome,
+}
 
 pub(super) struct BootstrapWaitConfig<'a> {
     pub network: &'a str,
@@ -23,7 +30,7 @@ pub(super) struct BootstrapWaitConfig<'a> {
 
 pub(super) async fn wait_for_bootstrap_shape_ready(
     config: BootstrapWaitConfig<'_>,
-) -> SignerResult<Vec<Value>> {
+) -> SignerResult<BootstrapShapeWaitResult> {
     let BootstrapWaitConfig {
         network,
         signer,
@@ -51,7 +58,9 @@ pub(super) async fn wait_for_bootstrap_shape_ready(
             initial_sleep,
             max_sleep,
         ) else {
-            return Err(SignerError::Other("confirmation_wait_timeout".to_string()));
+            return Err(SignerError::Other(
+                "bootstrap_shape_wait_timeout".to_string(),
+            ));
         };
         let coins = list_wallet_unspent_coins_for_signer(
             network,
@@ -68,14 +77,17 @@ pub(super) async fn wait_for_bootstrap_shape_ready(
             &ctx.combine_context,
         );
         if bootstrap_wait_step_satisfied(step, &outcome) {
-            return Ok(vec![json!({
-                "event": "bootstrap_shape_ready",
-                "wait_step": match step {
-                    BootstrapWaitStepKind::AfterCombine => "after_combine",
-                    BootstrapWaitStepKind::AfterSplit => "after_split",
-                },
-                "elapsed_seconds": elapsed_seconds.to_string(),
-            })]);
+            return Ok(BootstrapShapeWaitResult {
+                events: vec![json!({
+                    "event": "bootstrap_shape_ready",
+                    "wait_step": match step {
+                        BootstrapWaitStepKind::AfterCombine => "after_combine",
+                        BootstrapWaitStepKind::AfterSplit => "after_split",
+                    },
+                    "elapsed_seconds": elapsed_seconds.to_string(),
+                })],
+                outcome,
+            });
         }
         tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
         sleep_seconds =
@@ -128,7 +140,7 @@ mod tests {
         }];
         let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let events = wait_for_bootstrap_shape_ready(BootstrapWaitConfig {
+        let ready = wait_for_bootstrap_shape_ready(BootstrapWaitConfig {
             network: "mainnet",
             signer: &signer,
             ctx: &ctx,
@@ -139,8 +151,12 @@ mod tests {
         .await
         .expect("combine wait should ignore change-only inventory");
 
-        assert_eq!(events[0]["event"], "bootstrap_shape_ready");
-        assert_eq!(events[0]["wait_step"], "after_combine");
+        assert_eq!(ready.events[0]["event"], "bootstrap_shape_ready");
+        assert_eq!(ready.events[0]["wait_step"], "after_combine");
+        assert!(crate::offer::bootstrap::bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterCombine,
+            &ready.outcome,
+        ));
     }
 
     #[tokio::test]
@@ -171,6 +187,6 @@ mod tests {
         })
         .await
         .expect_err("timeout");
-        assert_eq!(err.to_string(), "confirmation_wait_timeout");
+        assert_eq!(err.to_string(), "bootstrap_shape_wait_timeout");
     }
 }

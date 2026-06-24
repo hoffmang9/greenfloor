@@ -116,7 +116,7 @@ pub fn combine_first_shape_context(
         fee_mojos: 0,
         fee_source: String::new(),
         fee_lookup_error: None,
-        existing_coin_ids: spendable.iter().map(|coin| coin.id.clone()).collect(),
+        #[cfg(test)]
         test_overrides: SignerDenominationTestOverrides::default(),
     }
 }

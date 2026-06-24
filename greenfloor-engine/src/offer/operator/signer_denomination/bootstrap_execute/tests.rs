@@ -1,30 +1,19 @@
 use crate::config::ManagerProgramConfig;
-use crate::offer::bootstrap::PlannerLadderRow;
+use crate::offer::bootstrap::{
+    plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, PlannerLadderRow,
+};
 use crate::test_support::bootstrap_shape::{
     coin_record_body, coin_records_response, fragmented_combine_first_shape_context,
-    BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_MOJO_PER_XCH, BOOTSTRAP_TEST_RECEIVE,
+    BOOTSTRAP_TEST_MOJO_PER_XCH, BOOTSTRAP_TEST_RECEIVE,
 };
 use crate::test_support::signer_config::test_signer_config;
 
 use super::super::test_overrides::sample_vault_mixed_split_stub;
 use super::{execute_bootstrap_shape, replan_after_combine};
 
-#[tokio::test]
-async fn replan_after_combine_transitions_to_single_coin_split() {
+#[test]
+fn replan_after_combine_transitions_to_single_coin_split() {
     let combined_parent = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-    let combined_record = coin_record_body(combined_parent, BOOTSTRAP_TEST_MOJO_PER_UNIT * 100);
-
-    let mut server = mockito::Server::new_async().await;
-    let combined_coin_body = coin_records_response(&[combined_record]);
-    let _mock = server
-        .mock("POST", "/get_coin_records_by_puzzle_hash")
-        .with_status(200)
-        .with_body(combined_coin_body)
-        .create_async()
-        .await;
-
-    let program = ManagerProgramConfig::default();
-    let signer = test_signer_config(&server.url());
     let ladder = vec![PlannerLadderRow {
         size_base_units: 100,
         target_count: 1,
@@ -33,14 +22,18 @@ async fn replan_after_combine_transitions_to_single_coin_split() {
     let mut ctx = fragmented_combine_first_shape_context(BOOTSTRAP_TEST_RECEIVE, "xch", ladder);
     assert!(ctx.bootstrap_plan.requires_combine_first());
 
+    let spendable = vec![BootstrapCoin {
+        id: combined_parent.to_string(),
+        amount: BaseUnits::new(100),
+    }];
+    let outcome =
+        plan_bootstrap_mixed_outputs(&ctx.ladder_entries, &spendable, 5, &ctx.combine_context);
+
     let replanned = replan_after_combine(
-        &program,
-        &signer,
         &mut ctx,
         vec![serde_json::json!({"event": "bootstrap_combine_submitted"})],
-    )
-    .await
-    .expect("replan");
+        outcome,
+    );
 
     match replanned {
         None => {
@@ -78,21 +71,10 @@ async fn prepare_and_replan_combine_first_inventory() {
             BOOTSTRAP_TEST_MOJO_PER_XCH * 4,
         ),
     ]);
-    let combined = coin_records_response(&[coin_record_body(
-        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
-    )]);
     let _initial = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
         .with_status(200)
         .with_body(fragmented)
-        .expect_at_least(1)
-        .create_async()
-        .await;
-    let _after_combine = server
-        .mock("POST", "/get_coin_records_by_puzzle_hash")
-        .with_status(200)
-        .with_body(combined)
         .expect_at_least(1)
         .create_async()
         .await;
@@ -118,9 +100,17 @@ async fn prepare_and_replan_combine_first_inventory() {
             .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
 
-    let replanned = replan_after_combine(&program, &signer, &mut shape_ctx, Vec::new())
-        .await
-        .expect("replan");
+    let spendable = vec![BootstrapCoin {
+        id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string(),
+        amount: BaseUnits::new(100),
+    }];
+    let outcome = plan_bootstrap_mixed_outputs(
+        &shape_ctx.ladder_entries,
+        &spendable,
+        5,
+        &shape_ctx.combine_context,
+    );
+    let replanned = replan_after_combine(&mut shape_ctx, Vec::new(), outcome);
     match replanned {
         None => {
             assert!(!shape_ctx.bootstrap_plan.requires_combine_first());
@@ -169,10 +159,6 @@ async fn coinset_server_for_combine_first_e2e() -> mockito::ServerGuard {
             BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
         ),
     ]);
-    let shaped_only = coin_records_response(&[coin_record_body(
-        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
-    )]);
 
     let mut server = mockito::Server::new_async().await;
     let _initial = server
@@ -187,22 +173,10 @@ async fn coinset_server_for_combine_first_e2e() -> mockito::ServerGuard {
         .with_body(combined_only.clone())
         .create_async()
         .await;
-    let _replan_refresh = server
-        .mock("POST", "/get_coin_records_by_puzzle_hash")
-        .with_status(200)
-        .with_body(combined_only)
-        .create_async()
-        .await;
     let _split_wait = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
         .with_status(200)
         .with_body(shaped_for_wait)
-        .create_async()
-        .await;
-    let _final_refresh = server
-        .mock("POST", "/get_coin_records_by_puzzle_hash")
-        .with_status(200)
-        .with_body(shaped_only)
         .create_async()
         .await;
     let _fee = server

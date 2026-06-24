@@ -62,6 +62,7 @@ pub(crate) fn bootstrap_wait_step_satisfied(
     outcome: &BootstrapPlanOutcome,
 ) -> bool {
     match step {
+        // Combine can fully satisfy the ladder (Ready) when outputs already match targets.
         BootstrapWaitStepKind::AfterCombine => match outcome {
             BootstrapPlanOutcome::Ready => true,
             BootstrapPlanOutcome::NeedsShape(plan) => !plan.requires_combine_first(),
@@ -163,6 +164,15 @@ mod tests {
         assert!(phase
             .reason
             .contains("still_underfunded:total_output_amount=20"));
+    }
+
+    #[test]
+    fn after_combine_wait_satisfied_when_combine_fully_shapes_ladder() {
+        let ready = BootstrapPlanOutcome::Ready;
+        assert!(bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterCombine,
+            &ready
+        ));
     }
 
     #[test]
