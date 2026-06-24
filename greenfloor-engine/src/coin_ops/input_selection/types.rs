@@ -1,3 +1,15 @@
+use crate::coin_ops::selection::SpendableCoin;
+
+/// Inputs for daemon automatic split-source selection.
+#[derive(Debug, Clone, Copy)]
+pub struct DaemonAutoSplitParams<'a> {
+    pub candidate_spendable: &'a [SpendableCoin],
+    pub required_amount_mojos: i64,
+    pub canonical_asset_id: &'a str,
+    pub combine_input_cap: i64,
+    pub allow_combine_prereq: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitCombinePrereqPlan {
     pub input_coin_ids: Vec<String>,

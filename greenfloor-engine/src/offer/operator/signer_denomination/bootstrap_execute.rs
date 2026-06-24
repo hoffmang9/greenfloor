@@ -3,8 +3,9 @@ use serde_json::json;
 use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
-    bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapPhaseSnapshot,
-    BootstrapPlanOutcome, BootstrapReplanAfterCombine, BootstrapWaitStepKind, PlannerLadderRow,
+    bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapCoin,
+    BootstrapPhaseSnapshot, BootstrapPlanOutcome, BootstrapReplanAfterCombine,
+    BootstrapWaitStepKind, PlannerLadderRow,
 };
 
 use super::executed_after_split;
@@ -104,7 +105,14 @@ async fn execute_bootstrap_combine_step(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
     ctx: &BootstrapShapeContext,
-) -> Result<(Vec<serde_json::Value>, BootstrapPlanOutcome), BootstrapPhaseResult> {
+) -> Result<
+    (
+        Vec<serde_json::Value>,
+        BootstrapPlanOutcome,
+        Vec<BootstrapCoin>,
+    ),
+    BootstrapPhaseResult,
+> {
     let combine_result = submit_bootstrap_combine(
         signer_config,
         &ctx.bootstrap_plan,
@@ -159,7 +167,7 @@ async fn execute_bootstrap_combine_step(
             "combine_result": combine_result,
         }),
     );
-    Ok((wait_events, wait.outcome))
+    Ok((wait_events, wait.outcome, wait.spendable_coins))
 }
 
 #[must_use]
@@ -168,8 +176,14 @@ pub(crate) fn replan_after_combine(
     prepend_wait_events: Vec<serde_json::Value>,
     replanned: BootstrapPlanOutcome,
     combine_target_amount: i64,
+    spendable_coins: &[BootstrapCoin],
 ) -> Option<BootstrapPhaseResult> {
-    match bootstrap_replan_after_combine(combine_target_amount, replanned) {
+    match bootstrap_replan_after_combine(
+        combine_target_amount,
+        replanned,
+        &ctx.ladder_entries,
+        spendable_coins,
+    ) {
         BootstrapReplanAfterCombine::Complete(outcome) => {
             Some(ctx.executed_from_outcome(&outcome, prepend_wait_events))
         }
@@ -189,7 +203,7 @@ pub(super) async fn execute_bootstrap_shape(
 
     if ctx.bootstrap_plan.requires_combine_first() {
         let combine_target_amount = ctx.bootstrap_plan.total_output_amount;
-        let (events, replanned) =
+        let (events, replanned, spendable) =
             match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
                 Ok(result) => result,
                 Err(result) => return Ok(result),
@@ -200,6 +214,7 @@ pub(super) async fn execute_bootstrap_shape(
             prepend_wait_events.clone(),
             replanned,
             combine_target_amount,
+            &spendable,
         ) {
             return Ok(result);
         }

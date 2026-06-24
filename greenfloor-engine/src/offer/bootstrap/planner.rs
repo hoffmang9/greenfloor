@@ -8,7 +8,10 @@ use crate::coin_ops::aggregate_covers_without_single_coin;
 use super::amounts::BaseUnits;
 use super::combine_inputs::BootstrapCombineInputs;
 use super::combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
-use super::ladder::protected_ladder_coin_slots_by_size;
+use super::ladder::ladder_shape_context_for_bootstrap;
+use crate::coin_ops::shape_protection::{
+    select_smallest_non_cannibalizing_index, SplittableCandidate,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -115,21 +118,6 @@ fn sorted_ladder_rows(ladder_entries: &[PlannerLadderRow]) -> Vec<PlannerLadderR
     sorted
 }
 
-fn count_exact_amount_coins(
-    spendable_coin_amounts: &[i64],
-    ladder_sizes: &[i64],
-) -> std::collections::HashMap<i64, i64> {
-    let ladder: std::collections::HashSet<i64> = ladder_sizes.iter().copied().collect();
-    let mut counts: std::collections::HashMap<i64, i64> =
-        ladder_sizes.iter().map(|size| (*size, 0)).collect();
-    for amount in spendable_coin_amounts {
-        if ladder.contains(amount) {
-            *counts.get_mut(amount).expect("ladder size pre-seeded") += 1;
-        }
-    }
-    counts
-}
-
 /// Build a one-shot mixed-output bootstrap plan from ladder deficits.
 ///
 /// # Panics
@@ -153,16 +141,13 @@ pub fn plan_bootstrap_mixed_outputs(
         return BootstrapPlanOutcome::InvalidLadder;
     }
 
-    let ladder_sizes: Vec<i64> = sorted_ladder
-        .iter()
-        .map(|row| row.size_base_units)
-        .collect();
     let spendable_amounts: Vec<i64> = spendable_coins
         .iter()
         .map(|coin| coin.amount.get())
         .collect();
-    let counts = count_exact_amount_coins(&spendable_amounts, &ladder_sizes);
-    let protected_slots = protected_ladder_coin_slots_by_size(&sorted_ladder);
+    let shape_ctx = ladder_shape_context_for_bootstrap(&sorted_ladder, &spendable_amounts);
+    let protected_slots = &shape_ctx.protected_slots;
+    let counts = &shape_ctx.exact_ladder_counts;
 
     let mut deficits = Vec::new();
     let mut output_amounts = Vec::new();
@@ -193,20 +178,23 @@ pub fn plan_bootstrap_mixed_outputs(
         return BootstrapPlanOutcome::InvalidLadder;
     }
 
-    let mut sorted_coins: Vec<&BootstrapCoin> = spendable_coins.iter().collect();
-    sorted_coins.sort_by_key(|coin| std::cmp::Reverse(coin.amount));
-
-    let candidate = sorted_coins.into_iter().find_map(|coin| {
-        let coin_id = coin.id.trim();
-        if coin_id.is_empty() {
-            return None;
-        }
-        if coin.amount.get() >= total_output_amount {
-            Some((coin_id.to_string(), coin.amount))
-        } else {
-            None
-        }
-    });
+    let candidates: Vec<SplittableCandidate<'_>> = spendable_coins
+        .iter()
+        .filter(|coin| !coin.id.trim().is_empty())
+        .map(|coin| SplittableCandidate {
+            id: coin.id.as_str(),
+            amount_base_units: coin.amount.get(),
+        })
+        .collect();
+    let candidate =
+        select_smallest_non_cannibalizing_index(&candidates, total_output_amount, &shape_ctx)
+            .and_then(|index| {
+                let selected_id = candidates[index].id;
+                spendable_coins
+                    .iter()
+                    .find(|coin| coin.id == selected_id)
+                    .map(|coin| (coin.id.clone(), coin.amount))
+            });
 
     let Some((source_coin_id, source_amount)) = candidate else {
         if !aggregate_covers_without_single_coin(total_output_amount, &spendable_amounts) {
@@ -333,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn selects_largest_funding_coin() {
+    fn selects_smallest_non_cannibalizing_funding_coin() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big-object", 100)];
         let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
@@ -346,6 +334,22 @@ mod tests {
         };
         assert_eq!(plan.source_coin_id(), Some("coin-big-object"));
         assert_eq!(plan.output_amounts_base_units, vec![10, 10]);
+    }
+
+    #[test]
+    fn skips_satisfied_ladder_row_when_smaller_non_ladder_coin_exists() {
+        let ladder = vec![row(10, 2, 1), row(100, 1, 0)];
+        let spendable = vec![coin("combined", 100), coin("spare", 50), coin("ten", 10)];
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
+            panic!("expected needs_shape")
+        };
+        assert_eq!(plan.source_coin_id(), Some("spare"));
+        assert_eq!(plan.total_output_amount, 20);
     }
 
     #[test]
@@ -617,7 +621,20 @@ mod tests {
         );
         match remaining {
             BootstrapPlanOutcome::Ready => {}
+            BootstrapPlanOutcome::CannotFund {
+                total_output_amount,
+            } => {
+                assert!(
+                    total_output_amount < 100,
+                    "100 BU row must stay satisfied after combine: {remaining:?}"
+                );
+            }
             BootstrapPlanOutcome::NeedsShape(ref split) => {
+                assert_ne!(
+                    split.source_amount(),
+                    100,
+                    "must not split the satisfied 100 BU row for smaller deficits: {remaining:?}"
+                );
                 assert!(
                     !split
                         .deficits

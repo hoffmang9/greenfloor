@@ -12,6 +12,21 @@ fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
         .collect()
 }
 
+fn daemon_params<'a>(
+    spendable: &'a [SpendableCoin],
+    required_amount_mojos: i64,
+    canonical_asset_id: &'a str,
+    allow_combine_prereq: bool,
+) -> DaemonAutoSplitParams<'a> {
+    DaemonAutoSplitParams {
+        candidate_spendable: spendable,
+        required_amount_mojos,
+        canonical_asset_id,
+        combine_input_cap: 10,
+        allow_combine_prereq,
+    }
+}
+
 #[test]
 fn cli_auto_picks_largest_without_required_enforcement() {
     let plan = plan_cli_auto_split_selection(&coins(&[("Coin_small", 100), ("Coin_big", 1500)]));
@@ -23,13 +38,8 @@ fn cli_auto_picks_largest_without_required_enforcement() {
 
 #[test]
 fn daemon_auto_requires_single_coin_at_least_required() {
-    let plan = plan_daemon_auto_split_selection(
-        &coins(&[("Coin_small", 500), ("Coin_big", 1500)]),
-        1000,
-        "xch",
-        10,
-        false,
-    );
+    let spendable = coins(&[("Coin_small", 500), ("Coin_big", 1500)]);
+    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 1000, "xch", false));
     match plan {
         SplitAutoSelectPlan::Coin(coin) => assert_eq!(coin.coin_id, "Coin_big"),
         other => panic!("unexpected plan: {other:?}"),
@@ -38,13 +48,8 @@ fn daemon_auto_requires_single_coin_at_least_required() {
 
 #[test]
 fn daemon_auto_skips_when_no_coin_meets_required() {
-    let plan = plan_daemon_auto_split_selection(
-        &coins(&[("Coin_a", 400), ("Coin_b", 500)]),
-        1000,
-        "xch",
-        10,
-        false,
-    );
+    let spendable = coins(&[("Coin_a", 400), ("Coin_b", 500)]);
+    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 1000, "xch", false));
     match plan {
         SplitAutoSelectPlan::Skip(SplitSkipReason::NoSpendableMeetsRequired) => {}
         other => panic!("unexpected plan: {other:?}"),
@@ -53,13 +58,8 @@ fn daemon_auto_skips_when_no_coin_meets_required() {
 
 #[test]
 fn daemon_auto_returns_combine_prereq_when_aggregate_covers() {
-    let plan = plan_daemon_auto_split_selection(
-        &coins(&[("Coin_a", 4000), ("Coin_b", 6000)]),
-        10_000,
-        "xch",
-        10,
-        true,
-    );
+    let spendable = coins(&[("Coin_a", 4000), ("Coin_b", 6000)]);
+    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, "xch", true));
     match plan {
         SplitAutoSelectPlan::CombinePrereq(prereq) => {
             assert_eq!(
@@ -88,12 +88,12 @@ fn cli_auto_picks_largest_when_no_single_coin_meets_required() {
 #[test]
 fn daemon_retry_second_attempt_disables_combine_prereq() {
     let spendable = coins(&[("Coin_a", 4000), ("Coin_b", 6000)]);
-    let first = plan_daemon_auto_split_selection(&spendable, 10_000, "xch", 10, true);
+    let first = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, "xch", true));
     match first {
         SplitAutoSelectPlan::CombinePrereq(_) => {}
         other => panic!("expected combine prereq on first attempt: {other:?}"),
     }
-    let second = plan_daemon_auto_split_selection(&spendable, 10_000, "xch", 10, false);
+    let second = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, "xch", false));
     match second {
         SplitAutoSelectPlan::Skip(SplitSkipReason::NoSpendableMeetsRequired) => {}
         other => panic!("expected skip when combine prereq disabled: {other:?}"),
@@ -136,13 +136,8 @@ fn combine_largest_by_amount_picks_top_coins_respecting_exclude() {
 #[test]
 fn daemon_auto_rejects_sub_cat_change_dust() {
     let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
-    let plan = plan_daemon_auto_split_selection(
-        &coins(&[("Coin_cat", 10_500)]),
-        10_000,
-        cat_id,
-        10,
-        false,
-    );
+    let spendable = coins(&[("Coin_cat", 10_500)]);
+    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, cat_id, false));
     match plan {
         SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(data)) => {
             assert_eq!(data.remainder_mojos, 500);
@@ -189,13 +184,8 @@ fn combine_prereq_plan_exact_match_when_cap_covers_all_inputs() {
 #[test]
 fn daemon_auto_skips_combine_prereq_when_overshoot_would_be_cat_dust() {
     let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
-    let plan = plan_daemon_auto_split_selection(
-        &coins(&[("Coin_a", 6000), ("Coin_b", 4500)]),
-        10_000,
-        cat_id,
-        10,
-        true,
-    );
+    let spendable = coins(&[("Coin_a", 6000), ("Coin_b", 4500)]);
+    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, cat_id, true));
     match plan {
         SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(data)) => {
             assert_eq!(data.remainder_mojos, 500);

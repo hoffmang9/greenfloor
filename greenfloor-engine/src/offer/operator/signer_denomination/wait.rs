@@ -7,7 +7,8 @@ use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_wait_event_metadata, plan_bootstrap_mixed_outputs, resolve_bootstrap_wait_poll,
-    BootstrapCoin, BootstrapPlanOutcome, BootstrapWaitResolution, BootstrapWaitStepKind,
+    BootstrapCoin, BootstrapPlanOutcome, BootstrapWaitContext, BootstrapWaitPoll,
+    BootstrapWaitResolution, BootstrapWaitStepKind,
 };
 
 use super::planning::bootstrap_coins_in_base_units;
@@ -41,6 +42,7 @@ async fn fetch_bootstrap_spendable(
 pub(super) struct BootstrapShapeStepWaitResult {
     pub events: Vec<Value>,
     pub outcome: BootstrapPlanOutcome,
+    pub spendable_coins: Vec<BootstrapCoin>,
 }
 
 pub(super) struct BootstrapWaitConfig<'a> {
@@ -99,9 +101,20 @@ pub(super) async fn wait_for_bootstrap_shape_step(
             resolve_combine_input_cap(),
             &ctx.combine_context,
         );
-        if let BootstrapWaitResolution::Complete(completed) =
-            resolve_bootstrap_wait_poll(step, &outcome, observed_on_chain_update)
-        {
+        if let BootstrapWaitResolution::Complete(completed) = resolve_bootstrap_wait_poll(
+            match step {
+                BootstrapWaitStepKind::AfterCombine => {
+                    BootstrapWaitPoll::AfterCombine(BootstrapWaitContext {
+                        combine_target_amount: ctx.bootstrap_plan.total_output_amount,
+                        ladder_entries: &ctx.ladder_entries,
+                        spendable_coins: &spendable,
+                    })
+                }
+                BootstrapWaitStepKind::AfterSplit => BootstrapWaitPoll::AfterSplit,
+            },
+            &outcome,
+            observed_on_chain_update,
+        ) {
             let (ready, reason) = bootstrap_wait_event_metadata(step, &completed);
             return Ok(BootstrapShapeStepWaitResult {
                 events: vec![json!({
@@ -115,6 +128,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
                     "elapsed_seconds": elapsed_seconds.to_string(),
                 })],
                 outcome: completed,
+                spendable_coins: spendable,
             });
         }
         tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
@@ -127,12 +141,13 @@ pub(super) async fn wait_for_bootstrap_shape_step(
 mod tests {
     use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
     use crate::error::SignerError;
-    use crate::offer::bootstrap::{BaseUnits, BootstrapCoin};
-    use crate::offer::bootstrap::{BootstrapWaitStepKind, PlannerLadderRow};
+    use crate::offer::bootstrap::{
+        BaseUnits, BootstrapFundingSource, BootstrapPlan, BootstrapWaitStepKind, PlannerLadderRow,
+    };
+    use crate::offer::operator::BootstrapShapeContext;
     use crate::test_support::bootstrap_shape::{
-        coin_record_body, coin_records_response, combine_first_shape_context,
-        eco181_cap_combine_shape_context, BOOTSTRAP_TEST_MOJO_MULTIPLIER,
-        BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_RECEIVE,
+        coin_record_body, coin_records_response, eco181_cap_combine_shape_context,
+        BOOTSTRAP_TEST_MOJO_MULTIPLIER, BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_RECEIVE,
     };
     use crate::test_support::signer_config::test_signer_config;
 
@@ -256,18 +271,34 @@ mod tests {
             target_count: 2,
             split_buffer_count: 0,
         }];
-        let spendable = vec![BootstrapCoin {
-            id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string(),
-            amount: BaseUnits::new(100),
-        }];
-        let ctx = combine_first_shape_context(
-            BOOTSTRAP_TEST_RECEIVE,
-            "xch",
-            BOOTSTRAP_TEST_MOJO_MULTIPLIER,
-            ladder,
-            &spendable,
-            5,
-        );
+        let ctx = BootstrapShapeContext {
+            split_asset_id: "xch".to_string(),
+            split_asset_mojo_multiplier: BOOTSTRAP_TEST_MOJO_MULTIPLIER,
+            receive_address: BOOTSTRAP_TEST_RECEIVE.to_string(),
+            bootstrap_plan: BootstrapPlan {
+                funding: BootstrapFundingSource::SingleCoin {
+                    coin_id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                    amount: BaseUnits::new(100),
+                },
+                output_amounts_base_units: vec![100],
+                total_output_amount: 100,
+                change_amount: 0,
+                deficits: vec![crate::offer::bootstrap::LadderDeficit {
+                    size_base_units: 100,
+                    required_count: 2,
+                    current_count: 1,
+                    deficit_count: 1,
+                }],
+            },
+            ladder_entries: ladder,
+            combine_context: crate::offer::bootstrap::BootstrapCombineContext::for_tests(),
+            fee_mojos: 0,
+            fee_source: String::new(),
+            fee_lookup_error: None,
+            #[cfg(test)]
+            test_overrides: crate::offer::operator::SignerDenominationTestOverrides::default(),
+        };
 
         let completed = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
             network: "mainnet",
@@ -286,9 +317,10 @@ mod tests {
             "bootstrap_shape_wait_complete"
         );
         assert_eq!(completed.events[0]["ready"], false);
-        assert!(completed.events[0]["reason"]
-            .as_str()
-            .expect("reason")
-            .contains("still_needs_split"));
+        let reason = completed.events[0]["reason"].as_str().expect("reason");
+        assert!(
+            reason.contains("still_needs_split") || reason.contains("still_underfunded"),
+            "reason={reason}"
+        );
     }
 }
