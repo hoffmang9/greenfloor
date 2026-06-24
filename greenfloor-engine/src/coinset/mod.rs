@@ -6,6 +6,7 @@ mod cats;
 pub(crate) mod coin_select;
 mod direct_api;
 mod msp;
+mod pagination;
 mod parse;
 mod poll;
 mod presplit;

@@ -4,7 +4,7 @@ use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 use chia_sdk_driver::{Vault, VaultInfo};
 use clvm_utils::TreeHash;
 
-use super::parse::coin_records_from_response;
+use super::pagination::{coin_records_by_parent_ids, coin_records_by_puzzle_hash};
 use crate::error::{SignerError, SignerResult};
 
 /// Fetch latest vault.
@@ -17,20 +17,14 @@ pub async fn fetch_latest_vault(
     launcher_id: Bytes32,
     inner_puzzle_hash: TreeHash,
 ) -> SignerResult<Vault> {
-    let response = client
-        .get_coin_records_by_parent_ids(vec![launcher_id], None, None, Some(true), None)
-        .await
-        .map_err(SignerError::from)?;
-    let launcher_children = coin_records_from_response(response)?;
+    let launcher_children =
+        coin_records_by_parent_ids(client, vec![launcher_id], None, None, Some(true)).await?;
     let Some(first_child) = launcher_children.first() else {
         return Err(SignerError::VaultSingletonNotFound);
     };
     let singleton_puzzle_hash = first_child.coin.puzzle_hash;
-    let leaf_response = client
-        .get_coin_records_by_puzzle_hash(singleton_puzzle_hash, None, None, Some(false), None)
-        .await
-        .map_err(SignerError::from)?;
-    let mut leaf_candidates = coin_records_from_response(leaf_response)?;
+    let mut leaf_candidates =
+        coin_records_by_puzzle_hash(client, singleton_puzzle_hash, None, None, Some(false)).await?;
     if leaf_candidates.is_empty() {
         return Err(SignerError::VaultSingletonNotFound);
     }

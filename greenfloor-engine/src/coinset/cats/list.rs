@@ -4,8 +4,9 @@ use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
 use futures_util::future::try_join_all;
 
-use super::{coin_records_from_response, resolve, unspent_coin_records};
+use super::{resolve, unspent_coin_records};
 use crate::bech32m::decode_address;
+use crate::coinset::pagination::coin_records_by_puzzle_hash;
 use crate::coinset::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::LogContext;
@@ -17,13 +18,7 @@ pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
 ) -> SignerResult<Vec<CoinRecord>> {
     let p2_puzzle_hash = decode_address(receive_address)?;
     let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, p2_puzzle_hash.into()).into();
-    let response = with_coinset_client_retries(|| async {
-        client
-            .get_coin_records_by_puzzle_hash(cat_outer_puzzle_hash, None, None, Some(false), None)
-            .await
-    })
-    .await?;
-    coin_records_from_response(response)
+    coin_records_by_puzzle_hash(client, cat_outer_puzzle_hash, None, None, Some(false)).await
 }
 
 /// Resolve spendable [`Cat`] values with lineage proofs for coin records.

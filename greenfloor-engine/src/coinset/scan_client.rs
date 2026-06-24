@@ -66,12 +66,7 @@ impl DirectCoinsetScanClient {
         end_height: Option<u64>,
     ) -> SignerResult<Vec<Value>> {
         apply_height_fields(&mut body, start_height, end_height);
-        let network = self.network.clone();
-        let base_url = self.base_url.clone();
-        with_script_retries(|| async {
-            post_coinset_coin_records(&network, base_url.as_deref(), endpoint, body.clone()).await
-        })
-        .await
+        post_coinset_coin_records(&self.network, self.base_url.as_deref(), endpoint, body).await
     }
 
     async fn record(&self, endpoint: &str, body: Value, key: &str) -> SignerResult<Option<Value>> {

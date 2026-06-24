@@ -1,8 +1,8 @@
 use chia_protocol::Coin;
-use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
+use chia_sdk_coinset::CoinsetClient;
 
-use super::parse::{coin_records_from_response, unspent_coin_records};
-use super::retry::with_coinset_client_retries;
+use super::pagination::coin_records_by_puzzle_hash;
+use super::parse::unspent_coin_records;
 use crate::bech32m::decode_address;
 use crate::error::SignerResult;
 
@@ -16,13 +16,8 @@ pub async fn list_unspent_xch(
     receive_address: &str,
 ) -> SignerResult<Vec<Coin>> {
     let puzzle_hash = decode_address(receive_address)?;
-    let response = with_coinset_client_retries(|| async {
-        client
-            .get_coin_records_by_puzzle_hash(puzzle_hash, None, None, Some(false), None)
-            .await
-    })
-    .await?;
-    Ok(unspent_coin_records(coin_records_from_response(response)?)
+    let records = coin_records_by_puzzle_hash(client, puzzle_hash, None, None, Some(false)).await?;
+    Ok(unspent_coin_records(records)
         .map(|record| record.coin)
         .collect())
 }

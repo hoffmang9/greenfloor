@@ -61,11 +61,54 @@ fn coinset_rpc_failure_detail(payload: &Value) -> String {
     "coinset rpc returned success=false".to_string()
 }
 
-pub(crate) fn coin_records_from_response(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoinsetRecordsPagination {
+    pub truncated: bool,
+    pub next_cursor: Option<String>,
+}
+
+pub(crate) fn pagination_from_response(
+    response: &GetCoinRecordsResponse,
+) -> CoinsetRecordsPagination {
+    CoinsetRecordsPagination {
+        truncated: response.truncated.unwrap_or(false),
+        next_cursor: response.next_cursor.clone(),
+    }
+}
+
+pub(crate) fn pagination_from_payload(payload: &Value) -> CoinsetRecordsPagination {
+    CoinsetRecordsPagination {
+        truncated: payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        next_cursor: payload
+            .get("next_cursor")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+/// Reject truncated Coinset pages that omit the resume cursor.
+///
+/// # Errors
+///
+/// Returns an error when `truncated` is true and `next_cursor` is missing.
+pub(crate) fn ensure_complete_page(pagination: &CoinsetRecordsPagination) -> SignerResult<()> {
+    if pagination.truncated && pagination.next_cursor.is_none() {
+        return Err(SignerError::Coinset(
+            "coinset response truncated without next_cursor".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn coin_records_page_from_response(
     response: GetCoinRecordsResponse,
-) -> SignerResult<Vec<CoinRecord>> {
+) -> SignerResult<(Vec<CoinRecord>, CoinsetRecordsPagination)> {
     ensure_coinset_typed_rpc_success(&response, "coinset request failed")?;
-    Ok(response.coin_records.unwrap_or_default())
+    let pagination = pagination_from_response(&response);
+    Ok((response.coin_records.unwrap_or_default(), pagination))
 }
 
 /// Ensure coinset rpc success.
@@ -356,5 +399,44 @@ mod tests {
         let values = vec![1, 2, 3];
         assert_eq!(chunk_values(&values, 0), vec![vec![1, 2, 3]]);
         assert!(chunk_values::<i32>(&[], 2).is_empty());
+    }
+
+    #[test]
+    fn pagination_from_payload_reads_truncated_and_cursor() {
+        let payload = json!({
+            "success": true,
+            "truncated": true,
+            "next_cursor": "abc",
+            "coin_records": []
+        });
+        let pagination = pagination_from_payload(&payload);
+        assert!(pagination.truncated);
+        assert_eq!(pagination.next_cursor.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn coin_records_page_from_response_allows_truncated_without_cursor() {
+        let response = GetCoinRecordsResponse {
+            coin_records: Some(vec![]),
+            error: None,
+            success: true,
+            truncated: Some(true),
+            next_cursor: None,
+        };
+        let (records, pagination) =
+            coin_records_page_from_response(response).expect("single-page parse");
+        assert!(records.is_empty());
+        assert!(pagination.truncated);
+        assert!(pagination.next_cursor.is_none());
+    }
+
+    #[test]
+    fn ensure_complete_page_errors_when_truncated_without_cursor() {
+        let pagination = CoinsetRecordsPagination {
+            truncated: true,
+            next_cursor: None,
+        };
+        let err = ensure_complete_page(&pagination).expect_err("missing cursor");
+        assert!(err.to_string().contains("truncated without next_cursor"));
     }
 }
