@@ -11,8 +11,8 @@ inputs:
     description: >-
       Swatinem/rust-cache shared-key namespace. Use `test` for clippy and plain
       nextest. Use `coverage` for llvm-cov instrumented builds. The ubuntu lint job
-      runs clippy on `test`, then restores `coverage` before llvm-cov so non-instrumented
-      clippy artifacts are not saved into the coverage cache.
+      runs clippy on `test`, then restores `coverage` before incremental llvm-cov so
+      non-instrumented clippy artifacts are not saved into the coverage cache.
     required: false
     default: "test"
   install-nextest:

@@ -76,9 +76,6 @@ jobs:
           restore-keys: |
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
-      # Clippy always uses the non-instrumented test cache. When diff coverage is in
-      # scope, a second coverage-cache step below restores instrumented target/ artifacts
-      # before llvm-cov runs (see .github/actions/rust-cache-greenfloor/action.yml).
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
           shared-key: test
@@ -86,29 +83,10 @@ jobs:
           install-nextest: ${{ steps.scope.outputs.run_rust_cov != 'true' }}
 
       - name: Lint, format, clippy, and script tests (parallel)
-        if: steps.scope.outputs.run_rust_cov != 'true'
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
           RUN_PY_COV: ${{ steps.scope.outputs.run_py_cov }}
         run: bash .github/scripts/ubuntu-all-checks-parallel.sh
-
-      - name: Lint and format (parallel)
-        if: steps.scope.outputs.run_rust_cov == 'true'
-        env:
-          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: bash .github/scripts/ubuntu-lint-parallel.sh
-
-      - name: Script adapter tests
-        if: steps.scope.outputs.run_rust_cov == 'true'
-        env:
-          RUN_PY_COV: ${{ steps.scope.outputs.run_py_cov }}
-        run: bash .github/scripts/ubuntu-script-tests.sh
-
-      - name: Clippy
-        if: steps.scope.outputs.run_rust_cov == 'true'
-        env:
-          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: pre-commit run cargo-clippy --all-files
 
       - uses: ./.github/actions/rust-cache-greenfloor
         if: steps.scope.outputs.run_rust_cov == 'true'
@@ -127,10 +105,22 @@ jobs:
         if: steps.scope.outputs.run_rust_cov == 'true'
         run: rustup component add llvm-tools-preview
 
-      - name: Rust tests (coverage)
+      - name: Install lcov for coverage merge
+        if: steps.scope.outputs.run_rust_cov == 'true'
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      - name: Download baseline coverage from main
+        if: steps.scope.outputs.run_rust_cov == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash .github/scripts/download-main-coverage-baseline.sh lcov.info.baseline
+
+      - name: Rust tests (incremental coverage)
         if: steps.scope.outputs.run_rust_cov == 'true'
         env:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+          INCREMENTAL: "1"
         run: bash .github/scripts/ubuntu-rust-coverage.sh
 
       - name: Rust tests
@@ -185,7 +175,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          # ubuntu-latest Rust/Python tests run in the lint job (plain nextest or llvm-cov).
+          # ubuntu-latest Rust/Python tests run in the lint job (plain nextest or incremental llvm-cov).
           - ubuntu-24.04-arm
           - macos-14
     steps:
