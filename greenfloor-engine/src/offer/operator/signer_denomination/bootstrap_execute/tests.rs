@@ -7,6 +7,44 @@ use crate::test_support::signer_config::test_signer_config;
 use super::super::test_overrides::sample_vault_mixed_split_stub;
 use super::execute_bootstrap_shape;
 
+async fn coinset_server_for_eco181_combine_only_e2e() -> mockito::ServerGuard {
+    use crate::test_support::eco181_bootstrap_inventory::{
+        eco181_after_combine_inventory_rows, eco181_bootstrap_inventory_rows,
+        eco181_fixture_coin_records,
+    };
+
+    let fragmented = eco181_fixture_coin_records(
+        &eco181_bootstrap_inventory_rows(),
+        BOOTSTRAP_TEST_MOJO_PER_XCH.cast_signed(),
+    );
+    let after_combine = eco181_fixture_coin_records(
+        &eco181_after_combine_inventory_rows(),
+        BOOTSTRAP_TEST_MOJO_PER_XCH.cast_signed(),
+    );
+
+    let mut server = mockito::Server::new_async().await;
+    let _initial = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(fragmented)
+        .create_async()
+        .await;
+    let _combine_wait = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(after_combine)
+        .expect_at_least(2)
+        .create_async()
+        .await;
+    let _fee = server
+        .mock("POST", "/get_fee_estimate")
+        .with_status(200)
+        .with_body(r#"{"success":false}"#)
+        .create_async()
+        .await;
+    server
+}
+
 async fn coinset_server_for_combine_first_e2e() -> mockito::ServerGuard {
     let fragmented = coin_records_response(&[
         coin_record_body(
@@ -110,4 +148,48 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
         event.get("event") == Some(&serde_json::json!("bootstrap_shape_wait_complete"))
     }));
     assert!(!result.split_result.is_null());
+}
+
+#[tokio::test]
+async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split() {
+    use crate::offer::operator::signer_denomination::prepare_bootstrap_execution_plan;
+    use crate::test_support::ladder::market_with_eco181_sell_ladder;
+
+    let server = coinset_server_for_eco181_combine_only_e2e().await;
+    let market = market_with_eco181_sell_ladder(BOOTSTRAP_TEST_RECEIVE);
+    let program = ManagerProgramConfig {
+        coin_ops_minimum_fee_mojos: 0,
+        runtime_offer_bootstrap_wait_timeout_seconds: 30,
+        ..Default::default()
+    };
+    let signer = test_signer_config(&server.url());
+
+    let shape_ctx =
+        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
+            .await
+            .expect("plan result")
+            .expect("shape context");
+    assert!(shape_ctx.bootstrap_plan.requires_combine_first());
+    shape_ctx
+        .test_overrides
+        .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
+
+    let result = Box::pin(execute_bootstrap_shape(&program, &signer, shape_ctx))
+        .await
+        .expect("execute shape");
+
+    assert!(result.ready, "reason={}", result.reason);
+    assert_eq!(result.reason, "bootstrap_submitted");
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_combine_submitted"))
+    }));
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_shape_wait_complete"))
+            && event.get("wait_step") == Some(&serde_json::json!("after_combine"))
+    }));
+    assert_eq!(
+        result.split_result,
+        serde_json::json!({}),
+        "eco181 bootstrap must not submit a destructive split after combine"
+    );
 }

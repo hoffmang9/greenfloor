@@ -257,6 +257,58 @@ async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
 }
 
 #[tokio::test]
+async fn run_daemon_split_plan_uses_ninety_bu_remnant_for_john_deere_buffer_deficit() {
+    use crate::test_support::eco181_bootstrap_inventory::john_deere_after_combine_inventory_rows;
+    use crate::test_support::ladder::market_with_eco181_sell_ladder;
+
+    const MULTIPLIER: i64 = 1000;
+    let mut market = market_with_eco181_sell_ladder("xch1test");
+    market.base_asset = "b".repeat(64);
+    let spendable: Vec<SpendableCoin> = john_deere_after_combine_inventory_rows()
+        .into_iter()
+        .map(|(id, amount)| SpendableCoin {
+            id,
+            amount: amount.saturating_mul(MULTIPLIER),
+        })
+        .collect();
+    let ctx = test_exec_context(market, spendable, Some("split-op-test"));
+    let plan = CoinOpPlan {
+        op_type: CoinOpKind::Split,
+        size_base_units: 10,
+        op_count: 1,
+        reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
+    };
+
+    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+
+    assert_eq!(executed, 1);
+    assert_eq!(items[0].reason, "signer_split_submitted");
+}
+
+#[tokio::test]
+async fn run_daemon_low_watermark_split_skips_protection_when_sell_ladder_empty() {
+    use crate::test_support::ladder::empty_ladders_market;
+
+    let market = empty_ladders_market("xch1test");
+    let spendable = vec![SpendableCoin {
+        id: test_coin_id('a'),
+        amount: 100_000,
+    }];
+    let ctx = test_exec_context(market, spendable, Some("split-op-test"));
+    let plan = CoinOpPlan {
+        op_type: CoinOpKind::Split,
+        size_base_units: 10,
+        op_count: 1,
+        reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
+    };
+
+    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+
+    assert_eq!(executed, 1);
+    assert_eq!(items[0].reason, "signer_split_submitted");
+}
+
+#[tokio::test]
 async fn run_daemon_split_plan_submits_single_output_when_source_is_larger() {
     let mut market = sample_market("xch1test");
     market.base_asset = "b".repeat(64);

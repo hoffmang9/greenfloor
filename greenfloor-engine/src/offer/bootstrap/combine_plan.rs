@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits};
 use super::combine_inputs::BootstrapCombineInputs;
-use super::ladder::protected_ladder_coin_slots_by_size;
+use super::ladder::ladder_shape_context_for_bootstrap;
 use super::planner::{BootstrapCoin, PlannerLadderRow};
 use crate::coin_ops::cat_overshoot_change_would_be_dust;
 use crate::coin_ops::{select_combine_inputs_for_target_in, TargetAmountCoin};
@@ -35,7 +35,8 @@ fn partition_ladder_coins(
     coins: &[BootstrapCoin],
     ladder_entries: &[PlannerLadderRow],
 ) -> (Vec<BootstrapCoin>, Vec<BootstrapCoin>) {
-    let mut protected_remaining = protected_ladder_coin_slots_by_size(ladder_entries);
+    let mut protected_remaining =
+        ladder_shape_context_for_bootstrap(ladder_entries, &[]).protected_slots;
     let mut sorted = coins.to_vec();
     sorted.sort_by(|left, right| left.id.cmp(&right.id));
 

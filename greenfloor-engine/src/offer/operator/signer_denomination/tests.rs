@@ -357,3 +357,54 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
     assert_eq!(plan_ctx.fee_source, "config_minimum_fee_fallback");
     assert!(!plan_ctx.bootstrap_plan.output_amounts_base_units.is_empty());
 }
+
+#[tokio::test]
+async fn prepare_bootstrap_execution_plan_continues_eco181_after_combine_buffer_deficit() {
+    use super::prepare_bootstrap_execution_plan;
+    use crate::config::ManagerProgramConfig;
+    use crate::test_support::bootstrap_shape::{coin_record_body, coin_records_response};
+    use crate::test_support::eco181_bootstrap_inventory::eco181_after_combine_inventory_rows;
+    use crate::test_support::ladder::market_with_eco181_sell_ladder;
+    use crate::test_support::signer_config::test_signer_config;
+
+    const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+    const MOJO_MULTIPLIER: i64 = 1000;
+    let records: Vec<String> = eco181_after_combine_inventory_rows()
+        .iter()
+        .enumerate()
+        .map(|(index, (_label, amount))| {
+            coin_record_body(
+                &format!("{index:064x}"),
+                u64::try_from(amount.saturating_mul(MOJO_MULTIPLIER)).unwrap_or(u64::MAX),
+            )
+        })
+        .collect();
+    let coin_body = coin_records_response(&records);
+    let mut server = mockito::Server::new_async().await;
+    let _coin_mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(coin_body)
+        .create_async()
+        .await;
+
+    let mut market = market_with_eco181_sell_ladder(RECEIVE_ADDRESS);
+    market.base_asset = "xch".to_string();
+    market.pricing = serde_json::json!({
+        "side": "sell",
+        "base_unit_mojo_multiplier": MOJO_MULTIPLIER,
+    });
+    let program = ManagerProgramConfig::default();
+    let signer = test_signer_config(&server.url());
+
+    let result =
+        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
+            .await
+            .expect("phase result");
+
+    let Err(result) = result else {
+        panic!("expected already_ready skip, got execution plan");
+    };
+    assert_eq!(result.reason, "already_ready");
+    assert!(result.offer_creation_block_error().is_none());
+}

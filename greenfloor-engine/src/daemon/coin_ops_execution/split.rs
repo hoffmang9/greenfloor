@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed,
     defer_low_watermark_split_from_spendable, i64_to_usize, plan_daemon_auto_split_selection,
-    usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan, SplitCombinePrereqPlan,
-    SplitSkipReason,
+    plan_daemon_low_watermark_split, usize_to_i64, CoinOpPlan, CoinOpPlanReason,
+    DaemonAutoSplitParams, SpendableCoin, SplitAutoSelectPlan, SplitCombinePrereqPlan,
+    SplitSkipReason, SplitSourceProtection,
 };
 
 use super::items::{
@@ -95,7 +96,29 @@ struct SplitPlanContext {
 
 enum DaemonSplitPreflight {
     Deferred(Vec<CoinOpExecItem>, u64),
-    Execute(Vec<SpendableCoin>),
+    Execute {
+        spendable: Vec<SpendableCoin>,
+        low_watermark_protection: Option<SplitSourceProtection>,
+    },
+}
+
+fn low_watermark_split_protection(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+    spendable: &[SpendableCoin],
+) -> Option<SplitSourceProtection> {
+    if plan.reason != CoinOpPlanReason::LowWatermarkBufferDeficit {
+        return None;
+    }
+    let sell_ladder = ctx.market.ladders.get("sell")?;
+    if sell_ladder.is_empty() {
+        return None;
+    }
+    Some(SplitSourceProtection::from_sell_ladder_entries(
+        sell_ladder,
+        spendable,
+        ctx.base_unit_mojo_multiplier,
+    ))
 }
 
 async fn daemon_split_preflight(
@@ -148,7 +171,10 @@ async fn daemon_split_preflight(
             0,
         ));
     }
-    Ok(DaemonSplitPreflight::Execute(spendable_for_defer))
+    Ok(DaemonSplitPreflight::Execute {
+        spendable: spendable_for_defer.clone(),
+        low_watermark_protection: low_watermark_split_protection(ctx, plan, &spendable_for_defer),
+    })
 }
 
 pub(crate) async fn execute_daemon_split_plan(
@@ -158,8 +184,18 @@ pub(crate) async fn execute_daemon_split_plan(
     match daemon_split_preflight(ctx, plan).await {
         Ok(DaemonSplitPreflight::Deferred(items, executed)) => (items, executed),
         Err(skip) => skip,
-        Ok(DaemonSplitPreflight::Execute(spendable)) => {
-            match execute_daemon_split_plan_inner(ctx, plan, Some(spendable)).await {
+        Ok(DaemonSplitPreflight::Execute {
+            spendable,
+            low_watermark_protection,
+        }) => {
+            match Box::pin(execute_daemon_split_plan_inner(
+                ctx,
+                plan,
+                Some(spendable),
+                low_watermark_protection,
+            ))
+            .await
+            {
                 Ok(result) => result,
                 Err(skip) => skip,
             }
@@ -296,6 +332,7 @@ async fn attempt_daemon_split(
     attempt_index: usize,
     attempted_coin_ids: &HashSet<String>,
     prefetched_spendable: Option<&[SpendableCoin]>,
+    split_protection: Option<&SplitSourceProtection>,
 ) -> CoinOpSkipResult<DaemonSplitAttemptResult> {
     let candidate_spendable = split_candidate_spendable(
         ctx,
@@ -308,13 +345,18 @@ async fn attempt_daemon_split(
         },
     )
     .await?;
-    let selection = plan_daemon_auto_split_selection(
-        &candidate_spendable,
-        split_ctx.required_amount,
-        &split_ctx.canonical_asset_id,
-        ctx.combine_input_cap,
-        attempt_index == 0,
-    );
+    let params = DaemonAutoSplitParams {
+        candidate_spendable: &candidate_spendable,
+        required_amount_mojos: split_ctx.required_amount,
+        canonical_asset_id: &split_ctx.canonical_asset_id,
+        combine_input_cap: ctx.combine_input_cap,
+        allow_combine_prereq: attempt_index == 0,
+    };
+    let selection = if let Some(protection) = split_protection {
+        plan_daemon_low_watermark_split(&params, protection)
+    } else {
+        plan_daemon_auto_split_selection(&params)
+    };
 
     match selection {
         SplitAutoSelectPlan::CombinePrereq(prereq) => Ok(DaemonSplitAttemptResult::Finished(
@@ -352,9 +394,11 @@ async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
     prefetched_spendable: Option<Vec<SpendableCoin>>,
+    split_protection: Option<SplitSourceProtection>,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
     let split_ctx = prepare_split_plan_context(ctx, plan)?;
     let prefetched = prefetched_spendable.as_deref();
+    let protection_ref = split_protection.as_ref();
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {
         match attempt_daemon_split(
@@ -363,6 +407,7 @@ async fn execute_daemon_split_plan_inner(
             attempt_index,
             &attempted_coin_ids,
             prefetched,
+            protection_ref,
         )
         .await?
         {

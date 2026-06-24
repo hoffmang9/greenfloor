@@ -14,6 +14,7 @@ mod policy;
 mod scalars;
 mod selection;
 mod shape_defer;
+pub mod shape_protection;
 mod wallet_coin;
 
 pub use amounts::{combine_output_amounts, total_for_coin_ids};
@@ -28,9 +29,9 @@ pub use gate::{
 };
 pub use input_selection::{
     build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
-    plan_exact_amount_combine_inputs, plan_largest_combine_inputs, CliSplitSelection,
-    SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
-    SubCatChangeSkipData,
+    plan_daemon_low_watermark_split, plan_exact_amount_combine_inputs, plan_largest_combine_inputs,
+    CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan,
+    SplitCombinePrereqPlan, SplitSkipReason, SubCatChangeSkipData,
 };
 pub(crate) use input_selection::{select_combine_inputs_for_target_in, TargetAmountCoin};
 pub use inventory::compute_bucket_counts_from_coins;
@@ -54,4 +55,5 @@ pub use shape_defer::{
     defer_low_watermark_split_to_post_bootstrap, spendable_amounts_in_base_units,
     LOW_WATERMARK_BUFFER_DEFICIT,
 };
+pub use shape_protection::{LadderShapeContext, SplitSourceProtection};
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};

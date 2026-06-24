@@ -178,7 +178,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         resolve_combine_input_cap(),
         &combine_context,
     );
-    if let Some(early) = bootstrap_early_phase(&outcome) {
+    if let Some(early) = bootstrap_early_phase(&outcome, &ladder_entries, &spendable_coins) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));
     }
 

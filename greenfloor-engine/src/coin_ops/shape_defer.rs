@@ -1,4 +1,8 @@
 //! Post-bootstrap vs daemon coin-op shaping coordination.
+//!
+//! When offer-post bootstrap is still shaping the primary ladder row, daemon low-watermark
+//! splits defer to bootstrap via [`defer_low_watermark_split_to_post_bootstrap`]. After
+//! bootstrap completes a primary row, see `offer::bootstrap::shape_policy`.
 
 use super::{CoinOpKind, CoinOpPlan, CoinOpPlanReason, SpendableCoin};
 

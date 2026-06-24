@@ -71,3 +71,65 @@ pub fn eco181_bootstrap_coins() -> Vec<BootstrapCoin> {
 pub fn eco181_after_combine_coins() -> Vec<BootstrapCoin> {
     bootstrap_coins_from_rows(&eco181_after_combine_inventory_rows())
 }
+
+/// john-deere live inventory mapped to base units (`amount_mojos / 1000`).
+#[must_use]
+pub fn john_deere_current_inventory_rows() -> Vec<(String, i64)> {
+    let mut rows = Vec::with_capacity(17);
+    for index in 0..11 {
+        rows.push((format!("one_{index}"), 1));
+    }
+    rows.push(("dust_low".to_string(), 1));
+    rows.push(("dust_high".to_string(), 3));
+    for index in 0..3 {
+        rows.push((format!("ten_{index}"), 10));
+    }
+    rows.push(("ninety".to_string(), 90));
+    rows
+}
+
+/// Post-bootstrap inventory: 100 BU primary row plus john-deere remnants.
+#[must_use]
+pub fn john_deere_after_combine_inventory_rows() -> Vec<(String, i64)> {
+    let mut rows = eco181_after_combine_inventory_rows();
+    rows.push(("ninety".to_string(), 90));
+    rows
+}
+
+#[must_use]
+pub fn john_deere_current_bootstrap_coins() -> Vec<BootstrapCoin> {
+    bootstrap_coins_from_rows(&john_deere_current_inventory_rows())
+}
+
+#[must_use]
+pub fn john_deere_after_combine_coins() -> Vec<BootstrapCoin> {
+    bootstrap_coins_from_rows(&john_deere_after_combine_inventory_rows())
+}
+
+/// Deterministic 64-char hex coin id for coinset fixtures (label must be unique per fixture row).
+#[must_use]
+pub fn eco181_fixture_coin_id(label: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    label.hash(&mut hasher);
+    format!("{:064x}", hasher.finish())
+}
+
+/// Build coinset `coin_records` JSON for a fixture inventory (amounts in base units).
+#[must_use]
+pub fn eco181_fixture_coin_records(rows: &[(String, i64)], mojo_multiplier: i64) -> String {
+    use crate::test_support::bootstrap_shape::{coin_record_body, coin_records_response};
+
+    let records: Vec<String> = rows
+        .iter()
+        .map(|(label, amount)| {
+            coin_record_body(
+                &eco181_fixture_coin_id(label),
+                u64::try_from(amount.saturating_mul(mojo_multiplier)).unwrap_or(u64::MAX),
+            )
+        })
+        .collect();
+    coin_records_response(&records)
+}
