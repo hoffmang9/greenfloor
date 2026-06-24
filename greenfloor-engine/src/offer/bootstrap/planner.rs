@@ -3,11 +3,11 @@
 //! `output_amounts_base_units` is the authoritative mixed-split output list for
 //! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
-use crate::coin_ops::{
-    aggregate_covers_without_single_coin, build_combine_prereq_plan, SpendableCoin,
-};
+use crate::coin_ops::aggregate_covers_without_single_coin;
 
+use super::amounts::BaseUnits;
 use super::combine_inputs::BootstrapCombineInputs;
+use super::combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -27,12 +27,12 @@ pub struct LadderDeficit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapCoin {
     pub id: String,
-    pub amount: i64,
+    pub amount: BaseUnits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapFundingSource {
-    SingleCoin { coin_id: String, amount: i64 },
+    SingleCoin { coin_id: String, amount: BaseUnits },
     CombineFirst(BootstrapCombineInputs),
 }
 
@@ -41,6 +41,7 @@ pub struct BootstrapPlan {
     pub funding: BootstrapFundingSource,
     pub output_amounts_base_units: Vec<i64>,
     pub total_output_amount: i64,
+    /// Leftover base units after shaping (not mojos). Convert before CAT dust checks.
     pub change_amount: i64,
     pub deficits: Vec<LadderDeficit>,
 }
@@ -62,8 +63,8 @@ impl BootstrapPlan {
     #[must_use]
     pub fn source_amount(&self) -> i64 {
         match &self.funding {
-            BootstrapFundingSource::SingleCoin { amount, .. } => *amount,
-            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total,
+            BootstrapFundingSource::SingleCoin { amount, .. } => amount.get(),
+            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total.get(),
         }
     }
 
@@ -91,14 +92,11 @@ pub enum BootstrapPlanOutcome {
     InvalidCoins,
 }
 
-fn spendable_for_combine(coins: &[BootstrapCoin]) -> Vec<SpendableCoin> {
+fn spendable_for_combine(coins: &[BootstrapCoin]) -> Vec<BootstrapCoin> {
     coins
         .iter()
-        .filter(|coin| !coin.id.trim().is_empty() && coin.amount > 0)
-        .map(|coin| SpendableCoin {
-            id: coin.id.clone(),
-            amount: coin.amount,
-        })
+        .filter(|coin| !coin.id.trim().is_empty() && coin.amount.get() > 0)
+        .cloned()
         .collect()
 }
 
@@ -107,7 +105,7 @@ fn ladder_row_valid(row: &PlannerLadderRow) -> bool {
 }
 
 fn spendable_coins_valid(coins: &[BootstrapCoin]) -> bool {
-    coins.iter().all(|coin| coin.amount >= 0)
+    coins.iter().all(|coin| coin.amount.get() >= 0)
 }
 
 fn sorted_ladder_rows(ladder_entries: &[PlannerLadderRow]) -> Vec<PlannerLadderRow> {
@@ -140,6 +138,7 @@ pub fn plan_bootstrap_mixed_outputs(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
     combine_input_cap: i64,
+    combine_context: &BootstrapCombineContext,
 ) -> BootstrapPlanOutcome {
     if !ladder_entries.iter().all(ladder_row_valid) {
         return BootstrapPlanOutcome::InvalidLadder;
@@ -157,7 +156,10 @@ pub fn plan_bootstrap_mixed_outputs(
         .iter()
         .map(|row| row.size_base_units)
         .collect();
-    let spendable_amounts: Vec<i64> = spendable_coins.iter().map(|coin| coin.amount).collect();
+    let spendable_amounts: Vec<i64> = spendable_coins
+        .iter()
+        .map(|coin| coin.amount.get())
+        .collect();
     let counts = count_exact_amount_coins(&spendable_amounts, &ladder_sizes);
 
     let mut deficits = Vec::new();
@@ -197,7 +199,7 @@ pub fn plan_bootstrap_mixed_outputs(
         if coin_id.is_empty() {
             return None;
         }
-        if coin.amount >= total_output_amount {
+        if coin.amount.get() >= total_output_amount {
             Some((coin_id.to_string(), coin.amount))
         } else {
             None
@@ -211,20 +213,19 @@ pub fn plan_bootstrap_mixed_outputs(
             };
         }
         let spendable_for_combine = spendable_for_combine(spendable_coins);
-        let Some(prereq) = build_combine_prereq_plan(
+        let Some(combine_inputs) = build_bootstrap_combine_plan(
             &spendable_for_combine,
-            total_output_amount,
+            BaseUnits::new(total_output_amount),
             combine_input_cap,
+            combine_context,
         ) else {
             return BootstrapPlanOutcome::CannotFund {
                 total_output_amount,
             };
         };
-        let selected_total = prereq.selected_total;
+        let selected_total = combine_inputs.selected_total.get();
         return BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs::from_coin_ops(
-                prereq,
-            )),
+            funding: BootstrapFundingSource::CombineFirst(combine_inputs),
             output_amounts_base_units: output_amounts,
             total_output_amount,
             change_amount: selected_total - total_output_amount,
@@ -239,7 +240,7 @@ pub fn plan_bootstrap_mixed_outputs(
         },
         output_amounts_base_units: output_amounts,
         total_output_amount,
-        change_amount: source_amount - total_output_amount,
+        change_amount: source_amount.get() - total_output_amount,
         deficits,
     })
 }
@@ -251,8 +252,13 @@ mod tests {
         BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
     };
     use crate::coin_ops::aggregate_covers_without_single_coin;
+    use crate::offer::bootstrap::{BaseUnits, BootstrapCombineContext};
 
     const TEST_COMBINE_CAP: i64 = 5;
+
+    fn test_combine_context() -> BootstrapCombineContext {
+        BootstrapCombineContext::for_tests()
+    }
 
     fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
         PlannerLadderRow {
@@ -265,7 +271,7 @@ mod tests {
     fn coin(id: &str, amount: i64) -> BootstrapCoin {
         BootstrapCoin {
             id: id.to_string(),
-            amount,
+            amount: BaseUnits::new(amount),
         }
     }
 
@@ -288,9 +294,12 @@ mod tests {
             coin("coin-big", 1000),
             coin("coin-hundred", 100),
         ];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_single_coin_split(&plan);
@@ -310,7 +319,12 @@ mod tests {
             coin("coin-extra", 500),
         ];
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &ladder,
+                &spendable,
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::Ready
         );
     }
@@ -319,9 +333,12 @@ mod tests {
     fn selects_largest_funding_coin() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big-object", 100)];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_eq!(plan.source_coin_id(), Some("coin-big-object"));
@@ -332,9 +349,12 @@ mod tests {
     fn skips_coins_without_id() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("", 1000), coin("valid", 100)];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_eq!(plan.source_coin_id(), Some("valid"));
@@ -345,7 +365,12 @@ mod tests {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("small", 5)];
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &ladder,
+                &spendable,
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::CannotFund {
                 total_output_amount: 20
             }
@@ -356,9 +381,12 @@ mod tests {
     fn preserves_deficit_metadata() {
         let ladder = vec![row(10, 2, 1)];
         let spendable = vec![coin("coin-big", 1000)];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_eq!(
@@ -375,7 +403,12 @@ mod tests {
     #[test]
     fn empty_ladder_is_invalid() {
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&[], &[coin("x", 1)], TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &[],
+                &[coin("x", 1)],
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::InvalidLadder
         );
     }
@@ -384,9 +417,12 @@ mod tests {
     fn single_output_plan_when_only_one_deficit_coin_needed() {
         let ladder = vec![row(10, 1, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_eq!(plan.output_amounts_base_units, vec![10]);
@@ -396,15 +432,30 @@ mod tests {
     #[test]
     fn returns_invalid_ladder_for_negative_fields() {
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&[row(-1, 1, 0)], &[coin("x", 100)], TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &[row(-1, 1, 0)],
+                &[coin("x", 100)],
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::InvalidLadder
         );
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&[row(10, -1, 0)], &[coin("x", 100)], TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &[row(10, -1, 0)],
+                &[coin("x", 100)],
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::InvalidLadder
         );
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&[row(10, 1, -1)], &[coin("x", 100)], TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &[row(10, 1, -1)],
+                &[coin("x", 100)],
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::InvalidLadder
         );
     }
@@ -413,7 +464,12 @@ mod tests {
     fn returns_invalid_coins_for_negative_amount() {
         let ladder = vec![row(10, 1, 0)];
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)], TEST_COMBINE_CAP),
+            plan_bootstrap_mixed_outputs(
+                &ladder,
+                &[coin("bad", -5)],
+                TEST_COMBINE_CAP,
+                &test_combine_context()
+            ),
             BootstrapPlanOutcome::InvalidCoins
         );
     }
@@ -422,9 +478,12 @@ mod tests {
     fn change_amount_matches_source_minus_outputs() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape")
         };
         assert_eq!(
@@ -442,9 +501,12 @@ mod tests {
             coin("eleven", 11),
             coin("four", 4),
         ];
-        let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, TEST_COMBINE_CAP)
-        else {
+        let BootstrapPlanOutcome::NeedsShape(plan) = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            TEST_COMBINE_CAP,
+            &test_combine_context(),
+        ) else {
             panic!("expected needs_shape combine-first")
         };
         assert_combine_first(&plan);
@@ -471,13 +533,13 @@ mod tests {
             coin("four", 4),
         ];
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, 2),
+            plan_bootstrap_mixed_outputs(&ladder, &spendable, 2, &test_combine_context()),
             BootstrapPlanOutcome::CannotFund {
                 total_output_amount: 100
             }
         );
         assert_eq!(
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, 3),
+            plan_bootstrap_mixed_outputs(&ladder, &spendable, 3, &test_combine_context()),
             BootstrapPlanOutcome::CannotFund {
                 total_output_amount: 100
             }
@@ -494,7 +556,7 @@ mod tests {
             coin("four", 4),
         ];
         let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, 4)
+            plan_bootstrap_mixed_outputs(&ladder, &spendable, 4, &test_combine_context())
         else {
             panic!("expected needs_shape with cap=4")
         };
@@ -511,13 +573,17 @@ mod tests {
                 .map(|coin_row| coin(&coin_row.id, coin_row.amount))
                 .collect();
         let BootstrapPlanOutcome::NeedsShape(plan) =
-            plan_bootstrap_mixed_outputs(&ladder, &spendable, 5)
+            plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &test_combine_context())
         else {
             panic!("expected combine-first plan for fragmented inventory")
         };
         assert_combine_first(&plan);
         assert_eq!(plan.total_output_amount, 100);
-        let inputs = plan.combine_input_coin_ids().expect("combine inputs");
+        let combine = plan.combine_inputs().expect("combine inputs");
+        assert_eq!(combine.target_amount, BaseUnits::new(100));
+        assert!(combine.selected_total.get() >= 100);
+        assert_eq!(plan.change_amount, combine.selected_total.get() - 100);
+        let inputs = plan.combine_input_coin_ids().expect("combine input ids");
         assert!(inputs.len() >= 2);
         assert!(inputs.len() <= 5);
         assert!(plan.source_amount() >= 100);

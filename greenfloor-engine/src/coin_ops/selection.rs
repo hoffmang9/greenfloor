@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::policy::coin_op_min_amount_mojos;
+use super::policy::cat_overshoot_change_would_be_dust;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetAmountOvershootRank {
@@ -37,6 +37,7 @@ impl TargetAmountSelectionOptions {
     }
 }
 
+/// Wallet coin for daemon coin-op selection (`amount` is always on-chain mojos).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendableCoin {
     pub id: String,
@@ -87,6 +88,9 @@ pub fn select_exact_amount_coin_ids(
     selected
 }
 
+/// Whether splitting `selected_amount_mojos` down to `required_amount_mojos` leaves CAT dust.
+///
+/// Both amounts must be in on-chain **mojos** (daemon coin-op paths only).
 #[must_use]
 pub fn split_would_create_sub_cat_change(
     selected_amount_mojos: i64,
@@ -94,12 +98,10 @@ pub fn split_would_create_sub_cat_change(
     canonical_asset_id: &str,
 ) -> (bool, i64) {
     let remainder = selected_amount_mojos - required_amount_mojos;
-    let min_cat_mojos = coin_op_min_amount_mojos(canonical_asset_id);
-    if min_cat_mojos > 0 && remainder > 0 && remainder < min_cat_mojos {
-        (true, remainder)
-    } else {
-        (false, remainder)
-    }
+    (
+        cat_overshoot_change_would_be_dust(remainder, canonical_asset_id),
+        remainder,
+    )
 }
 
 #[must_use]

@@ -32,13 +32,15 @@ pub use input_selection::{
     SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
     SubCatChangeSkipData,
 };
+pub(crate) use input_selection::{select_combine_inputs_for_target, TargetAmountCoin};
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,
     LadderTargetRow,
 };
 pub use policy::{
-    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+    amount_meets_coin_op_min_mojos, cat_overshoot_change_would_be_dust, coin_op_min_amount_mojos,
+    coin_op_target_amount_allowed,
 };
 pub use scalars::{
     coin_op_non_negative_u64, coin_op_non_negative_u64_saturating, i64_to_usize, usize_to_i64,

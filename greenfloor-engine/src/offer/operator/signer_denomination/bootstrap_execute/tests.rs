@@ -1,6 +1,6 @@
 use crate::config::ManagerProgramConfig;
 use crate::offer::bootstrap::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow,
+    plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow,
 };
 use crate::test_support::signer_config::test_signer_config;
 
@@ -21,24 +21,27 @@ fn combine_first_shape_context(
     let spendable = vec![
         BootstrapCoin {
             id: "sixty-five".to_string(),
-            amount: 65,
+            amount: BaseUnits::new(65),
         },
         BootstrapCoin {
             id: "twenty".to_string(),
-            amount: 20,
+            amount: BaseUnits::new(20),
         },
         BootstrapCoin {
             id: "eleven".to_string(),
-            amount: 11,
+            amount: BaseUnits::new(11),
         },
         BootstrapCoin {
             id: "four".to_string(),
-            amount: 4,
+            amount: BaseUnits::new(4),
         },
     ];
-    let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) =
-        plan_bootstrap_mixed_outputs(&ladder, &spendable, 5)
-    else {
+    let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) = plan_bootstrap_mixed_outputs(
+        &ladder,
+        &spendable,
+        5,
+        &crate::offer::bootstrap::BootstrapCombineContext::for_tests(),
+    ) else {
         panic!("expected combine-first plan");
     };
     BootstrapShapeContext {
