@@ -4,8 +4,9 @@ use serde_json::{json, Value};
 
 use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
-use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::error::SignerResult;
+use crate::offer::OfferAssetResolver;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
@@ -80,19 +81,17 @@ fn skip_all_plans(
 #[must_use]
 pub fn execute_managed_coin_op_plans<'a>(
     program: &'a ManagerProgramConfig,
-    signer_config: &'a SignerConfig,
+    resolver: &'a OfferAssetResolver<'a>,
     market: &'a MarketConfig,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
-    ticker_index: &'a crate::config::CatTickerIndex,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
         program,
-        signer_config,
+        resolver,
         market,
         plans,
         watched_coin_ids,
-        ticker_index,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     ))
@@ -103,31 +102,28 @@ pub fn execute_managed_coin_op_plans<'a>(
 #[must_use]
 pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
     program: &'a ManagerProgramConfig,
-    signer_config: &'a SignerConfig,
+    resolver: &'a OfferAssetResolver<'a>,
     market: &'a MarketConfig,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
-    ticker_index: &'a crate::config::CatTickerIndex,
     test_overrides: CoinOpTestOverrides,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
         program,
-        signer_config,
+        resolver,
         market,
         plans,
         watched_coin_ids,
-        ticker_index,
         test_overrides,
     ))
 }
 
 async fn execute_managed_coin_op_plans_async(
     program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
+    resolver: &OfferAssetResolver<'_>,
     market: &MarketConfig,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
-    ticker_index: &crate::config::CatTickerIndex,
     #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
     if market.receive_address.trim().is_empty() {
@@ -142,11 +138,10 @@ async fn execute_managed_coin_op_plans_async(
 
     let ctx = match CoinOpExecContext::new(
         program.clone(),
-        signer_config.clone(),
+        resolver,
         market.clone(),
         None,
         watched_coin_ids.iter().cloned().collect(),
-        ticker_index.clone(),
         #[cfg(test)]
         test_overrides,
     )

@@ -6,13 +6,14 @@ use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{
     load_markets_config_with_overlay, load_program_bundle_for_coin_list,
-    operator_ticker_index_from_paths, ProgramConfigBundle,
+    operator_ticker_index_from_paths, resolve_coin_list_market, ProgramConfigBundle,
 };
 use crate::error::{SignerError, SignerResult};
+use crate::offer::OfferAssetResolver;
 
 use crate::manager_cli::context::ManagerContext;
 
-use super::context::{resolve_asset_filter, select_list_market};
+use super::context::resolve_asset_filter;
 
 struct CoinListSnapshot {
     network: String,
@@ -26,19 +27,47 @@ struct CoinListSnapshot {
     pending_coin_count: usize,
 }
 
-async fn load_coin_list_snapshot(
-    bundle: &ProgramConfigBundle,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-    cats_path: &Path,
-    asset: Option<&str>,
-    cat_id: Option<&str>,
-) -> SignerResult<CoinListSnapshot> {
+struct CoinListLoadParams<'a> {
+    bundle: &'a ProgramConfigBundle,
+    markets_path: &'a Path,
+    testnet_markets_path: Option<&'a Path>,
+    cats_path: &'a Path,
+    network: &'a str,
+    market_id: Option<&'a str>,
+    pair: Option<&'a str>,
+    asset: Option<&'a str>,
+    cat_id: Option<&'a str>,
+}
+
+struct CoinListCommand<'a> {
+    mgr: &'a ManagerContext,
+    network: &'a str,
+    market_id: Option<&'a str>,
+    pair: Option<&'a str>,
+    asset: Option<&'a str>,
+    vault_id: Option<&'a str>,
+    cat_id: Option<&'a str>,
+    op: &'a str,
+}
+
+async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult<CoinListSnapshot> {
+    let CoinListLoadParams {
+        bundle,
+        markets_path,
+        testnet_markets_path,
+        cats_path,
+        network,
+        market_id,
+        pair,
+        asset,
+        cat_id,
+    } = params;
     let ticker_index =
         operator_ticker_index_from_paths(markets_path, testnet_markets_path, Some(cats_path));
+    let resolver = OfferAssetResolver::new(&bundle.signer, &ticker_index);
     let program = &bundle.program;
-    let markets = load_markets_config_with_overlay(markets_path, None)?;
-    let market = select_list_market(&markets)?;
+    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
+    let market = resolve_coin_list_market(&markets, network, market_id, pair)?;
     let receive_address = market.receive_address.trim();
     if receive_address.is_empty() {
         return Err(SignerError::Other(
@@ -57,7 +86,7 @@ async fn load_coin_list_snapshot(
         });
     let filter_label = filter.clone();
     let list_asset_id = if let Some(filter_value) = filter {
-        resolve_asset_filter(&bundle.signer, &filter_value, &ticker_index).await?
+        resolve_asset_filter(&resolver, &filter_value).await?
     } else {
         market.base_asset.clone()
     };
@@ -113,13 +142,17 @@ async fn load_coin_list_snapshot(
     })
 }
 
-async fn run_coin_list_command(
-    mgr: &ManagerContext,
-    asset: Option<&str>,
-    vault_id: Option<&str>,
-    cat_id: Option<&str>,
-    op: &str,
-) -> SignerResult<i32> {
+async fn run_coin_list_command(cmd: CoinListCommand<'_>) -> SignerResult<i32> {
+    let CoinListCommand {
+        mgr,
+        network,
+        market_id,
+        pair,
+        asset,
+        vault_id,
+        cat_id,
+        op,
+    } = cmd;
     let _ = vault_id;
     let bundle = match load_program_bundle_for_coin_list(&mgr.program_config) {
         Err(SignerError::SignerPathNotConfigured) => {
@@ -133,14 +166,17 @@ async fn run_coin_list_command(
         Err(err) => return Err(err),
         Ok(bundle) => bundle,
     };
-    let snapshot = load_coin_list_snapshot(
-        &bundle,
-        &mgr.markets_config,
-        mgr.testnet_markets_path(),
-        &mgr.cats_config,
+    let snapshot = load_coin_list_snapshot(CoinListLoadParams {
+        bundle: &bundle,
+        markets_path: &mgr.markets_config,
+        testnet_markets_path: mgr.testnet_markets_path(),
+        cats_path: &mgr.cats_config,
+        network,
+        market_id,
+        pair,
         asset,
         cat_id,
-    )
+    })
     .await?;
     if op == "coin-status" {
         mgr.emit_json(&json!({
@@ -173,18 +209,44 @@ async fn run_coin_list_command(
 
 pub async fn run_coins_list(
     mgr: &ManagerContext,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
     asset: Option<&str>,
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
-    run_coin_list_command(mgr, asset, vault_id, cat_id, "coins-list").await
+    run_coin_list_command(CoinListCommand {
+        mgr,
+        network,
+        market_id,
+        pair,
+        asset,
+        vault_id,
+        cat_id,
+        op: "coins-list",
+    })
+    .await
 }
 
 pub async fn run_coin_status(
     mgr: &ManagerContext,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
     asset: Option<&str>,
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
-    run_coin_list_command(mgr, asset, vault_id, cat_id, "coin-status").await
+    run_coin_list_command(CoinListCommand {
+        mgr,
+        network,
+        market_id,
+        pair,
+        asset,
+        vault_id,
+        cat_id,
+        op: "coin-status",
+    })
+    .await
 }

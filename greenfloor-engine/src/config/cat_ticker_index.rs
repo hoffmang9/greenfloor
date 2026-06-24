@@ -5,10 +5,10 @@ use std::path::Path;
 
 use serde_json::Value as JsonValue;
 
+use super::cats_catalog::load_cats_catalog;
 use crate::config::{load_markets_config_with_overlay, MarketConfig};
 use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
-use crate::manager_cli::load_cats_catalog;
 
 pub fn normalize_label(value: &str) -> String {
     value
@@ -19,15 +19,17 @@ pub fn normalize_label(value: &str) -> String {
         .collect()
 }
 
-pub type CatTickerIndex = (
-    HashMap<String, HashSet<String>>,
-    BTreeMap<String, Vec<String>>,
-);
+/// Operator ticker symbol → asset id index built from cats and markets metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatTickerIndex {
+    pub by_ticker: HashMap<String, HashSet<String>>,
+    pub symbols_by_asset_id: BTreeMap<String, Vec<String>>,
+}
 
 /// Empty ticker index (tests that require Coinset-only resolution).
 #[must_use]
 pub fn empty_cat_ticker_index() -> CatTickerIndex {
-    (HashMap::new(), BTreeMap::new())
+    CatTickerIndex::default()
 }
 
 /// Build a ticker index from in-memory cats catalog rows (no markets overlay).
@@ -47,14 +49,14 @@ pub fn build_cat_ticker_index_from_cats_rows(catalog: &[JsonValue]) -> CatTicker
 ///
 /// Returns an error when the ticker maps to more than one asset id.
 pub fn lookup_asset_id_from_ticker(
-    (ticker_to_asset_ids, _): &CatTickerIndex,
+    index: &CatTickerIndex,
     raw: &str,
 ) -> SignerResult<Option<String>> {
     let key = normalize_label(raw);
     if key.is_empty() {
         return Ok(None);
     }
-    let Some(asset_ids) = ticker_to_asset_ids.get(&key) else {
+    let Some(asset_ids) = index.by_ticker.get(&key) else {
         return Ok(None);
     };
     if asset_ids.is_empty() {
@@ -128,11 +130,13 @@ fn finalize_ticker_index(
     ticker_to_asset_ids: HashMap<String, HashSet<String>>,
     asset_id_to_symbols: HashMap<String, BTreeSet<String>>,
 ) -> CatTickerIndex {
-    let asset_id_to_symbols = asset_id_to_symbols
-        .into_iter()
-        .map(|(asset_id, symbols)| (asset_id, symbols.into_iter().collect()))
-        .collect();
-    (ticker_to_asset_ids, asset_id_to_symbols)
+    CatTickerIndex {
+        by_ticker: ticker_to_asset_ids,
+        symbols_by_asset_id: asset_id_to_symbols
+            .into_iter()
+            .map(|(asset_id, symbols)| (asset_id, symbols.into_iter().collect()))
+            .collect(),
+    }
 }
 
 fn merge_cats_catalog(
@@ -295,9 +299,9 @@ mod tests {
         std::fs::write(&cats, "{not yaml").expect("write bad cats");
         let markets = dir.path().join("markets.yaml");
         std::fs::write(&markets, "{also bad").expect("write bad markets");
-        let (tickers, symbols) = build_cat_ticker_index_lenient(&cats, &markets, None);
-        assert!(tickers.is_empty());
-        assert!(symbols.is_empty());
+        let index = build_cat_ticker_index_lenient(&cats, &markets, None);
+        assert!(index.by_ticker.is_empty());
+        assert!(index.symbols_by_asset_id.is_empty());
     }
 
     #[test]
@@ -305,7 +309,10 @@ mod tests {
         let asset_id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let mut tickers = HashMap::new();
         tickers.insert("wusdcb".to_string(), HashSet::from([asset_id.to_string()]));
-        let index = (tickers, BTreeMap::new());
+        let index = CatTickerIndex {
+            by_ticker: tickers,
+            symbols_by_asset_id: BTreeMap::new(),
+        };
         let resolved = lookup_asset_id_from_ticker(&index, " wUSDC.b ")
             .expect("lookup")
             .expect("asset id");
@@ -319,7 +326,10 @@ mod tests {
             "byc".to_string(),
             HashSet::from(["aa".repeat(64), "bb".repeat(64)]),
         );
-        let index = (tickers, BTreeMap::new());
+        let index = CatTickerIndex {
+            by_ticker: tickers,
+            symbols_by_asset_id: BTreeMap::new(),
+        };
         let err = lookup_asset_id_from_ticker(&index, "BYC").expect_err("ambiguous");
         assert!(err.to_string().contains("ambiguous_ticker:BYC"));
     }
@@ -342,9 +352,12 @@ cats:
         .expect("write cats");
         let markets = dir.path().join("markets.yaml");
         std::fs::write(&markets, "{not yaml").expect("write bad markets");
-        let (tickers, symbols) = build_cat_ticker_index_lenient(&cats, &markets, None);
-        assert!(tickers.contains_key("wusdcb"));
-        assert!(symbols.contains_key(asset_id));
-        assert_eq!(symbols[asset_id], vec!["wUSDC.b".to_string()]);
+        let index = build_cat_ticker_index_lenient(&cats, &markets, None);
+        assert!(index.by_ticker.contains_key("wusdcb"));
+        assert!(index.symbols_by_asset_id.contains_key(asset_id));
+        assert_eq!(
+            index.symbols_by_asset_id[asset_id],
+            vec!["wUSDC.b".to_string()]
+        );
     }
 }

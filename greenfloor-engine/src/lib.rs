@@ -43,6 +43,7 @@ use config::SignerConfig;
 use error::SignerResult;
 
 pub use config::operator_ticker_index_from_paths;
+pub use offer::OfferAssetResolver;
 pub use paths::resolve_cats_config_path;
 
 pub use error::SignerError as Error;

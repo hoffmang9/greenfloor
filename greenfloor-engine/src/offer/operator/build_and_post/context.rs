@@ -5,9 +5,7 @@ use crate::config::{
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
-use crate::offer::{
-    normalize_offer_side, resolve_market_offer_assets_for_action, ResolvedMarketOfferAssets,
-};
+use crate::offer::{normalize_offer_side, OfferAssetResolver, ResolvedMarketOfferAssets};
 
 use super::BuildAndPostOfferRequest;
 use crate::offer::operator::logging::{sync_manager_file_logging, warn_if_log_level_auto_healed};
@@ -35,7 +33,12 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    let loaded = load_gated_operator_market(
+    let crate::config::GatedOperatorMarket {
+        program,
+        signer,
+        market,
+        ticker_index,
+    } = load_gated_operator_market(
         &request.program_path,
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -44,10 +47,8 @@ pub(super) async fn resolve_build_and_post_context(
         request.market_id.as_deref(),
         request.pair.as_deref(),
     )?;
-    let program = loaded.program;
     sync_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
-    let market = loaded.market;
     let (publish_venue, dexie_base_url, splash_base_url) = resolve_offer_publish_settings(
         &program,
         &request.network,
@@ -55,23 +56,18 @@ pub(super) async fn resolve_build_and_post_context(
         request.dexie_base_url.as_deref(),
         request.splash_base_url.as_deref(),
     )?;
-    let signer_config = loaded.signer;
-    let ticker_index = loaded.ticker_index;
-    let assets = resolve_market_offer_assets_for_action(
-        &signer_config,
-        &market,
-        &request.network,
-        &ticker_index,
-    )
-    .await?;
+    let resolver = OfferAssetResolver::new(&signer, &ticker_index);
+    let assets = resolver
+        .resolve_market_assets(&market, &request.network)
+        .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
-    let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&signer_config).await;
+    let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&signer).await;
 
     Ok(ResolvedBuildAndPostContext {
         program,
         market,
-        signer_config,
+        signer_config: signer,
         publish_venue,
         dexie_base_url,
         splash_base_url,
@@ -214,7 +210,7 @@ mod tests {
         use serde_json::json;
 
         use crate::config::MarketConfig;
-        use crate::offer::resolve_market_offer_assets_for_action;
+        use crate::offer::OfferAssetResolver;
         use crate::test_support::signer_config::test_signer_config;
 
         let cat = "a".repeat(64);
@@ -233,15 +229,13 @@ mod tests {
             ladders: HashMap::default(),
         };
         let signer = test_signer_config("http://127.0.0.1:1");
+        let empty_index = crate::config::empty_cat_ticker_index();
+        let resolver = OfferAssetResolver::new(&signer, &empty_index);
 
-        let assets = resolve_market_offer_assets_for_action(
-            &signer,
-            &market,
-            "testnet11",
-            &crate::config::empty_cat_ticker_index(),
-        )
-        .await
-        .expect("resolve offer assets");
+        let assets = resolver
+            .resolve_market_assets(&market, "testnet11")
+            .await
+            .expect("resolve offer assets");
 
         assert_eq!(market.quote_asset, "xch");
         assert_eq!(assets.quote_asset_for_offer, "txch");

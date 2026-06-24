@@ -235,6 +235,50 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Resolve the market row for `coins-list` / `coin-status`.
+///
+/// When `--market-id` or `--pair` is provided, uses the same rules as
+/// [`resolve_market_for_build`]. Otherwise requires exactly one enabled market.
+///
+/// # Errors
+///
+/// Returns an error if market resolution fails or selection is ambiguous.
+pub fn resolve_coin_list_market(
+    markets: &MarketsConfig,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
+) -> SignerResult<MarketConfig> {
+    let has_market_id = market_id
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    let has_pair = pair.map(str::trim).is_some_and(|value| !value.is_empty());
+    if has_market_id || has_pair {
+        return resolve_market_for_build(markets, market_id, pair, network);
+    }
+    let enabled: Vec<_> = markets
+        .markets
+        .iter()
+        .filter(|market| market.enabled)
+        .collect();
+    if enabled.is_empty() {
+        return Err(SignerError::Other(
+            "no enabled markets configured".to_string(),
+        ));
+    }
+    if enabled.len() == 1 {
+        return Ok(enabled[0].clone());
+    }
+    let ids: Vec<_> = enabled
+        .iter()
+        .map(|market| market.market_id.as_str())
+        .collect();
+    Err(SignerError::Other(format!(
+        "multiple enabled markets; provide --market-id or --pair for coins-list (candidates: {})",
+        ids.join(", ")
+    )))
+}
+
 /// Resolve market for build.
 ///
 /// # Errors

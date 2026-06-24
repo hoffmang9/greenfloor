@@ -1,4 +1,5 @@
 mod cat_ticker_index;
+mod cats_catalog;
 mod keys_registry;
 mod markets;
 mod markets_validate;
@@ -14,10 +15,12 @@ pub use cat_ticker_index::{
     build_cat_ticker_index, build_cat_ticker_index_from_cats_rows, build_cat_ticker_index_lenient,
     empty_cat_ticker_index, lookup_asset_id_from_ticker, normalize_label, CatTickerIndex,
 };
+pub use cats_catalog::{load_cats_catalog, write_cats_catalog};
 pub use keys_registry::SignerKeyEntry;
 pub use markets::{
     cancel_policy_stable_vs_unstable, load_markets_config, load_markets_config_with_overlay,
-    parse_markets_config, resolve_market_for_build, LadderEntry, MarketConfig, MarketsConfig,
+    parse_markets_config, resolve_coin_list_market, resolve_market_for_build, LadderEntry,
+    MarketConfig, MarketsConfig,
 };
 pub use parse_int::{parse_non_negative_u64, u64_to_i64, usize_to_i64};
 pub use program::{

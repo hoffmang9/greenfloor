@@ -45,6 +45,18 @@ impl DaemonCycleResources {
         self.program_config.signer_for_execution()
     }
 
+    /// Signer-backed offer asset resolver for this cycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when signer config is unavailable for execution.
+    pub fn asset_resolver(&self) -> SignerResult<crate::offer::OfferAssetResolver<'_>> {
+        Ok(crate::offer::OfferAssetResolver::new(
+            self.signer_for_execution()?,
+            &self.ticker_index,
+        ))
+    }
+
     pub(crate) fn with_program_config(
         program_config: CycleProgramConfig,
         markets: MarketsConfig,

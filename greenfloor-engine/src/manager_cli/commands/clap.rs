@@ -186,6 +186,12 @@ pub enum ManagerCommands {
         log_level: String,
     },
     CoinsList {
+        #[arg(long)]
+        market_id: Option<String>,
+        #[arg(long)]
+        pair: Option<String>,
+        #[arg(long, default_value = "mainnet")]
+        network: String,
         #[arg(long, default_value = "")]
         asset: String,
         #[arg(long, default_value = "")]
@@ -194,6 +200,12 @@ pub enum ManagerCommands {
         cat_id: String,
     },
     CoinStatus {
+        #[arg(long)]
+        market_id: Option<String>,
+        #[arg(long)]
+        pair: Option<String>,
+        #[arg(long, default_value = "mainnet")]
+        network: String,
         #[arg(long, default_value = "")]
         asset: String,
         #[arg(long, default_value = "")]

@@ -268,7 +268,7 @@ async fn coins_list_requires_signer_backend() {
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(&harness.ctx, None, None, None)
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 2);
@@ -333,12 +333,124 @@ async fn coins_list_returns_empty_wallet_with_signer_backend() {
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(&harness.ctx, None, None, None)
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 0);
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("coin_count"), Some(&serde_json::json!(0)));
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn coins_list_applies_testnet_markets_overlay_for_receive_address() {
+    use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+    use crate::minimal_program_template::{
+        write_minimal_program_with_signer_coinset, MinimalProgramParams,
+    };
+
+    const MAINNET_RECEIVE: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+    const TESTNET_RECEIVE: &str = "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k";
+
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(r#"{"success":true,"coin_records":[]}"#)
+        .create_async()
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    let testnet_markets = dir.path().join("testnet-markets.yaml");
+    write_minimal_program_with_signer_coinset(
+        &program,
+        &server.url(),
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    std::fs::write(
+        &markets,
+        format!(
+            r#"markets:
+  - id: z-mainnet
+    enabled: true
+    base_asset: "xch"
+    base_symbol: "XCH"
+    quote_asset: "xch"
+    quote_asset_type: "stable"
+    signer_key_id: "key-main-1"
+    receive_address: "{MAINNET_RECEIVE}"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+      bucket_counts:
+        1: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#
+        ),
+    )
+    .expect("write markets");
+    std::fs::write(
+        &testnet_markets,
+        format!(
+            r#"markets:
+  - id: a-testnet
+    enabled: true
+    base_asset: "xch"
+    base_symbol: "XCH"
+    quote_asset: "xch"
+    quote_asset_type: "stable"
+    signer_key_id: "key-main-1"
+    receive_address: "{TESTNET_RECEIVE}"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+      bucket_counts:
+        1: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#
+        ),
+    )
+    .expect("write testnet markets");
+    let harness = ManagerContextBuilder::new(program, markets)
+        .testnet_markets(testnet_markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = super::list::run_coins_list(
+        &harness.ctx,
+        "mainnet",
+        Some("a-testnet"),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("coins-list");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
+    assert_eq!(
+        payload.get("receive_address"),
+        Some(&serde_json::json!(TESTNET_RECEIVE))
+    );
+    assert_eq!(
+        payload.get("market_id"),
+        Some(&serde_json::json!("a-testnet"))
+    );
 }
 
 fn write_split_test_markets(path: &std::path::Path) {

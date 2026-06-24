@@ -1,47 +1,15 @@
-//! CAT catalog YAML load/write and Dexie metadata helpers.
-
-use std::path::Path;
+//! CAT catalog Dexie metadata helpers (YAML IO lives in [`crate::config::cats_catalog`]).
 
 use serde_json::{json, Value as JsonValue};
 
-use crate::config::yaml_file::{read_yaml_file_labeled, write_yaml_file};
-use crate::error::SignerResult;
+use crate::config::{build_cat_ticker_index_from_cats_rows, lookup_asset_id_from_ticker};
 use crate::hex::normalize_hex_id;
 
-/// Load cats catalog.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn load_cats_catalog(path: &Path) -> SignerResult<Vec<JsonValue>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let parsed = read_yaml_file_labeled(path, "cats config")?;
-    Ok(parsed
-        .get("cats")
-        .and_then(JsonValue::as_array)
-        .cloned()
-        .unwrap_or_default())
-}
-
-pub fn write_cats_catalog(path: &Path, catalog: &[JsonValue]) -> SignerResult<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            crate::error::SignerError::Other(format!(
-                "failed to create {}: {err}",
-                parent.display()
-            ))
-        })?;
-    }
-    write_yaml_file(path, &json!({"cats": catalog}))
-}
+pub use crate::config::{load_cats_catalog, write_cats_catalog};
 
 pub fn resolve_asset_id_from_catalog(catalog: &[JsonValue], ticker: &str) -> Option<String> {
-    let index = crate::config::build_cat_ticker_index_from_cats_rows(catalog);
-    crate::config::lookup_asset_id_from_ticker(&index, ticker)
-        .ok()
-        .flatten()
+    let index = build_cat_ticker_index_from_cats_rows(catalog);
+    lookup_asset_id_from_ticker(&index, ticker).ok().flatten()
 }
 
 pub fn derive_cat_metadata_from_dexie_row(row: Option<&JsonValue>) -> JsonValue {

@@ -10,7 +10,7 @@ use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_fro
 use crate::config::{CatTickerIndex, ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
-use crate::offer::resolve_market_base_asset_id;
+use crate::offer::OfferAssetResolver;
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 use super::cap::resolve_combine_input_cap;
@@ -39,19 +39,19 @@ impl CoinOpExecContext {
     /// Returns an error if asset resolution fails.
     pub async fn new(
         program: ManagerProgramConfig,
-        signer_config: SignerConfig,
+        resolver: &OfferAssetResolver<'_>,
         market: MarketConfig,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
-        ticker_index: CatTickerIndex,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
+        let signer_config = resolver.signer().clone();
+        let ticker_index = resolver.index().clone();
         let canonical = canonical_base_asset
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| market.base_asset.trim());
-        let resolved_base_asset_id =
-            resolve_market_base_asset_id(&signer_config, canonical, &ticker_index).await?;
+        let resolved_base_asset_id = resolver.resolve_base(canonical).await?;
         Ok(Self {
             signer_config,
             market: market.clone(),
@@ -64,6 +64,11 @@ impl CoinOpExecContext {
             #[cfg(test)]
             test_overrides,
         })
+    }
+
+    #[must_use]
+    pub fn asset_resolver(&self) -> OfferAssetResolver<'_> {
+        OfferAssetResolver::new(&self.signer_config, &self.ticker_index)
     }
 
     /// Submit a combine: merge `input_coin_ids` into a single output coin.

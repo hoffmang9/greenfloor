@@ -8,10 +8,8 @@
 //! | [`load_daemon_cycle_config`] | daemon cycle (`load_cycle_resources`) | soft (`CycleProgramConfig`) | no (full markets list) |
 //! | [`load_raw_program_and_markets`] | `combine-market-cat-dust` (needs raw YAML) | parse program only | no (full markets list) |
 //!
-//! Asset id resolution after load is separate: coin-op/inventory use
-//! [`crate::offer::resolve_market_base_asset_id`] with an explicit [`CatTickerIndex`]; offer build
-//! and reservations use [`crate::offer::resolve_market_offer_assets_for_action`]. Ticker symbols
-//! resolve via the index built from operator metadata paths before Coinset fallback.
+//! Asset id resolution after load uses [`crate::offer::OfferAssetResolver`] built from
+//! [`GatedOperatorMarket::asset_resolver`] or [`operator_ticker_index_from_paths`].
 
 use std::path::Path;
 
@@ -33,6 +31,13 @@ pub struct GatedOperatorMarket {
     pub signer: SignerConfig,
     pub market: MarketConfig,
     pub ticker_index: CatTickerIndex,
+}
+
+impl GatedOperatorMarket {
+    #[must_use]
+    pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'_> {
+        crate::offer::OfferAssetResolver::new(&self.signer, &self.ticker_index)
+    }
 }
 
 /// Build the operator ticker index from resolved metadata config paths.

@@ -5,10 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::coinset::{self, is_xch_like_asset, normalize_asset_id};
-use crate::config::{resolve_quote_asset_for_offer, CatTickerIndex, MarketConfig, SignerConfig};
+use crate::coinset::parse_coin_ids;
+use crate::config::{CatTickerIndex, MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
-use crate::offer::assets::resolve_offer_assets;
+use crate::offer::assets::{OfferAssetResolver, ResolvedMarketOfferAssets};
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
@@ -75,77 +75,16 @@ fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64
     resolve_quote_price_for_pricing(&request.pricing)
 }
 
-fn resolved_assets_or_collision_error(
-    resolved_base: String,
-    resolved_quote: String,
-) -> SignerResult<(String, String)> {
-    if resolved_base == resolved_quote
-        && !is_xch_like_asset(&resolved_base)
-        && !is_xch_like_asset(&resolved_quote)
-    {
-        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
-    }
-    Ok((resolved_base, resolved_quote))
-}
-
-/// Try normalize resolved assets.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn try_normalize_resolved_assets(
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    let (resolved_base, resolved_quote) = (
-        normalize_asset_id(base_asset)?,
-        normalize_asset_id(quote_asset)?,
-    );
-    resolved_assets_or_collision_error(resolved_base, resolved_quote)
-}
-
-/// Resolve offer asset labels to on-chain ids (hex, ticker index, Coinset fallback).
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_offer_assets_for_action(
-    config: &SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-    ticker_index: &CatTickerIndex,
-) -> SignerResult<(String, String)> {
-    match try_normalize_resolved_assets(base_asset, quote_asset) {
-        Ok(resolved) => Ok(resolved),
-        Err(SignerError::ResolvedAssetsCollideForNonXchPair) => {
-            Err(SignerError::ResolvedAssetsCollideForNonXchPair)
-        }
-        Err(_) => resolve_offer_assets(config, base_asset, quote_asset, ticker_index).await,
-    }
-}
-
 /// Resolve a market base asset id for coin-op and inventory paths (xch quote leg).
 ///
 /// # Errors
 ///
 /// Returns an error if asset resolution fails.
 pub async fn resolve_market_base_asset_id(
-    config: &SignerConfig,
+    resolver: &OfferAssetResolver<'_>,
     base_asset: &str,
-    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
-    let (resolved_base_asset_id, _) =
-        resolve_offer_assets_for_action(config, base_asset.trim(), "xch", ticker_index).await?;
-    Ok(resolved_base_asset_id)
-}
-
-/// Resolved on-chain asset ids for a configured market row (offer build / reservations).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedMarketOfferAssets {
-    pub base_asset_id: String,
-    pub quote_asset_id: String,
-    /// Network-normalized quote leg label used for asset resolution and fee routing.
-    pub quote_asset_for_offer: String,
+    resolver.resolve_base(base_asset).await
 }
 
 /// Resolve base and quote asset ids for a configured market row (offer build / reservations).
@@ -154,25 +93,13 @@ pub struct ResolvedMarketOfferAssets {
 ///
 /// Returns an error if asset resolution fails.
 pub async fn resolve_market_offer_assets_for_action(
-    config: &SignerConfig,
+    resolver: &OfferAssetResolver<'_>,
     market: &MarketConfig,
     program_network: &str,
-    ticker_index: &CatTickerIndex,
 ) -> SignerResult<ResolvedMarketOfferAssets> {
-    let quote_asset_for_offer =
-        resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
-    let (base_asset_id, quote_asset_id) = resolve_offer_assets_for_action(
-        config,
-        market.base_asset.trim(),
-        &quote_asset_for_offer,
-        ticker_index,
-    )
-    .await?;
-    Ok(ResolvedMarketOfferAssets {
-        base_asset_id,
-        quote_asset_id,
-        quote_asset_for_offer,
-    })
+    resolver
+        .resolve_market_assets(market, program_network)
+        .await
 }
 
 /// Resolve fee-leg asset id for parallel offer reservations.
@@ -181,18 +108,10 @@ pub async fn resolve_market_offer_assets_for_action(
 ///
 /// Returns an error if asset resolution fails.
 pub async fn resolve_market_offer_fee_asset_id(
-    config: &SignerConfig,
+    resolver: &OfferAssetResolver<'_>,
     assets: &ResolvedMarketOfferAssets,
-    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
-    if is_xch_like_asset(&assets.quote_asset_for_offer) {
-        return Ok(assets.quote_asset_id.clone());
-    }
-    Ok(
-        resolve_offer_assets_for_action(config, "xch", &assets.quote_asset_for_offer, ticker_index)
-            .await?
-            .0,
-    )
+    resolver.resolve_fee_asset(assets).await
 }
 
 fn leg_amounts_for_request(
@@ -224,7 +143,7 @@ fn create_offer_request_from_leg(
         offer_amount: leg.offer_amount_mojos,
         request_asset_id: leg.request_asset_id.clone(),
         request_amount: leg.request_amount_mojos,
-        offer_coin_ids: coinset::parse_coin_ids(&request.offer_coin_ids)?,
+        offer_coin_ids: parse_coin_ids(&request.offer_coin_ids)?,
         presplit_coin_ids: Vec::new(),
         split_input_coins: request.split_input_coins,
         broadcast_split: request.broadcast_split,
@@ -242,13 +161,10 @@ pub async fn build_signer_offer_for_action(
     request: BuildOfferForActionRequest,
     ticker_index: &CatTickerIndex,
 ) -> SignerResult<BuildOfferForActionResult> {
-    let (resolved_base, resolved_quote) = resolve_offer_assets_for_action(
-        &config,
-        &request.base_asset,
-        &request.quote_asset,
-        ticker_index,
-    )
-    .await?;
+    let resolver = OfferAssetResolver::new(&config, ticker_index);
+    let (resolved_base, resolved_quote) = resolver
+        .resolve_pair(&request.base_asset, &request.quote_asset)
+        .await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
@@ -282,86 +198,5 @@ mod tests {
             .expect("expiry");
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
-    }
-
-    #[test]
-    fn try_normalize_accepts_pre_resolved_assets() {
-        let cat = "a".repeat(64);
-        let (base, quote) = try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
-        assert_eq!(base, cat);
-        assert_eq!(quote, "xch");
-    }
-
-    #[test]
-    fn collision_error_does_not_use_other_variant() {
-        let cat = "a".repeat(64);
-        let err = try_normalize_resolved_assets(&cat, &cat).expect_err("collision");
-        assert!(matches!(
-            err,
-            SignerError::ResolvedAssetsCollideForNonXchPair
-        ));
-    }
-
-    use crate::config::{build_cat_ticker_index_lenient, empty_cat_ticker_index};
-    use crate::offer::assets::resolve_offer_asset_ids;
-    use crate::test_support::signer_config::test_signer_config;
-
-    #[tokio::test]
-    async fn resolve_via_ticker_index_without_coinset_lookup() {
-        let byc_id = "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac";
-        let wusdc_id = "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d";
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cats = dir.path().join("cats.yaml");
-        std::fs::write(
-            &cats,
-            format!(
-                r"
-cats:
-  - asset_id: {byc_id}
-    base_symbol: BYC
-  - asset_id: {wusdc_id}
-    base_symbol: wUSDC.b
-"
-            ),
-        )
-        .expect("write cats");
-        let markets = dir.path().join("markets.yaml");
-        std::fs::write(&markets, "markets: []\n").expect("write markets");
-        let ticker_index = build_cat_ticker_index_lenient(&cats, &markets, None);
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/lookup_asset_by_symbol")
-            .expect(0)
-            .create_async()
-            .await;
-        let config = test_signer_config(&server.url());
-        let client = crate::coinset::client_for_signer(&config).expect("client");
-        let (base, quote) = resolve_offer_asset_ids(&client, "BYC", "wUSDC.b", &ticker_index)
-            .await
-            .expect("ticker index resolution");
-        assert_eq!(base, byc_id);
-        assert_eq!(quote, wusdc_id);
-    }
-
-    #[tokio::test]
-    async fn resolve_via_coinset_looks_up_ticker_symbols() {
-        let mut server = mockito::Server::new_async().await;
-        let cat_id = "b".repeat(64);
-        let _mock = server
-            .mock("POST", "/lookup_asset_by_symbol")
-            .with_status(200)
-            .with_body(format!(
-                r#"{{"success":true,"asset":{{"asset_id":"{cat_id}","symbol":"HOA"}}}}"#
-            ))
-            .create_async()
-            .await;
-        let config = test_signer_config(&server.url());
-        let client = crate::coinset::client_for_signer(&config).expect("client");
-        let (base, quote) =
-            resolve_offer_asset_ids(&client, "HOA", "xch", &empty_cat_ticker_index())
-                .await
-                .expect("coinset resolution");
-        assert_eq!(base, cat_id);
-        assert_eq!(quote, "xch");
     }
 }

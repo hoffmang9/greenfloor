@@ -9,6 +9,7 @@ use crate::daemon::coin_ops_execution::{
     execute_managed_coin_op_plans, execute_managed_coin_op_plans_with_test_overrides,
     CoinOpExecutionResult,
 };
+use crate::offer::OfferAssetResolver;
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -94,13 +95,13 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
     ];
 
     let empty_index = empty_cat_ticker_index();
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
     let result = execute_managed_coin_op_plans(
         &bundle.program,
-        &bundle.signer,
+        &resolver,
         &market,
         &plans,
         &HashSet::<String>::default(),
-        &empty_index,
     )
     .await;
 
@@ -126,13 +127,13 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
     let plans = vec![sample_plan(CoinOpKind::Split)];
 
     let empty_index = empty_cat_ticker_index();
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
     let result = execute_managed_coin_op_plans(
         &bundle.program,
-        &bundle.signer,
+        &resolver,
         &market,
         &plans,
         &HashSet::<String>::default(),
-        &empty_index,
     )
     .await;
 
@@ -155,13 +156,13 @@ async fn execute_managed_coin_op_plans_skips_invalid_plans() {
     }];
 
     let empty_index = empty_cat_ticker_index();
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
     let result = execute_managed_coin_op_plans(
         &bundle.program,
-        &bundle.signer,
+        &resolver,
         &market,
         &plans,
         &HashSet::<String>::default(),
-        &empty_index,
     )
     .await;
 
@@ -181,13 +182,14 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
         sample_plan(CoinOpKind::Combine),
     ];
 
+    let empty_index = empty_cat_ticker_index();
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index);
     let result = execute_managed_coin_op_plans_with_test_overrides(
         &bundle.program,
-        &bundle.signer,
+        &resolver,
         &market,
         &plans,
         &HashSet::<String>::default(),
-        &empty_cat_ticker_index(),
         CoinOpTestOverrides {
             wallet_coins: Some(vec![
                 SpendableCoin {

@@ -8,7 +8,6 @@ use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason,
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
-use crate::offer::resolve_market_base_asset_id;
 use crate::operator_log::{LogContext, INVENTORY_BUCKET_SCAN, INVENTORY_BUCKET_SCAN_ERROR};
 use crate::storage::SqliteStore;
 
@@ -60,13 +59,9 @@ pub async fn run_inventory_phase(
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
-        let signer_config = resources.signer_for_execution()?;
-        let resolved_base_asset_id = resolve_market_base_asset_id(
-            signer_config,
-            market.base_asset.trim(),
-            &resources.ticker_index,
-        )
-        .await?;
+        let resolver = resources.asset_resolver()?;
+        let signer_config = resolver.signer();
+        let resolved_base_asset_id = resolver.resolve_base(market.base_asset.trim()).await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let amounts = list_spendable_base_unit_amounts_for_signer(
             &resources.network,

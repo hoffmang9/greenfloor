@@ -7,10 +7,10 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
-use crate::config::{load_gated_operator_market, CatTickerIndex, MarketConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::config::load_gated_operator_market;
+use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
-use crate::offer::resolve_market_base_asset_id;
+use crate::offer::OfferAssetResolver;
 
 pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
     "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
@@ -36,13 +36,19 @@ pub(super) async fn build_coin_op_exec_context(
         market_id,
         pair,
     )?;
+    let crate::config::GatedOperatorMarket {
+        program,
+        signer,
+        market,
+        ticker_index,
+    } = loaded;
+    let resolver = OfferAssetResolver::new(&signer, &ticker_index);
     CoinOpExecContext::new(
-        loaded.program,
-        loaded.signer,
-        loaded.market,
+        program,
+        &resolver,
+        market,
         asset_id_override,
         HashSet::default(),
-        loaded.ticker_index,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     )
@@ -87,34 +93,11 @@ pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value
 }
 
 pub(super) async fn resolve_asset_filter(
-    signer_config: &crate::config::SignerConfig,
+    resolver: &OfferAssetResolver<'_>,
     filter: &str,
-    ticker_index: &CatTickerIndex,
 ) -> SignerResult<String> {
     if is_hex_id(filter) {
         return Ok(normalize_hex_id(filter));
     }
-    resolve_market_base_asset_id(signer_config, filter, ticker_index).await
-}
-
-pub(super) fn select_list_market(
-    markets: &crate::config::MarketsConfig,
-) -> SignerResult<&MarketConfig> {
-    let enabled: Vec<_> = markets.markets.iter().filter(|m| m.enabled).collect();
-    let candidates = if enabled.is_empty() {
-        markets.markets.iter().collect::<Vec<_>>()
-    } else {
-        enabled
-    };
-    if candidates.is_empty() {
-        return Err(SignerError::Other("no markets configured".to_string()));
-    }
-    if candidates.len() == 1 {
-        return Ok(candidates[0]);
-    }
-    Ok(candidates
-        .iter()
-        .min_by_key(|market| market.market_id.as_str())
-        .copied()
-        .expect("non-empty"))
+    resolver.resolve_base(filter).await
 }

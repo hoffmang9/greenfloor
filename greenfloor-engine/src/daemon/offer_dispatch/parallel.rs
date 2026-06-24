@@ -225,11 +225,10 @@ pub async fn execute_actions_parallel(
     }
 
     let reservation_ctx = parallel_reservation_context(
-        signer_config,
+        &ctx.resources.asset_resolver()?,
         &ctx.resources.program().network,
         market,
         0,
-        &ctx.resources.ticker_index,
     )
     .await?;
 
