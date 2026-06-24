@@ -12,7 +12,7 @@ use super::items::{
     executed_item, skip_item, skip_on_signer_err, CoinOpExecItem, CoinOpSkipResult,
 };
 use super::COIN_OP_ERROR_PREFIX;
-use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
+use crate::coin_ops::execution::CoinOpExecContext;
 
 fn split_execution_scalars(
     op_type: &str,
@@ -55,7 +55,7 @@ async fn submit_combine_prereq_for_split_inner(
         op_count,
         usize_to_i64(prereq.input_coin_ids.len(), "split_prereq.input_count"),
     )?;
-    match submit_combine_prereq(ctx, &prereq.input_coin_ids).await {
+    match ctx.execute_combine(&prereq.input_coin_ids, None).await {
         Ok(operation_id) => {
             let reason = if prereq.exact_match {
                 "signer_combine_submitted_for_split_prereq_exact"

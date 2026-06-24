@@ -7,6 +7,9 @@ use crate::error::SignerResult;
 use super::scalars::{coin_op_non_negative_u64_saturating, usize_to_i64};
 use super::selection::SpendableCoin;
 
+/// Operator combine paths merge selected inputs into one on-chain output coin.
+pub const COMBINE_SINGLE_OUTPUT_COUNT: usize = 1;
+
 /// Combine output amounts.
 ///
 /// # Errors
@@ -44,6 +47,26 @@ pub fn total_for_coin_ids(spendable: &[SpendableCoin], coin_ids: &[String]) -> i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_combine_merges_selected_inputs_to_single_output() {
+        let spendable = vec![
+            SpendableCoin {
+                id: "aa".to_string(),
+                amount: 10_000,
+            },
+            SpendableCoin {
+                id: "bb".to_string(),
+                amount: 15_000,
+            },
+        ];
+        let total = total_for_coin_ids(&spendable, &["aa".to_string(), "bb".to_string()]);
+        assert_eq!(total, 25_000);
+        assert_eq!(
+            combine_output_amounts(total, COMBINE_SINGLE_OUTPUT_COUNT).expect("amounts"),
+            vec![25_000]
+        );
+    }
 
     #[test]
     fn combine_output_distributes_remainder_to_last() {

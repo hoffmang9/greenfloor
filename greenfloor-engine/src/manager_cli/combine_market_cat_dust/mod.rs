@@ -19,8 +19,7 @@ use serde_json::{json, Value};
 
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, read_program_yaml,
-    ManagerProgramConfig, MarketsConfig, SignerConfig,
+    load_raw_program_and_markets, ManagerProgramConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
@@ -137,11 +136,12 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
 fn load_program_and_markets(
     mgr: &ManagerContext,
 ) -> SignerResult<(serde_json::Value, ManagerProgramConfig, MarketsConfig)> {
-    let raw = read_program_yaml(&mgr.program_config)?;
-    let program = parse_program_config(&raw)?;
-    let markets =
-        load_markets_config_with_overlay(&mgr.markets_config, mgr.testnet_markets_path())?;
-    Ok((raw, program, markets))
+    let loaded = load_raw_program_and_markets(
+        &mgr.program_config,
+        &mgr.markets_config,
+        mgr.testnet_markets_path(),
+    )?;
+    Ok((loaded.raw_program, loaded.program, loaded.markets))
 }
 
 pub async fn run_combine_market_cat_dust(

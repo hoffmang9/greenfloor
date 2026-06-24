@@ -6,8 +6,6 @@ use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
-use crate::hex::default_mojo_multiplier_for_asset;
-use crate::offer::resolve_offer_assets_for_action;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
@@ -15,9 +13,9 @@ use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
 use super::split::execute_daemon_split_plan;
+use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
-use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext};
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use crate::offer::dexie_payload::DexieOfferPayload;
 
@@ -137,25 +135,21 @@ async fn execute_managed_coin_op_plans_async(
         );
     }
 
-    let (resolved_base_asset_id, _) =
-        match resolve_offer_assets_for_action(signer_config, market.base_asset.trim(), "xch").await
-        {
-            Ok(resolved) => resolved,
-            Err(err) => {
-                return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
-            }
-        };
-
-    let ctx = CoinOpExecContext {
-        signer_config: signer_config.clone(),
-        market: market.clone(),
-        program: program.clone(),
-        resolved_base_asset_id,
-        base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
-        combine_input_cap: resolve_combine_input_cap(),
-        watched_coin_ids: watched_coin_ids.iter().cloned().collect(),
+    let ctx = match CoinOpExecContext::new(
+        program.clone(),
+        signer_config.clone(),
+        market.clone(),
+        None,
+        watched_coin_ids.iter().cloned().collect(),
         #[cfg(test)]
         test_overrides,
+    )
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
+        }
     };
 
     let mut items = Vec::new();

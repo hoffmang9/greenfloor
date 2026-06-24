@@ -1,7 +1,6 @@
 use crate::async_boundary::ManagerCommandFuture;
 use serde_json::json;
 
-use crate::coin_ops::coin_op_non_negative_u64;
 use crate::coin_ops::evaluate_coin_combine_gate;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
@@ -47,7 +46,6 @@ struct CombineLoopContext<'a> {
     behavior: CoinCombineBehavior,
     number_of_coins: i64,
     target_coin_amount_mojos: i64,
-    combine_fee: u64,
 }
 
 async fn prepare_combine_loop_context(
@@ -88,16 +86,11 @@ async fn prepare_combine_loop_context(
         .unwrap_or(0)
         .max(0)
         .saturating_mul(common.exec_ctx.base_unit_mojo_multiplier);
-    let combine_fee = coin_op_non_negative_u64(
-        common.exec_ctx.program.coin_ops_combine_fee_mojos,
-        "program.coin_ops_combine_fee_mojos",
-    )?;
     Ok(CombineLoopContext {
         common,
         behavior,
         number_of_coins,
         target_coin_amount_mojos,
-        combine_fee,
     })
 }
 
@@ -113,7 +106,6 @@ async fn run_coin_combine_async(request: CoinCombineRequest<'_>) -> SignerResult
         behavior,
         number_of_coins,
         target_coin_amount_mojos,
-        combine_fee,
     } = prepare_combine_loop_context(request).await?;
     let CoinCombineBehavior { wait } = behavior;
     let super::loop_context::CoinOpLoopCommon {
@@ -157,7 +149,6 @@ async fn run_coin_combine_async(request: CoinCombineRequest<'_>) -> SignerResult
                 number_of_coins,
                 target_coin_amount_mojos,
                 coin_ids,
-                combine_fee,
                 no_wait: wait.no_wait,
             })
         },

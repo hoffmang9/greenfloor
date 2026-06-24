@@ -3,17 +3,14 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
-use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext};
 use crate::coin_ops::SpendableCoin;
-use crate::config::{
-    load_markets_config_with_overlay, load_program_bundle_gated, resolve_market_for_build,
-    MarketConfig,
-};
+use crate::config::{load_gated_operator_market, MarketConfig};
 use crate::error::{SignerError, SignerResult};
-use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
-use crate::offer::resolve_offer_assets_for_action;
+use crate::hex::{is_hex_id, normalize_hex_id};
+use crate::offer::resolve_market_base_asset_id;
 
 pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
     "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
@@ -28,29 +25,24 @@ pub(super) async fn build_coin_op_exec_context(
     pair: Option<&str>,
     asset_id_override: Option<&str>,
 ) -> SignerResult<CoinOpExecContext> {
-    let bundle = load_program_bundle_gated(program_path)?;
-    let program = bundle.program;
-    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    let market = resolve_market_for_build(&markets, market_id, pair, network)?;
-    let signer_config = bundle.signer;
-    let canonical = asset_id_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(market.base_asset.trim());
-    let (resolved_base_asset_id, _) =
-        resolve_offer_assets_for_action(&signer_config, canonical, "xch").await?;
-    Ok(CoinOpExecContext {
-        signer_config,
-        market: market.clone(),
-        program: program.clone(),
-        resolved_base_asset_id,
-        base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim())
-            as i64,
-        combine_input_cap: resolve_combine_input_cap(),
-        watched_coin_ids: HashSet::default(),
+    let loaded = load_gated_operator_market(
+        program_path,
+        markets_path,
+        testnet_markets_path,
+        network,
+        market_id,
+        pair,
+    )?;
+    CoinOpExecContext::new(
+        loaded.program,
+        loaded.signer,
+        loaded.market,
+        asset_id_override,
+        HashSet::default(),
         #[cfg(test)]
-        test_overrides: CoinOpTestOverrides::default(),
-    })
+        CoinOpTestOverrides::default(),
+    )
+    .await
 }
 
 pub(super) fn enforce_split_lockup_guardrail(
@@ -97,8 +89,7 @@ pub(super) async fn resolve_asset_filter(
     if is_hex_id(filter) {
         return Ok(normalize_hex_id(filter));
     }
-    let (resolved, _) = resolve_offer_assets_for_action(signer_config, filter, "xch").await?;
-    Ok(resolved)
+    resolve_market_base_asset_id(signer_config, filter).await
 }
 
 pub(super) fn select_list_market(
