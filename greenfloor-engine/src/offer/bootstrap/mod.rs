@@ -17,6 +17,10 @@ pub use combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
 pub(crate) use combine_submit::bootstrap_combine_vault_outputs;
 pub(crate) use gate::{bootstrap_offer_gate_for_status, BootstrapPhaseStatus};
 pub use phase::{bootstrap_early_phase, bootstrap_executed_phase, BootstrapPhaseSnapshot};
+pub(crate) use phase::{
+    bootstrap_wait_event_metadata, resolve_bootstrap_wait_poll, BootstrapWaitResolution,
+    BootstrapWaitStepKind,
+};
 pub use planner::{
     plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapFundingSource, BootstrapPlan,
     BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,

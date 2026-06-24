@@ -1,19 +1,13 @@
-use std::collections::HashSet;
-
 use serde_json::json;
 
-use crate::coin_ops::execution::resolve_combine_input_cap;
-use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
-    bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCombineContext, BootstrapPlan,
-    BootstrapPlanOutcome, PlannerLadderRow,
+    bootstrap_executed_phase, BootstrapPlanOutcome, BootstrapWaitStepKind, PlannerLadderRow,
 };
 
-use super::planning::bootstrap_coins_in_base_units;
 use super::split_submit::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-use super::wait::{wait_for_coinset_confirmation, BootstrapWaitConfig};
+use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
 use super::{
     executed_after_split, BootstrapPhaseFailure, BootstrapPhaseResult, ExecutedAfterSplitParams,
 };
@@ -24,21 +18,14 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) split_asset_id: String,
     pub(crate) split_asset_mojo_multiplier: i64,
     pub(crate) receive_address: String,
-    pub(crate) bootstrap_plan: BootstrapPlan,
+    pub(crate) bootstrap_plan: crate::offer::bootstrap::BootstrapPlan,
     pub(crate) ladder_entries: Vec<PlannerLadderRow>,
+    pub(crate) combine_context: crate::offer::bootstrap::BootstrapCombineContext,
     pub(crate) fee_mojos: u64,
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
-    pub(crate) existing_coin_ids: HashSet<String>,
     #[cfg(test)]
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
-}
-
-impl BootstrapShapeContext {
-    #[must_use]
-    pub(crate) fn combine_context(&self) -> BootstrapCombineContext {
-        BootstrapCombineContext::new(self.split_asset_mojo_multiplier, &self.split_asset_id)
-    }
 }
 
 fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
@@ -59,60 +46,28 @@ fn bootstrap_result_from_replan(
     result
 }
 
-async fn wait_for_bootstrap_shape_confirmation(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
+fn bootstrap_wait_failed(
     ctx: &BootstrapShapeContext,
     failure_reason: &'static str,
-) -> Result<Vec<serde_json::Value>, BootstrapPhaseResult> {
-    wait_for_coinset_confirmation(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
-        receive_address: &ctx.receive_address,
-        asset_id: &ctx.split_asset_id,
-        initial_coin_ids: &ctx.existing_coin_ids,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
-        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
-    })
-    .await
-    .map_err(|err| {
-        bootstrap_failed(
-            BootstrapPhaseFailure::new(
-                failure_reason,
-                ctx.fee_mojos,
-                ctx.fee_source.clone(),
-                ctx.fee_lookup_error.clone(),
-            )
-            .with_plan(ctx.bootstrap_plan.clone())
-            .with_wait_error(err.to_string()),
+    err: impl std::fmt::Display,
+) -> BootstrapPhaseResult {
+    bootstrap_failed(
+        BootstrapPhaseFailure::new(
+            failure_reason,
+            ctx.fee_mojos,
+            ctx.fee_source.clone(),
+            ctx.fee_lookup_error.clone(),
         )
-    })
-}
-
-async fn refresh_bootstrap_spendable(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    ctx: &BootstrapShapeContext,
-) -> SignerResult<(
-    Vec<crate::coinset::WalletUnspentCoin>,
-    Vec<crate::offer::bootstrap::BootstrapCoin>,
-)> {
-    let asset_coins = list_wallet_unspent_coins_for_signer(
-        &program.network,
-        signer_config,
-        &ctx.receive_address,
-        &ctx.split_asset_id,
+        .with_plan(ctx.bootstrap_plan.clone())
+        .with_wait_error(err.to_string()),
     )
-    .await?;
-    let spendable = bootstrap_coins_in_base_units(&asset_coins, ctx.split_asset_mojo_multiplier);
-    Ok((asset_coins, spendable))
 }
 
 async fn execute_bootstrap_combine_step(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
     ctx: &BootstrapShapeContext,
-) -> Result<Vec<serde_json::Value>, BootstrapPhaseResult> {
+) -> Result<(Vec<serde_json::Value>, BootstrapPlanOutcome), BootstrapPhaseResult> {
     let combine_result = submit_bootstrap_combine(
         signer_config,
         &ctx.bootstrap_plan,
@@ -132,13 +87,18 @@ async fn execute_bootstrap_combine_step(
         ))
     })?;
 
-    let mut wait_events = wait_for_bootstrap_shape_confirmation(
-        program,
-        signer_config,
+    let wait = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
+        network: &program.network,
+        signer: signer_config,
         ctx,
-        "bootstrap_combine_wait_failed",
-    )
-    .await?;
+        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+        step: BootstrapWaitStepKind::AfterCombine,
+    })
+    .await
+    .map_err(|err| bootstrap_wait_failed(ctx, "bootstrap_combine_wait_failed", err))?;
+
+    let mut wait_events = wait.events;
     wait_events.insert(
         0,
         json!({
@@ -146,44 +106,32 @@ async fn execute_bootstrap_combine_step(
             "combine_result": combine_result,
         }),
     );
-    Ok(wait_events)
+    Ok((wait_events, wait.outcome))
 }
 
-async fn replan_after_combine(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
+#[must_use]
+pub(crate) fn replan_after_combine(
     ctx: &mut BootstrapShapeContext,
     prepend_wait_events: Vec<serde_json::Value>,
-) -> SignerResult<Option<BootstrapPhaseResult>> {
-    let (refreshed_asset_coins, refreshed_spendable) =
-        refresh_bootstrap_spendable(program, signer_config, ctx).await?;
-    ctx.existing_coin_ids = refreshed_asset_coins
-        .iter()
-        .map(|coin| coin.id.clone())
-        .collect();
-
-    let replanned = plan_bootstrap_mixed_outputs(
-        &ctx.ladder_entries,
-        &refreshed_spendable,
-        resolve_combine_input_cap(),
-        &ctx.combine_context(),
-    );
+    replanned: BootstrapPlanOutcome,
+) -> Option<BootstrapPhaseResult> {
     let BootstrapPlanOutcome::NeedsShape(split_plan) = replanned else {
-        return Ok(Some(bootstrap_result_from_replan(
+        return Some(bootstrap_result_from_replan(
             &replanned,
             ctx,
             prepend_wait_events,
-        )));
+        ));
     };
     if split_plan.requires_combine_first() {
-        return Ok(Some(bootstrap_result_from_replan(
-            &BootstrapPlanOutcome::NeedsShape(split_plan),
+        ctx.bootstrap_plan = split_plan;
+        return Some(bootstrap_result_from_replan(
+            &BootstrapPlanOutcome::NeedsShape(ctx.bootstrap_plan.clone()),
             ctx,
             prepend_wait_events,
-        )));
+        ));
     }
     ctx.bootstrap_plan = split_plan;
-    Ok(None)
+    None
 }
 
 pub(super) async fn execute_bootstrap_shape(
@@ -194,18 +142,13 @@ pub(super) async fn execute_bootstrap_shape(
     let mut prepend_wait_events = Vec::new();
 
     if ctx.bootstrap_plan.requires_combine_first() {
-        prepend_wait_events =
+        let (events, replanned) =
             match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
-                Ok(events) => events,
+                Ok(result) => result,
                 Err(result) => return Ok(result),
             };
-        if let Some(result) = replan_after_combine(
-            program,
-            signer_config,
-            &mut ctx,
-            prepend_wait_events.clone(),
-        )
-        .await?
+        prepend_wait_events = events;
+        if let Some(result) = replan_after_combine(&mut ctx, prepend_wait_events.clone(), replanned)
         {
             return Ok(result);
         }
@@ -237,25 +180,35 @@ pub(super) async fn execute_bootstrap_shape(
         }
     };
 
-    let mut wait_events = match wait_for_bootstrap_shape_confirmation(
-        program,
-        signer_config,
-        &ctx,
-        "bootstrap_wait_failed",
-    )
+    let wait = match wait_for_bootstrap_shape_step(BootstrapWaitConfig {
+        network: &program.network,
+        signer: signer_config,
+        ctx: &ctx,
+        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+        step: BootstrapWaitStepKind::AfterSplit,
+    })
     .await
     {
-        Ok(events) => events,
-        Err(mut failure) => {
+        Ok(wait) => wait,
+        Err(err) => {
+            let mut failure = bootstrap_failed(
+                BootstrapPhaseFailure::new(
+                    "bootstrap_wait_failed",
+                    ctx.fee_mojos,
+                    ctx.fee_source.clone(),
+                    ctx.fee_lookup_error.clone(),
+                )
+                .with_plan(bootstrap_plan)
+                .with_wait_error(err.to_string()),
+            );
             failure.split_result = split_result;
             return Ok(failure);
         }
     };
+    let mut wait_events = wait.events;
     wait_events.splice(0..0, prepend_wait_events);
 
-    let (_, refreshed_spendable) =
-        refresh_bootstrap_spendable(program, signer_config, &ctx).await?;
-    let combine_context = ctx.combine_context();
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos: ctx.fee_mojos,
         fee_source: ctx.fee_source,
@@ -263,9 +216,7 @@ pub(super) async fn execute_bootstrap_shape(
         split_result,
         wait_events,
         bootstrap_plan,
-        ladder_entries: &ctx.ladder_entries,
-        refreshed_spendable: &refreshed_spendable,
-        combine_context,
+        remaining: wait.outcome,
     }))
 }
 

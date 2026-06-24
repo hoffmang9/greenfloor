@@ -1,33 +1,67 @@
-use std::collections::HashSet;
-
 use serde_json::{json, Value};
 
+use crate::coin_ops::execution::resolve_combine_input_cap;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::SignerConfig;
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
 use crate::error::{SignerError, SignerResult};
+use crate::offer::bootstrap::{
+    bootstrap_wait_event_metadata, plan_bootstrap_mixed_outputs, resolve_bootstrap_wait_poll,
+    BootstrapCoin, BootstrapPlanOutcome, BootstrapWaitResolution, BootstrapWaitStepKind,
+};
+
+use super::planning::bootstrap_coins_in_base_units;
+use super::BootstrapShapeContext;
+
+fn normalized_spendable_snapshot(spendable: &[BootstrapCoin]) -> Vec<BootstrapCoin> {
+    let mut snapshot = spendable.to_vec();
+    snapshot.sort_by(|left, right| left.id.cmp(&right.id));
+    snapshot
+}
+
+async fn fetch_bootstrap_spendable(
+    network: &str,
+    signer: &SignerConfig,
+    ctx: &BootstrapShapeContext,
+) -> SignerResult<Vec<BootstrapCoin>> {
+    let coins = list_wallet_unspent_coins_for_signer(
+        network,
+        signer,
+        &ctx.receive_address,
+        &ctx.split_asset_id,
+    )
+    .await?;
+    Ok(bootstrap_coins_in_base_units(
+        &coins,
+        ctx.split_asset_mojo_multiplier,
+    ))
+}
+
+#[derive(Debug)]
+pub(super) struct BootstrapShapeStepWaitResult {
+    pub events: Vec<Value>,
+    pub outcome: BootstrapPlanOutcome,
+}
 
 pub(super) struct BootstrapWaitConfig<'a> {
     pub network: &'a str,
     pub signer: &'a SignerConfig,
-    pub receive_address: &'a str,
-    pub asset_id: &'a str,
-    pub initial_coin_ids: &'a HashSet<String>,
+    pub ctx: &'a BootstrapShapeContext,
     pub timeout_seconds: u64,
     pub min_timeout_seconds: u64,
+    pub step: BootstrapWaitStepKind,
 }
 
-pub(super) async fn wait_for_coinset_confirmation(
+pub(super) async fn wait_for_bootstrap_shape_step(
     config: BootstrapWaitConfig<'_>,
-) -> SignerResult<Vec<Value>> {
+) -> SignerResult<BootstrapShapeStepWaitResult> {
     let BootstrapWaitConfig {
         network,
         signer,
-        receive_address,
-        asset_id,
-        initial_coin_ids,
+        ctx,
         timeout_seconds,
         min_timeout_seconds,
+        step,
     } = config;
     let start = std::time::Instant::now();
     let timeout = crate::config::u64_to_i64(
@@ -37,6 +71,7 @@ pub(super) async fn wait_for_coinset_confirmation(
     let initial_sleep = 2.0f64;
     let max_sleep = 20.0f64;
     let mut sleep_seconds = 0.0f64;
+    let mut baseline_spendable: Option<Vec<BootstrapCoin>> = None;
     loop {
         let elapsed_seconds = i64::try_from(start.elapsed().as_secs()).map_err(|_| {
             SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
@@ -48,21 +83,41 @@ pub(super) async fn wait_for_coinset_confirmation(
             initial_sleep,
             max_sleep,
         ) else {
-            return Err(SignerError::Other("confirmation_wait_timeout".to_string()));
+            return Err(SignerError::Other(
+                "bootstrap_shape_wait_timeout".to_string(),
+            ));
         };
-        let coins =
-            list_wallet_unspent_coins_for_signer(network, signer, receive_address, asset_id)
-                .await?;
-        let new_confirmed: Vec<_> = coins
-            .into_iter()
-            .filter(|coin| !initial_coin_ids.contains(&coin.id))
-            .collect();
-        if let Some(first) = new_confirmed.first() {
-            return Ok(vec![json!({
-                "event": "confirmed",
-                "coin_name": first.name,
-                "elapsed_seconds": elapsed_seconds.to_string(),
-            })]);
+        let spendable = fetch_bootstrap_spendable(network, signer, ctx).await?;
+        let snapshot = normalized_spendable_snapshot(&spendable);
+        let observed_on_chain_update = if let Some(baseline) = baseline_spendable.as_ref() {
+            snapshot != *baseline
+        } else {
+            baseline_spendable = Some(snapshot);
+            false
+        };
+        let outcome = plan_bootstrap_mixed_outputs(
+            &ctx.ladder_entries,
+            &spendable,
+            resolve_combine_input_cap(),
+            &ctx.combine_context,
+        );
+        if let BootstrapWaitResolution::Complete(completed) =
+            resolve_bootstrap_wait_poll(step, &outcome, observed_on_chain_update)
+        {
+            let (ready, reason) = bootstrap_wait_event_metadata(step, &completed);
+            return Ok(BootstrapShapeStepWaitResult {
+                events: vec![json!({
+                    "event": "bootstrap_shape_wait_complete",
+                    "wait_step": match step {
+                        BootstrapWaitStepKind::AfterCombine => "after_combine",
+                        BootstrapWaitStepKind::AfterSplit => "after_split",
+                    },
+                    "ready": ready,
+                    "reason": reason,
+                    "elapsed_seconds": elapsed_seconds.to_string(),
+                })],
+                outcome: completed,
+            });
         }
         tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
         sleep_seconds =
@@ -72,70 +127,76 @@ pub(super) async fn wait_for_coinset_confirmation(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use serde_json::Value;
-
-    use super::{wait_for_coinset_confirmation, BootstrapWaitConfig};
-    use crate::coinset::coin_id_from_record;
+    use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
+    use crate::offer::bootstrap::{BaseUnits, BootstrapCoin};
+    use crate::offer::bootstrap::{BootstrapWaitStepKind, PlannerLadderRow};
+    use crate::test_support::bootstrap_shape::{
+        coin_record_body, coin_records_response, combine_first_shape_context,
+        eco181_cap_combine_shape_context, BOOTSTRAP_TEST_MOJO_MULTIPLIER,
+        BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_RECEIVE,
+    };
     use crate::test_support::signer_config::test_signer_config;
 
-    const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
     const TEST_MIN_TIMEOUT_SECONDS: u64 = 1;
 
     #[tokio::test]
-    async fn wait_for_coinset_confirmation_returns_new_coin_event() {
-        let body = r#"{
-        "success": true,
-        "coin_records": [{
-            "coin": {
-                "parent_coin_info": "c325057d788bee13367cb8e2d71ff3e209b5e94b31b296322ba1a143053fef5b",
-                "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                "amount": 1000
-            },
-            "coinbase": false,
-            "confirmed_block_index": 1,
-            "spent": false,
-            "spent_block_index": 0,
-            "timestamp": 1
-        }]
-    }"#;
-        let record: Value = serde_json::from_str::<Value>(body)
-            .expect("fixture")
-            .get("coin_records")
-            .and_then(|value| value.as_array())
-            .and_then(|records| records.first())
-            .cloned()
-            .expect("record");
-        let coin_id = coin_id_from_record(&record);
+    async fn wait_after_combine_ignores_change_before_target_coin() {
+        let change_only = coin_records_response(&[coin_record_body(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            BOOTSTRAP_TEST_MOJO_PER_UNIT * 5,
+        )]);
+        let combined = coin_records_response(&[coin_record_body(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            BOOTSTRAP_TEST_MOJO_PER_UNIT * 100,
+        )]);
         let mut server = mockito::Server::new_async().await;
-        let _mock = server
+        let _change = server
             .mock("POST", "/get_coin_records_by_puzzle_hash")
             .with_status(200)
-            .with_body(body)
+            .with_body(change_only)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+        let _combined = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(combined)
+            .expect_at_least(1)
             .create_async()
             .await;
         let signer = test_signer_config(&server.url());
+        let ladder = vec![PlannerLadderRow {
+            size_base_units: 100,
+            target_count: 1,
+            split_buffer_count: 0,
+        }];
+        let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let events = wait_for_coinset_confirmation(BootstrapWaitConfig {
+        let completed = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
             network: "mainnet",
             signer: &signer,
-            receive_address: RECEIVE_ADDRESS,
-            asset_id: "xch",
-            initial_coin_ids: &HashSet::new(),
-            timeout_seconds: 5,
+            ctx: &ctx,
+            timeout_seconds: 30,
             min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+            step: BootstrapWaitStepKind::AfterCombine,
         })
         .await
-        .expect("confirmed");
+        .expect("combine wait should ignore change-only inventory");
 
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["event"], "confirmed");
-        assert_eq!(events[0]["coin_name"].as_str(), Some(coin_id.as_str()));
+        assert_eq!(
+            completed.events[0]["event"],
+            "bootstrap_shape_wait_complete"
+        );
+        assert_eq!(completed.events[0]["wait_step"], "after_combine");
+        if completed.events[0]["ready"] == serde_json::json!(true) {
+            assert_eq!(completed.events[0]["reason"], "bootstrap_submitted");
+        } else {
+            assert_eq!(completed.events[0]["reason"], "combine_step_complete");
+        }
     }
 
     #[tokio::test]
-    async fn wait_for_coinset_confirmation_times_out_when_no_new_coins() {
+    async fn wait_times_out_when_planner_never_satisfied() {
         let mut server = mockito::Server::new_async().await;
         let _mock = server
             .mock("POST", "/get_coin_records_by_puzzle_hash")
@@ -145,18 +206,90 @@ mod tests {
             .create_async()
             .await;
         let signer = test_signer_config(&server.url());
+        let ladder = vec![PlannerLadderRow {
+            size_base_units: 100,
+            target_count: 1,
+            split_buffer_count: 0,
+        }];
+        let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let err = wait_for_coinset_confirmation(BootstrapWaitConfig {
+        let err = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
             network: "mainnet",
             signer: &signer,
-            receive_address: RECEIVE_ADDRESS,
-            asset_id: "xch",
-            initial_coin_ids: &HashSet::new(),
+            ctx: &ctx,
             timeout_seconds: 1,
             min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+            step: BootstrapWaitStepKind::AfterCombine,
         })
         .await
         .expect_err("timeout");
-        assert_eq!(err.to_string(), "confirmation_wait_timeout");
+        assert_eq!(err.to_string(), "bootstrap_shape_wait_timeout");
+    }
+
+    #[tokio::test]
+    async fn wait_after_split_completes_on_terminal_still_needs_split() {
+        let before_split = coin_records_response(&[coin_record_body(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            BOOTSTRAP_TEST_MOJO_PER_UNIT * 100,
+        )]);
+        let after_split = coin_records_response(&[coin_record_body(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            BOOTSTRAP_TEST_MOJO_PER_UNIT * 100,
+        )]);
+        let mut server = mockito::Server::new_async().await;
+        let _before = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(before_split)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+        let _after = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(after_split)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+        let signer = test_signer_config(&server.url());
+        let ladder = vec![PlannerLadderRow {
+            size_base_units: 100,
+            target_count: 2,
+            split_buffer_count: 0,
+        }];
+        let spendable = vec![BootstrapCoin {
+            id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string(),
+            amount: BaseUnits::new(100),
+        }];
+        let ctx = combine_first_shape_context(
+            BOOTSTRAP_TEST_RECEIVE,
+            "xch",
+            BOOTSTRAP_TEST_MOJO_MULTIPLIER,
+            ladder,
+            &spendable,
+            5,
+        );
+
+        let completed = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
+            network: "mainnet",
+            signer: &signer,
+            ctx: &ctx,
+            timeout_seconds: 30,
+            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+            step: BootstrapWaitStepKind::AfterSplit,
+        })
+        .await
+        .expect("split wait should finish on terminal still_needs_split");
+
+        assert_eq!(completed.events[0]["wait_step"], "after_split");
+        assert_eq!(
+            completed.events[0]["event"],
+            "bootstrap_shape_wait_complete"
+        );
+        assert_eq!(completed.events[0]["ready"], false);
+        assert!(completed.events[0]["reason"]
+            .as_str()
+            .expect("reason")
+            .contains("still_needs_split"));
     }
 }

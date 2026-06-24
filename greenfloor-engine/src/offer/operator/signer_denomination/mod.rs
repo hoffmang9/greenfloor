@@ -12,22 +12,26 @@ mod test_overrides;
 mod types;
 mod wait;
 
-use std::collections::HashSet;
-
 use crate::coin_ops::execution::resolve_combine_input_cap;
 use crate::coinset::WalletUnspentCoin;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
+#[cfg(test)]
+use crate::offer::bootstrap::BootstrapCoin;
 use crate::offer::bootstrap::{
-    bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
-    BootstrapCombineContext, BootstrapPlanOutcome, PlannerLadderRow,
+    bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs,
+    BootstrapCombineContext, BootstrapPlanOutcome,
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
+pub(crate) use bootstrap_execute::BootstrapShapeContext;
 pub use types::BootstrapPhaseResult;
 
-use bootstrap_execute::{execute_bootstrap_shape, BootstrapShapeContext};
+#[cfg(test)]
+pub(crate) use test_overrides::SignerDenominationTestOverrides;
+
+use bootstrap_execute::execute_bootstrap_shape;
 use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
@@ -70,19 +74,17 @@ async fn load_asset_scoped_coins(
     })
 }
 
-pub(crate) struct ExecutedAfterSplitParams<'a> {
+pub(crate) struct ExecutedAfterSplitParams {
     pub(crate) fee_mojos: u64,
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
     pub(crate) split_result: serde_json::Value,
     pub(crate) wait_events: Vec<serde_json::Value>,
     pub(crate) bootstrap_plan: crate::offer::bootstrap::BootstrapPlan,
-    pub(crate) ladder_entries: &'a [PlannerLadderRow],
-    pub(crate) refreshed_spendable: &'a [BootstrapCoin],
-    pub(crate) combine_context: BootstrapCombineContext,
+    pub(crate) remaining: BootstrapPlanOutcome,
 }
 
-pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseResult {
+pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> BootstrapPhaseResult {
     let ExecutedAfterSplitParams {
         fee_mojos,
         fee_source,
@@ -90,16 +92,8 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> Boot
         split_result,
         wait_events,
         bootstrap_plan,
-        ladder_entries,
-        refreshed_spendable,
-        combine_context,
+        remaining,
     } = params;
-    let remaining = plan_bootstrap_mixed_outputs(
-        ladder_entries,
-        refreshed_spendable,
-        resolve_combine_input_cap(),
-        &combine_context,
-    );
     let executed = bootstrap_executed_phase(&remaining);
     let mut result = BootstrapPhaseResult::from_snapshot(executed);
     result.fee_mojos = fee_mojos;
@@ -202,21 +196,16 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         ))));
     }
 
-    let existing_coin_ids: HashSet<String> = asset_scoped_coins
-        .iter()
-        .map(|coin| coin.id.clone())
-        .collect();
-
     Ok(Ok(BootstrapShapeContext {
         split_asset_id,
         split_asset_mojo_multiplier,
         receive_address: receive_address.to_string(),
         bootstrap_plan,
         ladder_entries,
+        combine_context,
         fee_mojos,
         fee_source,
         fee_lookup_error,
-        existing_coin_ids,
         #[cfg(test)]
         test_overrides: test_overrides::SignerDenominationTestOverrides::default(),
     }))
