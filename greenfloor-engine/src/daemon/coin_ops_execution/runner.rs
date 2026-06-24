@@ -182,7 +182,9 @@ async fn execute_managed_coin_op_plans_async(
             continue;
         }
         let (plan_items, plan_executed) = match plan.op_type {
-            crate::coin_ops::CoinOpKind::Split => execute_daemon_split_plan(&ctx, plan).await,
+            crate::coin_ops::CoinOpKind::Split => {
+                Box::pin(execute_daemon_split_plan(&ctx, plan)).await
+            }
             crate::coin_ops::CoinOpKind::Combine => execute_daemon_combine_plan(&ctx, plan).await,
         };
         items.extend(plan_items);

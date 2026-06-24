@@ -3,35 +3,36 @@
 //! Deterministic ladder planning lives in `offer::bootstrap`; this module executes
 //! the signer-side denomination phase before offer construction.
 
+mod bootstrap_execute;
 mod futures;
 mod planning;
 mod split_submit;
+#[cfg(test)]
+mod test_overrides;
 mod types;
 mod wait;
 
 use std::collections::HashSet;
 
-use crate::coinset::{list_wallet_unspent_coins_for_signer, WalletUnspentCoin};
+use crate::coin_ops::execution::resolve_combine_input_cap;
+use crate::coinset::WalletUnspentCoin;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
-    BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow,
+    BootstrapPlanOutcome, PlannerLadderRow,
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
 pub use types::BootstrapPhaseResult;
 
+use bootstrap_execute::{execute_bootstrap_shape, BootstrapShapeContext};
 use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
 };
-use split_submit::submit_bootstrap_mixed_split;
 use types::BootstrapPhaseFailure;
-use wait::{wait_for_coinset_confirmation, BootstrapWaitConfig};
-
-const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
 #[cfg(test)]
 fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
@@ -52,7 +53,7 @@ async fn load_asset_scoped_coins(
     receive_address: &str,
     split_asset_id: &str,
 ) -> Result<Vec<WalletUnspentCoin>, BootstrapPhaseResult> {
-    list_wallet_unspent_coins_for_signer(
+    crate::coinset::list_wallet_unspent_coins_for_signer(
         &program.network,
         signer_config,
         receive_address,
@@ -69,18 +70,18 @@ async fn load_asset_scoped_coins(
     })
 }
 
-struct ExecutedAfterSplitParams<'a> {
-    fee_mojos: u64,
-    fee_source: String,
-    fee_lookup_error: Option<String>,
-    split_result: serde_json::Value,
-    wait_events: Vec<serde_json::Value>,
-    bootstrap_plan: BootstrapPlan,
-    ladder_entries: &'a [PlannerLadderRow],
-    refreshed_spendable: &'a [BootstrapCoin],
+pub(crate) struct ExecutedAfterSplitParams<'a> {
+    pub(crate) fee_mojos: u64,
+    pub(crate) fee_source: String,
+    pub(crate) fee_lookup_error: Option<String>,
+    pub(crate) split_result: serde_json::Value,
+    pub(crate) wait_events: Vec<serde_json::Value>,
+    pub(crate) bootstrap_plan: crate::offer::bootstrap::BootstrapPlan,
+    pub(crate) ladder_entries: &'a [PlannerLadderRow],
+    pub(crate) refreshed_spendable: &'a [BootstrapCoin],
 }
 
-fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseResult {
+pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseResult {
     let ExecutedAfterSplitParams {
         fee_mojos,
         fee_source,
@@ -91,7 +92,11 @@ fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseR
         ladder_entries,
         refreshed_spendable,
     } = params;
-    let remaining = plan_bootstrap_mixed_outputs(ladder_entries, refreshed_spendable);
+    let remaining = plan_bootstrap_mixed_outputs(
+        ladder_entries,
+        refreshed_spendable,
+        resolve_combine_input_cap(),
+    );
     let executed = bootstrap_executed_phase(&remaining);
     let mut result = BootstrapPhaseResult::from_snapshot(executed);
     result.fee_mojos = fee_mojos;
@@ -103,19 +108,7 @@ fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseR
     result
 }
 
-struct BootstrapSplitPlanContext {
-    split_asset_id: String,
-    split_asset_mojo_multiplier: i64,
-    receive_address: String,
-    bootstrap_plan: BootstrapPlan,
-    ladder_entries: Vec<PlannerLadderRow>,
-    fee_mojos: u64,
-    fee_source: String,
-    fee_lookup_error: Option<String>,
-    existing_coin_ids: HashSet<String>,
-}
-
-async fn prepare_bootstrap_split_plan(
+pub(crate) async fn prepare_bootstrap_execution_plan(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
     market: &MarketConfig,
@@ -123,7 +116,7 @@ async fn prepare_bootstrap_split_plan(
     resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
     quote_price: f64,
-) -> SignerResult<Result<BootstrapSplitPlanContext, BootstrapPhaseResult>> {
+) -> SignerResult<Result<BootstrapShapeContext, BootstrapPhaseResult>> {
     let side = normalize_offer_side(action_side);
     let side_ladder = market.ladders.get(side).cloned().unwrap_or_default();
     if side_ladder.is_empty() {
@@ -175,18 +168,23 @@ async fn prepare_bootstrap_split_plan(
 
     let spendable_coins =
         bootstrap_coins_in_base_units(&asset_scoped_coins, split_asset_mojo_multiplier);
-    let outcome = plan_bootstrap_mixed_outputs(&ladder_entries, &spendable_coins);
+    let outcome = plan_bootstrap_mixed_outputs(
+        &ladder_entries,
+        &spendable_coins,
+        resolve_combine_input_cap(),
+    );
     if let Some(early) = bootstrap_early_phase(&outcome) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));
     }
-    let BootstrapPlanOutcome::NeedsSplit(bootstrap_plan) = outcome else {
+
+    let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) = outcome else {
         return Ok(Err(bootstrap_skipped("bootstrap_precheck_failed")));
     };
-
+    let output_count = bootstrap_plan.output_amounts_base_units.len();
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
         signer_config,
         program.coin_ops_minimum_fee_mojos,
-        bootstrap_plan.output_amounts_base_units.len(),
+        output_count,
     )
     .await;
     if fee_mojos > 0 {
@@ -203,7 +201,7 @@ async fn prepare_bootstrap_split_plan(
         .map(|coin| coin.id.clone())
         .collect();
 
-    Ok(Ok(BootstrapSplitPlanContext {
+    Ok(Ok(BootstrapShapeContext {
         split_asset_id,
         split_asset_mojo_multiplier,
         receive_address: receive_address.to_string(),
@@ -213,94 +211,8 @@ async fn prepare_bootstrap_split_plan(
         fee_source,
         fee_lookup_error,
         existing_coin_ids,
-    }))
-}
-
-async fn execute_bootstrap_split_and_wait(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    plan_ctx: BootstrapSplitPlanContext,
-) -> SignerResult<BootstrapPhaseResult> {
-    let BootstrapSplitPlanContext {
-        split_asset_id,
-        split_asset_mojo_multiplier,
-        receive_address,
-        bootstrap_plan,
-        ladder_entries,
-        fee_mojos,
-        fee_source,
-        fee_lookup_error,
-        existing_coin_ids,
-    } = plan_ctx;
-
-    let split_result = match submit_bootstrap_mixed_split(
-        signer_config,
-        &bootstrap_plan,
-        &split_asset_id,
-        &receive_address,
-        split_asset_mojo_multiplier,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(err) => {
-            return Ok(bootstrap_failed(
-                BootstrapPhaseFailure::new(
-                    format!("signer_mixed_split_error:{err}"),
-                    fee_mojos,
-                    fee_source.clone(),
-                    fee_lookup_error.clone(),
-                )
-                .with_plan(bootstrap_plan),
-            ));
-        }
-    };
-
-    let wait_events = match wait_for_coinset_confirmation(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
-        receive_address: &receive_address,
-        asset_id: &split_asset_id,
-        initial_coin_ids: &existing_coin_ids,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
-        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
-    })
-    .await
-    {
-        Ok(events) => events,
-        Err(err) => {
-            return Ok(bootstrap_failed(
-                BootstrapPhaseFailure::new(
-                    "bootstrap_wait_failed",
-                    fee_mojos,
-                    fee_source.clone(),
-                    fee_lookup_error.clone(),
-                )
-                .with_plan(bootstrap_plan)
-                .with_wait_error(err.to_string())
-                .with_split_result(split_result),
-            ));
-        }
-    };
-
-    let refreshed_asset_coins = list_wallet_unspent_coins_for_signer(
-        &program.network,
-        signer_config,
-        &receive_address,
-        &split_asset_id,
-    )
-    .await?;
-    let refreshed_spendable =
-        bootstrap_coins_in_base_units(&refreshed_asset_coins, split_asset_mojo_multiplier);
-    Ok(executed_after_split(ExecutedAfterSplitParams {
-        fee_mojos,
-        fee_source,
-        fee_lookup_error,
-        split_result,
-        wait_events,
-        bootstrap_plan,
-        ladder_entries: &ladder_entries,
-        refreshed_spendable: &refreshed_spendable,
+        #[cfg(test)]
+        test_overrides: test_overrides::SignerDenominationTestOverrides::default(),
     }))
 }
 
@@ -336,7 +248,7 @@ async fn run_signer_denomination_phase_async(
     quote_price: f64,
     action_side: &str,
 ) -> SignerResult<BootstrapPhaseResult> {
-    match prepare_bootstrap_split_plan(
+    match prepare_bootstrap_execution_plan(
         program,
         signer_config,
         market,
@@ -347,7 +259,7 @@ async fn run_signer_denomination_phase_async(
     )
     .await?
     {
-        Ok(plan_ctx) => execute_bootstrap_split_and_wait(program, signer_config, plan_ctx).await,
+        Ok(shape_ctx) => execute_bootstrap_shape(program, signer_config, shape_ctx).await,
         Err(result) => Ok(result),
     }
 }

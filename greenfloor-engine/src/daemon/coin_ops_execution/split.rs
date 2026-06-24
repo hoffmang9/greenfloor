@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::{
-    coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_daemon_auto_split_selection, usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
-    SplitCombinePrereqPlan, SplitSkipReason,
+    coin_op_non_negative_u64, coin_op_target_amount_allowed,
+    defer_low_watermark_split_from_spendable, i64_to_usize, plan_daemon_auto_split_selection,
+    usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan, SplitCombinePrereqPlan,
+    SplitSkipReason,
 };
 
 use super::items::{
@@ -92,6 +93,80 @@ struct SplitPlanContext {
     canonical_asset_id: String,
 }
 
+enum DaemonSplitPreflight {
+    Deferred(Vec<CoinOpExecItem>, u64),
+    Execute(Vec<SpendableCoin>),
+}
+
+async fn daemon_split_preflight(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> CoinOpSkipResult<DaemonSplitPreflight> {
+    let initial = match ctx.list_spendable_coins().await {
+        Ok(coins) => coins,
+        Err(err) => {
+            return Err((
+                vec![skip_item(
+                    plan.op_type.as_str(),
+                    plan.size_base_units,
+                    plan.op_count,
+                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                )],
+                0,
+            ));
+        }
+    };
+    if initial.is_empty() {
+        return Err((
+            vec![skip_item(
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
+                "no_spendable_split_coin_available",
+            )],
+            0,
+        ));
+    }
+
+    let spendable_for_defer: Vec<SpendableCoin> = initial
+        .iter()
+        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
+        .cloned()
+        .collect();
+    if defer_low_watermark_split_from_spendable(
+        plan,
+        &spendable_for_defer,
+        ctx.base_unit_mojo_multiplier,
+    ) {
+        return Ok(DaemonSplitPreflight::Deferred(
+            vec![skip_item(
+                plan.op_type.as_str(),
+                plan.size_base_units,
+                plan.op_count,
+                "bootstrap_primary_shape_deferred",
+            )],
+            0,
+        ));
+    }
+    Ok(DaemonSplitPreflight::Execute(spendable_for_defer))
+}
+
+pub(crate) async fn execute_daemon_split_plan(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> (Vec<CoinOpExecItem>, u64) {
+    match daemon_split_preflight(ctx, plan).await {
+        Ok(DaemonSplitPreflight::Deferred(items, executed)) => (items, executed),
+        Err(skip) => skip,
+        Ok(DaemonSplitPreflight::Execute(spendable)) => {
+            match execute_daemon_split_plan_inner(ctx, plan, Some(spendable)).await {
+                Ok(result) => result,
+                Err(skip) => skip,
+            }
+        }
+    }
+}
+
 fn prepare_split_plan_context(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
@@ -99,18 +174,6 @@ fn prepare_split_plan_context(
     let op_type = plan.op_type.as_str();
     let op_count = plan.op_count;
     let size_base_units = plan.size_base_units;
-
-    if op_count == 1 {
-        return Err((
-            vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
-                "split_single_coin_noop_skipped",
-            )],
-            0,
-        ));
-    }
 
     let amount_per_coin_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
     let canonical_asset_id = ctx.market.base_asset.trim();
@@ -146,21 +209,27 @@ async fn split_candidate_spendable(
     ctx: &CoinOpExecContext,
     split_ctx: &SplitPlanContext,
     attempted_coin_ids: &HashSet<String>,
+    prefetched_spendable: Option<&[SpendableCoin]>,
 ) -> CoinOpSkipResult<Vec<SpendableCoin>> {
-    let fresh = match ctx.list_spendable_coins().await {
-        Ok(coins) => coins,
-        Err(err) => {
-            return Err((
-                vec![skip_item(
-                    &split_ctx.op_type,
-                    split_ctx.size_base_units,
-                    split_ctx.op_count,
-                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                )],
-                0,
-            ));
-        }
-    };
+    let fresh =
+        if let Some(prefetched) = prefetched_spendable.filter(|_| attempted_coin_ids.is_empty()) {
+            prefetched.to_vec()
+        } else {
+            match ctx.list_spendable_coins().await {
+                Ok(coins) => coins,
+                Err(err) => {
+                    return Err((
+                        vec![skip_item(
+                            &split_ctx.op_type,
+                            split_ctx.size_base_units,
+                            split_ctx.op_count,
+                            format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                        )],
+                        0,
+                    ));
+                }
+            }
+        };
     Ok(fresh
         .into_iter()
         .filter(|coin| {
@@ -226,8 +295,19 @@ async fn attempt_daemon_split(
     split_ctx: &SplitPlanContext,
     attempt_index: usize,
     attempted_coin_ids: &HashSet<String>,
+    prefetched_spendable: Option<&[SpendableCoin]>,
 ) -> CoinOpSkipResult<DaemonSplitAttemptResult> {
-    let candidate_spendable = split_candidate_spendable(ctx, split_ctx, attempted_coin_ids).await?;
+    let candidate_spendable = split_candidate_spendable(
+        ctx,
+        split_ctx,
+        attempted_coin_ids,
+        if attempt_index == 0 {
+            prefetched_spendable
+        } else {
+            None
+        },
+    )
+    .await?;
     let selection = plan_daemon_auto_split_selection(
         &candidate_spendable,
         split_ctx.required_amount,
@@ -268,51 +348,24 @@ async fn attempt_daemon_split(
     }
 }
 
-pub(crate) async fn execute_daemon_split_plan(
-    ctx: &CoinOpExecContext,
-    plan: &CoinOpPlan,
-) -> (Vec<CoinOpExecItem>, u64) {
-    match execute_daemon_split_plan_inner(ctx, plan).await {
-        Ok(result) => result,
-        Err(skip) => skip,
-    }
-}
-
 async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
+    prefetched_spendable: Option<Vec<SpendableCoin>>,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
     let split_ctx = prepare_split_plan_context(ctx, plan)?;
-
-    let initial = match ctx.list_spendable_coins().await {
-        Ok(coins) => coins,
-        Err(err) => {
-            return Err((
-                vec![skip_item(
-                    &split_ctx.op_type,
-                    split_ctx.size_base_units,
-                    split_ctx.op_count,
-                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                )],
-                0,
-            ));
-        }
-    };
-    if initial.is_empty() {
-        return Err((
-            vec![skip_item(
-                &split_ctx.op_type,
-                split_ctx.size_base_units,
-                split_ctx.op_count,
-                "no_spendable_split_coin_available",
-            )],
-            0,
-        ));
-    }
-
+    let prefetched = prefetched_spendable.as_deref();
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {
-        match attempt_daemon_split(ctx, &split_ctx, attempt_index, &attempted_coin_ids).await? {
+        match attempt_daemon_split(
+            ctx,
+            &split_ctx,
+            attempt_index,
+            &attempted_coin_ids,
+            prefetched,
+        )
+        .await?
+        {
             DaemonSplitAttemptResult::Finished(result) => return Ok(result),
             DaemonSplitAttemptResult::Retry(coin_id) => {
                 attempted_coin_ids.insert(coin_id);

@@ -1,5 +1,5 @@
 use crate::coinset::WalletUnspentCoin;
-use crate::offer::bootstrap::{BootstrapCoin, BootstrapPlan, PlannerLadderRow};
+use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlan, PlannerLadderRow};
 
 use super::{
     bootstrap_skipped, executed_after_split, run_signer_denomination_phase,
@@ -40,8 +40,10 @@ fn bootstrap_skipped_marks_phase_not_ready() {
 #[test]
 fn executed_after_split_carries_fee_and_plan_metadata() {
     let bootstrap_plan = BootstrapPlan {
-        source_coin_id: "coin-a".to_string(),
-        source_amount: 50_000,
+        funding: BootstrapFundingSource::SingleCoin {
+            coin_id: "coin-a".to_string(),
+            amount: 50_000,
+        },
         output_amounts_base_units: vec![100, 100],
         total_output_amount: 200,
         change_amount: 49_800,
@@ -52,7 +54,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
         target_count: 2,
         split_buffer_count: 0,
     }];
-    let refreshed = vec![BootstrapCoin {
+    let refreshed = vec![crate::offer::bootstrap::BootstrapCoin {
         id: "coin-a".to_string(),
         amount: 50_000,
     }];
@@ -307,7 +309,7 @@ async fn run_signer_denomination_phase_skips_when_ladder_already_ready() {
 
 #[tokio::test]
 async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
-    use super::prepare_bootstrap_split_plan;
+    use super::prepare_bootstrap_execution_plan;
     use crate::config::ManagerProgramConfig;
     use crate::test_support::ladder::market_with_side_ladder;
     use crate::test_support::signer_config::test_signer_config;
@@ -354,11 +356,12 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
     let signer = test_signer_config(&server.url());
 
     let plan_ctx =
-        prepare_bootstrap_split_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
+        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
             .await
             .expect("phase result")
-            .expect("split plan context");
+            .expect("execution plan");
 
+    assert!(!plan_ctx.bootstrap_plan.requires_combine_first());
     assert_eq!(plan_ctx.fee_mojos, 0);
     assert_eq!(plan_ctx.fee_source, "config_minimum_fee_fallback");
     assert!(!plan_ctx.bootstrap_plan.output_amounts_base_units.is_empty());

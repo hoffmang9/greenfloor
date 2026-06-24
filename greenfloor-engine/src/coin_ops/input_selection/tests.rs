@@ -164,12 +164,16 @@ fn combine_prereq_plan_returns_none_when_cap_reduces_below_two_inputs() {
 }
 
 #[test]
-fn combine_prereq_plan_applies_cap_while_keeping_two_inputs() {
-    let spendable = coins(&[("c5", 5000), ("c3", 3000), ("c2", 2000)]);
-    let plan = build_combine_prereq_plan(&spendable, 10_000, 2).expect("prereq plan");
-    assert_eq!(plan.input_coin_ids.len(), 2);
-    assert!(plan.cap_applied);
-    assert_eq!(plan.selected_count_before_cap, 3);
+fn combine_prereq_plan_returns_none_when_cap_truncates_below_required_total() {
+    let spendable = coins(&[
+        ("Coin_a", 6500),
+        ("Coin_b", 2000),
+        ("Coin_c", 1100),
+        ("Coin_d", 400),
+    ]);
+    assert!(build_combine_prereq_plan(&spendable, 10_000, 2).is_none());
+    assert!(build_combine_prereq_plan(&spendable, 10_000, 3).is_none());
+    assert!(build_combine_prereq_plan(&spendable, 10_000, 4).is_some());
 }
 
 #[test]
