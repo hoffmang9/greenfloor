@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for incremental coverage path scope and lcov merge helpers.
+# Unit tests for incremental coverage path scope and nextest filter helpers.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -143,14 +143,30 @@ fixture_dir="$(new_fixture_dir)"
   assert_eq "${run_rust_cov}" "true" "production rust diff should run rust cov"
 )
 
-echo "merge-lcov uses incremental report when baseline is missing"
-tmpdir="$(new_fixture_dir)"
-printf 'incremental-only\n' >"${tmpdir}/inc.lcov"
-bash "${repo_root}/.github/scripts/merge-lcov-reports.sh" \
-  "${tmpdir}/missing-baseline.lcov" \
-  "${tmpdir}/inc.lcov" \
-  "${tmpdir}/out.lcov"
-assert_eq "$(cat "${tmpdir}/out.lcov")" "incremental-only" \
-  "missing baseline should copy incremental report"
+echo "nextest filter includes integration binaries and changed path tokens"
+filter="$(
+  printf '%s\n' 'greenfloor-engine/src/config/program.rs' \
+    | bash "${repo_root}/.github/scripts/rust-coverage-nextest-filter.sh"
+)"
+assert_contains "${filter}" "binary(/config/)" "integration config binary"
+assert_contains "${filter}" "test(/program/)" "program path token"
+assert_contains "${filter}" "test(/config/)" "config path token"
+
+filter="$(
+  printf '%s\n' 'greenfloor-engine/src/offer/bootstrap/replan.rs' \
+    | bash "${repo_root}/.github/scripts/rust-coverage-nextest-filter.sh"
+)"
+assert_contains "${filter}" "binary(/daemon_once_integration/)" "integration binaries from tests/*.rs"
+assert_contains "${filter}" "test(/replan/)" "replan path token"
+assert_contains "${filter}" "test(/bootstrap/)" "bootstrap path token"
+assert_contains "${filter}" "test(/offer/)" "offer path token"
+
+filter="$(
+  printf '%s\n' 'greenfloor-engine/src/storage/sqlite/schema.rs' \
+    | bash "${repo_root}/.github/scripts/rust-coverage-nextest-filter.sh"
+)"
+assert_contains "${filter}" "test(/storage/)" "storage ancestor path token"
+assert_contains "${filter}" "test(/sqlite/)" "sqlite path token"
+assert_contains "${filter}" "binary(/sqlite_store/)" "discovered sqlite integration binary"
 
 echo "all rust coverage script tests passed"

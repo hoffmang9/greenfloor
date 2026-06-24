@@ -105,21 +105,11 @@ jobs:
         if: steps.scope.outputs.run_rust_cov == 'true'
         run: rustup component add llvm-tools-preview
 
-      - name: Install lcov for coverage merge
-        if: steps.scope.outputs.run_rust_cov == 'true'
-        run: sudo apt-get update && sudo apt-get install -y lcov
-
-      - name: Download baseline coverage from main
-        if: steps.scope.outputs.run_rust_cov == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: bash .github/scripts/download-main-coverage-baseline.sh lcov.info.baseline
-
       - name: Rust tests (incremental coverage)
         if: steps.scope.outputs.run_rust_cov == 'true'
         env:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+          COMPARE_BRANCH: origin/main
           INCREMENTAL: "1"
         run: bash .github/scripts/ubuntu-rust-coverage.sh
 

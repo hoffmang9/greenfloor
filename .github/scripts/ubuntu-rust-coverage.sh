@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 # Collect Rust test coverage via llvm-cov.
 #
-# INCREMENTAL=1  — fixed nextest filter + optional BASELINE_LCOV merge for diff-cover.
+# INCREMENTAL=1  — nextest filter from changed production paths + integration binaries.
 # INCREMENTAL=0  — full test suite (local/manual).
 #
-# CI gates this script with diff-coverage-scope.sh; do not invoke INCREMENTAL=1 without
-# a production Rust diff unless you only want the filtered test run locally.
+# CI gates this script with diff-coverage-scope.sh.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 manifest="${CARGO_MANIFEST:?CARGO_MANIFEST is required}"
-baseline_lcov="${BASELINE_LCOV:-lcov.info.baseline}"
-incremental_nextest_filter='test(/greenfloor_engine/) | test(/offer/) | test(/daemon/)'
+compare_branch="${COMPARE_BRANCH:-origin/main}"
 
 if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
-  echo "Incremental coverage nextest filterset: ${incremental_nextest_filter}"
+  changed_files="$(
+    bash "${script_dir}/changed-production-rust-files.sh" "${compare_branch}"
+  )"
+  if [[ -z "${changed_files}" ]]; then
+    echo "No production Rust changes; skipping coverage collection."
+    exit 0
+  fi
+
+  if ! filter="$(
+    printf '%s\n' "${changed_files}" \
+      | bash "${script_dir}/rust-coverage-nextest-filter.sh"
+  )"; then
+    echo "Production Rust files changed but no nextest filter could be built:" >&2
+    printf '%s\n' "${changed_files}" >&2
+    exit 1
+  fi
+
+  echo "Incremental coverage nextest filterset: ${filter}"
   cargo llvm-cov nextest \
     --manifest-path "${manifest}" \
     --features test-support \
     -- \
-    -E "${incremental_nextest_filter}"
+    -E "${filter}"
   cargo llvm-cov report \
     --manifest-path "${manifest}" \
     --lcov \
-    --output-path lcov.info.incremental
-
-  bash "${script_dir}/merge-lcov-reports.sh" \
-    "${baseline_lcov}" \
-    lcov.info.incremental \
-    lcov.info
+    --output-path lcov.info
 else
   cargo llvm-cov nextest --manifest-path "${manifest}" --features test-support
   cargo llvm-cov report --manifest-path "${manifest}" --lcov --output-path lcov.info
