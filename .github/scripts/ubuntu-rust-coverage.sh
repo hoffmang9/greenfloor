@@ -31,10 +31,10 @@ if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
   fi
 
   echo "Incremental coverage nextest filterset: ${filter}"
+  # -E is a nextest runner flag; do not place it after `--` (that forwards it to test binaries).
   cargo llvm-cov nextest \
     --manifest-path "${manifest}" \
     --features test-support \
-    -- \
     -E "${filter}"
   cargo llvm-cov report \
     --manifest-path "${manifest}" \
