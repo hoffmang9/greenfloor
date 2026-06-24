@@ -34,6 +34,13 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
 }
 
+impl BootstrapShapeContext {
+    #[must_use]
+    pub(crate) fn combine_context(&self) -> BootstrapCombineContext {
+        BootstrapCombineContext::new(self.split_asset_mojo_multiplier, &self.split_asset_id)
+    }
+}
+
 fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
     BootstrapPhaseResult::failed(failure)
 }
@@ -159,10 +166,7 @@ async fn replan_after_combine(
         &ctx.ladder_entries,
         &refreshed_spendable,
         resolve_combine_input_cap(),
-        &BootstrapCombineContext {
-            mojo_multiplier: ctx.split_asset_mojo_multiplier,
-            canonical_asset_id: ctx.split_asset_id.clone(),
-        },
+        &ctx.combine_context(),
     );
     let BootstrapPlanOutcome::NeedsShape(split_plan) = replanned else {
         return Ok(Some(bootstrap_result_from_replan(
@@ -251,6 +255,7 @@ pub(super) async fn execute_bootstrap_shape(
 
     let (_, refreshed_spendable) =
         refresh_bootstrap_spendable(program, signer_config, &ctx).await?;
+    let combine_context = ctx.combine_context();
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos: ctx.fee_mojos,
         fee_source: ctx.fee_source,
@@ -260,10 +265,7 @@ pub(super) async fn execute_bootstrap_shape(
         bootstrap_plan,
         ladder_entries: &ctx.ladder_entries,
         refreshed_spendable: &refreshed_spendable,
-        combine_context: BootstrapCombineContext {
-            mojo_multiplier: ctx.split_asset_mojo_multiplier,
-            canonical_asset_id: ctx.split_asset_id.clone(),
-        },
+        combine_context,
     }))
 }
 

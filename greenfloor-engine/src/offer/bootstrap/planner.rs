@@ -5,6 +5,7 @@
 
 use crate::coin_ops::aggregate_covers_without_single_coin;
 
+use super::amounts::BaseUnits;
 use super::combine_inputs::BootstrapCombineInputs;
 use super::combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
 
@@ -26,12 +27,12 @@ pub struct LadderDeficit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapCoin {
     pub id: String,
-    pub amount: i64,
+    pub amount: BaseUnits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapFundingSource {
-    SingleCoin { coin_id: String, amount: i64 },
+    SingleCoin { coin_id: String, amount: BaseUnits },
     CombineFirst(BootstrapCombineInputs),
 }
 
@@ -62,8 +63,8 @@ impl BootstrapPlan {
     #[must_use]
     pub fn source_amount(&self) -> i64 {
         match &self.funding {
-            BootstrapFundingSource::SingleCoin { amount, .. } => *amount,
-            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total,
+            BootstrapFundingSource::SingleCoin { amount, .. } => amount.get(),
+            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total.get(),
         }
     }
 
@@ -94,7 +95,7 @@ pub enum BootstrapPlanOutcome {
 fn spendable_for_combine(coins: &[BootstrapCoin]) -> Vec<BootstrapCoin> {
     coins
         .iter()
-        .filter(|coin| !coin.id.trim().is_empty() && coin.amount > 0)
+        .filter(|coin| !coin.id.trim().is_empty() && coin.amount.get() > 0)
         .cloned()
         .collect()
 }
@@ -104,7 +105,7 @@ fn ladder_row_valid(row: &PlannerLadderRow) -> bool {
 }
 
 fn spendable_coins_valid(coins: &[BootstrapCoin]) -> bool {
-    coins.iter().all(|coin| coin.amount >= 0)
+    coins.iter().all(|coin| coin.amount.get() >= 0)
 }
 
 fn sorted_ladder_rows(ladder_entries: &[PlannerLadderRow]) -> Vec<PlannerLadderRow> {
@@ -155,7 +156,10 @@ pub fn plan_bootstrap_mixed_outputs(
         .iter()
         .map(|row| row.size_base_units)
         .collect();
-    let spendable_amounts: Vec<i64> = spendable_coins.iter().map(|coin| coin.amount).collect();
+    let spendable_amounts: Vec<i64> = spendable_coins
+        .iter()
+        .map(|coin| coin.amount.get())
+        .collect();
     let counts = count_exact_amount_coins(&spendable_amounts, &ladder_sizes);
 
     let mut deficits = Vec::new();
@@ -195,7 +199,7 @@ pub fn plan_bootstrap_mixed_outputs(
         if coin_id.is_empty() {
             return None;
         }
-        if coin.amount >= total_output_amount {
+        if coin.amount.get() >= total_output_amount {
             Some((coin_id.to_string(), coin.amount))
         } else {
             None
@@ -211,7 +215,7 @@ pub fn plan_bootstrap_mixed_outputs(
         let spendable_for_combine = spendable_for_combine(spendable_coins);
         let Some(combine_inputs) = build_bootstrap_combine_plan(
             &spendable_for_combine,
-            total_output_amount,
+            BaseUnits::new(total_output_amount),
             combine_input_cap,
             combine_context,
         ) else {
@@ -219,7 +223,7 @@ pub fn plan_bootstrap_mixed_outputs(
                 total_output_amount,
             };
         };
-        let selected_total = combine_inputs.selected_total;
+        let selected_total = combine_inputs.selected_total.get();
         return BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(combine_inputs),
             output_amounts_base_units: output_amounts,
@@ -236,7 +240,7 @@ pub fn plan_bootstrap_mixed_outputs(
         },
         output_amounts_base_units: output_amounts,
         total_output_amount,
-        change_amount: source_amount - total_output_amount,
+        change_amount: source_amount.get() - total_output_amount,
         deficits,
     })
 }
@@ -248,7 +252,7 @@ mod tests {
         BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
     };
     use crate::coin_ops::aggregate_covers_without_single_coin;
-    use crate::offer::bootstrap::BootstrapCombineContext;
+    use crate::offer::bootstrap::{BaseUnits, BootstrapCombineContext};
 
     const TEST_COMBINE_CAP: i64 = 5;
 
@@ -267,7 +271,7 @@ mod tests {
     fn coin(id: &str, amount: i64) -> BootstrapCoin {
         BootstrapCoin {
             id: id.to_string(),
-            amount,
+            amount: BaseUnits::new(amount),
         }
     }
 
@@ -576,9 +580,9 @@ mod tests {
         assert_combine_first(&plan);
         assert_eq!(plan.total_output_amount, 100);
         let combine = plan.combine_inputs().expect("combine inputs");
-        assert_eq!(combine.target_amount, 100);
-        assert!(combine.selected_total >= 100);
-        assert_eq!(plan.change_amount, combine.selected_total - 100);
+        assert_eq!(combine.target_amount, BaseUnits::new(100));
+        assert!(combine.selected_total.get() >= 100);
+        assert_eq!(plan.change_amount, combine.selected_total.get() - 100);
         let inputs = plan.combine_input_coin_ids().expect("combine input ids");
         assert!(inputs.len() >= 2);
         assert!(inputs.len() <= 5);

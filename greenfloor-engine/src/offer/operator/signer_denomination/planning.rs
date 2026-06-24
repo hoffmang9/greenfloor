@@ -4,7 +4,7 @@ use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
 use crate::config::{LadderEntry, SignerConfig};
 use crate::error::SignerResult;
-use crate::offer::bootstrap::{BootstrapCoin, PlannerLadderRow};
+use crate::offer::bootstrap::{BaseUnits, BootstrapCoin, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 use crate::offer::request::normalize_offer_side;
@@ -88,7 +88,7 @@ pub(super) fn bootstrap_coins_in_base_units(
             let base_units = amount_mojos / multiplier;
             (base_units > 0).then(|| BootstrapCoin {
                 id: coin.id.clone(),
-                amount: base_units,
+                amount: BaseUnits::new(base_units),
             })
         })
         .collect()
@@ -144,6 +144,7 @@ mod tests {
     #[test]
     fn bootstrap_coins_in_base_units_divides_cat_mojos() {
         use super::bootstrap_coins_in_base_units;
+        use crate::offer::bootstrap::BaseUnits;
 
         let coins = vec![
             WalletUnspentCoin {
@@ -161,7 +162,7 @@ mod tests {
         ];
         let base = bootstrap_coins_in_base_units(&coins, 1_000);
         assert_eq!(base.len(), 1);
-        assert_eq!(base[0].amount, 5);
+        assert_eq!(base[0].amount, BaseUnits::new(5));
     }
 
     #[test]

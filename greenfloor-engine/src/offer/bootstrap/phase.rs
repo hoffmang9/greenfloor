@@ -92,8 +92,8 @@ pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPh
 mod tests {
     use super::{bootstrap_early_phase, bootstrap_executed_phase};
     use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapCombineContext, BootstrapPlanOutcome,
-        PlannerLadderRow,
+        plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
+        BootstrapPlanOutcome, PlannerLadderRow,
     };
 
     fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
@@ -107,7 +107,7 @@ mod tests {
     fn coin(id: &str, amount: i64) -> BootstrapCoin {
         BootstrapCoin {
             id: id.to_string(),
-            amount,
+            amount: BaseUnits::new(amount),
         }
     }
 

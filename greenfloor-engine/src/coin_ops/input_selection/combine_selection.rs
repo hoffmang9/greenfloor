@@ -1,13 +1,26 @@
+//! Unit-agnostic target-amount coin selection for combine-first steps.
+//!
+//! Every coin in `coins` and the `target` argument must use the same unit system for
+//! the call: on-chain **mojos** (daemon coin ops) or ladder **base units** (bootstrap).
+
 use crate::coin_ops::selection::{
     select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
 };
 use crate::metrics::metric_non_negative_usize;
 
+/// One coin row for [`select_combine_inputs_for_target`] (unit system chosen by caller).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CombineInputSelection {
+pub(crate) struct TargetAmountCoin {
+    pub id: String,
+    pub amount: i64,
+}
+
+/// Selected inputs covering a target amount (amounts share the caller's unit system).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TargetAmountCoinSelection {
     pub input_coin_ids: Vec<String>,
-    pub target_amount: i64,
+    pub target: i64,
     pub selected_total: i64,
     pub exact_match: bool,
     pub cap_applied: bool,
@@ -15,13 +28,12 @@ pub(crate) struct CombineInputSelection {
     pub combine_input_cap: i64,
 }
 
-/// Select input coins for a combine-first step. Amounts must share one unit system (mojos).
 pub(crate) fn select_combine_inputs_for_target(
-    candidate_spendable: &[SpendableCoin],
-    target_amount: i64,
+    coins: &[TargetAmountCoin],
+    target: i64,
     combine_input_cap: i64,
-) -> Option<CombineInputSelection> {
-    if target_amount <= 0 {
+) -> Option<TargetAmountCoinSelection> {
+    if target <= 0 {
         return None;
     }
 
@@ -30,10 +42,18 @@ pub(crate) fn select_combine_inputs_for_target(
         return None;
     }
 
+    let spendable: Vec<SpendableCoin> = coins
+        .iter()
+        .map(|coin| SpendableCoin {
+            id: coin.id.clone(),
+            amount: coin.amount,
+        })
+        .collect();
+
     let (unconstrained_ids, unconstrained_total, unconstrained_exact) =
         select_spendable_coins_for_target_amount_with_options(
-            candidate_spendable,
-            target_amount,
+            &spendable,
+            target,
             TargetAmountSelectionOptions::default(),
         );
     let selected_count_before_cap = unconstrained_ids.len();
@@ -44,8 +64,8 @@ pub(crate) fn select_combine_inputs_for_target(
     let cap_applied = selected_count_before_cap > cap;
     let (input_coin_ids, selected_total, exact_match) = if cap_applied {
         let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
-            candidate_spendable,
-            target_amount,
+            &spendable,
+            target,
             TargetAmountSelectionOptions::combine_cap(cap),
         );
         if ids.is_empty() {
@@ -62,15 +82,15 @@ pub(crate) fn select_combine_inputs_for_target(
             selected_count_before_cap,
             selected_count = input_coin_ids.len(),
             selected_total,
-            required_amount = target_amount,
+            required_amount = target,
             exact_match,
             "combine prereq input selection hit combine input cap"
         );
     }
 
-    Some(CombineInputSelection {
+    Some(TargetAmountCoinSelection {
         input_coin_ids,
-        target_amount,
+        target,
         selected_total,
         exact_match,
         cap_applied,

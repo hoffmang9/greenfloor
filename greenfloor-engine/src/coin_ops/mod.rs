@@ -26,13 +26,13 @@ pub use gate::{
     coin_op_should_stop, evaluate_coin_combine_gate, evaluate_coin_split_gate,
     CoinCombineGateResult, CoinSplitGateResult,
 };
-pub(crate) use input_selection::select_combine_inputs_for_target;
 pub use input_selection::{
     build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
     plan_exact_amount_combine_inputs, plan_largest_combine_inputs, CliSplitSelection,
     SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipReason,
     SubCatChangeSkipData,
 };
+pub(crate) use input_selection::{select_combine_inputs_for_target, TargetAmountCoin};
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,

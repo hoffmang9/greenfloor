@@ -1,11 +1,11 @@
-//! Bootstrap combine-first input selection (base units only — never [`SpendableCoin`] mojos).
+//! Bootstrap combine-first input selection (base units only).
 
-use super::amounts::bootstrap_overshoot_change_mojos;
+use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits};
 use super::combine_inputs::BootstrapCombineInputs;
 use super::planner::BootstrapCoin;
 use crate::coin_ops::cat_overshoot_change_would_be_dust;
 use crate::coin_ops::select_combine_inputs_for_target;
-use crate::coin_ops::SpendableCoin;
+use crate::coin_ops::TargetAmountCoin;
 
 /// Asset context for bootstrap combine dust validation at plan time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,21 +16,26 @@ pub struct BootstrapCombineContext {
 
 impl BootstrapCombineContext {
     #[must_use]
-    pub fn for_tests() -> Self {
+    pub fn new(mojo_multiplier: i64, canonical_asset_id: impl Into<String>) -> Self {
         Self {
-            mojo_multiplier: 1_000,
-            canonical_asset_id: "xch".to_string(),
+            mojo_multiplier,
+            canonical_asset_id: canonical_asset_id.into(),
         }
+    }
+
+    #[must_use]
+    pub fn for_tests() -> Self {
+        Self::new(1_000, "xch")
     }
 }
 
-fn selection_candidates(coins: &[BootstrapCoin]) -> Vec<SpendableCoin> {
+fn selection_candidates(coins: &[BootstrapCoin]) -> Vec<TargetAmountCoin> {
     coins
         .iter()
-        .filter(|coin| !coin.id.trim().is_empty() && coin.amount > 0)
-        .map(|coin| SpendableCoin {
+        .filter(|coin| !coin.id.trim().is_empty() && coin.amount.get() > 0)
+        .map(|coin| TargetAmountCoin {
             id: coin.id.clone(),
-            amount: coin.amount,
+            amount: coin.amount.get(),
         })
         .collect()
 }
@@ -39,16 +44,21 @@ fn selection_candidates(coins: &[BootstrapCoin]) -> Vec<SpendableCoin> {
 #[must_use]
 pub fn build_bootstrap_combine_plan(
     coins: &[BootstrapCoin],
-    target_amount_base_units: i64,
+    target_amount_base_units: BaseUnits,
     combine_input_cap: i64,
     combine_context: &BootstrapCombineContext,
 ) -> Option<BootstrapCombineInputs> {
     let candidates = selection_candidates(coins);
-    let selection =
-        select_combine_inputs_for_target(&candidates, target_amount_base_units, combine_input_cap)?;
+    let selection = select_combine_inputs_for_target(
+        &candidates,
+        target_amount_base_units.get(),
+        combine_input_cap,
+    )?;
+    let selected_total = BaseUnits::new(selection.selected_total);
+    let target_amount = BaseUnits::new(selection.target);
     let change_mojos = bootstrap_overshoot_change_mojos(
-        selection.selected_total,
-        selection.target_amount,
+        selected_total,
+        target_amount,
         combine_context.mojo_multiplier,
     );
     if cat_overshoot_change_would_be_dust(change_mojos, &combine_context.canonical_asset_id) {
@@ -56,8 +66,8 @@ pub fn build_bootstrap_combine_plan(
     }
     Some(BootstrapCombineInputs {
         input_coin_ids: selection.input_coin_ids,
-        selected_total: selection.selected_total,
-        target_amount: selection.target_amount,
+        selected_total,
+        target_amount,
         exact_match: selection.exact_match,
         cap_applied: selection.cap_applied,
     })
@@ -71,17 +81,14 @@ mod tests {
     fn coin(id: &str, amount: i64) -> BootstrapCoin {
         BootstrapCoin {
             id: id.to_string(),
-            amount,
+            amount: BaseUnits::new(amount),
         }
     }
 
     const CAT_ASSET: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
     fn cat_combine_context() -> BootstrapCombineContext {
-        BootstrapCombineContext {
-            mojo_multiplier: 1_000,
-            canonical_asset_id: CAT_ASSET.to_string(),
-        }
+        BootstrapCombineContext::new(1_000, CAT_ASSET)
     }
 
     #[test]
@@ -90,22 +97,24 @@ mod tests {
             .into_iter()
             .map(|row| coin(&row.id, row.amount))
             .collect();
-        let inputs = build_bootstrap_combine_plan(&spendable, 100, 5, &cat_combine_context())
-            .expect("fragmented inventory should combine within cap=5");
+        let inputs = build_bootstrap_combine_plan(
+            &spendable,
+            BaseUnits::new(100),
+            5,
+            &cat_combine_context(),
+        )
+        .expect("fragmented inventory should combine within cap=5");
         assert!(inputs.cap_applied);
         assert_eq!(inputs.input_coin_ids.len(), 4);
-        assert_eq!(inputs.selected_total, 105);
+        assert_eq!(inputs.selected_total, BaseUnits::new(105));
         assert!(!inputs.exact_match);
-        assert_eq!(inputs.target_amount, 100);
+        assert_eq!(inputs.target_amount, BaseUnits::new(100));
     }
 
     #[test]
     fn rejects_combine_when_overshoot_change_would_be_cat_dust() {
-        let ctx = BootstrapCombineContext {
-            mojo_multiplier: 1,
-            canonical_asset_id: CAT_ASSET.to_string(),
-        };
+        let ctx = BootstrapCombineContext::new(1, CAT_ASSET);
         let spendable = vec![coin("a", 51), coin("b", 50)];
-        assert!(build_bootstrap_combine_plan(&spendable, 100, 10, &ctx).is_none());
+        assert!(build_bootstrap_combine_plan(&spendable, BaseUnits::new(100), 10, &ctx).is_none());
     }
 }

@@ -1,12 +1,12 @@
 //! Bootstrap-local combine input selection (base units only).
 
+use super::amounts::BaseUnits;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapCombineInputs {
     pub input_coin_ids: Vec<String>,
-    /// Sum of selected input coin amounts in ladder base units.
-    pub selected_total: i64,
-    /// Combine output size in ladder base units (vault submit scales by mojo multiplier).
-    pub target_amount: i64,
+    pub selected_total: BaseUnits,
+    pub target_amount: BaseUnits,
     pub exact_match: bool,
     pub cap_applied: bool,
 }

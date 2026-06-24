@@ -171,14 +171,13 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 
     let spendable_coins =
         bootstrap_coins_in_base_units(&asset_scoped_coins, split_asset_mojo_multiplier);
+    let combine_context =
+        BootstrapCombineContext::new(split_asset_mojo_multiplier, &split_asset_id);
     let outcome = plan_bootstrap_mixed_outputs(
         &ladder_entries,
         &spendable_coins,
         resolve_combine_input_cap(),
-        &BootstrapCombineContext {
-            mojo_multiplier: split_asset_mojo_multiplier,
-            canonical_asset_id: split_asset_id.clone(),
-        },
+        &combine_context,
     );
     if let Some(early) = bootstrap_early_phase(&outcome) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));

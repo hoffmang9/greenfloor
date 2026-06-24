@@ -23,14 +23,14 @@ pub(crate) fn bootstrap_combine_vault_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::bootstrap::BootstrapCombineInputs;
+    use crate::offer::bootstrap::{BaseUnits, BootstrapCombineInputs};
 
     #[test]
     fn eco181_shape_outputs_target_not_selected_total() {
         let inputs = BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: 105,
-            target_amount: 100,
+            selected_total: BaseUnits::new(105),
+            target_amount: BaseUnits::new(100),
             exact_match: false,
             cap_applied: true,
         };

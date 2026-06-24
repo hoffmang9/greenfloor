@@ -1,6 +1,6 @@
 use crate::coinset::WalletUnspentCoin;
 use crate::offer::bootstrap::{
-    BootstrapCombineContext, BootstrapFundingSource, BootstrapPlan, PlannerLadderRow,
+    BaseUnits, BootstrapCombineContext, BootstrapFundingSource, BootstrapPlan, PlannerLadderRow,
 };
 
 use super::{
@@ -28,7 +28,7 @@ fn spendable_bootstrap_coins_filters_unconfirmed_wallet_rows() {
     let spendable = spendable_bootstrap_coins(&coins);
     assert_eq!(spendable.len(), 1);
     assert_eq!(spendable[0].id, "confirmed");
-    assert_eq!(spendable[0].amount, 1000);
+    assert_eq!(spendable[0].amount, BaseUnits::new(1000));
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
     let bootstrap_plan = BootstrapPlan {
         funding: BootstrapFundingSource::SingleCoin {
             coin_id: "coin-a".to_string(),
-            amount: 50_000,
+            amount: BaseUnits::new(50_000),
         },
         output_amounts_base_units: vec![100, 100],
         total_output_amount: 200,
@@ -58,7 +58,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
     }];
     let refreshed = vec![crate::offer::bootstrap::BootstrapCoin {
         id: "coin-a".to_string(),
-        amount: 50_000,
+        amount: BaseUnits::new(50_000),
     }];
 
     let result = executed_after_split(ExecutedAfterSplitParams {

@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
-    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BootstrapFundingSource,
-    BootstrapPlan,
+    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits,
+    BootstrapFundingSource, BootstrapPlan,
 };
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
@@ -17,7 +17,10 @@ async fn submit_bootstrap_vault_mixed_split(
     #[cfg(test)] test_overrides: Option<&super::test_overrides::SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
     #[cfg(test)]
-    if let Some(stub) = super::test_overrides::vault_mixed_split_stub_response(test_overrides) {
+    if let Some(stub) = super::test_overrides::vault_mixed_split_stub_response(
+        test_overrides,
+        &output_amounts_mojos,
+    ) {
         let _ = (
             signer_config,
             split_asset_id,
@@ -94,7 +97,11 @@ pub(super) async fn submit_bootstrap_mixed_split(
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
     let output_amounts_mojos = bootstrap_mixed_split_output_mojos(
-        &bootstrap_plan.output_amounts_base_units,
+        &bootstrap_plan
+            .output_amounts_base_units
+            .iter()
+            .map(|amount| BaseUnits::new(*amount))
+            .collect::<Vec<_>>(),
         split_asset_mojo_multiplier.max(1),
     )?;
     submit_bootstrap_vault_mixed_split(
@@ -113,7 +120,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
 mod tests {
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
     use crate::offer::bootstrap::{
-        bootstrap_combine_vault_outputs, BootstrapCombineInputs, BootstrapFundingSource,
+        bootstrap_combine_vault_outputs, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
         BootstrapPlan,
     };
     use crate::offer::operator::signer_denomination::test_overrides::{
@@ -122,7 +129,7 @@ mod tests {
     use crate::test_support::signer_config::test_signer_config;
 
     fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
-        let selected_total = inputs.selected_total;
+        let selected_total = inputs.selected_total.get();
         BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(inputs),
             output_amounts_base_units: vec![100],
@@ -136,8 +143,8 @@ mod tests {
     fn bootstrap_combine_vault_outputs_match_eco181_shape() {
         let inputs = BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: 105,
-            target_amount: 100,
+            selected_total: BaseUnits::new(105),
+            target_amount: BaseUnits::new(100),
             exact_match: false,
             cap_applied: true,
         };
@@ -151,8 +158,8 @@ mod tests {
         overrides.enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
         let plan = combine_first_plan(BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: 105,
-            target_amount: 100,
+            selected_total: BaseUnits::new(105),
+            target_amount: BaseUnits::new(100),
             exact_match: false,
             cap_applied: true,
         });
@@ -168,13 +175,17 @@ mod tests {
         .await
         .expect("combine submit");
         assert_eq!(result["input_coin_count"], 2);
+        assert_eq!(
+            overrides.take_vault_output_amounts_mojos(),
+            Some(vec![100_000])
+        );
     }
 
     fn sample_split_plan(source_coin_id: &str) -> BootstrapPlan {
         BootstrapPlan {
             funding: BootstrapFundingSource::SingleCoin {
                 coin_id: source_coin_id.to_string(),
-                amount: 1_000,
+                amount: BaseUnits::new(1_000),
             },
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

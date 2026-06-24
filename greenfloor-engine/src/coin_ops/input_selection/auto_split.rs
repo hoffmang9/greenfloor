@@ -21,6 +21,29 @@ fn coin_plan(coin: &SpendableCoin) -> SplitCoinPlan {
     }
 }
 
+fn sub_cat_change_skip(
+    selected_coin_id: String,
+    selected_amount_mojos: i64,
+    required_amount_mojos: i64,
+    canonical_asset_id: &str,
+) -> Option<SplitSkipReason> {
+    let (would_create_dust, remainder) = split_would_create_sub_cat_change(
+        selected_amount_mojos,
+        required_amount_mojos,
+        canonical_asset_id,
+    );
+    if !would_create_dust {
+        return None;
+    }
+    Some(SplitSkipReason::SubCatChange(SubCatChangeSkipData {
+        selected_coin_id,
+        selected_amount_mojos,
+        required_amount_mojos,
+        remainder_mojos: remainder,
+        minimum_allowed_mojos: coin_op_min_amount_mojos(canonical_asset_id),
+    }))
+}
+
 /// CLI auto split: pick the largest spendable coin without enforcing required amount.
 #[must_use]
 pub fn plan_cli_auto_split_selection(candidate_spendable: &[SpendableCoin]) -> CliSplitSelection {
@@ -50,22 +73,13 @@ pub fn plan_daemon_auto_split_selection(
     if let Some(selected_coin) =
         select_largest_spendable_coin(candidate_spendable, min_amount, &HashSet::new())
     {
-        let selected_amount = selected_coin.amount;
-        let (would_create_dust, remainder) = split_would_create_sub_cat_change(
-            selected_amount,
+        if let Some(skip) = sub_cat_change_skip(
+            selected_coin.id.clone(),
+            selected_coin.amount,
             required_amount_mojos,
             canonical_asset_id,
-        );
-        if would_create_dust {
-            return SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(
-                SubCatChangeSkipData {
-                    selected_coin_id: selected_coin.id.clone(),
-                    selected_amount_mojos: selected_amount,
-                    required_amount_mojos,
-                    remainder_mojos: remainder,
-                    minimum_allowed_mojos: coin_op_min_amount_mojos(canonical_asset_id),
-                },
-            ));
+        ) {
+            return SplitAutoSelectPlan::Skip(skip);
         }
         return SplitAutoSelectPlan::Coin(coin_plan(selected_coin));
     }
@@ -78,25 +92,13 @@ pub fn plan_daemon_auto_split_selection(
                 required_amount_mojos,
                 combine_input_cap,
             ) {
-                let (would_create_dust, remainder) = split_would_create_sub_cat_change(
+                if let Some(skip) = sub_cat_change_skip(
+                    prereq.input_coin_ids.first().cloned().unwrap_or_default(),
                     prereq.selected_total_mojos,
                     prereq.target_amount_mojos,
                     canonical_asset_id,
-                );
-                if would_create_dust {
-                    return SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(
-                        SubCatChangeSkipData {
-                            selected_coin_id: prereq
-                                .input_coin_ids
-                                .first()
-                                .cloned()
-                                .unwrap_or_default(),
-                            selected_amount_mojos: prereq.selected_total_mojos,
-                            required_amount_mojos: prereq.target_amount_mojos,
-                            remainder_mojos: remainder,
-                            minimum_allowed_mojos: coin_op_min_amount_mojos(canonical_asset_id),
-                        },
-                    ));
+                ) {
+                    return SplitAutoSelectPlan::Skip(skip);
                 }
                 return SplitAutoSelectPlan::CombinePrereq(prereq);
             }
