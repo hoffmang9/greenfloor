@@ -5,7 +5,9 @@ use crate::config::{
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
-use crate::offer::{normalize_offer_side, resolve_market_offer_assets_for_action};
+use crate::offer::{
+    normalize_offer_side, resolve_market_offer_assets_for_action, ResolvedMarketOfferAssets,
+};
 
 use super::BuildAndPostOfferRequest;
 use crate::offer::operator::logging::{sync_manager_file_logging, warn_if_log_level_auto_healed};
@@ -20,8 +22,7 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub publish_venue: String,
     pub dexie_base_url: String,
     pub splash_base_url: String,
-    pub resolved_base_asset_id: String,
-    pub resolved_quote_asset_id: String,
+    pub offer_assets: ResolvedMarketOfferAssets,
     pub quote_price: f64,
     pub action_side: String,
     pub offer_fee_mojos: u64,
@@ -66,8 +67,7 @@ pub(super) async fn resolve_build_and_post_context(
         publish_venue,
         dexie_base_url,
         splash_base_url,
-        resolved_base_asset_id: assets.base_asset_id,
-        resolved_quote_asset_id: assets.quote_asset_id,
+        offer_assets: assets,
         quote_price,
         action_side,
         offer_fee_mojos,
@@ -145,8 +145,11 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         publish_venue: "dexie".to_string(),
         dexie_base_url: "https://api.dexie.space".to_string(),
         splash_base_url: "http://localhost:4000".to_string(),
-        resolved_base_asset_id: "a1".to_string(),
-        resolved_quote_asset_id: "xch".to_string(),
+        offer_assets: ResolvedMarketOfferAssets {
+            base_asset_id: "a1".to_string(),
+            quote_asset_id: "xch".to_string(),
+            quote_asset_for_offer: "xch".to_string(),
+        },
         quote_price: 1.0,
         action_side: "sell".to_string(),
         offer_fee_mojos: 0,
@@ -192,5 +195,42 @@ mod tests {
 
         assert_eq!(fee_mojos, 0);
         assert_eq!(fee_source, "coinset_fee_unavailable");
+    }
+
+    #[tokio::test]
+    async fn resolve_build_and_post_offer_assets_normalize_xch_on_testnet11() {
+        use std::collections::HashMap;
+
+        use serde_json::json;
+
+        use crate::config::MarketConfig;
+        use crate::offer::resolve_market_offer_assets_for_action;
+        use crate::test_support::signer_config::test_signer_config;
+
+        let cat = "a".repeat(64);
+        let market = MarketConfig {
+            market_id: "m1".to_string(),
+            enabled: true,
+            base_asset: cat.clone(),
+            base_symbol: "A1".to_string(),
+            quote_asset: "xch".to_string(),
+            quote_asset_type: "unstable".to_string(),
+            receive_address: "xch1".to_string(),
+            signer_key_id: "key-main-1".to_string(),
+            mode: "sell_only".to_string(),
+            pricing: json!({}),
+            cancel_move_threshold_bps: None,
+            ladders: HashMap::default(),
+        };
+        let signer = test_signer_config("http://127.0.0.1:1");
+
+        let assets = resolve_market_offer_assets_for_action(&signer, &market, "testnet11")
+            .await
+            .expect("resolve offer assets");
+
+        assert_eq!(market.quote_asset, "xch");
+        assert_eq!(assets.quote_asset_for_offer, "txch");
+        assert_eq!(assets.quote_asset_id, "txch");
+        assert_ne!(assets.quote_asset_for_offer, market.quote_asset);
     }
 }

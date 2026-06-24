@@ -29,8 +29,8 @@ async fn run_bootstrap_phase(
             &ctx.program,
             &ctx.market,
             &ctx.signer_config,
-            &ctx.resolved_base_asset_id,
-            &ctx.resolved_quote_asset_id,
+            &ctx.offer_assets.base_asset_id,
+            &ctx.offer_assets.quote_asset_id,
             ctx.quote_price,
             &ctx.action_side,
         )
@@ -104,9 +104,9 @@ async fn publish_created_offer(
     let asset_fields = expected_publish_asset_fields(
         side,
         &ctx.market.base_symbol,
-        &ctx.market.quote_asset,
-        &ctx.resolved_base_asset_id,
-        &ctx.resolved_quote_asset_id,
+        &ctx.offer_assets.quote_asset_for_offer,
+        &ctx.offer_assets.base_asset_id,
+        &ctx.offer_assets.quote_asset_id,
     );
     let publish_started = Instant::now();
     let publish = publish_offer(

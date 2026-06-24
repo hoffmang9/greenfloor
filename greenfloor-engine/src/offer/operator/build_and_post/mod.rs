@@ -164,8 +164,8 @@ fn build_and_post_payload(
     json!({
         "market_id": ctx.market.market_id,
         "pair": format!("{}:{}", ctx.market.base_asset, ctx.market.quote_asset),
-        "resolved_base_asset_id": ctx.resolved_base_asset_id,
-        "resolved_quote_asset_id": ctx.resolved_quote_asset_id,
+        "resolved_base_asset_id": ctx.offer_assets.base_asset_id,
+        "resolved_quote_asset_id": ctx.offer_assets.quote_asset_id,
         "network": ctx.program.network,
         "size_base_units": request.size_base_units,
         "repeat": request.repeat,

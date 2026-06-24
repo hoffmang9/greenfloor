@@ -4,6 +4,26 @@ use crate::offer::{build_signer_offer_for_action, BuildOfferForActionRequest};
 
 use super::context::ResolvedBuildAndPostContext;
 
+pub(super) fn build_create_offer_request(
+    ctx: &ResolvedBuildAndPostContext,
+    size_base_units: u64,
+) -> BuildOfferForActionRequest {
+    BuildOfferForActionRequest {
+        receive_address: ctx.market.receive_address.clone(),
+        base_asset: ctx.market.base_asset.clone(),
+        quote_asset: ctx.offer_assets.quote_asset_for_offer.clone(),
+        size_base_units,
+        action_side: ctx.action_side.clone(),
+        pricing: ctx.market.pricing.clone(),
+        quote_price: Some(ctx.quote_price),
+        // Presplit (ent-wallet `splitInputCoins`): vault singleton spends only in the split tx;
+        // the Dexie offer file is self-contained so one taker fill does not invalidate siblings.
+        split_input_coins: true,
+        broadcast_split: true,
+        offer_coin_ids: Vec::new(),
+    }
+}
+
 pub(super) async fn create_offer(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
@@ -20,19 +40,29 @@ pub(super) async fn create_offer(
             create_result: None,
         });
     }
-    let request = BuildOfferForActionRequest {
-        receive_address: ctx.market.receive_address.clone(),
-        base_asset: ctx.market.base_asset.clone(),
-        quote_asset: ctx.market.quote_asset.clone(),
-        size_base_units,
-        action_side: ctx.action_side.clone(),
-        pricing: ctx.market.pricing.clone(),
-        quote_price: Some(ctx.quote_price),
-        // Presplit (ent-wallet `splitInputCoins`): vault singleton spends only in the split tx;
-        // the Dexie offer file is self-contained so one taker fill does not invalidate siblings.
-        split_input_coins: true,
-        broadcast_split: true,
-        offer_coin_ids: Vec::new(),
-    };
+    let request = build_create_offer_request(ctx, size_base_units);
     build_signer_offer_for_action(ctx.signer_config.clone(), request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offer::operator::build_and_post::context::sample_resolved_build_and_post_context;
+    use crate::offer::ResolvedMarketOfferAssets;
+
+    #[test]
+    fn create_offer_request_uses_normalized_quote_from_offer_assets() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.market.quote_asset = "xch".to_string();
+        ctx.offer_assets = ResolvedMarketOfferAssets {
+            base_asset_id: "a1".to_string(),
+            quote_asset_id: "txch".to_string(),
+            quote_asset_for_offer: "txch".to_string(),
+        };
+
+        let request = build_create_offer_request(&ctx, 100);
+
+        assert_eq!(request.quote_asset, "txch");
+        assert_ne!(request.quote_asset, ctx.market.quote_asset);
+    }
 }
