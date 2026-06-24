@@ -8,12 +8,12 @@ use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
     bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCombineContext, BootstrapPlan,
-    BootstrapPlanOutcome, PlannerLadderRow,
+    BootstrapPlanOutcome, BootstrapWaitStepKind, PlannerLadderRow,
 };
 
 use super::planning::bootstrap_coins_in_base_units;
 use super::split_submit::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-use super::wait::{wait_for_coinset_confirmation, BootstrapWaitConfig};
+use super::wait::{wait_for_bootstrap_shape_ready, BootstrapWaitConfig};
 use super::{
     executed_after_split, BootstrapPhaseFailure, BootstrapPhaseResult, ExecutedAfterSplitParams,
 };
@@ -26,19 +26,13 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) receive_address: String,
     pub(crate) bootstrap_plan: BootstrapPlan,
     pub(crate) ladder_entries: Vec<PlannerLadderRow>,
+    pub(crate) combine_context: BootstrapCombineContext,
     pub(crate) fee_mojos: u64,
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
     pub(crate) existing_coin_ids: HashSet<String>,
     #[cfg(test)]
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
-}
-
-impl BootstrapShapeContext {
-    #[must_use]
-    pub(crate) fn combine_context(&self) -> BootstrapCombineContext {
-        BootstrapCombineContext::new(self.split_asset_mojo_multiplier, &self.split_asset_id)
-    }
 }
 
 fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
@@ -64,15 +58,15 @@ async fn wait_for_bootstrap_shape_confirmation(
     signer_config: &SignerConfig,
     ctx: &BootstrapShapeContext,
     failure_reason: &'static str,
+    step: BootstrapWaitStepKind,
 ) -> Result<Vec<serde_json::Value>, BootstrapPhaseResult> {
-    wait_for_coinset_confirmation(BootstrapWaitConfig {
+    wait_for_bootstrap_shape_ready(BootstrapWaitConfig {
         network: &program.network,
         signer: signer_config,
-        receive_address: &ctx.receive_address,
-        asset_id: &ctx.split_asset_id,
-        initial_coin_ids: &ctx.existing_coin_ids,
+        ctx,
         timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+        step,
     })
     .await
     .map_err(|err| {
@@ -137,6 +131,7 @@ async fn execute_bootstrap_combine_step(
         signer_config,
         ctx,
         "bootstrap_combine_wait_failed",
+        BootstrapWaitStepKind::AfterCombine,
     )
     .await?;
     wait_events.insert(
@@ -166,7 +161,7 @@ async fn replan_after_combine(
         &ctx.ladder_entries,
         &refreshed_spendable,
         resolve_combine_input_cap(),
-        &ctx.combine_context(),
+        &ctx.combine_context,
     );
     let BootstrapPlanOutcome::NeedsShape(split_plan) = replanned else {
         return Ok(Some(bootstrap_result_from_replan(
@@ -176,8 +171,9 @@ async fn replan_after_combine(
         )));
     };
     if split_plan.requires_combine_first() {
+        ctx.bootstrap_plan = split_plan;
         return Ok(Some(bootstrap_result_from_replan(
-            &BootstrapPlanOutcome::NeedsShape(split_plan),
+            &BootstrapPlanOutcome::NeedsShape(ctx.bootstrap_plan.clone()),
             ctx,
             prepend_wait_events,
         )));
@@ -242,6 +238,7 @@ pub(super) async fn execute_bootstrap_shape(
         signer_config,
         &ctx,
         "bootstrap_wait_failed",
+        BootstrapWaitStepKind::AfterSplit,
     )
     .await
     {
@@ -255,7 +252,6 @@ pub(super) async fn execute_bootstrap_shape(
 
     let (_, refreshed_spendable) =
         refresh_bootstrap_spendable(program, signer_config, &ctx).await?;
-    let combine_context = ctx.combine_context();
     Ok(executed_after_split(ExecutedAfterSplitParams {
         fee_mojos: ctx.fee_mojos,
         fee_source: ctx.fee_source,
@@ -265,7 +261,7 @@ pub(super) async fn execute_bootstrap_shape(
         bootstrap_plan,
         ladder_entries: &ctx.ladder_entries,
         refreshed_spendable: &refreshed_spendable,
-        combine_context,
+        combine_context: ctx.combine_context,
     }))
 }
 

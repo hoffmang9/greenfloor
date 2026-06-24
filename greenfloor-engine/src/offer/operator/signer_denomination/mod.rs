@@ -25,9 +25,13 @@ use crate::offer::bootstrap::{
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
+pub(crate) use bootstrap_execute::BootstrapShapeContext;
 pub use types::BootstrapPhaseResult;
 
-use bootstrap_execute::{execute_bootstrap_shape, BootstrapShapeContext};
+#[cfg(test)]
+pub(crate) use test_overrides::SignerDenominationTestOverrides;
+
+use bootstrap_execute::execute_bootstrap_shape;
 use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
@@ -213,6 +217,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         receive_address: receive_address.to_string(),
         bootstrap_plan,
         ladder_entries,
+        combine_context,
         fee_mojos,
         fee_source,
         fee_lookup_error,

@@ -2,6 +2,8 @@
 #![allow(clippy::large_futures)] // simulator offer paths exceed Clippy threshold; not production code.
 
 #[cfg(test)]
+pub mod bootstrap_shape;
+#[cfg(test)]
 pub mod build_and_post;
 #[cfg(test)]
 mod export_fixtures_test;

@@ -2,6 +2,13 @@
 
 use super::planner::BootstrapPlanOutcome;
 
+/// Which bootstrap shape step a confirmation wait is polling for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BootstrapWaitStepKind {
+    AfterCombine,
+    AfterSplit,
+}
+
 /// Manager-visible bootstrap phase fields (status / reason / ready).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapPhaseSnapshot {
@@ -48,6 +55,24 @@ pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<Bootstrap
     }
 }
 
+/// Whether on-chain inventory satisfies the bootstrap wait step (planner re-evaluation).
+#[must_use]
+pub(crate) fn bootstrap_wait_step_satisfied(
+    step: BootstrapWaitStepKind,
+    outcome: &BootstrapPlanOutcome,
+) -> bool {
+    match step {
+        BootstrapWaitStepKind::AfterCombine => match outcome {
+            BootstrapPlanOutcome::Ready => true,
+            BootstrapPlanOutcome::NeedsShape(plan) => !plan.requires_combine_first(),
+            BootstrapPlanOutcome::CannotFund { .. }
+            | BootstrapPlanOutcome::InvalidLadder
+            | BootstrapPlanOutcome::InvalidCoins => false,
+        },
+        BootstrapWaitStepKind::AfterSplit => matches!(outcome, BootstrapPlanOutcome::Ready),
+    }
+}
+
 /// Map a post-split replan outcome to executed-phase status/reason/ready.
 #[must_use]
 pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
@@ -90,7 +115,10 @@ pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPh
 
 #[cfg(test)]
 mod tests {
-    use super::{bootstrap_early_phase, bootstrap_executed_phase};
+    use super::{
+        bootstrap_early_phase, bootstrap_executed_phase, bootstrap_wait_step_satisfied,
+        BootstrapWaitStepKind,
+    };
     use crate::offer::bootstrap::{
         plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
         BootstrapPlanOutcome, PlannerLadderRow,
@@ -135,5 +163,67 @@ mod tests {
         assert!(phase
             .reason
             .contains("still_underfunded:total_output_amount=20"));
+    }
+
+    #[test]
+    fn after_combine_wait_not_satisfied_on_cannot_fund_or_still_combine_first() {
+        let ladder = vec![row(100, 1, 0)];
+        let change_only = vec![coin("change", 5)];
+        let outcome = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &change_only,
+            5,
+            &BootstrapCombineContext::for_tests(),
+        );
+        assert!(!bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterCombine,
+            &outcome
+        ));
+
+        let cannot_fund = BootstrapPlanOutcome::CannotFund {
+            total_output_amount: 100,
+        };
+        assert!(!bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterCombine,
+            &cannot_fund
+        ));
+    }
+
+    #[test]
+    fn after_combine_wait_satisfied_when_single_coin_split_plan_available() {
+        let ladder = vec![row(100, 1, 0)];
+        let spendable = vec![coin("combined", 100)];
+        let outcome = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            5,
+            &BootstrapCombineContext::for_tests(),
+        );
+        assert!(bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterCombine,
+            &outcome
+        ));
+    }
+
+    #[test]
+    fn after_split_wait_satisfied_only_when_ready() {
+        let ready = BootstrapPlanOutcome::Ready;
+        assert!(bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterSplit,
+            &ready
+        ));
+
+        let ladder = vec![row(100, 2, 0)];
+        let spendable = vec![coin("combined", 100)];
+        let needs_split = plan_bootstrap_mixed_outputs(
+            &ladder,
+            &spendable,
+            5,
+            &BootstrapCombineContext::for_tests(),
+        );
+        assert!(!bootstrap_wait_step_satisfied(
+            BootstrapWaitStepKind::AfterSplit,
+            &needs_split
+        ));
     }
 }
