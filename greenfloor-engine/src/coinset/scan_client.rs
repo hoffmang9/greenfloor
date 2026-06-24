@@ -2,8 +2,9 @@
 
 use serde_json::{json, Value};
 
-use super::api::{post_coinset_coin_records, post_coinset_record};
+use super::api::{post_coinset_record, post_coinset_rpc};
 use super::direct_api::resolve_direct_client;
+use super::pagination::coin_records_from_json_endpoint;
 use super::parse::{chunk_values, coin_id_from_record, to_coinset_hex, u64_from_value};
 use super::retry::with_script_retries;
 use crate::error::SignerResult;
@@ -68,8 +69,22 @@ impl DirectCoinsetScanClient {
         apply_height_fields(&mut body, start_height, end_height);
         let network = self.network.clone();
         let base_url = self.base_url.clone();
-        with_script_retries(|| async {
-            post_coinset_coin_records(&network, base_url.as_deref(), endpoint, body.clone()).await
+        let endpoint = endpoint.to_string();
+        coin_records_from_json_endpoint(|cursor| {
+            let network = network.clone();
+            let base_url = base_url.clone();
+            let endpoint = endpoint.clone();
+            let mut page_body = body.clone();
+            async move {
+                if let Some(cursor) = cursor {
+                    page_body["cursor"] = json!(cursor);
+                }
+                with_script_retries(|| async {
+                    post_coinset_rpc(&network, base_url.as_deref(), &endpoint, page_body.clone())
+                        .await
+                })
+                .await
+            }
         })
         .await
     }

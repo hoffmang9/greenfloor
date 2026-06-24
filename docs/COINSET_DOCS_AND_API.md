@@ -15,7 +15,7 @@ For repo-specific execution and host validation, use:
 
 This file summarizes the public docs currently available from `https://www.coinset.org/docs` and linked usage pages.
 
-**As of:** 2026-02-19
+**As of:** 2026-06-24
 
 ## Overview
 
@@ -23,7 +23,8 @@ This file summarizes the public docs currently available from `https://www.coins
 - Mainnet API base URL: `https://api.coinset.org`.
 - Testnet11 base URL: `https://testnet11.api.coinset.org`.
 - Most documented endpoints use `POST` + JSON body.
-- Real-time updates are documented via WebSocket at `wss://coinset.org/ws`.
+- The API supports **HTTP/2** (negotiated automatically by modern HTTP clients).
+- Real-time updates are documented via WebSocket at `wss://api.coinset.org/ws` (also referenced as `wss://coinset.org/ws` in older notes).
 - Docs site is hosted separately at `https://www.coinset.org/docs`.
 
 ### Network Routing (Explicit)
@@ -69,6 +70,36 @@ curl https://testnet11.api.coinset.org
   - `start_height` (`uint32`)
   - `end_height` (`uint32`)
   - `include_spent_coins` (boolean)
+
+### Coin-record pagination (Coinset extension)
+
+The public docs at `coinset.org` do **not** document cursor pagination, but the live Coinset API (and `chia-sdk-coinset`) support it on coin-record query endpoints:
+
+| Direction | Field         | Type               | Meaning                                                                                                   |
+| --------- | ------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
+| Request   | `cursor`      | string (optional)  | Opaque resume token from a prior response. Omit on the first page.                                        |
+| Response  | `truncated`   | boolean (optional) | `true` when the server hit its per-stream key limit (`scan_max_keys_per_stream`) and more records remain. |
+| Response  | `next_cursor` | string (optional)  | Pass back as request `cursor` to fetch the next page. Present when `truncated` is `true`.                 |
+
+Applies to:
+
+- `get_coin_records_by_puzzle_hash`
+- `get_coin_records_by_puzzle_hashes`
+- `get_coin_records_by_hint` / `get_coin_records_by_hints`
+- `get_coin_records_by_names`
+- `get_coin_records_by_parent_ids`
+
+**Pagination loop:**
+
+1. POST with the normal filters (`puzzle_hash`, `include_spent_coins`, optional `start_height` / `end_height`).
+2. Append `coin_records` from the response.
+3. If `truncated` is `true`, repeat with `"cursor": "<next_cursor>"` (same endpoint and filters).
+4. Stop when `truncated` is absent or `false`.
+5. If `truncated` is `true` but `next_cursor` is missing, treat the scan as incomplete.
+
+**Height windows** (`start_height` / `end_height`) remain a separate, documented filter strategy for narrowing scans by confirmation height. They complement cursor pagination but do not replace it on very large single-puzzle-hash wallets.
+
+GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`) and script scans (`coinset/scan_client.rs`) follow cursor pages automatically.
 
 ## Endpoint Catalog (Verified)
 
@@ -151,19 +182,19 @@ Use this as a quick "minimum payload" guide when wiring clients.
 
 ### Coins
 
-| Endpoint                                        | Required body fields |
-| ----------------------------------------------- | -------------------- |
-| `POST /get_coin_record_by_name`                 | `name`               |
-| `POST /get_coin_records_by_hint`                | `hint`               |
-| `POST /get_coin_records_by_hints`               | `hints`              |
-| `POST /get_coin_records_by_names`               | `names`              |
-| `POST /get_coin_records_by_parent_ids`          | `parent_ids`         |
-| `POST /get_coin_records_by_puzzle_hash`         | `puzzle_hash`        |
-| `POST /get_coin_records_by_puzzle_hashes`       | `puzzle_hashes`      |
-| `POST /get_memos_by_coin_name`                  | `name`               |
-| `POST /get_puzzle_and_solution`                 | `coin_id`            |
-| `POST /get_puzzle_and_solution_with_conditions` | `coin_id`            |
-| `POST /push_tx`                                 | `spend_bundle`       |
+| Endpoint                                        | Required body fields                                                                     |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `POST /get_coin_record_by_name`                 | `name`                                                                                   |
+| `POST /get_coin_records_by_hint`                | `hint`                                                                                   |
+| `POST /get_coin_records_by_hints`               | `hints`                                                                                  |
+| `POST /get_coin_records_by_names`               | `names`                                                                                  |
+| `POST /get_coin_records_by_parent_ids`          | `parent_ids`                                                                             |
+| `POST /get_coin_records_by_puzzle_hash`         | `puzzle_hash` (+ optional `cursor`, `start_height`, `end_height`, `include_spent_coins`) |
+| `POST /get_coin_records_by_puzzle_hashes`       | `puzzle_hashes` (+ optional `cursor`, height filters, `include_spent_coins`)             |
+| `POST /get_memos_by_coin_name`                  | `name`                                                                                   |
+| `POST /get_puzzle_and_solution`                 | `coin_id`                                                                                |
+| `POST /get_puzzle_and_solution_with_conditions` | `coin_id`                                                                                |
+| `POST /push_tx`                                 | `spend_bundle`                                                                           |
 
 ### Fees / Full Node / Mempool / WebSocket
 
