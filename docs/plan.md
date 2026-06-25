@@ -22,7 +22,7 @@ vault bootstrap     ──►  create_kms_vault.py → ent-wallet GraphQL (one-t
 adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
 ```
 
-- **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
+- **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + direct Coinset HTTP API).
 - **Config policy for operators:** Rust (`config/program.rs`, `config/markets.rs`, `config/signer.rs`).
 - **Script-facing config reads:** `greenfloor-manager program-fields`, `markets-fields`,
   `cats-fields` (via `greenfloor-manager`); not direct YAML policy walks.

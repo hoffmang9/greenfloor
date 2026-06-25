@@ -5,11 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::coinset::{
-    self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset,
-};
-use crate::config::{resolve_quote_asset_for_offer, MarketConfig, SignerConfig};
+use crate::coinset::parse_coin_ids;
+use crate::config::CatTickerIndex;
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
@@ -76,130 +76,38 @@ fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64
     resolve_quote_price_for_pricing(&request.pricing)
 }
 
-fn resolved_assets_or_collision_error(
-    resolved_base: String,
-    resolved_quote: String,
-) -> SignerResult<(String, String)> {
-    if resolved_base == resolved_quote
-        && !is_xch_like_asset(&resolved_base)
-        && !is_xch_like_asset(&resolved_quote)
-    {
-        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
-    }
-    Ok((resolved_base, resolved_quote))
-}
-
-/// Try normalize resolved assets.
+/// Build signer offer for action.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub fn try_normalize_resolved_assets(
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    let (resolved_base, resolved_quote) = (
-        normalize_asset_id(base_asset)?,
-        normalize_asset_id(quote_asset)?,
-    );
-    resolved_assets_or_collision_error(resolved_base, resolved_quote)
-}
+pub async fn build_signer_offer_for_action(
+    config: SignerConfig,
+    request: BuildOfferForActionRequest,
+    ticker_index: &CatTickerIndex,
+    operator_network: &str,
+) -> SignerResult<BuildOfferForActionResult> {
+    let resolver = OfferAssetResolver::new(&config, ticker_index, operator_network);
+    let (resolved_base, resolved_quote) = resolver
+        .resolve_pair(&request.base_asset, &request.quote_asset)
+        .await?;
+    let quote_price = resolve_quote_price(&request)?;
+    let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
+    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
+    let side = normalize_offer_side(&request.action_side).to_string();
+    let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
+    let create_result =
+        build_vault_cat_offer(config, operator_network.to_string(), create_request).await?;
 
-/// Resolve offer assets via coinset.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_offer_assets_via_coinset(
-    config: &SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    let msp = MspCoinset::for_signer(config)?;
-    resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
-}
-
-/// Resolve offer assets for action.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_offer_assets_for_action(
-    config: &SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    match try_normalize_resolved_assets(base_asset, quote_asset) {
-        Ok(resolved) => Ok(resolved),
-        Err(SignerError::ResolvedAssetsCollideForNonXchPair) => {
-            Err(SignerError::ResolvedAssetsCollideForNonXchPair)
-        }
-        Err(_) => resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await,
-    }
-}
-
-/// Resolve a market base asset id for coin-op and inventory paths (xch quote leg).
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_base_asset_id(
-    config: &SignerConfig,
-    base_asset: &str,
-) -> SignerResult<String> {
-    let (resolved_base_asset_id, _) =
-        resolve_offer_assets_for_action(config, base_asset.trim(), "xch").await?;
-    Ok(resolved_base_asset_id)
-}
-
-/// Resolved on-chain asset ids for a configured market row (offer build / reservations).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedMarketOfferAssets {
-    pub base_asset_id: String,
-    pub quote_asset_id: String,
-    /// Network-normalized quote leg label used for asset resolution and fee routing.
-    pub quote_asset_for_offer: String,
-}
-
-/// Resolve base and quote asset ids for a configured market row (offer build / reservations).
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_offer_assets_for_action(
-    config: &SignerConfig,
-    market: &MarketConfig,
-    program_network: &str,
-) -> SignerResult<ResolvedMarketOfferAssets> {
-    let quote_asset_for_offer =
-        resolve_quote_asset_for_offer(market.quote_asset.trim(), program_network);
-    let (base_asset_id, quote_asset_id) =
-        resolve_offer_assets_for_action(config, market.base_asset.trim(), &quote_asset_for_offer)
-            .await?;
-    Ok(ResolvedMarketOfferAssets {
-        base_asset_id,
-        quote_asset_id,
-        quote_asset_for_offer,
+    Ok(BuildOfferForActionResult {
+        offer_text: create_result.offer.clone(),
+        side,
+        expires_at_unix,
+        offer_amount: leg.offer_amount_mojos,
+        request_amount: leg.request_amount_mojos,
+        execution_mode: create_result.execution_mode.to_string(),
+        create_result: Some(create_result),
     })
-}
-
-/// Resolve fee-leg asset id for parallel offer reservations.
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_market_offer_fee_asset_id(
-    config: &SignerConfig,
-    assets: &ResolvedMarketOfferAssets,
-) -> SignerResult<String> {
-    if is_xch_like_asset(&assets.quote_asset_for_offer) {
-        return Ok(assets.quote_asset_id.clone());
-    }
-    Ok(
-        resolve_offer_assets_for_action(config, "xch", &assets.quote_asset_for_offer)
-            .await?
-            .0,
-    )
 }
 
 fn leg_amounts_for_request(
@@ -231,40 +139,11 @@ fn create_offer_request_from_leg(
         offer_amount: leg.offer_amount_mojos,
         request_asset_id: leg.request_asset_id.clone(),
         request_amount: leg.request_amount_mojos,
-        offer_coin_ids: coinset::parse_coin_ids(&request.offer_coin_ids)?,
+        offer_coin_ids: parse_coin_ids(&request.offer_coin_ids)?,
         presplit_coin_ids: Vec::new(),
         split_input_coins: request.split_input_coins,
         broadcast_split: request.broadcast_split,
         expires_at: Some(expires_at_unix),
-    })
-}
-
-/// Build signer offer for action.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn build_signer_offer_for_action(
-    config: SignerConfig,
-    request: BuildOfferForActionRequest,
-) -> SignerResult<BuildOfferForActionResult> {
-    let (resolved_base, resolved_quote) =
-        resolve_offer_assets_for_action(&config, &request.base_asset, &request.quote_asset).await?;
-    let quote_price = resolve_quote_price(&request)?;
-    let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
-    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
-    let side = normalize_offer_side(&request.action_side).to_string();
-    let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
-    let create_result = build_vault_cat_offer(config, create_request).await?;
-
-    Ok(BuildOfferForActionResult {
-        offer_text: create_result.offer.clone(),
-        side,
-        expires_at_unix,
-        offer_amount: leg.offer_amount_mojos,
-        request_amount: leg.request_amount_mojos,
-        execution_mode: create_result.execution_mode.to_string(),
-        create_result: Some(create_result),
     })
 }
 
@@ -283,45 +162,5 @@ mod tests {
             .expect("expiry");
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
-    }
-
-    #[test]
-    fn try_normalize_accepts_pre_resolved_assets() {
-        let cat = "a".repeat(64);
-        let (base, quote) = try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
-        assert_eq!(base, cat);
-        assert_eq!(quote, "xch");
-    }
-
-    #[test]
-    fn collision_error_does_not_use_other_variant() {
-        let cat = "a".repeat(64);
-        let err = try_normalize_resolved_assets(&cat, &cat).expect_err("collision");
-        assert!(matches!(
-            err,
-            SignerError::ResolvedAssetsCollideForNonXchPair
-        ));
-    }
-
-    use crate::test_support::signer_config::test_signer_config;
-
-    #[tokio::test]
-    async fn resolve_via_coinset_looks_up_ticker_symbols() {
-        let mut server = mockito::Server::new_async().await;
-        let cat_id = "b".repeat(64);
-        let _mock = server
-            .mock("POST", "/lookup_asset_by_symbol")
-            .with_status(200)
-            .with_body(format!(
-                r#"{{"success":true,"asset":{{"asset_id":"{cat_id}","symbol":"HOA"}}}}"#
-            ))
-            .create_async()
-            .await;
-        let config = test_signer_config(&server.url());
-        let (base, quote) = resolve_offer_assets_via_coinset(&config, "HOA", "xch")
-            .await
-            .expect("coinset resolution");
-        assert_eq!(base, cat_id);
-        assert_eq!(quote, "xch");
     }
 }

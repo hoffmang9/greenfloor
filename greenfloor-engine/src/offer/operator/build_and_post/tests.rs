@@ -301,6 +301,7 @@ async fn dry_run_returns_preview_payload_in_process() {
         program_path: program,
         markets_path: markets,
         testnet_markets_path: None,
+        cats_path: None,
         network: "mainnet".to_string(),
         market_id: Some("m1".to_string()),
         pair: None,

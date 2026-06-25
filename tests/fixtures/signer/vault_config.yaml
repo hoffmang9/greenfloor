@@ -4,7 +4,7 @@ signer:
   kms_key_id: arn:aws:kms:us-west-2:123:key/abc
   kms_region: us-west-2
   kms_public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
-  coinset_msp_base_url: https://api-msp.coinset.org
+  coinset_base_url: https://api.coinset.org
 vault:
   launcher_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   custody_threshold: 1

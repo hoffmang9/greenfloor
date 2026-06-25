@@ -248,7 +248,7 @@ wscat -c wss://coinset.org/ws
 
 - Offer lifecycle reads (coin lookup, vault singleton, mempool tx ids): `greenfloor-engine`
   `coinset` subcommands and `greenfloor-engine/src/coinset/`.
-- **Offer cancel submit:** `offers-cancel` broadcasts reclaim spend bundles via Coinset MSP
+- **Offer cancel submit:** `offers-cancel` broadcasts reclaim spend bundles via the direct Coinset HTTP API
   (`push_tx` / broadcast helpers). Dexie is not used for cancel submission (ADR 0015).
 - Cancel tx ids are observed for reconcile; operator DB state is `cancel_submitted` until
   confirmation promotes to `cancelled`.

@@ -43,7 +43,7 @@ pub(super) fn resolve_scan_client(request: &ScanRequest) -> SignerResult<Resolve
 }
 
 pub(super) fn resolve_scan_metadata(request: &ScanRequest) -> SignerResult<ScanMetadata> {
-    let (ticker_to_asset_ids, asset_id_to_symbols) = build_cat_ticker_index_lenient(
+    let index = build_cat_ticker_index_lenient(
         &request.cats_config,
         &request.markets_config,
         request.testnet_markets_config.as_deref(),
@@ -57,7 +57,7 @@ pub(super) fn resolve_scan_metadata(request: &ScanRequest) -> SignerResult<ScanM
     let (requested_cat_ids, unresolved_cat_tickers) = resolve_requested_cat_ids(
         &requested_cat_ids_raw,
         &request.requested_cat_tickers,
-        &ticker_to_asset_ids,
+        &index.by_ticker,
     );
     if !unresolved_cat_tickers.is_empty() {
         return Err(SignerError::Other(format!(
@@ -76,7 +76,7 @@ pub(super) fn resolve_scan_metadata(request: &ScanRequest) -> SignerResult<ScanM
     Ok(ScanMetadata {
         effective_asset_type,
         requested_cat_ids,
-        asset_id_to_symbols,
+        asset_id_to_symbols: index.symbols_by_asset_id,
     })
 }
 

@@ -1,6 +1,5 @@
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapCoin,
@@ -15,7 +14,7 @@ use super::types::{
     BootstrapPhaseResult,
 };
 use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
-use super::ExecutedAfterSplitParams;
+use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 
 const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
@@ -101,10 +100,10 @@ fn bootstrap_wait_failed(
     )
 }
 
+#[allow(clippy::large_futures)]
 async fn execute_bootstrap_combine_step(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    ctx: &BootstrapShapeContext,
+    ctx: &ResolvedBuildAndPostContext,
+    shape: &BootstrapShapeContext,
 ) -> Result<
     (
         Vec<serde_json::Value>,
@@ -114,49 +113,53 @@ async fn execute_bootstrap_combine_step(
     BootstrapPhaseResult,
 > {
     let combine_result = submit_bootstrap_combine(
-        signer_config,
-        &ctx.bootstrap_plan,
-        &ctx.split_asset_id,
-        &ctx.receive_address,
-        ctx.split_asset_mojo_multiplier,
+        &ctx.gated.signer,
+        &ctx.gated.operator_network,
+        &shape.bootstrap_plan,
+        &shape.split_asset_id,
+        &shape.receive_address,
+        shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&ctx.test_overrides),
+        Some(&shape.test_overrides),
     )
     .await
     .map_err(|err| {
         bootstrap_failed(BootstrapPhaseFailure::new(
             format!("signer_bootstrap_combine_error:{err}"),
-            ctx.fee_mojos,
-            ctx.fee_source.clone(),
-            ctx.fee_lookup_error.clone(),
+            shape.fee_mojos,
+            shape.fee_source.clone(),
+            shape.fee_lookup_error.clone(),
         ))
     })?;
 
     let wait = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
-        ctx,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        network: &ctx.gated.operator_network,
+        signer: &ctx.gated.signer,
+        ctx: shape,
+        timeout_seconds: ctx
+            .gated
+            .program
+            .runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterCombine,
     })
     .await
     .map_err(|err| {
         if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
-            return ctx.executed_on_shape_wait_timeout(
+            return shape.executed_on_shape_wait_timeout(
                 "bootstrap_submitted:after_combine_wait_timeout",
                 BootstrapExecutedExtras {
                     wait_events: vec![json!({
                         "event": "bootstrap_combine_submitted",
                         "combine_result": combine_result,
                     })],
-                    plan: Some(ctx.bootstrap_plan.clone()),
+                    plan: Some(shape.bootstrap_plan.clone()),
                     wait_error: Some(err.to_string()),
                     ..BootstrapExecutedExtras::empty()
                 },
             );
         }
-        bootstrap_wait_failed(ctx, "bootstrap_combine_wait_failed", err)
+        bootstrap_wait_failed(shape, "bootstrap_combine_wait_failed", err)
     })?;
 
     let mut wait_events = wait.events;
@@ -194,23 +197,23 @@ pub(crate) fn replan_after_combine(
     }
 }
 
+#[allow(clippy::large_futures)]
 pub(super) async fn execute_bootstrap_shape(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    mut ctx: BootstrapShapeContext,
+    build_ctx: &ResolvedBuildAndPostContext,
+    mut shape: BootstrapShapeContext,
 ) -> SignerResult<BootstrapPhaseResult> {
     let mut prepend_wait_events = Vec::new();
 
-    if ctx.bootstrap_plan.requires_combine_first() {
-        let combine_target_amount = ctx.bootstrap_plan.total_output_amount;
+    if shape.bootstrap_plan.requires_combine_first() {
+        let combine_target_amount = shape.bootstrap_plan.total_output_amount;
         let (events, replanned, spendable) =
-            match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
+            match execute_bootstrap_combine_step(build_ctx, &shape).await {
                 Ok(result) => result,
                 Err(result) => return Ok(result),
             };
         prepend_wait_events = events;
         if let Some(result) = replan_after_combine(
-            &mut ctx,
+            &mut shape,
             prepend_wait_events.clone(),
             replanned,
             combine_target_amount,
@@ -220,15 +223,16 @@ pub(super) async fn execute_bootstrap_shape(
         }
     }
 
-    let bootstrap_plan = ctx.bootstrap_plan.clone();
+    let bootstrap_plan = shape.bootstrap_plan.clone();
     let split_result = match submit_bootstrap_mixed_split(
-        signer_config,
+        &build_ctx.gated.signer,
+        &build_ctx.gated.operator_network,
         &bootstrap_plan,
-        &ctx.split_asset_id,
-        &ctx.receive_address,
-        ctx.split_asset_mojo_multiplier,
+        &shape.split_asset_id,
+        &shape.receive_address,
+        shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&ctx.test_overrides),
+        Some(&shape.test_overrides),
     )
     .await
     {
@@ -237,9 +241,9 @@ pub(super) async fn execute_bootstrap_shape(
             return Ok(bootstrap_failed(
                 BootstrapPhaseFailure::new(
                     format!("signer_mixed_split_error:{err}"),
-                    ctx.fee_mojos,
-                    ctx.fee_source.clone(),
-                    ctx.fee_lookup_error.clone(),
+                    shape.fee_mojos,
+                    shape.fee_source.clone(),
+                    shape.fee_lookup_error.clone(),
                 )
                 .with_plan(bootstrap_plan),
             ));
@@ -247,10 +251,13 @@ pub(super) async fn execute_bootstrap_shape(
     };
 
     let wait = match wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
-        ctx: &ctx,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        network: &build_ctx.gated.operator_network,
+        signer: &build_ctx.gated.signer,
+        ctx: &shape,
+        timeout_seconds: build_ctx
+            .gated
+            .program
+            .runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterSplit,
     })
@@ -259,7 +266,7 @@ pub(super) async fn execute_bootstrap_shape(
         Ok(wait) => wait,
         Err(err) => {
             if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
-                return Ok(ctx.executed_on_shape_wait_timeout(
+                return Ok(shape.executed_on_shape_wait_timeout(
                     "bootstrap_submitted:after_split_wait_timeout",
                     BootstrapExecutedExtras {
                         wait_events: prepend_wait_events,
@@ -272,9 +279,9 @@ pub(super) async fn execute_bootstrap_shape(
             let mut failure = bootstrap_failed(
                 BootstrapPhaseFailure::new(
                     "bootstrap_wait_failed",
-                    ctx.fee_mojos,
-                    ctx.fee_source.clone(),
-                    ctx.fee_lookup_error.clone(),
+                    shape.fee_mojos,
+                    shape.fee_source.clone(),
+                    shape.fee_lookup_error.clone(),
                 )
                 .with_plan(bootstrap_plan)
                 .with_wait_error(err.to_string()),
@@ -286,10 +293,10 @@ pub(super) async fn execute_bootstrap_shape(
     let mut wait_events = wait.events;
     wait_events.splice(0..0, prepend_wait_events);
 
-    Ok(executed_after_split(ExecutedAfterSplitParams {
-        fee_mojos: ctx.fee_mojos,
-        fee_source: ctx.fee_source,
-        fee_lookup_error: ctx.fee_lookup_error,
+    Ok(executed_after_split(super::ExecutedAfterSplitParams {
+        fee_mojos: shape.fee_mojos,
+        fee_source: shape.fee_source,
+        fee_lookup_error: shape.fee_lookup_error,
         split_result,
         wait_events,
         bootstrap_plan,

@@ -4,6 +4,7 @@
 
 pub mod action;
 pub mod assemble;
+pub mod assets;
 pub mod bootstrap;
 pub mod build;
 pub mod build_context;
@@ -22,11 +23,11 @@ pub mod request;
 pub mod types;
 
 pub use action::{
-    build_signer_offer_for_action, expires_at_unix_from_pricing, resolve_market_base_asset_id,
-    resolve_market_offer_assets_for_action, resolve_market_offer_fee_asset_id,
-    resolve_offer_assets_for_action, resolve_offer_assets_via_coinset,
-    try_normalize_resolved_assets, BuildOfferForActionRequest, BuildOfferForActionResult,
-    ResolvedMarketOfferAssets,
+    build_signer_offer_for_action, expires_at_unix_from_pricing, BuildOfferForActionRequest,
+    BuildOfferForActionResult,
+};
+pub use assets::{
+    normalize_asset_id, resolve_offer_asset_ids, OfferAssetResolver, ResolvedMarketOfferAssets,
 };
 pub use bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,

@@ -2,7 +2,10 @@ use chia_protocol::{Bytes32, CoinSpend};
 use chia_sdk_coinset::CoinsetClient;
 use chia_sdk_test::Simulator;
 
-use super::{finalize_selected_cats, select_cats_for_spend, select_from_list, CoinSelectionMode};
+use super::{
+    finalize_preselected_cats_for_spend, finalize_selected_cats, select_cats_for_spend,
+    select_from_list, CoinSelectionMode,
+};
 use crate::coinset::test_support::{
     cat_with_amount, mock_get_coin_record_by_name_body, mock_get_coin_records_by_puzzle_hash_body,
     mock_get_puzzle_and_solution_body,
@@ -142,6 +145,26 @@ fn explicit_sum_fails_when_total_below_target() {
     )
     .expect_err("below target");
     assert!(matches!(err, SignerError::InsufficientCatCoins));
+}
+
+#[test]
+fn finalize_preselected_cats_rejects_mismatched_coin_ids() {
+    let cat = cat_with_amount(600);
+    let wrong_id = Bytes32::new([0xab; 32]);
+    let err =
+        finalize_preselected_cats_for_spend(vec![cat], &[wrong_id], 600).expect_err("mismatch");
+    assert!(matches!(err, SignerError::PreselectedCatCoinIdsMismatch));
+}
+
+#[test]
+fn finalize_preselected_cats_accepts_matching_coin_ids() {
+    let cat = cat_with_amount(600);
+    let coin_id = cat.coin.coin_id();
+    let selected =
+        finalize_preselected_cats_for_spend(vec![cat], std::slice::from_ref(&coin_id), 600)
+            .expect("match");
+    assert_eq!(selected.selected.len(), 1);
+    assert_eq!(selected.offered_total, 600);
 }
 
 #[test]

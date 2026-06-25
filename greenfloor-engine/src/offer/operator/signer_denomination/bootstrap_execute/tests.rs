@@ -6,6 +6,7 @@ use crate::test_support::signer_config::test_signer_config;
 
 use super::super::test_overrides::sample_vault_mixed_split_stub;
 use super::execute_bootstrap_shape;
+use crate::offer::operator::build_and_post::signer_denomination_test_context;
 
 async fn coinset_server_for_eco181_combine_only_e2e() -> mockito::ServerGuard {
     use crate::test_support::eco181_bootstrap_inventory::{
@@ -122,11 +123,11 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
     };
     let signer = test_signer_config(&server.url());
 
-    let shape_ctx =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("plan result")
-            .expect("shape context");
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let shape_ctx = prepare_bootstrap_execution_plan(&phase_ctx)
+        .await
+        .expect("plan result")
+        .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
     shape_ctx
         .test_overrides
@@ -135,7 +136,7 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
         .test_overrides
         .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
 
-    let result = Box::pin(execute_bootstrap_shape(&program, &signer, shape_ctx))
+    let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await
         .expect("execute shape");
 
@@ -164,17 +165,17 @@ async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split()
     };
     let signer = test_signer_config(&server.url());
 
-    let shape_ctx =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("plan result")
-            .expect("shape context");
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let shape_ctx = prepare_bootstrap_execution_plan(&phase_ctx)
+        .await
+        .expect("plan result")
+        .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
     shape_ctx
         .test_overrides
         .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
 
-    let result = Box::pin(execute_bootstrap_shape(&program, &signer, shape_ctx))
+    let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await
         .expect("execute shape");
 

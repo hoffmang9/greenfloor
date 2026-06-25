@@ -6,9 +6,9 @@ use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::sell_ladder_entry_for_size;
 
-use super::context::build_coin_op_exec_context;
 use super::loop_common::validate_until_ready_mode;
 use super::until_ready::UntilReadyWaitMode;
+use crate::config::{GatedOperatorMarketLoadRequest, OperatorMarketCommand};
 
 pub(super) struct CoinOpLoopCommon<'a> {
     pub exec_ctx: CoinOpExecContext,
@@ -34,20 +34,24 @@ pub(super) async fn prepare_coin_op_loop_common(
     prep: CoinOpLoopPrep<'_>,
 ) -> SignerResult<CoinOpLoopCommon<'_>> {
     validate_until_ready_mode(prep.wait, prep.size_base_units)?;
-    let exec_ctx = build_coin_op_exec_context(
-        &prep.mgr.program_config,
-        &prep.mgr.markets_config,
-        prep.mgr.testnet_markets_path(),
-        prep.network,
-        prep.market_id,
-        prep.pair,
+    let exec_ctx = super::context::build_coin_op_exec_context(
+        &GatedOperatorMarketLoadRequest {
+            program_path: &prep.mgr.program_config,
+            markets_path: &prep.mgr.markets_config,
+            testnet_markets_path: prep.mgr.testnet_markets_path(),
+            cats_path: Some(&prep.mgr.cats_config),
+            network: prep.network,
+            market_id: prep.market_id,
+            pair: prep.pair,
+            command: OperatorMarketCommand::Build,
+        },
         prep.asset_id,
     )
     .await?;
     let ladder_entry = prep
         .size_base_units
         .filter(|value| *value > 0)
-        .map(|size| sell_ladder_entry_for_size(&exec_ctx.market, size))
+        .map(|size| sell_ladder_entry_for_size(&exec_ctx.gated.market_row, size))
         .transpose()?
         .cloned();
     Ok(CoinOpLoopCommon {

@@ -13,30 +13,39 @@ fn optional_positive_size(size_base_units: i64) -> Option<i64> {
     (size_base_units > 0).then_some(size_base_units)
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> SignerResult<i32> {
     match command {
         ManagerCommands::CoinsList {
+            market_id,
+            pair,
+            network,
             asset,
-            vault_id,
             cat_id,
         } => {
             coin_op_loop::run_coins_list(
                 ctx,
+                &network,
+                market_id.as_deref(),
+                pair.as_deref(),
                 optional_str(&asset),
-                optional_str(&vault_id),
                 optional_str(&cat_id),
             )
             .await
         }
         ManagerCommands::CoinStatus {
+            market_id,
+            pair,
+            network,
             asset,
-            vault_id,
             cat_id,
         } => {
             coin_op_loop::run_coin_status(
                 ctx,
+                &network,
+                market_id.as_deref(),
+                pair.as_deref(),
                 optional_str(&asset),
-                optional_str(&vault_id),
                 optional_str(&cat_id),
             )
             .await

@@ -50,12 +50,20 @@ fn bootstrap_fee_cost_for_output_count(output_count: usize) -> u64 {
 
 pub(super) async fn resolve_bootstrap_split_fee(
     signer: &SignerConfig,
+    operator_network: &str,
     minimum_fee_mojos: u64,
     output_count: usize,
 ) -> (u64, String, Option<String>) {
     let fee_cost = bootstrap_fee_cost_for_output_count(output_count);
     let spend_count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
-    match get_conservative_fee_estimate_for_signer(signer, fee_cost, Some(spend_count)).await {
+    match get_conservative_fee_estimate_for_signer(
+        signer,
+        operator_network,
+        fee_cost,
+        Some(spend_count),
+    )
+    .await
+    {
         Ok(Some(fee_mojos)) => (fee_mojos, "coinset_conservative_fee".to_string(), None),
         Ok(None) => (
             minimum_fee_mojos,
@@ -196,7 +204,7 @@ mod tests {
         let signer = test_signer_config(&server.url());
 
         let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, 99, 2).await;
+            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
         assert_eq!(fee_mojos, 500);
         assert_eq!(fee_source, "coinset_conservative_fee");
         assert!(lookup_error.is_none());
@@ -214,7 +222,7 @@ mod tests {
         let signer = test_signer_config(&server.url());
 
         let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, 99, 2).await;
+            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
         assert_eq!(fee_mojos, 99);
         assert_eq!(fee_source, "config_minimum_fee_fallback");
         assert!(lookup_error.is_some());
@@ -233,7 +241,7 @@ mod tests {
         let signer = test_signer_config(&server.url());
 
         let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, 99, 2).await;
+            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
         assert_eq!(fee_mojos, 99);
         assert_eq!(fee_source, "config_minimum_fee_fallback");
         assert!(lookup_error.is_none());

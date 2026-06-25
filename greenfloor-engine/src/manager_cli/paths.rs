@@ -3,16 +3,13 @@
 use std::path::{Path, PathBuf};
 
 pub use crate::paths::{
-    default_home_or_repo_config_path, default_testnet_markets_config_path, expand_home,
+    default_cats_config_path, default_home_or_repo_config_path, default_markets_config_path,
+    default_operator_metadata_config_paths, default_testnet_markets_config_path, expand_home,
     resolve_config_path_from_optional, resolve_repo_root, resolve_vault_scan_testnet_markets_path,
 };
 
 const HOME_PROGRAM_CONFIG: &str = "~/.greenfloor/config/program.yaml";
 const REPO_PROGRAM_CONFIG: &str = "config/program.yaml";
-const HOME_MARKETS_CONFIG: &str = "~/.greenfloor/config/markets.yaml";
-const REPO_MARKETS_CONFIG: &str = "config/markets.yaml";
-const HOME_CATS_CONFIG: &str = "~/.greenfloor/config/cats.yaml";
-const REPO_CATS_CONFIG: &str = "config/cats.yaml";
 
 #[must_use]
 pub fn default_program_config_path() -> PathBuf {
@@ -24,29 +21,13 @@ pub fn program_config_path_from_optional(raw: &str) -> PathBuf {
     resolve_config_path_from_optional(raw, default_program_config_path)
 }
 
-#[must_use]
-pub fn default_markets_config_path() -> PathBuf {
-    default_home_or_repo_config_path(HOME_MARKETS_CONFIG, REPO_MARKETS_CONFIG)
-}
-
-#[must_use]
-pub fn default_cats_config_path() -> PathBuf {
-    default_home_or_repo_config_path(HOME_CATS_CONFIG, REPO_CATS_CONFIG)
-}
-
+/// Default metadata paths for ticker index construction (alias).
 #[must_use]
 pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
-    (
-        default_cats_config_path(),
-        default_markets_config_path(),
-        default_testnet_markets_config_path(),
-    )
+    default_operator_metadata_config_paths()
 }
 
 /// Vault Coinset scan metadata defaults anchored to the repository `config/` tree.
-///
-/// Matches the legacy Python scanner (`Path(__file__).parents[1] / "config"`), so scans
-/// invoked outside the repo cwd still resolve ticker indexes from the checkout.
 #[must_use]
 pub fn default_vault_scan_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
     if let Some(repo_root) = resolve_repo_root() {

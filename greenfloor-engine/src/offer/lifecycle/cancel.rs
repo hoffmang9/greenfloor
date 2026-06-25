@@ -1,5 +1,5 @@
 use crate::adapters::DexieClient;
-use crate::coinset::{self, client_for_config, LiveCoinset};
+use crate::coinset::{self, client_for_signer_on_network, LiveCoinset};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::dexie_payload::DexieOfferPayload;
@@ -101,6 +101,7 @@ pub struct CancelOfferOutcome {
 pub struct CancelOfferOnChainParams<'a> {
     pub offer_id: &'a str,
     pub signer_config: SignerConfig,
+    pub operator_network: &'a str,
     pub dexie: &'a DexieClient,
     pub fee_mojos: u64,
     pub offer_text: Option<String>,
@@ -142,7 +143,8 @@ pub async fn cancel_offer_on_chain(
     } else {
         fetch_dexie_offer_text(params.dexie, params.offer_id).await?
     };
-    let coinset_client = client_for_config(&params.signer_config)?;
+    let coinset_client =
+        client_for_signer_on_network(&params.signer_config, params.operator_network)?;
     let backend = LiveCoinset(&coinset_client);
     let mut vault_ctx = resolve_vault_spend_context(params.signer_config).await?;
     let spend_bundle = build_offer_cancel_spend_bundle(
@@ -170,6 +172,7 @@ pub async fn cancel_offers_on_chain(
     store: &SqliteStore,
     dexie: &DexieClient,
     signer_config: SignerConfig,
+    operator_network: &str,
     targets: &[CancelOfferTarget],
 ) -> SignerResult<Vec<CancelOfferOutcome>> {
     let mut outcomes = Vec::with_capacity(targets.len());
@@ -183,6 +186,7 @@ pub async fn cancel_offers_on_chain(
         match cancel_offer_on_chain(CancelOfferOnChainParams {
             offer_id: target.offer_id(),
             signer_config: signer_config.clone(),
+            operator_network,
             dexie,
             fee_mojos: 0,
             offer_text: target.offer_text().map(str::to_string),
@@ -275,6 +279,7 @@ mod tests {
             &store,
             &dexie,
             test_signer_config("http://127.0.0.1:1"),
+            "mainnet",
             std::slice::from_ref(&target),
         )
         .await
@@ -318,6 +323,7 @@ mod tests {
             &store,
             &dexie,
             test_signer_config("http://127.0.0.1:1"),
+            "mainnet",
             std::slice::from_ref(&target),
         )
         .await

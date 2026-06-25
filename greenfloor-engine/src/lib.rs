@@ -42,6 +42,10 @@ pub mod vault_coinset_scan;
 use config::SignerConfig;
 use error::SignerResult;
 
+pub use config::operator_ticker_index_from_paths;
+pub use offer::OfferAssetResolver;
+pub use paths::resolve_cats_config_path;
+
 pub use error::SignerError as Error;
 
 /// Resolve vault context.
@@ -51,32 +55,6 @@ pub use error::SignerError as Error;
 /// Returns an error if the operation fails.
 pub async fn resolve_vault_context(config: SignerConfig) -> SignerResult<vault::VaultContext> {
     Ok(vault::session::resolve_vault_session(config).await?.display)
-}
-
-/// Resolve offer assets via coinset.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_offer_assets_via_coinset(
-    config: SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    offer::resolve_offer_assets_via_coinset(&config, base_asset, quote_asset).await
-}
-
-/// Deprecated alias for [`resolve_offer_assets_via_coinset`].
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_offer_asset_ids(
-    config: SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await
 }
 
 #[cfg(test)]

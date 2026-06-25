@@ -11,12 +11,12 @@ use crate::vault::context::VaultCustodySnapshot;
 use crate::vault::members::WalletKey;
 use crate::vault::validate_vault_threshold;
 
-pub use crate::coinset::DEFAULT_MSP_BASE_URL;
+use crate::coinset::DEFAULT_COINSET_BASE_URL;
 
 #[derive(Debug, Clone)]
 pub struct SignerConfig {
     pub network: String,
-    pub coinset_msp_base_url: String,
+    pub coinset_base_url: String,
     pub kms_key_id: String,
     pub kms_region: String,
     pub kms_public_key_hex: Option<String>,
@@ -51,25 +51,43 @@ pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
         .unwrap_or("us-west-2")
         .to_string();
     let kms_public_key_hex = optional_trimmed_string(signer.get("kms_public_key_hex"));
-    let coinset_msp_base_url = signer
-        .get("coinset_msp_base_url")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_MSP_BASE_URL)
-        .to_string();
+    let coinset_base_url = parse_signer_coinset_base_url(signer);
 
     let vault_snapshot = parse_vault_section(vault)?;
 
     Ok(SignerConfig {
         network,
-        coinset_msp_base_url,
+        coinset_base_url,
         kms_key_id,
         kms_region,
         kms_public_key_hex,
         kms_runtime: KmsRuntime::production(),
         vault: vault_snapshot,
     })
+}
+
+fn parse_signer_coinset_base_url(signer: &serde_json::Map<String, Value>) -> String {
+    let read = |key: &str| {
+        signer
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    if read("coinset_base_url").is_none() {
+        if let Some(legacy_url) = read("coinset_msp_base_url") {
+            tracing::warn!(
+                legacy_field = "signer.coinset_msp_base_url",
+                canonical_field = "signer.coinset_base_url",
+                "signer config uses deprecated coinset_msp_base_url; rename to coinset_base_url"
+            );
+            return legacy_url.to_string();
+        }
+    }
+    read("coinset_base_url")
+        .or_else(|| read("coinset_msp_base_url"))
+        .unwrap_or(DEFAULT_COINSET_BASE_URL)
+        .to_string()
 }
 
 /// Load signer config.
@@ -185,7 +203,7 @@ app:
 signer:
   kms_key_id: arn:aws:kms:us-west-2:123:key/abc
   kms_region: us-west-2
-  coinset_msp_base_url: https://api-msp.coinset.org
+  coinset_base_url: https://api.coinset.org
 vault:
   launcher_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   custody_threshold: 1
@@ -205,5 +223,36 @@ vault:
         assert_eq!(cfg.kms_key_id, "arn:aws:kms:us-west-2:123:key/abc");
         assert_eq!(cfg.vault.custody_threshold, 1);
         assert_eq!(hex::encode(cfg.vault.launcher_id), "aa".repeat(32));
+    }
+
+    #[test]
+    fn parse_signer_coinset_base_url_falls_back_to_legacy_msp_field() {
+        let mut signer = serde_json::Map::new();
+        signer.insert("kms_key_id".to_string(), Value::String("key-1".to_string()));
+        signer.insert(
+            "coinset_msp_base_url".to_string(),
+            Value::String("https://coinset.legacy.example/".to_string()),
+        );
+        assert_eq!(
+            parse_signer_coinset_base_url(&signer),
+            "https://coinset.legacy.example/"
+        );
+    }
+
+    #[test]
+    fn parse_signer_coinset_base_url_prefers_canonical_over_legacy_msp_field() {
+        let mut signer = serde_json::Map::new();
+        signer.insert(
+            "coinset_base_url".to_string(),
+            Value::String("https://coinset.canonical.example/".to_string()),
+        );
+        signer.insert(
+            "coinset_msp_base_url".to_string(),
+            Value::String("https://coinset.legacy.example/".to_string()),
+        );
+        assert_eq!(
+            parse_signer_coinset_base_url(&signer),
+            "https://coinset.canonical.example/"
+        );
     }
 }

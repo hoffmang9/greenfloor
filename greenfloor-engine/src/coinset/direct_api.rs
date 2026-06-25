@@ -3,6 +3,9 @@
 pub const MAINNET_DIRECT_BASE_URL: &str = "https://api.coinset.org";
 pub const TESTNET11_DIRECT_BASE_URL: &str = "https://testnet11.api.coinset.org";
 
+/// Default Coinset HTTP host for signer-backed operator paths.
+pub const DEFAULT_COINSET_BASE_URL: &str = MAINNET_DIRECT_BASE_URL;
+
 const LEGACY_MAINNET_HOST_ALIASES: &[&str] = &[
     "coinset.org",
     "https://coinset.org",
@@ -79,12 +82,67 @@ pub fn resolve_direct_client(network: &str, base_url: Option<&str>) -> ResolvedD
     }
 }
 
+fn canonical_coinset_base_url_mismatches_network(configured_url: &str, network: &str) -> bool {
+    match network {
+        "testnet11" => configured_url == MAINNET_DIRECT_BASE_URL,
+        "mainnet" => configured_url == TESTNET11_DIRECT_BASE_URL,
+        _ => false,
+    }
+}
+
+/// Pick the Coinset base URL for an operator network and configured signer value.
+///
+/// Empty configured URLs and canonical defaults for the wrong network fall back to the
+/// network-native direct Coinset host.
+#[must_use]
+pub fn effective_coinset_base_url(network: &str, configured_url: &str) -> String {
+    let network = normalize_coinset_network(network);
+    let configured = configured_url.trim().trim_end_matches('/');
+    if configured.is_empty() {
+        return resolve_direct_coinset_base_url(network, None);
+    }
+    if canonical_coinset_base_url_mismatches_network(configured, network) {
+        return resolve_direct_coinset_base_url(network, None);
+    }
+    configured.to_string()
+}
+
+/// Resolved Coinset HTTP endpoint for operator paths (network + base URL).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCoinsetEndpoint {
+    pub network: &'static str,
+    pub base_url: String,
+}
+
+/// Resolve the Coinset network and base URL from operator network, signer/program config,
+/// and an optional CLI override.
+///
+/// CLI overrides win when present (except legacy host aliases, which fall through to
+/// `effective_coinset_base_url`). The configured URL comes from signer/program YAML.
+#[must_use]
+pub fn resolve_coinset_endpoint(
+    operator_network: &str,
+    configured_url: &str,
+    cli_override: Option<&str>,
+) -> ResolvedCoinsetEndpoint {
+    let resolved = resolve_direct_client(operator_network, cli_override);
+    let base_url = explicit_coinset_url_override(cli_override).map_or_else(
+        || effective_coinset_base_url(resolved.network, configured_url),
+        |url| url.trim_end_matches('/').to_string(),
+    );
+    ResolvedCoinsetEndpoint {
+        network: resolved.network,
+        base_url,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        explicit_coinset_url_override, is_legacy_coinset_host_alias, normalize_coinset_network,
-        normalize_direct_base_url_input, resolve_direct_client, resolve_direct_coinset_base_url,
-        MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+        effective_coinset_base_url, explicit_coinset_url_override, is_legacy_coinset_host_alias,
+        normalize_coinset_network, normalize_direct_base_url_input, resolve_coinset_endpoint,
+        resolve_direct_client, resolve_direct_coinset_base_url, MAINNET_DIRECT_BASE_URL,
+        TESTNET11_DIRECT_BASE_URL,
     };
 
     #[test]
@@ -146,5 +204,39 @@ mod tests {
         let resolved = resolve_direct_client("testnet", Some("https://coinset.org"));
         assert_eq!(resolved.network, "testnet11");
         assert_eq!(resolved.base_url, TESTNET11_DIRECT_BASE_URL);
+    }
+
+    #[test]
+    fn effective_coinset_base_url_uses_network_default_when_configured_empty() {
+        assert_eq!(
+            effective_coinset_base_url("testnet11", ""),
+            TESTNET11_DIRECT_BASE_URL
+        );
+    }
+
+    #[test]
+    fn effective_coinset_base_url_replaces_mainnet_default_on_testnet11() {
+        assert_eq!(
+            effective_coinset_base_url("testnet11", MAINNET_DIRECT_BASE_URL),
+            TESTNET11_DIRECT_BASE_URL
+        );
+    }
+
+    #[test]
+    fn resolve_coinset_endpoint_maps_testnet11_program_default() {
+        let endpoint = resolve_coinset_endpoint("testnet11", MAINNET_DIRECT_BASE_URL, None);
+        assert_eq!(endpoint.network, "testnet11");
+        assert_eq!(endpoint.base_url, TESTNET11_DIRECT_BASE_URL);
+    }
+
+    #[test]
+    fn resolve_coinset_endpoint_honors_cli_override() {
+        let endpoint = resolve_coinset_endpoint(
+            "mainnet",
+            MAINNET_DIRECT_BASE_URL,
+            Some("https://coinset.custom/"),
+        );
+        assert_eq!(endpoint.network, "mainnet");
+        assert_eq!(endpoint.base_url, "https://coinset.custom");
     }
 }

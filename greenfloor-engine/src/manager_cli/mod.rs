@@ -24,7 +24,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub use cats_catalog::load_cats_catalog;
+pub use crate::config::load_cats_catalog;
 pub use commands::{ManagerCli, ManagerCommands};
 pub use dispatch::run_manager_cli;
 pub use offers::{

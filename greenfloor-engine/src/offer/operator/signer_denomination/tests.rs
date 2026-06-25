@@ -7,6 +7,7 @@ use super::{
     bootstrap_skipped, executed_after_split, run_signer_denomination_phase,
     spendable_bootstrap_coins, ExecutedAfterSplitParams,
 };
+use crate::offer::operator::build_and_post::signer_denomination_test_context;
 
 #[test]
 fn spendable_bootstrap_coins_filters_unconfirmed_wallet_rows() {
@@ -77,17 +78,15 @@ async fn run_signer_denomination_phase_skips_missing_receive_address() {
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config("https://example.test");
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert_eq!(result.reason, "missing_receive_address_for_bootstrap");
     assert!(!result.ready);
 }
 
 #[tokio::test]
-async fn run_signer_denomination_phase_uses_signer_coinset_msp_base_url_for_coin_list() {
+async fn run_signer_denomination_phase_uses_signer_coinset_base_url_for_coin_list() {
     use crate::config::ManagerProgramConfig;
     use crate::test_support::ladder::market_with_side_ladder;
     use crate::test_support::signer_config::test_signer_config;
@@ -106,10 +105,8 @@ async fn run_signer_denomination_phase_uses_signer_coinset_msp_base_url_for_coin
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert!(
         result.reason.starts_with("bootstrap_underfunded:"),
@@ -129,10 +126,8 @@ async fn run_signer_denomination_phase_skips_missing_sell_ladder() {
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config("https://example.test");
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert_eq!(result.reason, "missing_sell_ladder");
 }
@@ -155,10 +150,8 @@ async fn run_signer_denomination_phase_fails_when_coin_list_errors() {
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert!(
         result.reason.starts_with("bootstrap_coin_list_failed:"),
@@ -212,10 +205,8 @@ async fn run_signer_denomination_phase_rejects_nonzero_bootstrap_fee() {
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert_eq!(result.reason, "signer_mixed_split_fee_not_supported");
     assert!(!result.ready);
@@ -289,10 +280,8 @@ async fn run_signer_denomination_phase_skips_when_ladder_already_ready() {
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
-    let result =
-        run_signer_denomination_phase(&program, &market, &signer, "xch", "xch", 1.0, "sell")
-            .await
-            .expect("phase");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
 
     assert_eq!(result.reason, "already_ready");
     assert!(!result.ready);
@@ -346,11 +335,11 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
     };
     let signer = test_signer_config(&server.url());
 
-    let plan_ctx =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("phase result")
-            .expect("execution plan");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let plan_ctx = prepare_bootstrap_execution_plan(&ctx)
+        .await
+        .expect("phase result")
+        .expect("execution plan");
 
     assert!(!plan_ctx.bootstrap_plan.requires_combine_first());
     assert_eq!(plan_ctx.fee_mojos, 0);
@@ -397,10 +386,10 @@ async fn prepare_bootstrap_execution_plan_continues_eco181_after_combine_buffer_
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
-    let result =
-        prepare_bootstrap_execution_plan(&program, &signer, &market, "sell", "xch", "xch", 1.0)
-            .await
-            .expect("phase result");
+    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let result = prepare_bootstrap_execution_plan(&ctx)
+        .await
+        .expect("phase result");
 
     let Err(result) = result else {
         panic!("expected already_ready skip, got execution plan");

@@ -7,10 +7,10 @@ use crate::coin_ops::{
     COMBINE_SINGLE_OUTPUT_COUNT,
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
-use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{GatedOperatorMarket, MarketConfig};
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
-use crate::offer::resolve_market_base_asset_id;
+use crate::offer::OfferAssetResolver;
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 use super::cap::resolve_combine_input_cap;
@@ -19,9 +19,7 @@ use super::helpers::wallet_coins_to_spendable;
 use super::test_overrides::CoinOpTestOverrides;
 
 pub struct CoinOpExecContext {
-    pub signer_config: SignerConfig,
-    pub market: MarketConfig,
-    pub program: ManagerProgramConfig,
+    pub gated: GatedOperatorMarket,
     pub resolved_base_asset_id: String,
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
@@ -31,36 +29,27 @@ pub struct CoinOpExecContext {
 }
 
 impl CoinOpExecContext {
-    /// Build execution context from loaded operator config.
+    /// Build execution context from an owned gated operator market.
     ///
     /// # Errors
     ///
     /// Returns an error if asset resolution fails.
-    pub async fn new(
-        program: ManagerProgramConfig,
-        signer_config: SignerConfig,
-        market: MarketConfig,
+    pub async fn from_gated_market(
+        gated: GatedOperatorMarket,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
-        let canonical = canonical_base_asset
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| market.base_asset.trim());
+        let resolver = gated.asset_resolver();
         let resolved_base_asset_id =
-            resolve_market_base_asset_id(&signer_config, canonical).await?;
-        Ok(Self {
-            signer_config,
-            market: market.clone(),
-            program,
+            resolve_base_asset_id(&resolver, &gated.market_row, canonical_base_asset).await?;
+        Ok(Self::assemble(
+            gated,
             resolved_base_asset_id,
-            base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
-            combine_input_cap: resolve_combine_input_cap(),
             watched_coin_ids,
             #[cfg(test)]
             test_overrides,
-        })
+        ))
     }
 
     /// Submit a combine: merge `input_coin_ids` into a single output coin.
@@ -83,7 +72,7 @@ impl CoinOpExecContext {
         };
         let output_amounts = combine_output_amounts(total, COMBINE_SINGLE_OUTPUT_COUNT)?;
         let fee_mojos = coin_op_non_negative_u64(
-            self.program.coin_ops_combine_fee_mojos,
+            self.gated.program.coin_ops_combine_fee_mojos,
             "program.coin_ops_combine_fee_mojos",
         )?;
         self.execute_mixed_split(output_amounts, input_coin_ids, fee_mojos)
@@ -101,15 +90,15 @@ impl CoinOpExecContext {
             return Ok(coins.to_vec());
         }
         let coins = list_wallet_unspent_coins_for_signer(
-            &self.program.network,
-            &self.signer_config,
-            &self.market.receive_address,
+            &self.gated.operator_network,
+            &self.gated.signer,
+            &self.gated.market_row.receive_address,
             &self.resolved_base_asset_id,
         )
         .await?;
         Ok(wallet_coins_to_spendable(
             &coins,
-            self.market.base_asset.trim(),
+            self.gated.market_row.base_asset.trim(),
         ))
     }
 
@@ -135,7 +124,7 @@ impl CoinOpExecContext {
             .map(|coin_id| hex_to_bytes32(coin_id))
             .collect::<SignerResult<Vec<_>>>()?;
         let request = MixedSplitRequest {
-            receive_address: self.market.receive_address.clone(),
+            receive_address: self.gated.market_row.receive_address.clone(),
             asset_id,
             output_amounts,
             coin_ids: parsed_coin_ids,
@@ -143,11 +132,43 @@ impl CoinOpExecContext {
             fee_mojos,
         };
         let result = build_and_optionally_broadcast_vault_cat_mixed_split(
-            self.signer_config.clone(),
+            self.gated.signer.clone(),
+            &self.gated.operator_network,
             request,
             true,
         )
         .await?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
     }
+
+    fn assemble(
+        gated: GatedOperatorMarket,
+        resolved_base_asset_id: String,
+        watched_coin_ids: HashSet<String>,
+        #[cfg(test)] test_overrides: CoinOpTestOverrides,
+    ) -> Self {
+        Self {
+            base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(
+                gated.market_row.base_asset.trim(),
+            ),
+            combine_input_cap: resolve_combine_input_cap(),
+            gated,
+            resolved_base_asset_id,
+            watched_coin_ids,
+            #[cfg(test)]
+            test_overrides,
+        }
+    }
+}
+
+async fn resolve_base_asset_id(
+    resolver: &OfferAssetResolver<'_>,
+    market_row: &MarketConfig,
+    canonical_base_asset: Option<&str>,
+) -> SignerResult<String> {
+    let canonical = canonical_base_asset
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| market_row.base_asset.trim());
+    resolver.resolve_base(canonical).await
 }

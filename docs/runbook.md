@@ -36,10 +36,10 @@ Optional developer bootstrap for testnet markets:
 ## 2) Steady-State Operations
 
 - Vault KMS signer config (required for vault offer/coin-op paths):
-  - Set `signer.kms_key_id`, `signer.kms_region`, `signer.kms_public_key_hex`, and `signer.coinset_msp_base_url` in `~/.greenfloor/config/program.yaml`.
+  - Set `signer.kms_key_id`, `signer.kms_region`, `signer.kms_public_key_hex`, and `signer.coinset_base_url` in `~/.greenfloor/config/program.yaml`.
   - Set `vault.launcher_id`, custody/recovery thresholds, and member public keys under `vault:` (see `config/program.yaml` example in-repo).
   - Legacy `cloud_wallet:` blocks are rejected at config load; migrate to `signer:` + `vault:` before upgrading.
-  - On-chain IO uses Coinset MSP (`api-msp.coinset.org` by default). Optional override: `GREENFLOOR_COINSET_BASE_URL`.
+  - On-chain IO uses the direct Coinset HTTP API (`https://api.coinset.org` by default). Optional override: `GREENFLOOR_COINSET_BASE_URL`.
 - Review vault coin inventory before shaping or posting:
   - `greenfloor-manager coins-list`
   - `greenfloor-manager coin-status`

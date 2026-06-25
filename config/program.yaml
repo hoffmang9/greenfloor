@@ -28,7 +28,7 @@ storage:
 # Local Rust engine for vault KMS offer execution.
 # Written to ~/.greenfloor/config/signer.yaml at runtime for Rust load_signer_config.
 signer:
-  coinset_msp_base_url: "https://api-msp.coinset.org"
+  coinset_base_url: "https://api.coinset.org"
   kms_key_id: ""
   kms_region: ""
   kms_public_key_hex: ""

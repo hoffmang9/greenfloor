@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
-use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::error::SignerResult;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
@@ -16,6 +16,7 @@ use super::split::execute_daemon_split_plan;
 use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
+use crate::config::GatedOperatorMarket;
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use crate::offer::dexie_payload::DexieOfferPayload;
 
@@ -49,6 +50,7 @@ pub fn watched_coin_ids_from_open_offers(
 fn skip_all_plans(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
+    operator_network: &str,
     plans: &[CoinOpPlan],
     reason: &str,
     status: &str,
@@ -72,23 +74,19 @@ fn skip_all_plans(
         signer_selection: json!({
             "selected_source": "signer_registry",
             "key_id": market.signer_key_id,
-            "network": program.network,
+            "network": operator_network,
         }),
     }
 }
 
 #[must_use]
 pub fn execute_managed_coin_op_plans<'a>(
-    program: &'a ManagerProgramConfig,
-    signer_config: &'a SignerConfig,
-    market: &'a MarketConfig,
+    gated: GatedOperatorMarket,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
-        program,
-        signer_config,
-        market,
+        gated,
         plans,
         watched_coin_ids,
         #[cfg(test)]
@@ -100,17 +98,13 @@ pub fn execute_managed_coin_op_plans<'a>(
 #[cfg(test)]
 #[must_use]
 pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
-    program: &'a ManagerProgramConfig,
-    signer_config: &'a SignerConfig,
-    market: &'a MarketConfig,
+    gated: GatedOperatorMarket,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
     test_overrides: CoinOpTestOverrides,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
-        program,
-        signer_config,
-        market,
+        gated,
         plans,
         watched_coin_ids,
         test_overrides,
@@ -118,27 +112,27 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
 }
 
 async fn execute_managed_coin_op_plans_async(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    market: &MarketConfig,
+    gated: GatedOperatorMarket,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
     #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
-    if market.receive_address.trim().is_empty() {
+    if gated.market_row.receive_address.trim().is_empty() {
         return skip_all_plans(
-            program,
-            market,
+            &gated.program,
+            &gated.market_row,
+            &gated.operator_network,
             plans,
             "signer_coin_ops_missing_receive_address",
             "skipped",
         );
     }
 
-    let ctx = match CoinOpExecContext::new(
-        program.clone(),
-        signer_config.clone(),
-        market.clone(),
+    let program = gated.program.clone();
+    let market = gated.market_row.clone();
+    let operator_network = gated.operator_network.clone();
+    let ctx = match CoinOpExecContext::from_gated_market(
+        gated,
         None,
         watched_coin_ids.iter().cloned().collect(),
         #[cfg(test)]
@@ -148,7 +142,14 @@ async fn execute_managed_coin_op_plans_async(
     {
         Ok(ctx) => ctx,
         Err(err) => {
-            return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
+            return skip_all_plans(
+                &program,
+                &market,
+                &operator_network,
+                plans,
+                &err.to_string(),
+                "skipped",
+            );
         }
     };
 
@@ -164,7 +165,7 @@ async fn execute_managed_coin_op_plans_async(
             ));
             continue;
         }
-        if program.runtime_dry_run {
+        if ctx.gated.program.runtime_dry_run {
             items.push(CoinOpExecItem {
                 op_type: plan.op_type.as_str().to_string(),
                 size_base_units: plan.size_base_units,
@@ -186,15 +187,15 @@ async fn execute_managed_coin_op_plans_async(
     }
 
     CoinOpExecutionResult {
-        dry_run: program.runtime_dry_run,
+        dry_run: ctx.gated.program.runtime_dry_run,
         planned_count: plans.len(),
         executed_count,
         status: "signer".to_string(),
         items,
         signer_selection: json!({
             "selected_source": "signer_registry",
-            "key_id": market.signer_key_id,
-            "network": program.network,
+            "key_id": ctx.gated.market_row.signer_key_id,
+            "network": ctx.gated.operator_network,
         }),
     }
 }

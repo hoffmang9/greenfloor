@@ -17,6 +17,7 @@ use crate::offer::operator::{
     BuildAndPostOfferRequestParts, BuildAndPostRunOptions, BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
+use crate::paths::resolve_cats_config_path;
 use crate::storage::CycleWriteStore;
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
@@ -28,6 +29,7 @@ use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 #[derive(Debug, Clone)]
 pub(super) struct ManagedPostContext {
     pub program: ManagerProgramConfig,
+    pub operator_network: String,
     pub paths: DaemonCyclePaths,
     pub write_store: CycleWriteStore,
     #[cfg(test)]
@@ -38,6 +40,7 @@ impl ManagedPostContext {
     pub(super) fn from_market_cycle(ctx: &MarketCycleContext<'_>) -> Self {
         Self {
             program: ctx.resources.program().clone(),
+            operator_network: ctx.resources.network.clone(),
             paths: ctx.resources.paths.clone(),
             write_store: ctx.dispatch.write_store.clone(),
             #[cfg(test)]
@@ -57,7 +60,8 @@ fn daemon_managed_post_request(
                 program_path: post_ctx.paths.program_path.clone(),
                 markets_path: post_ctx.paths.markets_path.clone(),
                 testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
-                network: post_ctx.program.network.clone(),
+                cats_path: Some(resolve_cats_config_path(&post_ctx.paths.markets_path, None)),
+                network: post_ctx.operator_network.clone(),
                 market_id: Some(market.market_id.clone()),
                 pair: None,
                 size_base_units: crate::config::parse_non_negative_u64(action.size, "action.size")?,
@@ -150,6 +154,7 @@ mod tests {
                 splash_api_base: "https://splash.example".to_string(),
                 ..Default::default()
             },
+            operator_network: "mainnet".to_string(),
             paths: DaemonCyclePaths::new(
                 PathBuf::from("/tmp/program.yaml"),
                 PathBuf::from("/tmp/markets.yaml"),

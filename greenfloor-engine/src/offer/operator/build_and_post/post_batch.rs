@@ -71,7 +71,7 @@ impl<'a> PostBatchEmitter<'a> {
             LogContext::OFFER_POST,
             OFFER_POST_ITERATION,
             {
-                market_id = self.ctx.market.market_id.as_str(),
+                market_id = self.ctx.gated.market_row.market_id.as_str(),
                 outcome = outcome,
                 publish_venue = self.ctx.publish_venue.as_str(),
                 offer_ref = offer_ref,
@@ -87,7 +87,7 @@ impl<'a> PostBatchEmitter<'a> {
             "offer post failed",
             OFFER_POST_FAILURE,
             &payload,
-            Some(self.ctx.market.market_id.as_str()),
+            Some(self.ctx.gated.market_row.market_id.as_str()),
         );
     }
 
@@ -108,7 +108,7 @@ impl<'a> PostBatchEmitter<'a> {
             LogContext::OFFER_POST,
             OFFER_POST_COMPLETED,
             {
-                market_id = self.ctx.market.market_id.as_str(),
+                market_id = self.ctx.gated.market_row.market_id.as_str(),
                 outcome = outcome,
                 publish_attempts = publish_attempts,
                 publish_failures = publish_failures,
@@ -152,7 +152,7 @@ impl<'a> PostBatchEmitter<'a> {
             "offer post failed",
             OFFER_POST_FAILURE,
             self.failure_payload(&failure.error, failure.offer_ref.as_deref()),
-            Some(self.ctx.market.market_id.clone()),
+            Some(self.ctx.gated.market_row.market_id.clone()),
         )
     }
 
@@ -169,7 +169,7 @@ impl<'a> PostBatchEmitter<'a> {
 
     fn failure_payload(&self, error: &str, offer_ref: Option<&str>) -> Value {
         let mut payload = json!({
-            "market_id": self.ctx.market.market_id.as_str(),
+            "market_id": self.ctx.gated.market_row.market_id.as_str(),
             "venue": self.ctx.publish_venue.as_str(),
             "error": error,
             "planned_count": 1,

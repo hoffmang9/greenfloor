@@ -110,7 +110,7 @@ fn low_watermark_split_protection(
     if plan.reason != CoinOpPlanReason::LowWatermarkBufferDeficit {
         return None;
     }
-    let sell_ladder = ctx.market.ladders.get("sell")?;
+    let sell_ladder = ctx.gated.market_row.ladders.get("sell")?;
     if sell_ladder.is_empty() {
         return None;
     }
@@ -212,7 +212,7 @@ fn prepare_split_plan_context(
     let size_base_units = plan.size_base_units;
 
     let amount_per_coin_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
-    let canonical_asset_id = ctx.market.base_asset.trim();
+    let canonical_asset_id = ctx.gated.market_row.base_asset.trim();
     if !coin_op_target_amount_allowed(amount_per_coin_mojos, canonical_asset_id) {
         return Err((
             vec![skip_item(
@@ -286,7 +286,7 @@ async fn submit_daemon_split_for_coin(
         split_ctx.size_base_units,
         split_ctx.op_count,
         split_ctx.amount_per_coin_mojos,
-        ctx.program.coin_ops_split_fee_mojos,
+        ctx.gated.program.coin_ops_split_fee_mojos,
     )?;
     let output_amounts = vec![amount_u64; output_count];
     match ctx
@@ -390,6 +390,7 @@ async fn attempt_daemon_split(
     }
 }
 
+#[allow(clippy::large_futures)]
 async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,

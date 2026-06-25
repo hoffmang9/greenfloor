@@ -39,6 +39,7 @@ pub(crate) fn build_and_post_request(
                 program_path: ctx.program_config.clone(),
                 markets_path: ctx.markets_config.clone(),
                 testnet_markets_path: ctx.testnet_markets_path().map(std::path::Path::to_path_buf),
+                cats_path: Some(ctx.cats_config.clone()),
                 network: network.clone(),
                 market_id: market_id.clone(),
                 pair: pair.clone(),

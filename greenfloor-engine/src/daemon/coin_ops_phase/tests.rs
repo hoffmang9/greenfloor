@@ -173,7 +173,8 @@ fn skipped_coin_ops_result_marks_all_plans_skipped() {
         reason: CoinOpPlanReason::ExcessOnlyPolicy,
     }];
 
-    let result = skipped_coin_ops_result(&program, &market, &plans, "signer_unavailable");
+    let result =
+        skipped_coin_ops_result(&program, &market, "mainnet", &plans, "signer_unavailable");
 
     assert_eq!(result.status, "skipped");
     assert_eq!(result.planned_count, 1);

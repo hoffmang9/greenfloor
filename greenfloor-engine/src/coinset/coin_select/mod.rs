@@ -147,6 +147,37 @@ pub(crate) fn finalize_selected_cats(
     })
 }
 
+pub(crate) fn finalize_preselected_cats_for_spend(
+    cats: Vec<Cat>,
+    explicit_coin_ids: &[Bytes32],
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    validate_preselected_cats_match_coin_ids(&cats, explicit_coin_ids)?;
+    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+}
+
+fn validate_preselected_cats_match_coin_ids(
+    cats: &[Cat],
+    explicit_coin_ids: &[Bytes32],
+) -> SignerResult<()> {
+    if explicit_coin_ids.is_empty() {
+        return Ok(());
+    }
+    if cats.len() != explicit_coin_ids.len() {
+        return Err(SignerError::PreselectedCatCoinIdsMismatch);
+    }
+    let cat_ids: HashSet<Bytes32> = cats.iter().map(|cat| cat.coin.coin_id()).collect();
+    if cat_ids.len() != cats.len() {
+        return Err(SignerError::PreselectedCatCoinIdsMismatch);
+    }
+    for id in explicit_coin_ids {
+        if !cat_ids.contains(id) {
+            return Err(SignerError::PreselectedCatCoinIdsMismatch);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn select_cats_for_spend(
     client: &CoinsetClient,
     receive_address: &str,

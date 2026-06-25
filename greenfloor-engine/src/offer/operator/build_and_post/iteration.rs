@@ -25,16 +25,7 @@ async fn run_bootstrap_phase(
     let bootstrap_result = if request.run.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
     } else {
-        run_signer_denomination_phase(
-            &ctx.program,
-            &ctx.market,
-            &ctx.signer_config,
-            &ctx.offer_assets.base_asset_id,
-            &ctx.offer_assets.quote_asset_id,
-            ctx.quote_price,
-            &ctx.action_side,
-        )
-        .await?
+        run_signer_denomination_phase(ctx).await?
     };
     let bootstrap_action = bootstrap_result.to_operator_json();
     Ok((bootstrap_action, Some(bootstrap_result)))
@@ -103,7 +94,7 @@ async fn publish_created_offer(
     let side = created.side.as_str();
     let asset_fields = expected_publish_asset_fields(
         side,
-        &ctx.market.base_symbol,
+        &ctx.gated.market_row.base_symbol,
         &ctx.offer_assets.quote_asset_for_offer,
         &ctx.offer_assets.base_asset_id,
         &ctx.offer_assets.quote_asset_id,

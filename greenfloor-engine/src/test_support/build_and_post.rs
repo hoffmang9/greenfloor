@@ -18,6 +18,7 @@ pub fn post_iteration_request(
         program_path: program_path.to_path_buf(),
         markets_path: markets_path.to_path_buf(),
         testnet_markets_path: None,
+        cats_path: None,
         network: "mainnet".to_string(),
         market_id: Some("m1".to_string()),
         pair: None,

@@ -3,8 +3,8 @@ use chia_traits::Streamable;
 use serde_json::{json, Value};
 
 use super::super::broadcast::broadcast_spend_bundle;
-use super::super::msp::msp_base_url_for_signer;
-use super::rpc::{direct_coinset_client, post_msp_coinset_rpc};
+use super::super::direct_api::resolve_coinset_endpoint;
+use super::rpc::{direct_coinset_client, post_coinset_rpc};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 
@@ -27,7 +27,7 @@ pub async fn get_fee_estimate(
     if let Some(count) = spend_count.filter(|value| *value > 0) {
         body["spend_count"] = json!(count);
     }
-    post_msp_coinset_rpc(network, base_url, "get_fee_estimate", body).await
+    post_coinset_rpc(network, base_url, "get_fee_estimate", body).await
 }
 
 pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
@@ -76,19 +76,21 @@ pub async fn get_conservative_fee_estimate(
     Ok(conservative_fee_from_payload(&payload))
 }
 
-/// Conservative fee estimate using the signer's MSP endpoint when configured.
+/// Conservative fee estimate using the signer's Coinset endpoint when configured.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
 pub async fn get_conservative_fee_estimate_for_signer(
     signer: &SignerConfig,
+    operator_network: &str,
     cost: u64,
     spend_count: Option<u64>,
 ) -> SignerResult<Option<u64>> {
+    let endpoint = resolve_coinset_endpoint(operator_network, &signer.coinset_base_url, None);
     get_conservative_fee_estimate(
-        &signer.network,
-        msp_base_url_for_signer(signer),
+        endpoint.network,
+        Some(endpoint.base_url.as_str()),
         cost,
         spend_count,
     )
@@ -104,8 +106,7 @@ pub async fn get_all_mempool_tx_ids(
     network: &str,
     base_url: Option<&str>,
 ) -> SignerResult<Vec<String>> {
-    let payload =
-        post_msp_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
+    let payload = post_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
     if !payload
         .get("success")
         .and_then(Value::as_bool)

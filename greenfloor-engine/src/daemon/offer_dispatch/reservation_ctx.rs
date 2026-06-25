@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 
-use crate::config::{MarketConfig, SignerConfig};
+use crate::config::MarketConfig;
 use crate::cycle::ParallelReservationContext;
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
-use crate::offer::{resolve_market_offer_assets_for_action, resolve_market_offer_fee_asset_id};
+use crate::offer::OfferAssetResolver;
 
-pub fn reservation_wallet_id(signer: &SignerConfig) -> String {
+pub fn reservation_wallet_id(signer: &crate::config::SignerConfig) -> String {
     let encoded = hex::encode(signer.vault.launcher_id);
     if encoded.is_empty() {
         return "signer".to_string();
@@ -15,14 +15,12 @@ pub fn reservation_wallet_id(signer: &SignerConfig) -> String {
 }
 
 pub async fn parallel_reservation_context(
-    signer_config: &SignerConfig,
-    program_network: &str,
+    resolver: &OfferAssetResolver<'_>,
     market: &MarketConfig,
     fee_amount_mojos: i64,
 ) -> SignerResult<ParallelReservationContext> {
-    let assets =
-        resolve_market_offer_assets_for_action(signer_config, market, program_network).await?;
-    let fee_asset_id = resolve_market_offer_fee_asset_id(signer_config, &assets).await?;
+    let assets = resolver.resolve_market_assets(market).await?;
+    let fee_asset_id = resolver.resolve_fee_asset(&assets).await?;
     let base_unit_mojo_multiplier = market
         .pricing
         .get("base_unit_mojo_multiplier")

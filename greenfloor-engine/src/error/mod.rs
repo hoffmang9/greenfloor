@@ -50,6 +50,12 @@ pub enum SignerError {
     #[error("insufficient cat coins")]
     InsufficientCatCoins,
 
+    #[error("preselected cat coins do not match requested coin ids")]
+    PreselectedCatCoinIdsMismatch,
+
+    #[error("proven dust coin does not match spend-ready cat")]
+    ProvenDustCoinMismatch,
+
     #[error("failed to resolve cat lineage for coin {0}")]
     CatLineageResolutionFailed(String),
 

@@ -26,7 +26,7 @@ fn conservative_fee_returns_none_on_failure() {
 }
 
 #[tokio::test]
-async fn get_fee_estimate_via_msp_client() {
+async fn get_fee_estimate_via_direct_coinset_client() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_fee_estimate")
@@ -42,7 +42,7 @@ async fn get_fee_estimate_via_msp_client() {
 }
 
 #[tokio::test]
-async fn get_all_mempool_tx_ids_via_msp_client() {
+async fn get_all_mempool_tx_ids_via_direct_coinset_client() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_all_mempool_tx_ids")

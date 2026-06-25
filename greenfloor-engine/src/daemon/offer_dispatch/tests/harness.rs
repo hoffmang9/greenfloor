@@ -165,8 +165,13 @@ pub(super) async fn generous_spendable_profiles(
         parallel_reservation_asset_ids, parallel_reservation_context,
     };
 
-    let bundle = crate::config::load_program_bundle(program_path).expect("program bundle");
-    let reservation_ctx = parallel_reservation_context(&bundle.signer, "mainnet", market, 0)
+    use crate::config::{empty_cat_ticker_index, load_program_bundle};
+    use crate::offer::OfferAssetResolver;
+
+    let bundle = load_program_bundle(program_path).expect("program bundle");
+    let empty_index = empty_cat_ticker_index();
+    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
+    let reservation_ctx = parallel_reservation_context(&resolver, market, 0)
         .await
         .expect("reservation ctx");
     let mut spendable_profiles = BTreeMap::new();

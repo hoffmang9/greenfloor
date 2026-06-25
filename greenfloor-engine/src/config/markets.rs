@@ -102,7 +102,7 @@ fn validate_base_markets_no_testnet_receive_addresses(
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if receive_address.starts_with("txch1") {
+        if receive_address_matches_operator_network(&receive_address, "testnet11") {
             let market_id = row
                 .get("id")
                 .and_then(Value::as_str)
@@ -233,6 +233,97 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
         .get("cancel_policy_stable_vs_unstable")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+/// Select the market row for `coins-list` / `coin-status` without network validation.
+///
+/// When `--market-id` or `--pair` is provided, uses the same rules as
+/// [`resolve_market_for_build`]. Otherwise picks the lexicographically smallest
+/// enabled market whose `receive_address` prefix matches the operator network
+/// (`xch1` on mainnet, `txch1` on testnet11).
+///
+/// Call [`ensure_market_receive_address_for_network`] after selection when the row
+/// must match the operator network (including explicit `--market-id` / `--pair`).
+///
+/// # Errors
+///
+/// Returns an error if market selection fails or no market matches the network.
+pub fn select_coin_list_market(
+    markets: &MarketsConfig,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
+) -> SignerResult<MarketConfig> {
+    let has_market_id = market_id
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    let has_pair = pair.map(str::trim).is_some_and(|value| !value.is_empty());
+    if has_market_id || has_pair {
+        return resolve_market_for_build(markets, market_id, pair, network);
+    }
+    let mut candidates: Vec<&MarketConfig> = markets
+        .markets
+        .iter()
+        .filter(|market| {
+            market.enabled
+                && receive_address_matches_operator_network(&market.receive_address, network)
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Err(SignerError::Other(format!(
+            "no enabled market with receive_address for network {network}"
+        )));
+    }
+    candidates.sort_by_key(|market| market.market_id.as_str());
+    Ok(candidates[0].clone())
+}
+
+/// Resolve the market row for `coins-list` / `coin-status`.
+///
+/// Same selection as [`select_coin_list_market`], then enforces receive-address /
+/// operator-network match.
+///
+/// # Errors
+///
+/// Returns an error if market resolution fails or no market matches the network.
+pub fn resolve_coin_list_market(
+    markets: &MarketsConfig,
+    network: &str,
+    market_id: Option<&str>,
+    pair: Option<&str>,
+) -> SignerResult<MarketConfig> {
+    let market = select_coin_list_market(markets, network, market_id, pair)?;
+    ensure_market_receive_address_for_network(&market, network)?;
+    Ok(market)
+}
+
+/// Require a market row's receive address to match the operator network.
+///
+/// # Errors
+///
+/// Returns an error when the address prefix does not match the network.
+pub fn ensure_market_receive_address_for_network(
+    market: &MarketConfig,
+    network: &str,
+) -> SignerResult<()> {
+    if receive_address_matches_operator_network(&market.receive_address, network) {
+        return Ok(());
+    }
+    Err(SignerError::Other(format!(
+        "market {} receive_address does not match operator network {network}",
+        market.market_id
+    )))
+}
+
+/// Returns whether a market receive address belongs on the given operator network.
+#[must_use]
+pub fn receive_address_matches_operator_network(receive_address: &str, network: &str) -> bool {
+    let addr = receive_address.trim().to_ascii_lowercase();
+    if is_testnet_network(network) {
+        addr.starts_with("txch1")
+    } else {
+        addr.starts_with("xch1")
+    }
 }
 
 /// Resolve market for build.
