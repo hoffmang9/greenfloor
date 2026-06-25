@@ -251,6 +251,15 @@ mod tests {
             ..Default::default()
         };
 
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_all_mempool_tx_ids")
+            .with_status(200)
+            .with_body(r#"{"success":true,"tx_ids":[]}"#)
+            .create_async()
+            .await;
+        let coinset_base_url = server.url();
+
         let handle = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -259,7 +268,7 @@ mod tests {
             runtime.block_on(run_coinset_websocket_loop(
                 db_path,
                 program,
-                "https://example.test".to_string(),
+                coinset_base_url,
                 CoinWatchlistCache::new(),
                 stop_flag,
             ));
