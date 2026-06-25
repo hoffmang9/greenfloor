@@ -1,7 +1,7 @@
 use crate::coinset::get_conservative_fee_estimate_for_signer;
 use crate::config::{
     action_side_from_pricing, load_gated_operator_market, resolve_offer_publish_settings,
-    GatedOperatorMarket, OperatorMarketCommand,
+    GatedOperatorMarket, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
@@ -30,16 +30,16 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    let gated = load_gated_operator_market(
-        &request.program_path,
-        &request.markets_path,
-        request.testnet_markets_path.as_deref(),
-        None,
-        &request.network,
-        request.market_id.as_deref(),
-        request.pair.as_deref(),
-        OperatorMarketCommand::Build,
-    )?;
+    let gated = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
+        program_path: &request.program_path,
+        markets_path: &request.markets_path,
+        testnet_markets_path: request.testnet_markets_path.as_deref(),
+        cats_path: None,
+        network: &request.network,
+        market_id: request.market_id.as_deref(),
+        pair: request.pair.as_deref(),
+        command: OperatorMarketCommand::Build,
+    })?;
     sync_manager_file_logging(&gated.program.home_dir, &gated.program.app_log_level)?;
     warn_if_log_level_auto_healed(
         gated.program.app_log_level_was_missing,

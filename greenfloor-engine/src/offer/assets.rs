@@ -2,7 +2,7 @@
 
 use chia_sdk_coinset::CoinsetClient;
 
-use crate::coinset::{is_xch_like_asset, lookup_asset_by_symbol, normalize_asset_id};
+use crate::coinset::{is_xch_like_asset, lookup_asset_by_symbol};
 use crate::config::{lookup_asset_id_from_ticker, resolve_quote_asset_for_offer, CatTickerIndex};
 use crate::config::{MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
@@ -18,9 +18,9 @@ pub struct ResolvedMarketOfferAssets {
 
 /// Signer-backed offer asset resolution using a pre-built operator ticker index.
 pub struct OfferAssetResolver<'a> {
-    signer: &'a SignerConfig,
-    index: &'a CatTickerIndex,
-    operator_network: &'a str,
+    pub(crate) signer: &'a SignerConfig,
+    pub(crate) index: &'a CatTickerIndex,
+    pub(crate) operator_network: &'a str,
 }
 
 impl<'a> OfferAssetResolver<'a> {
@@ -35,21 +35,6 @@ impl<'a> OfferAssetResolver<'a> {
             index,
             operator_network,
         }
-    }
-
-    #[must_use]
-    pub fn signer(&self) -> &SignerConfig {
-        self.signer
-    }
-
-    #[must_use]
-    pub fn index(&self) -> &CatTickerIndex {
-        self.index
-    }
-
-    #[must_use]
-    pub fn operator_network(&self) -> &str {
-        self.operator_network
     }
 
     fn coinset_client(&self) -> SignerResult<CoinsetClient> {
@@ -162,6 +147,27 @@ fn ensure_distinct_non_xch_pair(base: &str, quote: &str) -> SignerResult<()> {
     Ok(())
 }
 
+/// Normalize a resolved offer asset id (XCH/TXCH label or 64-hex CAT id).
+///
+/// # Errors
+///
+/// Returns an error if the asset id is invalid.
+pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
+    let trimmed = raw.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return Err(SignerError::MissingAssetId);
+    }
+    if matches!(trimmed.as_str(), "xch" | "txch" | "1") {
+        return Ok(trimmed);
+    }
+    if trimmed.len() == 64 && trimmed.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Ok(trimmed);
+    }
+    Err(SignerError::Other(format!(
+        "invalid asset id (expected 64-hex cat id or xch/txch): {raw}"
+    )))
+}
+
 async fn resolve_one_asset(
     client: &CoinsetClient,
     raw: &str,
@@ -173,10 +179,11 @@ async fn resolve_one_asset(
     if let Some(asset_id) = lookup_asset_id_from_ticker(ticker_index, raw)? {
         return normalize_asset_id(&asset_id);
     }
-    if let Ok(Some(asset)) = lookup_asset_by_symbol(client, raw).await {
-        return normalize_asset_id(&asset.asset_id);
+    match lookup_asset_by_symbol(client, raw).await {
+        Ok(Some(asset)) => normalize_asset_id(&asset.asset_id),
+        Ok(None) => Err(SignerError::Other(format!("asset_resolution_failed:{raw}"))),
+        Err(err) => Err(err),
     }
-    Err(SignerError::Other(format!("asset_resolution_failed:{raw}")))
 }
 
 #[cfg(test)]
@@ -184,6 +191,20 @@ mod tests {
     use super::*;
     use crate::config::build_cat_ticker_index_lenient;
     use chia_sdk_coinset::CoinsetClient;
+
+    #[test]
+    fn normalize_asset_id_accepts_xch_and_hex() {
+        assert_eq!(normalize_asset_id("xch").unwrap(), "xch");
+        assert_eq!(normalize_asset_id("TXCH").unwrap(), "txch");
+        let cat = "a".repeat(64);
+        assert_eq!(normalize_asset_id(&cat).unwrap(), cat);
+    }
+
+    #[test]
+    fn normalize_asset_id_rejects_invalid() {
+        assert!(normalize_asset_id("").is_err());
+        assert!(normalize_asset_id("Asset_foo").is_err());
+    }
 
     #[test]
     fn ensure_distinct_non_xch_pair_rejects_identical_cats() {
@@ -269,6 +290,26 @@ cats:
             .expect("ticker index resolution");
         assert_eq!(base, byc_id);
         assert_eq!(quote, wusdc_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_one_asset_propagates_coinset_transport_errors() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/lookup_asset_by_symbol")
+            .with_status(500)
+            .create_async()
+            .await;
+        let client = CoinsetClient::new(server.url());
+        let err = resolve_offer_asset_ids(
+            &client,
+            "HOA",
+            "xch",
+            &crate::config::empty_cat_ticker_index(),
+        )
+        .await
+        .expect_err("transport error");
+        assert!(!err.to_string().contains("asset_resolution_failed"));
     }
 
     #[tokio::test]

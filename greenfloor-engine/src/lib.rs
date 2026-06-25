@@ -79,55 +79,5 @@ pub async fn resolve_offer_assets(
     .await
 }
 
-/// Deprecated: builds the default operator ticker index on each call.
-///
-/// Prefer [`resolve_offer_assets`] with an index from [`operator_ticker_index_from_paths`].
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-#[deprecated(
-    since = "0.2.0",
-    note = "pass an explicit CatTickerIndex from operator metadata paths"
-)]
-pub async fn resolve_offer_assets_via_coinset(
-    config: SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    use config::build_cat_ticker_index_lenient;
-    use paths::default_operator_metadata_config_paths;
-
-    let (cats, markets, testnet) = default_operator_metadata_config_paths();
-    let ticker_index = build_cat_ticker_index_lenient(&cats, &markets, testnet.as_deref());
-    let operator_network = config.network.clone();
-    resolve_offer_assets(
-        config,
-        base_asset,
-        quote_asset,
-        &ticker_index,
-        &operator_network,
-    )
-    .await
-}
-
-/// Deprecated alias for [`resolve_offer_assets_via_coinset`].
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-#[deprecated(
-    since = "0.2.0",
-    note = "use resolve_offer_assets with an explicit CatTickerIndex"
-)]
-#[allow(deprecated)]
-pub async fn resolve_offer_asset_ids(
-    config: SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-) -> SignerResult<(String, String)> {
-    resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await
-}
-
 #[cfg(test)]
 mod test_support;

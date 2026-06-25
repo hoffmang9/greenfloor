@@ -142,10 +142,11 @@ async fn build_vault_cat_mixed_split_with_selection(
 /// Returns an error if the operation fails.
 pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     config: SignerConfig,
+    operator_network: &str,
     request: MixedSplitRequest,
     broadcast: bool,
 ) -> SignerResult<MixedSplitResult> {
-    let client = coinset::client_for_signer(&config)?;
+    let client = coinset::client_for_signer_on_network(&config, operator_network)?;
     build_vault_cat_mixed_split_with_selection(
         config,
         request,

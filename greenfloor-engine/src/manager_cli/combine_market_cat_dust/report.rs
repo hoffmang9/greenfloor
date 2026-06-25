@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
 
 use super::batches::preview_batches_report;
-use super::coinset_context::CombineCoinsetContext;
 use super::jobs::CatDustJob;
 use crate::coinset::CoinSpentVerifyConfig;
+use crate::coinset::ResolvedCoinsetEndpoint;
 use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::vault_coinset_scan::{DustPlan, ScanResult};
@@ -86,7 +86,7 @@ pub(crate) fn attach_list_summary(job_report: &mut Value, scan: &ScanResult) {
 
 pub(crate) fn attach_dust_plan_fields(
     job_report: &mut Value,
-    coinset: &CombineCoinsetContext,
+    coinset: &ResolvedCoinsetEndpoint,
     plan: &DustPlan,
 ) {
     let lineage_proven = plan
@@ -125,7 +125,7 @@ pub(crate) fn signer_blocked_job_report(job: &CatDustJob, reason: &str) -> Value
 pub(crate) fn preview_job_report(
     job: &CatDustJob,
     scan: &ScanResult,
-    coinset: &CombineCoinsetContext,
+    coinset: &ResolvedCoinsetEndpoint,
     plan: &DustPlan,
     readiness: VaultSignerReadiness,
 ) -> Value {
@@ -144,7 +144,7 @@ pub(crate) fn preview_job_report(
 pub(crate) fn combine_job_report(
     job: &CatDustJob,
     scan: &ScanResult,
-    coinset: &CombineCoinsetContext,
+    coinset: &ResolvedCoinsetEndpoint,
     plan: &DustPlan,
     batches: Value,
     job_failed: bool,
@@ -158,7 +158,7 @@ pub(crate) fn combine_job_report(
 }
 
 pub(crate) async fn plan_dust_for_scan(
-    coinset: &CombineCoinsetContext,
+    coinset: &ResolvedCoinsetEndpoint,
     scan: &ScanResult,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
@@ -176,7 +176,7 @@ pub(crate) async fn plan_dust_for_scan(
 pub(crate) async fn finalize_job_report(
     job: &CatDustJob,
     scan: ScanResult,
-    coinset: &CombineCoinsetContext,
+    coinset: &ResolvedCoinsetEndpoint,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
     run_mode: &CombineRunMode<'_>,

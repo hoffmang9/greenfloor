@@ -4,7 +4,9 @@ use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
-use crate::config::{load_gated_operator_market, OperatorMarketCommand};
+use crate::config::{
+    load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
+};
 use crate::error::{SignerError, SignerResult};
 
 use crate::manager_cli::context::ManagerContext;
@@ -41,7 +43,6 @@ struct CoinListCommand<'a> {
     market_id: Option<&'a str>,
     pair: Option<&'a str>,
     asset: Option<&'a str>,
-    vault_id: Option<&'a str>,
     cat_id: Option<&'a str>,
     op: &'a str,
 }
@@ -58,16 +59,16 @@ async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult
         asset,
         cat_id,
     } = params;
-    let loaded = load_gated_operator_market(
+    let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
         program_path,
         markets_path,
         testnet_markets_path,
-        Some(cats_path),
+        cats_path: Some(cats_path),
         network,
         market_id,
         pair,
-        OperatorMarketCommand::CoinList,
-    )?;
+        command: OperatorMarketCommand::CoinList,
+    })?;
     let market = loaded.market.clone();
     let resolver = loaded.asset_resolver();
     let receive_address = market.receive_address.trim();
@@ -151,11 +152,9 @@ async fn run_coin_list_command(cmd: CoinListCommand<'_>) -> SignerResult<i32> {
         market_id,
         pair,
         asset,
-        vault_id,
         cat_id,
         op,
     } = cmd;
-    let _ = vault_id;
     let snapshot = match load_coin_list_snapshot(CoinListLoadParams {
         program_path: &mgr.program_config,
         markets_path: &mgr.markets_config,
@@ -215,7 +214,6 @@ pub async fn run_coins_list(
     market_id: Option<&str>,
     pair: Option<&str>,
     asset: Option<&str>,
-    vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     run_coin_list_command(CoinListCommand {
@@ -224,7 +222,6 @@ pub async fn run_coins_list(
         market_id,
         pair,
         asset,
-        vault_id,
         cat_id,
         op: "coins-list",
     })
@@ -237,7 +234,6 @@ pub async fn run_coin_status(
     market_id: Option<&str>,
     pair: Option<&str>,
     asset: Option<&str>,
-    vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     run_coin_list_command(CoinListCommand {
@@ -246,7 +242,6 @@ pub async fn run_coin_status(
         market_id,
         pair,
         asset,
-        vault_id,
         cat_id,
         op: "coin-status",
     })

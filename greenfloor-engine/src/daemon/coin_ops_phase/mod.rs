@@ -9,6 +9,7 @@ use crate::coin_ops::{
 };
 use crate::config::{
     signer_execution_skip_reason, LadderEntry, ManagerProgramConfig, MarketConfig,
+    OperatorMarketContext,
 };
 use crate::error::SignerResult;
 use crate::operator_log::{
@@ -151,11 +152,15 @@ async fn execute_coin_ops_plans(
         });
     }
 
-    match ctx.resources.asset_resolver() {
-        Ok(resolver) => Ok(execute_managed_coin_op_plans(
-            program,
-            &resolver,
-            market,
+    match ctx.resources.signer_for_execution() {
+        Ok(signer) => Ok(execute_managed_coin_op_plans(
+            OperatorMarketContext {
+                program,
+                signer,
+                ticker_index: &ctx.resources.ticker_index,
+                operator_network: &ctx.resources.network,
+                market,
+            },
             &planning.executable_plans,
             &watched_coin_ids,
         )

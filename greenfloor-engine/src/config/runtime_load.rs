@@ -6,7 +6,7 @@
 //! | --- | --- | --- | --- |
 //! | [`load_gated_operator_market`] | `build-and-post-offer`, coin-op CLI, `coins-list` | hard fail on missing signer | yes (see [`OperatorMarketCommand`]) |
 //! | [`load_daemon_cycle_config`] | daemon cycle (`load_cycle_resources`) | soft (`CycleProgramConfig`) | no (full markets list) |
-//! | [`load_raw_program_and_markets`] | `combine-market-cat-dust` (needs raw YAML) | parse program only | no (full markets list) |
+//! | [`load_combine_command_resources`] | `combine-market-cat-dust` | gated signer when executing | no (full markets list) |
 //!
 //! Asset id resolution after load uses [`crate::offer::OfferAssetResolver`] built from
 //! [`GatedOperatorMarket::asset_resolver`] or [`operator_ticker_index_from_paths`].
@@ -18,9 +18,10 @@ use serde_json::Value;
 use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
     load_markets_config_with_overlay, load_program_bundle_gated, parse_program_config,
-    read_program_yaml, resolve_coin_list_market, resolve_market_for_build, CycleProgramConfig,
-    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
+    parse_signer_config, read_program_yaml, resolve_coin_list_market, resolve_market_for_build,
+    CycleProgramConfig, ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
+use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint, DEFAULT_COINSET_BASE_URL};
 use crate::error::SignerResult;
 use crate::paths::resolve_cats_config_path;
 
@@ -43,14 +44,49 @@ pub struct GatedOperatorMarket {
     pub operator_network: String,
 }
 
+/// Borrowed view of a gated operator market (daemon coin-op paths, asset resolution).
+#[derive(Debug, Clone, Copy)]
+pub struct OperatorMarketContext<'a> {
+    pub program: &'a ManagerProgramConfig,
+    pub signer: &'a SignerConfig,
+    pub market: &'a MarketConfig,
+    pub ticker_index: &'a CatTickerIndex,
+    pub operator_network: &'a str,
+}
+
 impl GatedOperatorMarket {
     #[must_use]
+    pub fn as_context(&self) -> OperatorMarketContext<'_> {
+        OperatorMarketContext {
+            program: &self.program,
+            signer: &self.signer,
+            market: &self.market,
+            ticker_index: &self.ticker_index,
+            operator_network: &self.operator_network,
+        }
+    }
+
+    #[must_use]
     pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'_> {
-        crate::offer::OfferAssetResolver::new(
-            &self.signer,
-            &self.ticker_index,
-            &self.operator_network,
-        )
+        self.as_context().asset_resolver()
+    }
+}
+
+impl<'a> OperatorMarketContext<'a> {
+    #[must_use]
+    pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'a> {
+        crate::offer::OfferAssetResolver::new(self.signer, self.ticker_index, self.operator_network)
+    }
+
+    #[must_use]
+    pub fn into_gated(self) -> GatedOperatorMarket {
+        GatedOperatorMarket {
+            program: self.program.clone(),
+            signer: self.signer.clone(),
+            market: self.market.clone(),
+            ticker_index: self.ticker_index.clone(),
+            operator_network: self.operator_network.to_string(),
+        }
     }
 }
 
@@ -81,27 +117,62 @@ pub struct RawProgramMarkets {
     pub markets: MarketsConfig,
 }
 
+/// Program, markets, Coinset endpoint, and optional execution signer for combine-market-cat-dust.
+#[derive(Debug, Clone)]
+pub struct CombineCommandResources {
+    pub program: ManagerProgramConfig,
+    pub markets: MarketsConfig,
+    pub coinset: ResolvedCoinsetEndpoint,
+    pub execution_signer: Option<SignerConfig>,
+}
+
+/// Inputs for [`load_combine_command_resources`].
+#[derive(Debug, Clone, Copy)]
+pub struct CombineCommandLoadRequest<'a> {
+    pub program_path: &'a Path,
+    pub markets_path: &'a Path,
+    pub testnet_markets_path: Option<&'a Path>,
+    pub request_network: Option<&'a str>,
+    pub coinset_base_url: Option<&'a str>,
+    pub preview_mode: bool,
+}
+
+/// Inputs for [`load_gated_operator_market`].
+#[derive(Debug, Clone, Copy)]
+pub struct GatedOperatorMarketLoadRequest<'a> {
+    pub program_path: &'a Path,
+    pub markets_path: &'a Path,
+    pub testnet_markets_path: Option<&'a Path>,
+    pub cats_path: Option<&'a Path>,
+    pub network: &'a str,
+    pub market_id: Option<&'a str>,
+    pub pair: Option<&'a str>,
+    pub command: OperatorMarketCommand,
+}
+
 /// Load gated program config and resolve one market row for build/coin-op commands.
 ///
 /// # Errors
 ///
 /// Returns an error if config loading or market resolution fails.
-#[allow(clippy::too_many_arguments)]
 pub fn load_gated_operator_market(
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-    cats_path: Option<&Path>,
-    network: &str,
-    market_id: Option<&str>,
-    pair: Option<&str>,
-    command: OperatorMarketCommand,
+    request: &GatedOperatorMarketLoadRequest<'_>,
 ) -> SignerResult<GatedOperatorMarket> {
+    let GatedOperatorMarketLoadRequest {
+        program_path,
+        markets_path,
+        testnet_markets_path,
+        cats_path,
+        network,
+        market_id,
+        pair,
+        command,
+    } = request;
     let bundle = load_program_bundle_gated(program_path)?;
-    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    let market = resolve_operator_market(&markets, network, market_id, pair, command)?;
+    let markets = load_markets_config_with_overlay(markets_path, *testnet_markets_path)?;
+    let market = resolve_operator_market(&markets, network, *market_id, *pair, *command)?;
     let ticker_index =
-        operator_ticker_index_from_paths(markets_path, testnet_markets_path, cats_path);
+        operator_ticker_index_from_paths(markets_path, *testnet_markets_path, *cats_path);
     Ok(GatedOperatorMarket {
         program: bundle.program,
         signer: bundle.signer,
@@ -165,6 +236,56 @@ pub fn load_raw_program_and_markets(
         raw_program: raw,
         program,
         markets,
+    })
+}
+
+fn configured_coinset_base_url(raw: &Value, signer: Option<&SignerConfig>) -> String {
+    if let Some(signer) = signer {
+        return signer.coinset_base_url.clone();
+    }
+    parse_signer_config(raw).map_or_else(
+        |_| DEFAULT_COINSET_BASE_URL.to_string(),
+        |cfg| cfg.coinset_base_url,
+    )
+}
+
+/// Load program, markets, Coinset endpoint, and optional execution signer for combine.
+///
+/// # Errors
+///
+/// Returns an error if config loading fails.
+pub fn load_combine_command_resources(
+    request: &CombineCommandLoadRequest<'_>,
+) -> SignerResult<CombineCommandResources> {
+    let CombineCommandLoadRequest {
+        program_path,
+        markets_path,
+        testnet_markets_path,
+        request_network,
+        coinset_base_url,
+        preview_mode,
+    } = request;
+    let markets = load_markets_config_with_overlay(markets_path, *testnet_markets_path)?;
+    let (program, execution_signer, configured_url) = if *preview_mode {
+        let raw_program = read_program_yaml(program_path)?;
+        let program = parse_program_config(&raw_program)?;
+        let configured_url = configured_coinset_base_url(&raw_program, None);
+        (program, None, configured_url)
+    } else {
+        let bundle = load_program_bundle_gated(program_path)?;
+        let configured_url = bundle.signer.coinset_base_url.clone();
+        (bundle.program, Some(bundle.signer), configured_url)
+    };
+    let network_source = request_network
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(program.network.as_str());
+    let coinset = resolve_coinset_endpoint(network_source, &configured_url, *coinset_base_url);
+    Ok(CombineCommandResources {
+        program,
+        markets,
+        coinset,
+        execution_signer,
     })
 }
 

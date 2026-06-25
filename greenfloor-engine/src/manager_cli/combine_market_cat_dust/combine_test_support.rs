@@ -1,5 +1,5 @@
-use super::coinset_context::resolve_combine_coinset_context;
 use super::jobs::CatDustJob;
+use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint};
 use crate::hex::hex_to_bytes32;
 use crate::test_support::simulator::harness::{fetch_cat_from_sim_by_id, SimulatorVaultHarness};
 use crate::vault_coinset_scan::{
@@ -18,8 +18,8 @@ pub(super) fn sample_job(cat_asset_id: &str) -> CatDustJob {
     }
 }
 
-pub(super) fn test_coinset_context() -> super::coinset_context::CombineCoinsetContext {
-    resolve_combine_coinset_context(None, None, "mainnet", "https://api.coinset.org")
+pub(super) fn test_coinset_endpoint() -> ResolvedCoinsetEndpoint {
+    resolve_coinset_endpoint("mainnet", "https://api.coinset.org", None)
 }
 
 pub(super) fn dust_plan_from_scan_without_lineage(

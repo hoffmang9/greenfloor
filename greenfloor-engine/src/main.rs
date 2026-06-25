@@ -118,6 +118,7 @@ async fn main() {
     }
 }
 
+#[allow(clippy::large_futures)]
 async fn run() -> Result<(), Error> {
     match Cli::parse().command {
         Commands::VaultInfo { config, json } => run_vault_info_command(config, json).await,
@@ -197,7 +198,7 @@ async fn run_vault_info_command(config: PathBuf, json: bool) -> Result<(), Error
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::large_futures)]
 async fn run_mixed_cat_command(
     config: PathBuf,
     receive_address: String,
@@ -284,6 +285,7 @@ async fn run_create_offer_command(
     print_create_offer_result(&result, json)
 }
 
+#[allow(clippy::large_futures)]
 async fn run_mixed_split(
     config_path: &std::path::Path,
     receive_address: String,
@@ -299,8 +301,10 @@ async fn run_mixed_split(
     } else {
         parse_coin_ids(&coin_ids)?
     };
+    let operator_network = config.network.clone();
     build_and_optionally_broadcast_vault_cat_mixed_split(
         config,
+        &operator_network,
         MixedSplitRequest {
             receive_address,
             asset_id: hex_to_bytes32(&asset_id)?,

@@ -33,8 +33,10 @@ pub use program::{
     SIGNER_SKIP_MISSING_SIGNER_CONFIG, SIGNER_SKIP_NO_SIGNER_PATH,
 };
 pub use runtime_load::{
-    load_daemon_cycle_config, load_gated_operator_market, load_raw_program_and_markets,
-    operator_ticker_index_from_paths, DaemonCycleConfig, GatedOperatorMarket,
-    OperatorMarketCommand, RawProgramMarkets,
+    load_combine_command_resources, load_daemon_cycle_config, load_gated_operator_market,
+    load_raw_program_and_markets, operator_ticker_index_from_paths, CombineCommandLoadRequest,
+    CombineCommandResources, DaemonCycleConfig, GatedOperatorMarket,
+    GatedOperatorMarketLoadRequest, OperatorMarketCommand, OperatorMarketContext,
+    RawProgramMarkets,
 };
 pub use signer::{load_signer_config, parse_signer_config, SignerConfig};

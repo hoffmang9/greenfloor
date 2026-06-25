@@ -21,7 +21,6 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             pair,
             network,
             asset,
-            vault_id,
             cat_id,
         } => {
             coin_op_loop::run_coins_list(
@@ -30,7 +29,6 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                 market_id.as_deref(),
                 pair.as_deref(),
                 optional_str(&asset),
-                optional_str(&vault_id),
                 optional_str(&cat_id),
             )
             .await
@@ -40,7 +38,6 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             pair,
             network,
             asset,
-            vault_id,
             cat_id,
         } => {
             coin_op_loop::run_coin_status(
@@ -49,7 +46,6 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                 market_id.as_deref(),
                 pair.as_deref(),
                 optional_str(&asset),
-                optional_str(&vault_id),
                 optional_str(&cat_id),
             )
             .await

@@ -7,7 +7,9 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
-use crate::config::{load_gated_operator_market, OperatorMarketCommand};
+use crate::config::{
+    load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
+};
 use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::offer::OfferAssetResolver;
@@ -27,7 +29,7 @@ pub(super) async fn build_coin_op_exec_context(
     pair: Option<&str>,
     asset_id_override: Option<&str>,
 ) -> SignerResult<CoinOpExecContext> {
-    let loaded = load_gated_operator_market(
+    let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
         program_path,
         markets_path,
         testnet_markets_path,
@@ -35,8 +37,8 @@ pub(super) async fn build_coin_op_exec_context(
         network,
         market_id,
         pair,
-        OperatorMarketCommand::Build,
-    )?;
+        command: OperatorMarketCommand::Build,
+    })?;
     loaded
         .into_coin_op_exec_context(
             asset_id_override,

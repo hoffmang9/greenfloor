@@ -1,6 +1,5 @@
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapCoin,
@@ -15,7 +14,7 @@ use super::types::{
     BootstrapPhaseResult,
 };
 use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
-use super::ExecutedAfterSplitParams;
+use super::{ExecutedAfterSplitParams, SignerDenominationPhaseContext};
 
 const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
 
@@ -101,9 +100,9 @@ fn bootstrap_wait_failed(
     )
 }
 
+#[allow(clippy::large_futures)]
 async fn execute_bootstrap_combine_step(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
+    phase: &SignerDenominationPhaseContext<'_>,
     ctx: &BootstrapShapeContext,
 ) -> Result<
     (
@@ -114,7 +113,8 @@ async fn execute_bootstrap_combine_step(
     BootstrapPhaseResult,
 > {
     let combine_result = submit_bootstrap_combine(
-        signer_config,
+        phase.signer_config,
+        phase.operator_network,
         &ctx.bootstrap_plan,
         &ctx.split_asset_id,
         &ctx.receive_address,
@@ -133,10 +133,10 @@ async fn execute_bootstrap_combine_step(
     })?;
 
     let wait = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
+        network: phase.operator_network,
+        signer: phase.signer_config,
         ctx,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        timeout_seconds: phase.program.runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterCombine,
     })
@@ -196,19 +196,18 @@ pub(crate) fn replan_after_combine(
 
 #[allow(clippy::large_futures)]
 pub(super) async fn execute_bootstrap_shape(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
+    phase: &SignerDenominationPhaseContext<'_>,
     mut ctx: BootstrapShapeContext,
 ) -> SignerResult<BootstrapPhaseResult> {
     let mut prepend_wait_events = Vec::new();
 
     if ctx.bootstrap_plan.requires_combine_first() {
         let combine_target_amount = ctx.bootstrap_plan.total_output_amount;
-        let (events, replanned, spendable) =
-            match execute_bootstrap_combine_step(program, signer_config, &ctx).await {
-                Ok(result) => result,
-                Err(result) => return Ok(result),
-            };
+        let (events, replanned, spendable) = match execute_bootstrap_combine_step(phase, &ctx).await
+        {
+            Ok(result) => result,
+            Err(result) => return Ok(result),
+        };
         prepend_wait_events = events;
         if let Some(result) = replan_after_combine(
             &mut ctx,
@@ -223,7 +222,8 @@ pub(super) async fn execute_bootstrap_shape(
 
     let bootstrap_plan = ctx.bootstrap_plan.clone();
     let split_result = match submit_bootstrap_mixed_split(
-        signer_config,
+        phase.signer_config,
+        phase.operator_network,
         &bootstrap_plan,
         &ctx.split_asset_id,
         &ctx.receive_address,
@@ -248,10 +248,10 @@ pub(super) async fn execute_bootstrap_shape(
     };
 
     let wait = match wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-        network: &program.network,
-        signer: signer_config,
+        network: phase.operator_network,
+        signer: phase.signer_config,
         ctx: &ctx,
-        timeout_seconds: program.runtime_offer_bootstrap_wait_timeout_seconds,
+        timeout_seconds: phase.program.runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterSplit,
     })

@@ -6,7 +6,6 @@ use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::error::SignerResult;
-use crate::offer::OfferAssetResolver;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
@@ -17,6 +16,7 @@ use super::split::execute_daemon_split_plan;
 use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
+use crate::config::OperatorMarketContext;
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use crate::offer::dexie_payload::DexieOfferPayload;
 
@@ -80,16 +80,12 @@ fn skip_all_plans(
 
 #[must_use]
 pub fn execute_managed_coin_op_plans<'a>(
-    program: &'a ManagerProgramConfig,
-    resolver: &'a OfferAssetResolver<'a>,
-    market: &'a MarketConfig,
+    operator: OperatorMarketContext<'a>,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
-        program,
-        resolver,
-        market,
+        operator,
         plans,
         watched_coin_ids,
         #[cfg(test)]
@@ -101,17 +97,13 @@ pub fn execute_managed_coin_op_plans<'a>(
 #[cfg(test)]
 #[must_use]
 pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
-    program: &'a ManagerProgramConfig,
-    resolver: &'a OfferAssetResolver<'a>,
-    market: &'a MarketConfig,
+    operator: OperatorMarketContext<'a>,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
     test_overrides: CoinOpTestOverrides,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
-        program,
-        resolver,
-        market,
+        operator,
         plans,
         watched_coin_ids,
         test_overrides,
@@ -119,13 +111,13 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
 }
 
 async fn execute_managed_coin_op_plans_async(
-    program: &ManagerProgramConfig,
-    resolver: &OfferAssetResolver<'_>,
-    market: &MarketConfig,
+    operator: OperatorMarketContext<'_>,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
     #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
+    let program = operator.program;
+    let market = operator.market;
     if market.receive_address.trim().is_empty() {
         return skip_all_plans(
             program,
@@ -136,10 +128,8 @@ async fn execute_managed_coin_op_plans_async(
         );
     }
 
-    let ctx = match CoinOpExecContext::new(
-        program.clone(),
-        resolver,
-        market.clone(),
+    let ctx = match CoinOpExecContext::from_operator_context(
+        operator,
         None,
         watched_coin_ids.iter().cloned().collect(),
         #[cfg(test)]

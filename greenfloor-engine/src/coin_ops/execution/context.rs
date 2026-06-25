@@ -8,7 +8,8 @@ use crate::coin_ops::{
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
 use crate::config::{
-    CatTickerIndex, GatedOperatorMarket, ManagerProgramConfig, MarketConfig, SignerConfig,
+    CatTickerIndex, GatedOperatorMarket, ManagerProgramConfig, MarketConfig, OperatorMarketContext,
+    SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
@@ -35,34 +36,75 @@ pub struct CoinOpExecContext {
 }
 
 impl CoinOpExecContext {
-    /// Build execution context from loaded operator config.
+    /// Build execution context from an owned gated operator market.
     ///
     /// # Errors
     ///
     /// Returns an error if asset resolution fails.
-    pub async fn new(
-        program: ManagerProgramConfig,
-        resolver: &OfferAssetResolver<'_>,
-        market: MarketConfig,
+    pub async fn from_gated_market(
+        gated: GatedOperatorMarket,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
-        let signer_config = resolver.signer().clone();
-        let ticker_index = resolver.index().clone();
+        let resolver = gated.asset_resolver();
         let canonical = canonical_base_asset
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| market.base_asset.trim());
+            .unwrap_or_else(|| gated.market.base_asset.trim());
         let resolved_base_asset_id = resolver.resolve_base(canonical).await?;
+        let base_unit_mojo_multiplier =
+            default_mojo_multiplier_for_asset(gated.market.base_asset.trim());
+        let GatedOperatorMarket {
+            program,
+            signer,
+            market,
+            ticker_index,
+            operator_network,
+        } = gated;
         Ok(Self {
-            signer_config,
-            market: market.clone(),
+            signer_config: signer,
+            market,
             program,
             resolved_base_asset_id,
             ticker_index,
-            operator_network: resolver.operator_network().to_string(),
-            base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
+            operator_network,
+            base_unit_mojo_multiplier,
+            combine_input_cap: resolve_combine_input_cap(),
+            watched_coin_ids,
+            #[cfg(test)]
+            test_overrides,
+        })
+    }
+
+    /// Build execution context from a borrowed operator market view (daemon paths).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if asset resolution fails.
+    pub async fn from_operator_context(
+        operator: OperatorMarketContext<'_>,
+        canonical_base_asset: Option<&str>,
+        watched_coin_ids: HashSet<String>,
+        #[cfg(test)] test_overrides: CoinOpTestOverrides,
+    ) -> SignerResult<Self> {
+        let resolver = operator.asset_resolver();
+        let canonical = canonical_base_asset
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| operator.market.base_asset.trim());
+        let resolved_base_asset_id = resolver.resolve_base(canonical).await?;
+        let base_unit_mojo_multiplier =
+            default_mojo_multiplier_for_asset(operator.market.base_asset.trim());
+        let gated = operator.into_gated();
+        Ok(Self {
+            signer_config: gated.signer,
+            market: gated.market,
+            program: gated.program,
+            resolved_base_asset_id,
+            ticker_index: gated.ticker_index,
+            operator_network: gated.operator_network,
+            base_unit_mojo_multiplier,
             combine_input_cap: resolve_combine_input_cap(),
             watched_coin_ids,
             #[cfg(test)]
@@ -160,6 +202,7 @@ impl CoinOpExecContext {
         };
         let result = build_and_optionally_broadcast_vault_cat_mixed_split(
             self.signer_config.clone(),
+            &self.operator_network,
             request,
             true,
         )
@@ -169,7 +212,7 @@ impl CoinOpExecContext {
 }
 
 impl GatedOperatorMarket {
-    /// Build coin-op execution context without cloning program/market rows.
+    /// Build coin-op execution context without an intermediate bundle struct.
     ///
     /// # Errors
     ///
@@ -180,18 +223,8 @@ impl GatedOperatorMarket {
         watched_coin_ids: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<CoinOpExecContext> {
-        let Self {
-            program,
-            signer,
-            market,
-            ticker_index,
-            operator_network,
-        } = self;
-        let resolver = OfferAssetResolver::new(&signer, &ticker_index, &operator_network);
-        CoinOpExecContext::new(
-            program,
-            &resolver,
-            market,
+        CoinOpExecContext::from_gated_market(
+            self,
             asset_id_override,
             watched_coin_ids,
             #[cfg(test)]

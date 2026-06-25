@@ -15,7 +15,7 @@ use super::BuildAndPostOfferRequest;
 use crate::metrics::metric_millis_to_u64;
 use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
-    run_signer_denomination_phase, BootstrapPhaseResult,
+    run_signer_denomination_phase, BootstrapPhaseResult, SignerDenominationPhaseContext,
 };
 
 async fn run_bootstrap_phase(
@@ -25,16 +25,16 @@ async fn run_bootstrap_phase(
     let bootstrap_result = if request.run.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
     } else {
-        run_signer_denomination_phase(
-            &ctx.gated.program,
-            &ctx.gated.market,
-            &ctx.gated.signer,
-            &ctx.gated.operator_network,
-            &ctx.offer_assets.base_asset_id,
-            &ctx.offer_assets.quote_asset_id,
-            ctx.quote_price,
-            &ctx.action_side,
-        )
+        run_signer_denomination_phase(SignerDenominationPhaseContext {
+            program: &ctx.gated.program,
+            market: &ctx.gated.market,
+            signer_config: &ctx.gated.signer,
+            operator_network: &ctx.gated.operator_network,
+            resolved_base_asset_id: &ctx.offer_assets.base_asset_id,
+            resolved_quote_asset_id: &ctx.offer_assets.quote_asset_id,
+            quote_price: ctx.quote_price,
+            action_side: &ctx.action_side,
+        })
         .await?
     };
     let bootstrap_action = bootstrap_result.to_operator_json();

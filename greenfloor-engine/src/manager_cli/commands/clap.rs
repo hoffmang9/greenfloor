@@ -205,8 +205,6 @@ pub enum ManagerCommands {
         #[arg(long, default_value = "")]
         asset: String,
         #[arg(long, default_value = "")]
-        vault_id: String,
-        #[arg(long, default_value = "")]
         cat_id: String,
     },
     /// Summarize spendable coin counts for a market row (same market selection as [`CoinsList`]).
@@ -225,8 +223,6 @@ pub enum ManagerCommands {
         network: String,
         #[arg(long, default_value = "")]
         asset: String,
-        #[arg(long, default_value = "")]
-        vault_id: String,
         #[arg(long, default_value = "")]
         cat_id: String,
     },

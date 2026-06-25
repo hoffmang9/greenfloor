@@ -41,7 +41,7 @@ pub use direct_api::{
     resolve_direct_coinset_base_url, ResolvedCoinsetEndpoint, ResolvedDirectClient,
     DEFAULT_COINSET_BASE_URL, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
-pub use offer_assets::{lookup_asset_by_symbol, normalize_asset_id, AssetInfo};
+pub use offer_assets::{lookup_asset_by_symbol, AssetInfo};
 pub use parse::{
     chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
@@ -54,7 +54,7 @@ pub use retry::{
     with_script_retries_with_policy, ScriptRetryPolicy,
 };
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
-pub use signer_client::{client_for_network, client_for_signer, client_for_signer_on_network};
+pub use signer_client::{client_for_network, client_for_signer_on_network};
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{
@@ -65,5 +65,23 @@ pub use wallet_io::{
 pub use xch::list_unspent_xch;
 
 pub use chia_sdk_coinset::CoinsetClient;
+
+use crate::error::SignerResult;
+
+impl ResolvedCoinsetEndpoint {
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Coinset client for this resolved endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client cannot be constructed.
+    pub fn client(&self) -> SignerResult<CoinsetClient> {
+        direct_coinset_client(self.network, Some(self.base_url()))
+    }
+}
 
 pub use crate::hex::parse_coin_ids;

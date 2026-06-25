@@ -268,7 +268,7 @@ async fn coins_list_requires_signer_backend() {
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 2);
@@ -333,7 +333,7 @@ async fn coins_list_returns_empty_wallet_with_signer_backend() {
     let harness = ManagerContextBuilder::new(program, markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 0);
@@ -430,7 +430,7 @@ async fn coins_list_applies_testnet_markets_overlay_for_receive_address() {
         .testnet_markets(testnet_markets)
         .scratch_dir(dir.path().to_path_buf())
         .build_capturing();
-    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None, None)
+    let code = super::list::run_coins_list(&harness.ctx, "mainnet", None, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 0);

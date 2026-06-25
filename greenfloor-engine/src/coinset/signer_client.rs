@@ -24,18 +24,6 @@ pub fn client_for_signer_on_network(
     direct_coinset_client(endpoint.network, Some(&endpoint.base_url))
 }
 
-/// Coinset client for signer config (`signer.network` as operator network).
-///
-/// Prefer [`client_for_signer_on_network`] when the caller has an explicit program/CLI
-/// network (for example `coins-list` before combine context rewrites the signer).
-///
-/// # Errors
-///
-/// Returns an error if the signer network is unsupported.
-pub fn client_for_signer(signer: &SignerConfig) -> SignerResult<CoinsetClient> {
-    client_for_signer_on_network(signer, &signer.network)
-}
-
 /// Coinset client for network.
 ///
 /// # Errors

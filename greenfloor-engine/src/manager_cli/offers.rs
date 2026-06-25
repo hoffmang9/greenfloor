@@ -128,6 +128,7 @@ pub async fn run_offers_cancel_command(
             cancel_open: args.cancel_open,
         },
         bundle.signer,
+        &program.network,
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };

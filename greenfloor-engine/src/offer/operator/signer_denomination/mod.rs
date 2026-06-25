@@ -84,6 +84,18 @@ pub(crate) struct ExecutedAfterSplitParams {
     pub(crate) remaining: BootstrapPlanOutcome,
 }
 
+/// Inputs for the signer denomination bootstrap phase (offer build/post).
+pub struct SignerDenominationPhaseContext<'a> {
+    pub program: &'a ManagerProgramConfig,
+    pub market: &'a MarketConfig,
+    pub signer_config: &'a SignerConfig,
+    pub operator_network: &'a str,
+    pub resolved_base_asset_id: &'a str,
+    pub resolved_quote_asset_id: &'a str,
+    pub quote_price: f64,
+    pub action_side: &'a str,
+}
+
 pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> BootstrapPhaseResult {
     let ExecutedAfterSplitParams {
         fee_mojos,
@@ -110,17 +122,20 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> Bootstra
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn prepare_bootstrap_execution_plan(
-    program: &ManagerProgramConfig,
-    signer_config: &SignerConfig,
-    operator_network: &str,
-    market: &MarketConfig,
-    action_side: &str,
-    resolved_base_asset_id: &str,
-    resolved_quote_asset_id: &str,
-    quote_price: f64,
+    ctx: &SignerDenominationPhaseContext<'_>,
 ) -> SignerResult<Result<BootstrapShapeContext, BootstrapPhaseResult>> {
+    let SignerDenominationPhaseContext {
+        program,
+        signer_config,
+        operator_network,
+        market,
+        action_side,
+        resolved_base_asset_id,
+        resolved_quote_asset_id,
+        quote_price,
+    } = ctx;
     let side = normalize_offer_side(action_side);
     let side_ladder = market.ladders.get(side).cloned().unwrap_or_default();
     if side_ladder.is_empty() {
@@ -131,7 +146,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         side,
         &side_ladder,
         &market.pricing,
-        quote_price,
+        *quote_price,
         resolved_quote_asset_id,
     )?;
     if ladder_entries.is_empty() {
@@ -224,54 +239,19 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 }
 
 #[must_use]
-#[allow(clippy::too_many_arguments)]
-pub fn run_signer_denomination_phase<'a>(
-    program: &'a ManagerProgramConfig,
-    market: &'a MarketConfig,
-    signer_config: &'a SignerConfig,
-    operator_network: &'a str,
-    resolved_base_asset_id: &'a str,
-    resolved_quote_asset_id: &'a str,
-    quote_price: f64,
-    action_side: &'a str,
-) -> SignerDenominationPhaseFuture<'a> {
-    Box::pin(run_signer_denomination_phase_async(
-        program,
-        market,
-        signer_config,
-        operator_network,
-        resolved_base_asset_id,
-        resolved_quote_asset_id,
-        quote_price,
-        action_side,
-    ))
+pub fn run_signer_denomination_phase(
+    ctx: SignerDenominationPhaseContext<'_>,
+) -> SignerDenominationPhaseFuture<'_> {
+    Box::pin(run_signer_denomination_phase_async(ctx))
 }
 
 // Clippy `large_futures`: the phase is already boxed at `run_signer_denomination_phase`.
-#[allow(clippy::large_futures, clippy::too_many_arguments)]
+#[allow(clippy::large_futures)]
 async fn run_signer_denomination_phase_async(
-    program: &ManagerProgramConfig,
-    market: &MarketConfig,
-    signer_config: &SignerConfig,
-    operator_network: &str,
-    resolved_base_asset_id: &str,
-    resolved_quote_asset_id: &str,
-    quote_price: f64,
-    action_side: &str,
+    ctx: SignerDenominationPhaseContext<'_>,
 ) -> SignerResult<BootstrapPhaseResult> {
-    match prepare_bootstrap_execution_plan(
-        program,
-        signer_config,
-        operator_network,
-        market,
-        action_side,
-        resolved_base_asset_id,
-        resolved_quote_asset_id,
-        quote_price,
-    )
-    .await?
-    {
-        Ok(shape_ctx) => execute_bootstrap_shape(program, signer_config, shape_ctx).await,
+    match prepare_bootstrap_execution_plan(&ctx).await? {
+        Ok(shape_ctx) => execute_bootstrap_shape(&ctx, shape_ctx).await,
         Err(result) => Ok(result),
     }
 }

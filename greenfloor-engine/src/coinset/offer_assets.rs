@@ -3,7 +3,7 @@
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 use serde::Deserialize;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AssetInfo {
@@ -41,48 +41,14 @@ pub async fn lookup_asset_by_symbol(
         .await;
     match response {
         Ok(body) if body.success => Ok(body.asset),
-        _ => Ok(None),
+        Ok(_) => Ok(None),
+        Err(err) => Err(err.into()),
     }
-}
-
-/// Normalize asset id.
-///
-/// # Errors
-///
-/// Returns an error if the asset id is invalid.
-pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
-    let trimmed = raw.trim().to_lowercase();
-    if trimmed.is_empty() {
-        return Err(SignerError::MissingAssetId);
-    }
-    if matches!(trimmed.as_str(), "xch" | "txch" | "1") {
-        return Ok(trimmed);
-    }
-    if trimmed.len() == 64 && trimmed.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Ok(trimmed);
-    }
-    Err(SignerError::Other(format!(
-        "invalid asset id (expected 64-hex cat id or xch/txch): {raw}"
-    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalize_asset_id_accepts_xch_and_hex() {
-        assert_eq!(normalize_asset_id("xch").unwrap(), "xch");
-        assert_eq!(normalize_asset_id("TXCH").unwrap(), "txch");
-        let cat = "a".repeat(64);
-        assert_eq!(normalize_asset_id(&cat).unwrap(), cat);
-    }
-
-    #[test]
-    fn normalize_asset_id_rejects_invalid() {
-        assert!(normalize_asset_id("").is_err());
-        assert!(normalize_asset_id("Asset_foo").is_err());
-    }
 
     #[tokio::test]
     async fn lookup_asset_by_symbol_mock_shape() {
@@ -104,5 +70,19 @@ mod tests {
             asset.as_ref().and_then(|a| a.symbol.as_deref()),
             Some("BYC")
         );
+    }
+
+    #[tokio::test]
+    async fn lookup_asset_by_symbol_propagates_transport_errors() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/lookup_asset_by_symbol")
+            .with_status(500)
+            .create_async()
+            .await;
+        let client = CoinsetClient::new(server.url());
+        lookup_asset_by_symbol(&client, "BYC")
+            .await
+            .expect_err("transport error");
     }
 }

@@ -1,12 +1,13 @@
-use super::coinset_context::{load_gated_execution_signer, resolve_combine_coinset_context};
 use super::combine_test_support::{
-    dust_plan_from_scan_without_lineage, sample_job, test_coinset_context,
+    dust_plan_from_scan_without_lineage, sample_job, test_coinset_endpoint,
 };
 use super::report::{preview_job_report, vault_signer_ready};
 use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::CoinSpentVerifyConfig;
-use crate::config::{load_program_config, parse_program_config, read_program_yaml};
+use crate::config::{
+    load_combine_command_resources, load_program_config, CombineCommandLoadRequest,
+};
 use crate::manager_cli::test_support::{
     pop_json, write_combine_test_configs, ManagerContextBuilder,
 };
@@ -34,7 +35,7 @@ async fn preview_job_report_plans_two_coin_batch_from_simulator_scan() {
     assert_eq!(plan.batches.combinable_batches.len(), 1);
     assert!(plan.batches.uncombinable.is_empty());
 
-    let coinset = test_coinset_context();
+    let coinset = test_coinset_endpoint();
     let report = preview_job_report(&job, &scan, &coinset, &plan, readiness);
     assert_eq!(report.get("status"), Some(&json!("ok")));
     assert_eq!(report.get("combine_batches_planned"), Some(&json!(1)));
@@ -78,7 +79,7 @@ async fn preview_job_report_marks_single_dust_coin_as_orphan() {
     assert_eq!(plan.batches.combinable_batches.len(), 0);
     assert_eq!(plan.batches.uncombinable.len(), 1);
 
-    let report = preview_job_report(&job, &scan, &test_coinset_context(), &plan, readiness);
+    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &plan, readiness);
     let batches = report
         .get("batches")
         .and_then(|value| value.as_array())
@@ -104,7 +105,7 @@ async fn preview_job_report_without_signer_backend() {
     assert_eq!(readiness.note, Some("signer_not_configured"));
 
     let plan = dust_plan_from_scan_without_lineage(&scan, &harness, 1000, 2);
-    let report = preview_job_report(&job, &scan, &test_coinset_context(), &plan, readiness);
+    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &plan, readiness);
     assert_eq!(report.get("signer_config_ok"), Some(&json!(false)));
     assert_eq!(
         report.get("signer_config_note"),
@@ -189,23 +190,25 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
 }
 
 #[test]
-fn load_gated_execution_signer_returns_program_signer_without_mutation() {
+fn load_combine_command_resources_resolves_coinset_and_signer() {
     let dir = tempfile::tempdir().expect("tempdir");
     let cat_hex = "f".repeat(64);
     write_combine_test_configs(dir.path(), &cat_hex, true);
     let program_path = dir.path().join("program.yaml");
-    let raw = read_program_yaml(&program_path).expect("read program");
-    let program = parse_program_config(&raw).expect("parse program");
-    let coinset_ctx = resolve_combine_coinset_context(
-        Some("testnet"),
-        Some("https://coinset.custom/"),
-        &program.network,
-        "https://api.coinset.org",
-    );
-    let signer = load_gated_execution_signer(&raw, program.clone()).expect("execution signer");
+    let program = load_program_config(&program_path).expect("parse program");
+    let loaded = load_combine_command_resources(&CombineCommandLoadRequest {
+        program_path: &program_path,
+        markets_path: &dir.path().join("markets.yaml"),
+        testnet_markets_path: None,
+        request_network: Some("testnet"),
+        coinset_base_url: Some("https://coinset.custom/"),
+        preview_mode: false,
+    })
+    .expect("loaded");
+    let signer = loaded.execution_signer.expect("execution signer");
     assert_eq!(signer.network, program.network);
-    assert_ne!(signer.network, coinset_ctx.network);
-    let client = coinset_ctx.client().expect("coinset client");
+    assert_ne!(signer.network, loaded.coinset.network);
+    let client = loaded.coinset.client().expect("coinset client");
     assert_eq!(client.base_url(), "https://coinset.custom");
 }
 

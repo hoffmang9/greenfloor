@@ -197,6 +197,7 @@ pub async fn offers_cancel_cli(
     target_venue: &str,
     request: &OffersCancelCliRequest,
     signer_config: SignerConfig,
+    operator_network: &str,
 ) -> SignerResult<OffersCancelCliResult> {
     let venue = target_venue.trim().to_ascii_lowercase();
     if venue != "dexie" {
@@ -257,7 +258,8 @@ pub async fn offers_cancel_cli(
         .iter()
         .map(|selection| selection.target.clone())
         .collect();
-    let outcomes = cancel_offers_on_chain(&store, &dexie, signer_config, &targets).await?;
+    let outcomes =
+        cancel_offers_on_chain(&store, &dexie, signer_config, operator_network, &targets).await?;
     let selected_count = crate::metrics::metric_collection_len_to_u64(selections.len());
     let mut failures = 0u64;
     for (outcome, selection) in outcomes.into_iter().zip(selections.drain(..)) {

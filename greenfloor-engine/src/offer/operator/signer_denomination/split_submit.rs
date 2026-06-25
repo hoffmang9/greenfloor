@@ -10,6 +10,7 @@ use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSp
 
 async fn submit_bootstrap_vault_mixed_split(
     signer_config: &SignerConfig,
+    operator_network: &str,
     split_asset_id: &str,
     receive_address: &str,
     coin_ids: &[String],
@@ -23,6 +24,7 @@ async fn submit_bootstrap_vault_mixed_split(
     ) {
         let _ = (
             signer_config,
+            operator_network,
             split_asset_id,
             receive_address,
             coin_ids,
@@ -32,6 +34,7 @@ async fn submit_bootstrap_vault_mixed_split(
     }
     let result = build_and_optionally_broadcast_vault_cat_mixed_split(
         signer_config.clone(),
+        operator_network,
         MixedSplitRequest {
             receive_address: receive_address.to_string(),
             asset_id: crate::hex::hex_to_bytes32(split_asset_id)?,
@@ -55,6 +58,7 @@ async fn submit_bootstrap_vault_mixed_split(
 
 pub(super) async fn submit_bootstrap_combine(
     signer_config: &SignerConfig,
+    operator_network: &str,
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
@@ -68,6 +72,7 @@ pub(super) async fn submit_bootstrap_combine(
         bootstrap_combine_vault_outputs(inputs, split_asset_mojo_multiplier.max(1))?;
     let mut result = submit_bootstrap_vault_mixed_split(
         signer_config,
+        operator_network,
         split_asset_id,
         receive_address,
         &inputs.input_coin_ids,
@@ -87,6 +92,7 @@ pub(super) async fn submit_bootstrap_combine(
 
 pub(super) async fn submit_bootstrap_mixed_split(
     signer_config: &SignerConfig,
+    operator_network: &str,
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
@@ -106,6 +112,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
     )?;
     submit_bootstrap_vault_mixed_split(
         signer_config,
+        operator_network,
         split_asset_id,
         receive_address,
         std::slice::from_ref(coin_id),
@@ -118,6 +125,8 @@ pub(super) async fn submit_bootstrap_mixed_split(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::large_futures)]
+
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
     use crate::offer::bootstrap::{
         bootstrap_combine_vault_outputs, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
@@ -166,6 +175,7 @@ mod tests {
         let signer = test_signer_config("https://example.test");
         let result = submit_bootstrap_combine(
             &signer,
+            "mainnet",
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
@@ -201,6 +211,7 @@ mod tests {
 
         let err = submit_bootstrap_mixed_split(
             &signer,
+            "mainnet",
             &plan,
             "not-a-valid-asset-id",
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
@@ -220,6 +231,7 @@ mod tests {
 
         let err = submit_bootstrap_mixed_split(
             &signer,
+            "mainnet",
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",

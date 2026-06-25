@@ -1,9 +1,9 @@
-use super::coinset_context::resolve_combine_coinset_context;
 use super::combine_test_support::{
     dust_plan_from_scan_without_lineage, register_lineage_mocks_for_scan_coins, sample_job,
 };
 use super::report::{finalize_job_report, vault_signer_ready, CombineRunMode};
 use super::sim_harness::sim_dust_scan_result;
+use crate::coinset::resolve_coinset_endpoint;
 use crate::config::load_program_config;
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::manager_cli::test_support::write_combine_test_configs;
@@ -39,12 +39,8 @@ async fn finalize_preview_job_report_plans_two_coin_batch_with_lineage() {
     let mut server = mockito::Server::new_async().await;
     register_lineage_mocks_for_scan_coins(&mut server, &scan, &harness);
 
-    let coinset = resolve_combine_coinset_context(
-        None,
-        Some(&server.url()),
-        "mainnet",
-        "https://api.coinset.org",
-    );
+    let coinset =
+        resolve_coinset_endpoint("mainnet", "https://api.coinset.org", Some(&server.url()));
     let report = finalize_job_report(
         &job,
         scan,
@@ -156,12 +152,8 @@ async fn finalize_preview_job_report_marks_unresolvable_coin_lineage_excluded() 
         .with_body(puzzle_body)
         .create();
 
-    let coinset = resolve_combine_coinset_context(
-        None,
-        Some(&server.url()),
-        "mainnet",
-        "https://api.coinset.org",
-    );
+    let coinset =
+        resolve_coinset_endpoint("mainnet", "https://api.coinset.org", Some(&server.url()));
     let report = finalize_job_report(
         &job,
         scan,

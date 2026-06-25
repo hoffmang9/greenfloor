@@ -58,6 +58,7 @@ async fn execute_on_chain_cancellations(
     store: &SqliteStore,
     dexie: &DexieClient,
     signer_config: crate::config::SignerConfig,
+    operator_network: &str,
     market: &MarketConfig,
     target_offer_ids: &[String],
 ) -> SignerResult<(i64, Vec<Value>)> {
@@ -68,7 +69,8 @@ async fn execute_on_chain_cancellations(
             market_id: market.market_id.clone(),
         })
         .collect();
-    let outcomes = cancel_offers_on_chain(store, dexie, signer_config, &targets).await?;
+    let outcomes =
+        cancel_offers_on_chain(store, dexie, signer_config, operator_network, &targets).await?;
     let mut cancel_executed = 0_i64;
     let mut items = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
@@ -194,9 +196,15 @@ pub async fn run_market_cancel_phase(
             Err(err) => return Err(err),
             Ok(signer) => signer.clone(),
         };
-        (cancel_executed, items) =
-            execute_on_chain_cancellations(store, dexie, signer_config, market, &target_offer_ids)
-                .await?;
+        (cancel_executed, items) = execute_on_chain_cancellations(
+            store,
+            dexie,
+            signer_config,
+            &ctx.resources.network,
+            market,
+            &target_offer_ids,
+        )
+        .await?;
     }
 
     let payload = cancel_policy_payload(

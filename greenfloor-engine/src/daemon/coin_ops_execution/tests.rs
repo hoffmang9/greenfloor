@@ -4,12 +4,13 @@ use crate::coin_ops::execution::{
     resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides,
 };
 use crate::coin_ops::{CoinOpKind, CoinOpPlan, CoinOpPlanReason, SpendableCoin};
-use crate::config::{empty_cat_ticker_index, load_program_bundle, ManagerProgramConfig};
+use crate::config::{
+    empty_cat_ticker_index, load_program_bundle, ManagerProgramConfig, OperatorMarketContext,
+};
 use crate::daemon::coin_ops_execution::{
     execute_managed_coin_op_plans, execute_managed_coin_op_plans_with_test_overrides,
     CoinOpExecutionResult,
 };
-use crate::offer::OfferAssetResolver;
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -96,11 +97,14 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
     ];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
-        &bundle.program,
-        &resolver,
-        &market,
+        OperatorMarketContext {
+            program: &bundle.program,
+            signer: &bundle.signer,
+            ticker_index: &empty_index,
+            operator_network: "mainnet",
+            market: &market,
+        },
         &plans,
         &HashSet::<String>::default(),
     )
@@ -128,11 +132,14 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
     let plans = vec![sample_plan(CoinOpKind::Split)];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
-        &bundle.program,
-        &resolver,
-        &market,
+        OperatorMarketContext {
+            program: &bundle.program,
+            signer: &bundle.signer,
+            ticker_index: &empty_index,
+            operator_network: "mainnet",
+            market: &market,
+        },
         &plans,
         &HashSet::<String>::default(),
     )
@@ -157,11 +164,14 @@ async fn execute_managed_coin_op_plans_skips_invalid_plans() {
     }];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans(
-        &bundle.program,
-        &resolver,
-        &market,
+        OperatorMarketContext {
+            program: &bundle.program,
+            signer: &bundle.signer,
+            ticker_index: &empty_index,
+            operator_network: "mainnet",
+            market: &market,
+        },
         &plans,
         &HashSet::<String>::default(),
     )
@@ -184,11 +194,14 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
     ];
 
     let empty_index = empty_cat_ticker_index();
-    let resolver = OfferAssetResolver::new(&bundle.signer, &empty_index, "mainnet");
     let result = execute_managed_coin_op_plans_with_test_overrides(
-        &bundle.program,
-        &resolver,
-        &market,
+        OperatorMarketContext {
+            program: &bundle.program,
+            signer: &bundle.signer,
+            ticker_index: &empty_index,
+            operator_network: "mainnet",
+            market: &market,
+        },
         &plans,
         &HashSet::<String>::default(),
         CoinOpTestOverrides {
