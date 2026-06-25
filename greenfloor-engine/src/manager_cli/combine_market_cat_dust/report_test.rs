@@ -1,3 +1,4 @@
+use super::batches::DustBatchRunSelection;
 use super::combine_test_support::{
     dust_plan_from_scan_without_lineage, sample_job, test_coinset_endpoint,
 };
@@ -36,9 +37,11 @@ async fn preview_job_report_plans_two_coin_batch_from_simulator_scan() {
     assert!(plan.batches.uncombinable.is_empty());
 
     let coinset = test_coinset_endpoint();
-    let report = preview_job_report(&job, &scan, &coinset, &plan, readiness);
+    let selection = DustBatchRunSelection::new(&plan, None);
+    let report = preview_job_report(&job, &scan, &coinset, &selection, readiness);
     assert_eq!(report.get("status"), Some(&json!("ok")));
     assert_eq!(report.get("combine_batches_planned"), Some(&json!(1)));
+    assert_eq!(report.get("combine_batches_selected"), Some(&json!(1)));
     assert_eq!(report.get("uncombinable_dust_count"), Some(&json!(0)));
     assert_eq!(
         report.get("coinset_base_url"),
@@ -79,7 +82,8 @@ async fn preview_job_report_marks_single_dust_coin_as_orphan() {
     assert_eq!(plan.batches.combinable_batches.len(), 0);
     assert_eq!(plan.batches.uncombinable.len(), 1);
 
-    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &plan, readiness);
+    let selection = DustBatchRunSelection::new(&plan, None);
+    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &selection, readiness);
     let batches = report
         .get("batches")
         .and_then(|value| value.as_array())
@@ -105,12 +109,43 @@ async fn preview_job_report_without_signer_backend() {
     assert_eq!(readiness.note, Some("signer_not_configured"));
 
     let plan = dust_plan_from_scan_without_lineage(&scan, &harness, 1000, 2);
-    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &plan, readiness);
+    let selection = DustBatchRunSelection::new(&plan, None);
+    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &selection, readiness);
     assert_eq!(report.get("signer_config_ok"), Some(&json!(false)));
     assert_eq!(
         report.get("signer_config_note"),
         Some(&json!("signer_not_configured"))
     );
+}
+
+#[tokio::test]
+async fn preview_job_report_caps_selected_batches_when_max_batches_set() {
+    let (scan, harness) = sim_dust_scan_result(&[100, 100, 100, 100, 100, 100]);
+    let job = sample_job(
+        scan.coins
+            .first()
+            .and_then(|row| row.cat_asset_id.as_deref())
+            .expect("asset id"),
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_combine_test_configs(dir.path(), &job.cat_asset_id, true);
+    let program = load_program_config(&dir.path().join("program.yaml")).expect("program");
+    let readiness = vault_signer_ready(&program, &job.signer_key_id);
+
+    let plan = dust_plan_from_scan_without_lineage(&scan, &harness, 1000, 2);
+    assert_eq!(plan.batches.combinable_batches.len(), 3);
+
+    let selection = DustBatchRunSelection::new(&plan, Some(1));
+    let report = preview_job_report(&job, &scan, &test_coinset_endpoint(), &selection, readiness);
+    assert_eq!(report.get("combine_batches_planned"), Some(&json!(3)));
+    assert_eq!(report.get("combine_batches_selected"), Some(&json!(1)));
+
+    let batches = report
+        .get("batches")
+        .and_then(|value| value.as_array())
+        .expect("batches");
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].get("status"), Some(&json!("preview")));
 }
 
 #[tokio::test]
@@ -134,6 +169,7 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
         max_input_coins: 2,
+        max_batches: None,
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
@@ -172,6 +208,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
         max_input_coins: 2,
+        max_batches: None,
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
@@ -235,6 +272,7 @@ async fn run_combine_live_emits_json_when_signer_bundle_invalid() {
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
         max_input_coins: 2,
+        max_batches: None,
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
@@ -303,6 +341,7 @@ async fn run_combine_dry_run_reports_no_enabled_cat_markets() {
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
         max_input_coins: 2,
+        max_batches: None,
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
