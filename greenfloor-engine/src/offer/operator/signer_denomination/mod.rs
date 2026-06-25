@@ -115,7 +115,7 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> Bootstra
 pub(crate) async fn prepare_bootstrap_execution_plan(
     ctx: &ResolvedBuildAndPostContext,
 ) -> SignerResult<Result<BootstrapShapeContext, BootstrapPhaseResult>> {
-    let side = normalize_offer_side(&ctx.action_side);
+    let side = normalize_offer_side(&ctx.action_side());
     let side_ladder = ctx
         .gated
         .market_row
@@ -127,11 +127,12 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         return Ok(Err(bootstrap_skipped(format!("missing_{side}_ladder"))));
     }
 
+    let quote_price = ctx.quote_price()?;
     let ladder_entries = bootstrap_ladder_entries_for_side(
         side,
         &side_ladder,
         &ctx.gated.market_row.pricing,
-        ctx.quote_price,
+        quote_price,
         &ctx.offer_assets.quote_asset_id,
     )?;
     if ladder_entries.is_empty() {

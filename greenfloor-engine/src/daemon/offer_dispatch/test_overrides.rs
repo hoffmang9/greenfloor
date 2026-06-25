@@ -79,6 +79,7 @@ mod tests {
         let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = ManagedPostContext {
             program: ManagerProgramConfig::default(),
+            operator_network: "mainnet".to_string(),
             paths: crate::daemon::cycle_paths::DaemonCyclePaths::new(
                 dir.path().join("program.yaml"),
                 dir.path().join("markets.yaml"),

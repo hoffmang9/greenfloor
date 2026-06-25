@@ -74,6 +74,16 @@ fn parse_signer_coinset_base_url(signer: &serde_json::Map<String, Value>) -> Str
             .map(str::trim)
             .filter(|value| !value.is_empty())
     };
+    if read("coinset_base_url").is_none() {
+        if let Some(legacy_url) = read("coinset_msp_base_url") {
+            tracing::warn!(
+                legacy_field = "signer.coinset_msp_base_url",
+                canonical_field = "signer.coinset_base_url",
+                "signer config uses deprecated coinset_msp_base_url; rename to coinset_base_url"
+            );
+            return legacy_url.to_string();
+        }
+    }
     read("coinset_base_url")
         .or_else(|| read("coinset_msp_base_url"))
         .unwrap_or(DEFAULT_COINSET_BASE_URL)

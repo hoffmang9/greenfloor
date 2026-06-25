@@ -50,6 +50,7 @@ pub fn watched_coin_ids_from_open_offers(
 fn skip_all_plans(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
+    operator_network: &str,
     plans: &[CoinOpPlan],
     reason: &str,
     status: &str,
@@ -73,7 +74,7 @@ fn skip_all_plans(
         signer_selection: json!({
             "selected_source": "signer_registry",
             "key_id": market.signer_key_id,
-            "network": program.network,
+            "network": operator_network,
         }),
     }
 }
@@ -120,6 +121,7 @@ async fn execute_managed_coin_op_plans_async(
         return skip_all_plans(
             &gated.program,
             &gated.market_row,
+            &gated.operator_network,
             plans,
             "signer_coin_ops_missing_receive_address",
             "skipped",
@@ -128,6 +130,7 @@ async fn execute_managed_coin_op_plans_async(
 
     let program = gated.program.clone();
     let market = gated.market_row.clone();
+    let operator_network = gated.operator_network.clone();
     let ctx = match CoinOpExecContext::from_gated_market(
         gated,
         None,
@@ -139,7 +142,14 @@ async fn execute_managed_coin_op_plans_async(
     {
         Ok(ctx) => ctx,
         Err(err) => {
-            return skip_all_plans(&program, &market, plans, &err.to_string(), "skipped");
+            return skip_all_plans(
+                &program,
+                &market,
+                &operator_network,
+                plans,
+                &err.to_string(),
+                "skipped",
+            );
         }
     };
 
@@ -185,7 +195,7 @@ async fn execute_managed_coin_op_plans_async(
         signer_selection: json!({
             "selected_source": "signer_registry",
             "key_id": ctx.gated.market_row.signer_key_id,
-            "network": ctx.gated.program.network,
+            "network": ctx.gated.operator_network,
         }),
     }
 }

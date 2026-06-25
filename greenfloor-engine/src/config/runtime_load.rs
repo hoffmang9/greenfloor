@@ -19,7 +19,7 @@ use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
     ensure_market_receive_address_for_network, load_markets_config_with_overlay,
     load_program_bundle_gated, parse_program_config, parse_signer_config, read_program_yaml,
-    resolve_coin_list_market, resolve_market_for_build, CycleProgramConfig, ManagerProgramConfig,
+    resolve_market_for_build, select_coin_list_market, CycleProgramConfig, ManagerProgramConfig,
     MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint, DEFAULT_COINSET_BASE_URL};
@@ -169,7 +169,7 @@ fn resolve_operator_market(
             resolve_market_for_build(markets, market_id, pair, network)?
         }
         OperatorMarketCommand::CoinList => {
-            return resolve_coin_list_market(markets, network, market_id, pair);
+            select_coin_list_market(markets, network, market_id, pair)?
         }
     };
     ensure_market_receive_address_for_network(&market, network)?;

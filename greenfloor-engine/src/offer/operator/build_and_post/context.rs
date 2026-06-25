@@ -19,12 +19,30 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub dexie_base_url: String,
     pub splash_base_url: String,
     pub offer_assets: ResolvedMarketOfferAssets,
-    pub quote_price: f64,
-    pub action_side: String,
+    action_side_override: Option<String>,
     pub offer_fee_mojos: u64,
     pub offer_fee_source: String,
     #[cfg(test)]
     pub test_overrides: BuildOfferTestOverrides,
+}
+
+impl ResolvedBuildAndPostContext {
+    #[must_use]
+    pub(crate) fn action_side(&self) -> String {
+        resolve_action_side(
+            self.action_side_override.as_deref(),
+            &self.gated.market_row.pricing,
+        )
+    }
+
+    /// Quote-per-base from market pricing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when pricing lacks a usable quote price.
+    pub(crate) fn quote_price(&self) -> SignerResult<f64> {
+        resolve_quote_price_for_pricing(&self.gated.market_row.pricing)
+    }
 }
 
 pub(super) async fn resolve_build_and_post_context(
@@ -54,25 +72,29 @@ pub(super) async fn resolve_build_and_post_context(
     )?;
     let resolver = gated.asset_resolver();
     let assets = resolver.resolve_market_assets(&gated.market_row).await?;
-    let quote_price = resolve_quote_price_for_pricing(&gated.market_row.pricing)?;
-    let action_side =
-        resolve_action_side(request.action_side.as_deref(), &gated.market_row.pricing);
+    let action_side_override = request
+        .action_side
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let (offer_fee_mojos, offer_fee_source) =
         resolve_maker_offer_fee(&gated.signer, &gated.operator_network).await;
 
-    Ok(ResolvedBuildAndPostContext {
+    let ctx = ResolvedBuildAndPostContext {
         gated,
         publish_venue,
         dexie_base_url,
         splash_base_url,
         offer_assets: assets,
-        quote_price,
-        action_side,
+        action_side_override,
         offer_fee_mojos,
         offer_fee_source,
         #[cfg(test)]
         test_overrides: request.test_overrides.clone(),
-    })
+    };
+    ctx.quote_price()?;
+    Ok(ctx)
 }
 
 pub(super) fn resolve_action_side(
@@ -109,14 +131,23 @@ pub(crate) fn signer_denomination_test_context(
 ) -> ResolvedBuildAndPostContext {
     use crate::config::resolve_quote_asset_for_offer;
     use crate::offer::ResolvedMarketOfferAssets;
+    use serde_json::json;
 
+    let mut market_row = market_row.clone();
+    if resolve_quote_price_for_pricing(&market_row.pricing).is_err() {
+        if let Some(pricing) = market_row.pricing.as_object_mut() {
+            pricing.insert("fixed_quote_per_base".to_string(), json!(1.0));
+        } else {
+            market_row.pricing = json!({"fixed_quote_per_base": 1.0});
+        }
+    }
     let quote_asset_for_offer =
         resolve_quote_asset_for_offer(market_row.quote_asset.trim(), "mainnet");
     let mut ctx = sample_resolved_build_and_post_context();
     ctx.gated.program = program;
     ctx.gated.signer = signer;
     ctx.gated.market_row = market_row.clone();
-    ctx.action_side = action_side.to_string();
+    ctx.action_side_override = Some(action_side.to_string());
     ctx.offer_assets = ResolvedMarketOfferAssets {
         base_asset_id: market_row.base_asset.trim().to_string(),
         quote_asset_id: quote_asset_for_offer.clone(),
@@ -168,7 +199,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
                 receive_address: "xch1".to_string(),
                 signer_key_id: "key-main-1".to_string(),
                 mode: "sell_only".to_string(),
-                pricing: json!({}),
+                pricing: json!({"fixed_quote_per_base": 1.0}),
                 cancel_move_threshold_bps: None,
                 ladders: HashMap::default(),
             },
@@ -183,8 +214,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             quote_asset_id: "xch".to_string(),
             quote_asset_for_offer: "xch".to_string(),
         },
-        quote_price: 1.0,
-        action_side: "sell".to_string(),
+        action_side_override: None,
         offer_fee_mojos: 0,
         offer_fee_source: "coinset_fee_unavailable".to_string(),
         #[cfg(test)]

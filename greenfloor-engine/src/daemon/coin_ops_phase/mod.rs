@@ -135,6 +135,7 @@ async fn execute_coin_ops_plans(
     planning: &CoinOpsPlanningResult,
     offers: &[Value],
 ) -> SignerResult<CoinOpExecutionResult> {
+    let operator_network = ctx.resources.network.as_str();
     let watched_coin_ids = watched_coin_ids_from_open_offers(store, &market.market_id, offers)?;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {
@@ -146,7 +147,7 @@ async fn execute_coin_ops_plans(
             signer_selection: json!({
                 "selected_source": "signer_registry",
                 "key_id": market.signer_key_id,
-                "network": program.network,
+                "network": operator_network,
             }),
         });
     }
@@ -161,6 +162,7 @@ async fn execute_coin_ops_plans(
         Err(err) => Ok(skipped_coin_ops_result(
             program,
             market,
+            ctx.resources.network.as_str(),
             &planning.executable_plans,
             &signer_execution_skip_reason(&err),
         )),
@@ -307,6 +309,7 @@ pub async fn run_coin_ops_phase(
 fn skipped_coin_ops_result(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
+    operator_network: &str,
     plans: &[CoinOpPlan],
     reason: &str,
 ) -> CoinOpExecutionResult {
@@ -329,7 +332,7 @@ fn skipped_coin_ops_result(
         signer_selection: json!({
             "selected_source": "signer_registry",
             "key_id": market.signer_key_id,
-            "network": program.network,
+            "network": operator_network,
         }),
     }
 }

@@ -18,6 +18,8 @@ use super::watchlist::cache::CoinWatchlistCache;
 pub struct DaemonCycleResources {
     program_config: CycleProgramConfig,
     pub markets: MarketsConfig,
+    /// Operator network for Coinset IO and ledger fields (`mainnet` / `testnet11`).
+    /// Sourced from program.yaml; prefer this over `program().network` at call sites.
     pub network: String,
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
