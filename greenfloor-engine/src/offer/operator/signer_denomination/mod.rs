@@ -14,7 +14,7 @@ mod wait;
 
 use crate::coin_ops::execution::resolve_combine_input_cap;
 use crate::coinset::WalletUnspentCoin;
-use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::SignerConfig;
 use crate::error::SignerResult;
 #[cfg(test)]
 use crate::offer::bootstrap::BootstrapCoin;
@@ -23,6 +23,7 @@ use crate::offer::bootstrap::{
     BootstrapCombineContext, BootstrapPlanOutcome,
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
+use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
 pub(crate) use bootstrap_execute::BootstrapShapeContext;
@@ -84,18 +85,6 @@ pub(crate) struct ExecutedAfterSplitParams {
     pub(crate) remaining: BootstrapPlanOutcome,
 }
 
-/// Inputs for the signer denomination bootstrap phase (offer build/post).
-pub struct SignerDenominationPhaseContext<'a> {
-    pub program: &'a ManagerProgramConfig,
-    pub market: &'a MarketConfig,
-    pub signer_config: &'a SignerConfig,
-    pub operator_network: &'a str,
-    pub resolved_base_asset_id: &'a str,
-    pub resolved_quote_asset_id: &'a str,
-    pub quote_price: f64,
-    pub action_side: &'a str,
-}
-
 pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> BootstrapPhaseResult {
     let ExecutedAfterSplitParams {
         fee_mojos,
@@ -124,20 +113,16 @@ pub(crate) fn executed_after_split(params: ExecutedAfterSplitParams) -> Bootstra
 
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn prepare_bootstrap_execution_plan(
-    ctx: &SignerDenominationPhaseContext<'_>,
+    ctx: &ResolvedBuildAndPostContext,
 ) -> SignerResult<Result<BootstrapShapeContext, BootstrapPhaseResult>> {
-    let SignerDenominationPhaseContext {
-        program,
-        signer_config,
-        operator_network,
-        market,
-        action_side,
-        resolved_base_asset_id,
-        resolved_quote_asset_id,
-        quote_price,
-    } = ctx;
-    let side = normalize_offer_side(action_side);
-    let side_ladder = market.ladders.get(side).cloned().unwrap_or_default();
+    let side = normalize_offer_side(&ctx.action_side);
+    let side_ladder = ctx
+        .gated
+        .market_row
+        .ladders
+        .get(side)
+        .cloned()
+        .unwrap_or_default();
     if side_ladder.is_empty() {
         return Ok(Err(bootstrap_skipped(format!("missing_{side}_ladder"))));
     }
@@ -145,9 +130,9 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     let ladder_entries = bootstrap_ladder_entries_for_side(
         side,
         &side_ladder,
-        &market.pricing,
-        *quote_price,
-        resolved_quote_asset_id,
+        &ctx.gated.market_row.pricing,
+        ctx.quote_price,
+        &ctx.offer_assets.quote_asset_id,
     )?;
     if ladder_entries.is_empty() {
         return Ok(Err(bootstrap_skipped(format!(
@@ -155,8 +140,11 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         ))));
     }
 
-    let split_asset_id =
-        signer_split_asset_id(side, resolved_base_asset_id, resolved_quote_asset_id);
+    let split_asset_id = signer_split_asset_id(
+        side,
+        &ctx.offer_assets.base_asset_id,
+        &ctx.offer_assets.quote_asset_id,
+    );
     if split_asset_id.trim().is_empty() {
         return Ok(Err(bootstrap_skipped(format!(
             "missing_{side}_asset_for_bootstrap"
@@ -168,9 +156,9 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         "base_unit_mojo_multiplier"
     };
     let split_asset_mojo_multiplier =
-        mojo_multiplier_for_leg(&market.pricing, mojo_field, &split_asset_id).max(1);
+        mojo_multiplier_for_leg(&ctx.gated.market_row.pricing, mojo_field, &split_asset_id).max(1);
 
-    let receive_address = market.receive_address.trim();
+    let receive_address = ctx.gated.market_row.receive_address.trim();
     if receive_address.is_empty() {
         return Ok(Err(bootstrap_skipped(
             "missing_receive_address_for_bootstrap",
@@ -178,8 +166,8 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     }
 
     let asset_scoped_coins = match load_asset_scoped_coins(
-        operator_network,
-        signer_config,
+        &ctx.gated.operator_network,
+        &ctx.gated.signer,
         receive_address,
         &split_asset_id,
     )
@@ -208,9 +196,9 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     };
     let output_count = bootstrap_plan.output_amounts_base_units.len();
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
-        signer_config,
-        operator_network,
-        program.coin_ops_minimum_fee_mojos,
+        &ctx.gated.signer,
+        &ctx.gated.operator_network,
+        ctx.gated.program.coin_ops_minimum_fee_mojos,
         output_count,
     )
     .await;
@@ -240,7 +228,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 
 #[must_use]
 pub fn run_signer_denomination_phase(
-    ctx: SignerDenominationPhaseContext<'_>,
+    ctx: &ResolvedBuildAndPostContext,
 ) -> SignerDenominationPhaseFuture<'_> {
     Box::pin(run_signer_denomination_phase_async(ctx))
 }
@@ -248,10 +236,10 @@ pub fn run_signer_denomination_phase(
 // Clippy `large_futures`: the phase is already boxed at `run_signer_denomination_phase`.
 #[allow(clippy::large_futures)]
 async fn run_signer_denomination_phase_async(
-    ctx: SignerDenominationPhaseContext<'_>,
+    ctx: &ResolvedBuildAndPostContext,
 ) -> SignerResult<BootstrapPhaseResult> {
-    match prepare_bootstrap_execution_plan(&ctx).await? {
-        Ok(shape_ctx) => execute_bootstrap_shape(&ctx, shape_ctx).await,
+    match prepare_bootstrap_execution_plan(ctx).await? {
+        Ok(shape_ctx) => execute_bootstrap_shape(ctx, shape_ctx).await,
         Err(result) => Ok(result),
     }
 }

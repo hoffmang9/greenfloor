@@ -17,6 +17,7 @@ use crate::offer::operator::{
     BuildAndPostOfferRequestParts, BuildAndPostRunOptions, BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
+use crate::paths::resolve_cats_config_path;
 use crate::storage::CycleWriteStore;
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
@@ -57,6 +58,7 @@ fn daemon_managed_post_request(
                 program_path: post_ctx.paths.program_path.clone(),
                 markets_path: post_ctx.paths.markets_path.clone(),
                 testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
+                cats_path: Some(resolve_cats_config_path(&post_ctx.paths.markets_path, None)),
                 network: post_ctx.program.network.clone(),
                 market_id: Some(market.market_id.clone()),
                 pair: None,

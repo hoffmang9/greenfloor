@@ -75,8 +75,11 @@ async fn prepare_combine_loop_context(
         coin_ids,
     })
     .await?;
-    let number_of_coins =
-        resolve_combine_count(&common.exec_ctx.market, number_of_coins, size_base_units)?;
+    let number_of_coins = resolve_combine_count(
+        &common.exec_ctx.gated.market_row,
+        number_of_coins,
+        size_base_units,
+    )?;
     if number_of_coins <= 1 {
         return Err(SignerError::Other(
             "number_of_coins must be > 1".to_string(),

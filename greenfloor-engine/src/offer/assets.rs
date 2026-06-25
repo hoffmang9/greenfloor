@@ -106,23 +106,6 @@ impl<'a> OfferAssetResolver<'a> {
     }
 }
 
-/// Resolve offer base/quote labels to on-chain asset ids.
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_offer_assets(
-    config: &SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-    ticker_index: &CatTickerIndex,
-    operator_network: &str,
-) -> SignerResult<(String, String)> {
-    OfferAssetResolver::new(config, ticker_index, operator_network)
-        .resolve_pair(base_asset, quote_asset)
-        .await
-}
-
 /// Resolve offer asset ids using an explicit Coinset client and ticker index.
 ///
 /// # Errors

@@ -15,7 +15,7 @@ use super::BuildAndPostOfferRequest;
 use crate::metrics::metric_millis_to_u64;
 use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
-    run_signer_denomination_phase, BootstrapPhaseResult, SignerDenominationPhaseContext,
+    run_signer_denomination_phase, BootstrapPhaseResult,
 };
 
 async fn run_bootstrap_phase(
@@ -25,17 +25,7 @@ async fn run_bootstrap_phase(
     let bootstrap_result = if request.run.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
     } else {
-        run_signer_denomination_phase(SignerDenominationPhaseContext {
-            program: &ctx.gated.program,
-            market: &ctx.gated.market,
-            signer_config: &ctx.gated.signer,
-            operator_network: &ctx.gated.operator_network,
-            resolved_base_asset_id: &ctx.offer_assets.base_asset_id,
-            resolved_quote_asset_id: &ctx.offer_assets.quote_asset_id,
-            quote_price: ctx.quote_price,
-            action_side: &ctx.action_side,
-        })
-        .await?
+        run_signer_denomination_phase(ctx).await?
     };
     let bootstrap_action = bootstrap_result.to_operator_json();
     Ok((bootstrap_action, Some(bootstrap_result)))
@@ -104,7 +94,7 @@ async fn publish_created_offer(
     let side = created.side.as_str();
     let asset_fields = expected_publish_asset_fields(
         side,
-        &ctx.gated.market.base_symbol,
+        &ctx.gated.market_row.base_symbol,
         &ctx.offer_assets.quote_asset_for_offer,
         &ctx.offer_assets.base_asset_id,
         &ctx.offer_assets.quote_asset_id,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::adapters::DexieClient;
 use crate::config::{
     load_daemon_cycle_config, operator_ticker_index_from_paths, CatTickerIndex, CycleProgramConfig,
-    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
+    GatedOperatorMarket, ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
@@ -112,6 +112,23 @@ pub struct MarketCycleContext<'a> {
     pub dispatch: &'a MarketDispatchContext,
     pub plan: &'a CyclePlan,
     pub reconcile: &'a ReconcileMarketCycleResult,
+}
+
+impl MarketCycleContext<'_> {
+    /// Owned gated operator bundle for one market row in this cycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when signer config is unavailable for execution.
+    pub fn gated_market(&self, market: &MarketConfig) -> SignerResult<GatedOperatorMarket> {
+        Ok(GatedOperatorMarket::assemble(
+            self.resources.program().clone(),
+            self.resources.signer_for_execution()?.clone(),
+            market.clone(),
+            self.resources.ticker_index.clone(),
+            &self.resources.network,
+        ))
+    }
 }
 
 /// Load cycle resources.

@@ -6,6 +6,7 @@ use crate::test_support::signer_config::test_signer_config;
 
 use super::super::test_overrides::sample_vault_mixed_split_stub;
 use super::execute_bootstrap_shape;
+use crate::offer::operator::build_and_post::signer_denomination_test_context;
 
 async fn coinset_server_for_eco181_combine_only_e2e() -> mockito::ServerGuard {
     use crate::test_support::eco181_bootstrap_inventory::{
@@ -109,9 +110,7 @@ async fn coinset_server_for_combine_first_e2e() -> mockito::ServerGuard {
 
 #[tokio::test]
 async fn execute_bootstrap_shape_runs_combine_then_split() {
-    use crate::offer::operator::signer_denomination::{
-        prepare_bootstrap_execution_plan, SignerDenominationPhaseContext,
-    };
+    use crate::offer::operator::signer_denomination::prepare_bootstrap_execution_plan;
     use crate::test_support::ladder::market_with_side_ladder;
 
     let server = coinset_server_for_combine_first_e2e().await;
@@ -124,16 +123,7 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
     };
     let signer = test_signer_config(&server.url());
 
-    let phase_ctx = SignerDenominationPhaseContext {
-        program: &program,
-        market: &market,
-        signer_config: &signer,
-        operator_network: "mainnet",
-        resolved_base_asset_id: "xch",
-        resolved_quote_asset_id: "xch",
-        quote_price: 1.0,
-        action_side: "sell",
-    };
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
     let shape_ctx = prepare_bootstrap_execution_plan(&phase_ctx)
         .await
         .expect("plan result")
@@ -163,9 +153,7 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
 
 #[tokio::test]
 async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split() {
-    use crate::offer::operator::signer_denomination::{
-        prepare_bootstrap_execution_plan, SignerDenominationPhaseContext,
-    };
+    use crate::offer::operator::signer_denomination::prepare_bootstrap_execution_plan;
     use crate::test_support::ladder::market_with_eco181_sell_ladder;
 
     let server = coinset_server_for_eco181_combine_only_e2e().await;
@@ -177,16 +165,7 @@ async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split()
     };
     let signer = test_signer_config(&server.url());
 
-    let phase_ctx = SignerDenominationPhaseContext {
-        program: &program,
-        market: &market,
-        signer_config: &signer,
-        operator_network: "mainnet",
-        resolved_base_asset_id: "xch",
-        resolved_quote_asset_id: "xch",
-        quote_price: 1.0,
-        action_side: "sell",
-    };
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
     let shape_ctx = prepare_bootstrap_execution_plan(&phase_ctx)
         .await
         .expect("plan result")

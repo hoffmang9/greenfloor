@@ -57,27 +57,5 @@ pub async fn resolve_vault_context(config: SignerConfig) -> SignerResult<vault::
     Ok(vault::session::resolve_vault_session(config).await?.display)
 }
 
-/// Resolve offer asset labels to on-chain ids using an explicit ticker index.
-///
-/// # Errors
-///
-/// Returns an error if asset resolution fails.
-pub async fn resolve_offer_assets(
-    config: SignerConfig,
-    base_asset: &str,
-    quote_asset: &str,
-    ticker_index: &config::CatTickerIndex,
-    operator_network: &str,
-) -> SignerResult<(String, String)> {
-    offer::resolve_offer_assets(
-        &config,
-        base_asset,
-        quote_asset,
-        ticker_index,
-        operator_network,
-    )
-    .await
-}
-
 #[cfg(test)]
 mod test_support;

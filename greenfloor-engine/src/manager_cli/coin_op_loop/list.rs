@@ -69,7 +69,7 @@ async fn load_coin_list_snapshot(params: CoinListLoadParams<'_>) -> SignerResult
         pair,
         command: OperatorMarketCommand::CoinList,
     })?;
-    let market = loaded.market.clone();
+    let market = loaded.market_row.clone();
     let resolver = loaded.asset_resolver();
     let receive_address = market.receive_address.trim();
     if receive_address.is_empty() {

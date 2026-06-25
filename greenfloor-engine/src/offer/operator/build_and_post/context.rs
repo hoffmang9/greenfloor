@@ -34,7 +34,7 @@ pub(super) async fn resolve_build_and_post_context(
         program_path: &request.program_path,
         markets_path: &request.markets_path,
         testnet_markets_path: request.testnet_markets_path.as_deref(),
-        cats_path: None,
+        cats_path: request.cats_path.as_deref(),
         network: &request.network,
         market_id: request.market_id.as_deref(),
         pair: request.pair.as_deref(),
@@ -53,9 +53,10 @@ pub(super) async fn resolve_build_and_post_context(
         request.splash_base_url.as_deref(),
     )?;
     let resolver = gated.asset_resolver();
-    let assets = resolver.resolve_market_assets(&gated.market).await?;
-    let quote_price = resolve_quote_price_for_pricing(&gated.market.pricing)?;
-    let action_side = resolve_action_side(request.action_side.as_deref(), &gated.market.pricing);
+    let assets = resolver.resolve_market_assets(&gated.market_row).await?;
+    let quote_price = resolve_quote_price_for_pricing(&gated.market_row.pricing)?;
+    let action_side =
+        resolve_action_side(request.action_side.as_deref(), &gated.market_row.pricing);
     let (offer_fee_mojos, offer_fee_source) =
         resolve_maker_offer_fee(&gated.signer, &gated.operator_network).await;
 
@@ -100,6 +101,31 @@ async fn resolve_maker_offer_fee(
 }
 
 #[cfg(test)]
+pub(crate) fn signer_denomination_test_context(
+    program: crate::config::ManagerProgramConfig,
+    signer: crate::config::SignerConfig,
+    market_row: &crate::config::MarketConfig,
+    action_side: &str,
+) -> ResolvedBuildAndPostContext {
+    use crate::config::resolve_quote_asset_for_offer;
+    use crate::offer::ResolvedMarketOfferAssets;
+
+    let quote_asset_for_offer =
+        resolve_quote_asset_for_offer(market_row.quote_asset.trim(), "mainnet");
+    let mut ctx = sample_resolved_build_and_post_context();
+    ctx.gated.program = program;
+    ctx.gated.signer = signer;
+    ctx.gated.market_row = market_row.clone();
+    ctx.action_side = action_side.to_string();
+    ctx.offer_assets = ResolvedMarketOfferAssets {
+        base_asset_id: market_row.base_asset.trim().to_string(),
+        quote_asset_id: quote_asset_for_offer.clone(),
+        quote_asset_for_offer,
+    };
+    ctx
+}
+
+#[cfg(test)]
 pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostContext {
     use std::collections::HashMap;
 
@@ -132,7 +158,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
                     recovery_keys: Vec::new(),
                 },
             },
-            market: MarketConfig {
+            market_row: MarketConfig {
                 market_id: "m1".to_string(),
                 enabled: true,
                 base_asset: "a1".to_string(),

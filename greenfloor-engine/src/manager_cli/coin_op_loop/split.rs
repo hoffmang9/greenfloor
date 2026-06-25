@@ -95,7 +95,7 @@ async fn prepare_split_loop_context(
     })
     .await?;
     let (amount_per_coin, number_of_coins) = resolve_split_targets(
-        &common.exec_ctx.market,
+        &common.exec_ctx.gated.market_row,
         amount_per_coin,
         number_of_coins,
         size_base_units,
@@ -111,7 +111,7 @@ async fn prepare_split_loop_context(
     let amount_u64 =
         coin_op_non_negative_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos")?;
     let split_fee = coin_op_non_negative_u64(
-        common.exec_ctx.program.coin_ops_split_fee_mojos,
+        common.exec_ctx.gated.program.coin_ops_split_fee_mojos,
         "program.coin_ops_split_fee_mojos",
     )?;
     Ok(SplitLoopContext {

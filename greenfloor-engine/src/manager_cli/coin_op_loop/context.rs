@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -7,9 +6,7 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
-use crate::config::{
-    load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
-};
+use crate::config::{load_gated_operator_market, GatedOperatorMarketLoadRequest};
 use crate::error::SignerResult;
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::offer::OfferAssetResolver;
@@ -18,35 +15,19 @@ pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
     "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn build_coin_op_exec_context(
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-    cats_path: Option<&Path>,
-    network: &str,
-    market_id: Option<&str>,
-    pair: Option<&str>,
+    request: &GatedOperatorMarketLoadRequest<'_>,
     asset_id_override: Option<&str>,
 ) -> SignerResult<CoinOpExecContext> {
-    let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
-        program_path,
-        markets_path,
-        testnet_markets_path,
-        cats_path,
-        network,
-        market_id,
-        pair,
-        command: OperatorMarketCommand::Build,
-    })?;
-    loaded
-        .into_coin_op_exec_context(
-            asset_id_override,
-            HashSet::default(),
-            #[cfg(test)]
-            CoinOpTestOverrides::default(),
-        )
-        .await
+    let gated = load_gated_operator_market(request)?;
+    CoinOpExecContext::from_gated_market(
+        gated,
+        asset_id_override,
+        HashSet::default(),
+        #[cfg(test)]
+        CoinOpTestOverrides::default(),
+    )
+    .await
 }
 
 pub(super) fn enforce_split_lockup_guardrail(

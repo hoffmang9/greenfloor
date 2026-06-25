@@ -9,12 +9,12 @@ pub(super) fn build_create_offer_request(
     size_base_units: u64,
 ) -> BuildOfferForActionRequest {
     BuildOfferForActionRequest {
-        receive_address: ctx.gated.market.receive_address.clone(),
-        base_asset: ctx.gated.market.base_asset.clone(),
+        receive_address: ctx.gated.market_row.receive_address.clone(),
+        base_asset: ctx.gated.market_row.base_asset.clone(),
         quote_asset: ctx.offer_assets.quote_asset_for_offer.clone(),
         size_base_units,
         action_side: ctx.action_side.clone(),
-        pricing: ctx.gated.market.pricing.clone(),
+        pricing: ctx.gated.market_row.pricing.clone(),
         quote_price: Some(ctx.quote_price),
         // Presplit (ent-wallet `splitInputCoins`): vault singleton spends only in the split tx;
         // the Dexie offer file is self-contained so one taker fill does not invalidate siblings.
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn create_offer_request_uses_normalized_quote_from_offer_assets() {
         let mut ctx = sample_resolved_build_and_post_context();
-        ctx.gated.market.quote_asset = "xch".to_string();
+        ctx.gated.market_row.quote_asset = "xch".to_string();
         ctx.offer_assets = ResolvedMarketOfferAssets {
             base_asset_id: "a1".to_string(),
             quote_asset_id: "txch".to_string(),
@@ -69,6 +69,6 @@ mod tests {
         let request = build_create_offer_request(&ctx, 100);
 
         assert_eq!(request.quote_asset, "txch");
-        assert_ne!(request.quote_asset, ctx.gated.market.quote_asset);
+        assert_ne!(request.quote_asset, ctx.gated.market_row.quote_asset);
     }
 }

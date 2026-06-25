@@ -18,7 +18,10 @@ use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
-use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
+use context::resolve_build_and_post_context;
+#[cfg(test)]
+pub(crate) use context::signer_denomination_test_context;
+pub(crate) use context::ResolvedBuildAndPostContext;
 use iteration::run_post_iteration;
 use post_batch::{
     apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostIterationBatch,
@@ -52,6 +55,7 @@ pub struct BuildAndPostOfferRequest {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,
     pub testnet_markets_path: Option<PathBuf>,
+    pub cats_path: Option<PathBuf>,
     pub network: String,
     pub market_id: Option<String>,
     pub pair: Option<String>,
@@ -77,6 +81,7 @@ pub struct BuildAndPostOfferRequestParts {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,
     pub testnet_markets_path: Option<PathBuf>,
+    pub cats_path: Option<PathBuf>,
     pub network: String,
     pub market_id: Option<String>,
     pub pair: Option<String>,
@@ -97,6 +102,7 @@ impl BuildAndPostOfferRequest {
             program_path: parts.program_path,
             markets_path: parts.markets_path,
             testnet_markets_path: parts.testnet_markets_path,
+            cats_path: parts.cats_path,
             network: parts.network,
             market_id: parts.market_id,
             pair: parts.pair,
@@ -162,8 +168,8 @@ fn build_and_post_payload(
     batch: &PostIterationBatch,
 ) -> Value {
     json!({
-        "market_id": ctx.gated.market.market_id,
-        "pair": format!("{}:{}", ctx.gated.market.base_asset, ctx.gated.market.quote_asset),
+        "market_id": ctx.gated.market_row.market_id,
+        "pair": format!("{}:{}", ctx.gated.market_row.base_asset, ctx.gated.market_row.quote_asset),
         "resolved_base_asset_id": ctx.offer_assets.base_asset_id,
         "resolved_quote_asset_id": ctx.offer_assets.quote_asset_id,
         "network": ctx.gated.operator_network,

@@ -37,7 +37,7 @@ async fn prepare_daemon_combine_inputs(
     let requested_number_of_coins = op_count.max(2);
     let capped_number_of_coins = requested_number_of_coins.min(ctx.combine_input_cap);
     let target_coin_amount_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
-    let canonical_asset_id = ctx.market.base_asset.trim();
+    let canonical_asset_id = ctx.gated.market_row.base_asset.trim();
 
     if !coin_op_target_amount_allowed(target_coin_amount_mojos, canonical_asset_id) {
         return Err((

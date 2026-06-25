@@ -39,7 +39,7 @@ pub enum OperatorMarketCommand {
 pub struct GatedOperatorMarket {
     pub program: ManagerProgramConfig,
     pub signer: SignerConfig,
-    pub market: MarketConfig,
+    pub market_row: MarketConfig,
     pub ticker_index: CatTickerIndex,
     pub operator_network: String,
 }
@@ -49,18 +49,35 @@ pub struct GatedOperatorMarket {
 pub struct OperatorMarketContext<'a> {
     pub program: &'a ManagerProgramConfig,
     pub signer: &'a SignerConfig,
-    pub market: &'a MarketConfig,
+    pub market_row: &'a MarketConfig,
     pub ticker_index: &'a CatTickerIndex,
     pub operator_network: &'a str,
 }
 
 impl GatedOperatorMarket {
     #[must_use]
+    pub fn assemble(
+        program: ManagerProgramConfig,
+        signer: SignerConfig,
+        market_row: MarketConfig,
+        ticker_index: CatTickerIndex,
+        operator_network: impl AsRef<str>,
+    ) -> Self {
+        Self {
+            program,
+            signer,
+            market_row,
+            ticker_index,
+            operator_network: operator_network.as_ref().trim().to_string(),
+        }
+    }
+
+    #[must_use]
     pub fn as_context(&self) -> OperatorMarketContext<'_> {
         OperatorMarketContext {
             program: &self.program,
             signer: &self.signer,
-            market: &self.market,
+            market_row: &self.market_row,
             ticker_index: &self.ticker_index,
             operator_network: &self.operator_network,
         }
@@ -80,13 +97,13 @@ impl<'a> OperatorMarketContext<'a> {
 
     #[must_use]
     pub fn into_gated(self) -> GatedOperatorMarket {
-        GatedOperatorMarket {
-            program: self.program.clone(),
-            signer: self.signer.clone(),
-            market: self.market.clone(),
-            ticker_index: self.ticker_index.clone(),
-            operator_network: self.operator_network.to_string(),
-        }
+        GatedOperatorMarket::assemble(
+            self.program.clone(),
+            self.signer.clone(),
+            self.market_row.clone(),
+            self.ticker_index.clone(),
+            self.operator_network,
+        )
     }
 }
 
@@ -107,14 +124,6 @@ pub struct DaemonCycleConfig {
     pub program_config: CycleProgramConfig,
     pub markets: MarketsConfig,
     pub network: String,
-}
-
-/// Parsed program plus markets when callers also need raw program YAML.
-#[derive(Debug, Clone)]
-pub struct RawProgramMarkets {
-    pub raw_program: Value,
-    pub program: ManagerProgramConfig,
-    pub markets: MarketsConfig,
 }
 
 /// Program, markets, Coinset endpoint, and optional execution signer for combine-market-cat-dust.
@@ -173,13 +182,13 @@ pub fn load_gated_operator_market(
     let market = resolve_operator_market(&markets, network, *market_id, *pair, *command)?;
     let ticker_index =
         operator_ticker_index_from_paths(markets_path, *testnet_markets_path, *cats_path);
-    Ok(GatedOperatorMarket {
-        program: bundle.program,
-        signer: bundle.signer,
+    Ok(GatedOperatorMarket::assemble(
+        bundle.program,
+        bundle.signer,
         market,
         ticker_index,
-        operator_network: network.trim().to_string(),
-    })
+        network,
+    ))
 }
 
 fn resolve_operator_market(
@@ -216,26 +225,6 @@ pub fn load_daemon_cycle_config(
         program_config,
         markets,
         network,
-    })
-}
-
-/// Load parsed program and markets while retaining raw program YAML.
-///
-/// # Errors
-///
-/// Returns an error if config loading fails.
-pub fn load_raw_program_and_markets(
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-) -> SignerResult<RawProgramMarkets> {
-    let raw = read_program_yaml(program_path)?;
-    let program = parse_program_config(&raw)?;
-    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    Ok(RawProgramMarkets {
-        raw_program: raw,
-        program,
-        markets,
     })
 }
 
@@ -337,26 +326,5 @@ markets:
         assert_eq!(loaded.network, "mainnet");
         assert_eq!(loaded.markets.markets.len(), 1);
         assert_eq!(loaded.markets.markets[0].market_id, "m1");
-    }
-
-    #[test]
-    fn load_raw_program_and_markets_retains_yaml() {
-        let dir = tempdir().expect("tempdir");
-        let program_path = dir.path().join("program.yaml");
-        write_minimal_program_with_signer(
-            &program_path,
-            MinimalProgramParams {
-                home_dir: dir.path(),
-                ..Default::default()
-            },
-        );
-        let markets_path = dir.path().join("markets.yaml");
-        write_sample_markets(&markets_path);
-
-        let loaded =
-            load_raw_program_and_markets(&program_path, &markets_path, None).expect("loaded");
-        assert!(loaded.raw_program.is_object());
-        assert_eq!(loaded.program.network, "mainnet");
-        assert_eq!(loaded.markets.markets.len(), 1);
     }
 }

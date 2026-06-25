@@ -93,7 +93,7 @@ pub(super) fn offer_post_persist_record(
         .or_else(|| OfferExecutionMode::parse_db(execution_mode));
     Some(OfferPostPersistRecord {
         offer_id,
-        market_id: ctx.gated.market.market_id.clone(),
+        market_id: ctx.gated.market_row.market_id.clone(),
         side: side.to_string(),
         size_base_units,
         publish_venue: ctx.publish_venue.clone(),
