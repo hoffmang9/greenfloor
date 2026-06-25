@@ -292,6 +292,9 @@ pub enum ManagerCommands {
         dust_threshold_mojos: u64,
         #[arg(long, default_value_t = 10)]
         max_input_coins: usize,
+        /// Cap combinable batches executed (or previewed) per job; omit to run the full plan.
+        #[arg(long)]
+        max_batches: Option<usize>,
         #[arg(long, default_value_t = 120)]
         max_nonce: u32,
         #[arg(long, default_value = "")]

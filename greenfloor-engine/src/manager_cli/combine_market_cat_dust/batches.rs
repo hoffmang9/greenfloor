@@ -3,6 +3,42 @@ use serde_json::{json, Value};
 use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCoin, DustCombineBatch, DustPlan};
 
+/// Full dust plan plus an optional cap on combinable batches for this run.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DustBatchRunSelection<'a> {
+    plan: &'a DustPlan,
+    max_batches: Option<usize>,
+}
+
+impl<'a> DustBatchRunSelection<'a> {
+    pub(crate) fn new(plan: &'a DustPlan, max_batches: Option<usize>) -> Self {
+        Self { plan, max_batches }
+    }
+
+    pub(crate) fn plan(&self) -> &'a DustPlan {
+        self.plan
+    }
+
+    pub(crate) fn combinable_batches(&self) -> &[DustCombineBatch] {
+        let all = self.plan.batches.combinable_batches.as_slice();
+        match self.max_batches {
+            None => all,
+            Some(max) => {
+                let end = max.min(all.len());
+                &all[..end]
+            }
+        }
+    }
+
+    pub(crate) fn selected_count(&self) -> usize {
+        self.combinable_batches().len()
+    }
+
+    pub(crate) fn planned_count(&self) -> usize {
+        self.plan.batches.combinable_batches.len()
+    }
+}
+
 fn coin_ids_json(coins: &[DustCoin]) -> Value {
     json!(coins.iter().map(|coin| &coin.coin_id).collect::<Vec<_>>())
 }
@@ -22,9 +58,10 @@ fn single_coin_status_entry(coin: &DustCoin, status: &str) -> Value {
     })
 }
 
-pub fn preview_batches_report(plan: &DustPlan, can_combine: bool) -> Value {
+pub fn preview_batches_report(selection: &DustBatchRunSelection<'_>, can_combine: bool) -> Value {
+    let plan = selection.plan();
     let mut entries = Vec::new();
-    for batch in &plan.batches.combinable_batches {
+    for batch in selection.combinable_batches() {
         entries.push(json!({
             "coin_ids": batch_coin_ids_json(batch),
             "status": "preview",
@@ -109,7 +146,8 @@ mod tests {
             batches,
             lineage_excluded: Vec::new(),
         };
-        let report = preview_batches_report(&plan, true);
+        let selection = DustBatchRunSelection::new(&plan, None);
+        let report = preview_batches_report(&selection, true);
         let entries = report.as_array().expect("batch array");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].get("status"), Some(&json!("preview")));
@@ -130,9 +168,30 @@ mod tests {
                 amount: 100,
             }],
         };
-        let report = preview_batches_report(&plan, false);
+        let selection = DustBatchRunSelection::new(&plan, None);
+        let report = preview_batches_report(&selection, false);
         let entries = report.as_array().expect("batch array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].get("status"), Some(&json!("lineage_excluded")));
+    }
+
+    #[test]
+    fn preview_batches_report_respects_max_batches() {
+        let proven: Vec<_> = (0..4)
+            .map(|i| proven_dust(&format!("{i:064x}"), 1))
+            .collect();
+        let batches = plan_dust_batches(&proven, 2);
+        let plan = DustPlan {
+            scan_dust_count: 4,
+            batches,
+            lineage_excluded: Vec::new(),
+        };
+        let selection = DustBatchRunSelection::new(&plan, Some(1));
+        assert_eq!(selection.planned_count(), 2);
+        assert_eq!(selection.selected_count(), 1);
+        let report = preview_batches_report(&selection, true);
+        let entries = report.as_array().expect("batch array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].get("status"), Some(&json!("preview")));
     }
 }

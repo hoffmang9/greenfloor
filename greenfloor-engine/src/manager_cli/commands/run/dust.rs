@@ -16,6 +16,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
         launcher_id_file,
         dust_threshold_mojos,
         max_input_coins,
+        max_batches,
         max_nonce,
         cat_asset_id,
         dry_run,
@@ -36,6 +37,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             launcher_id_file: optional_str(&launcher_id_file),
             dust_threshold_mojos,
             max_input_coins,
+            max_batches,
             max_nonce,
             cat_asset_id: optional_str(&cat_asset_id),
             verify: CoinSpentVerifyConfig {

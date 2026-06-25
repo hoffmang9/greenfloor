@@ -40,6 +40,7 @@ pub struct CombineMarketCatDustRequest<'a> {
     pub launcher_id_file: Option<&'a str>,
     pub dust_threshold_mojos: u64,
     pub max_input_coins: usize,
+    pub max_batches: Option<usize>,
     pub max_nonce: u32,
     pub cat_asset_id: Option<&'a str>,
     pub verify: CoinSpentVerifyConfig,
@@ -54,6 +55,7 @@ struct ProcessJobContext<'a> {
     max_nonce: u32,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
+    max_batches: Option<usize>,
     run_mode: &'a CombineRunMode<'a>,
     job: &'a CatDustJob,
 }
@@ -129,17 +131,23 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
         ctx.coinset,
         ctx.dust_threshold_mojos,
         ctx.max_input_coins,
+        ctx.max_batches,
         ctx.run_mode,
         readiness,
     ))
     .await
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn run_combine_market_cat_dust(
     request: CombineMarketCatDustRequest<'_>,
 ) -> SignerResult<i32> {
     let flags = request.execution;
     let mgr = request.mgr;
+
+    if matches!(request.max_batches, Some(0)) {
+        return emit_command_error(mgr, "invalid_max_batches", "max_batches must be at least 1");
+    }
 
     if !mgr.cats_config.is_file() {
         return emit_command_error(
@@ -224,6 +232,7 @@ pub async fn run_combine_market_cat_dust(
             max_nonce: request.max_nonce,
             dust_threshold_mojos: request.dust_threshold_mojos,
             max_input_coins: request.max_input_coins,
+            max_batches: request.max_batches,
             run_mode: &run_mode,
             job: &job,
         }))
@@ -238,6 +247,7 @@ pub async fn run_combine_market_cat_dust(
         "status": if exit_code == 0 { "ok" } else { "error" },
         "network": loaded.coinset.network,
         "dust_threshold_mojos": request.dust_threshold_mojos,
+        "max_batches": request.max_batches,
         "dry_run": flags.dry_run,
         "list_only": flags.list_only,
         "jobs": job_reports,

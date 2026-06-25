@@ -47,6 +47,7 @@ async fn finalize_preview_job_report_plans_two_coin_batch_with_lineage() {
         &coinset,
         1000,
         2,
+        None,
         &CombineRunMode::Preview,
         readiness,
     )
@@ -160,6 +161,7 @@ async fn finalize_preview_job_report_marks_unresolvable_coin_lineage_excluded() 
         &coinset,
         1000,
         2,
+        None,
         &CombineRunMode::Preview,
         readiness,
     )
