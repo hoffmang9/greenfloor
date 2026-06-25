@@ -17,9 +17,10 @@ use serde_json::Value;
 
 use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
-    load_markets_config_with_overlay, load_program_bundle_gated, parse_program_config,
-    parse_signer_config, read_program_yaml, resolve_coin_list_market, resolve_market_for_build,
-    CycleProgramConfig, ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
+    ensure_market_receive_address_for_network, load_markets_config_with_overlay,
+    load_program_bundle_gated, parse_program_config, parse_signer_config, read_program_yaml,
+    resolve_coin_list_market, resolve_market_for_build, CycleProgramConfig, ManagerProgramConfig,
+    MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint, DEFAULT_COINSET_BASE_URL};
 use crate::error::SignerResult;
@@ -163,12 +164,16 @@ fn resolve_operator_market(
     pair: Option<&str>,
     command: OperatorMarketCommand,
 ) -> SignerResult<MarketConfig> {
-    match command {
-        OperatorMarketCommand::Build => resolve_market_for_build(markets, market_id, pair, network),
-        OperatorMarketCommand::CoinList => {
-            resolve_coin_list_market(markets, network, market_id, pair)
+    let market = match command {
+        OperatorMarketCommand::Build => {
+            resolve_market_for_build(markets, market_id, pair, network)?
         }
-    }
+        OperatorMarketCommand::CoinList => {
+            return resolve_coin_list_market(markets, network, market_id, pair);
+        }
+    };
+    ensure_market_receive_address_for_network(&market, network)?;
+    Ok(market)
 }
 
 /// Load daemon cycle program and markets config (soft signer parse).
@@ -291,5 +296,37 @@ markets:
         assert_eq!(loaded.network, "mainnet");
         assert_eq!(loaded.markets.markets.len(), 1);
         assert_eq!(loaded.markets.markets[0].market_id, "m1");
+    }
+
+    #[test]
+    fn load_gated_operator_market_build_rejects_receive_address_network_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        let markets_path = dir.path().join("markets.yaml");
+        write_sample_markets(&markets_path);
+
+        let err = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
+            program_path: &program_path,
+            markets_path: &markets_path,
+            testnet_markets_path: None,
+            cats_path: None,
+            network: "testnet11",
+            market_id: Some("m1"),
+            pair: None,
+            command: OperatorMarketCommand::Build,
+        })
+        .expect_err("mainnet receive_address on testnet11");
+        assert!(
+            err.to_string()
+                .contains("receive_address does not match operator network testnet11"),
+            "unexpected error: {err}"
+        );
     }
 }

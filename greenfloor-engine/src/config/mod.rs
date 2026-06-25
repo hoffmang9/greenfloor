@@ -18,9 +18,10 @@ pub use cat_ticker_index::{
 pub use cats_catalog::{load_cats_catalog, write_cats_catalog};
 pub use keys_registry::SignerKeyEntry;
 pub use markets::{
-    cancel_policy_stable_vs_unstable, load_markets_config, load_markets_config_with_overlay,
-    parse_markets_config, receive_address_matches_operator_network, resolve_coin_list_market,
-    resolve_market_for_build, LadderEntry, MarketConfig, MarketsConfig,
+    cancel_policy_stable_vs_unstable, ensure_market_receive_address_for_network,
+    load_markets_config, load_markets_config_with_overlay, parse_markets_config,
+    receive_address_matches_operator_network, resolve_coin_list_market, resolve_market_for_build,
+    LadderEntry, MarketConfig, MarketsConfig,
 };
 pub use parse_int::{parse_non_negative_u64, u64_to_i64, usize_to_i64};
 pub use program::{

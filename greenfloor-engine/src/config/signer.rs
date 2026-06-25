@@ -75,6 +75,7 @@ fn parse_signer_coinset_base_url(signer: &serde_json::Map<String, Value>) -> Str
             .filter(|value| !value.is_empty())
     };
     read("coinset_base_url")
+        .or_else(|| read("coinset_msp_base_url"))
         .unwrap_or(DEFAULT_COINSET_BASE_URL)
         .to_string()
 }
@@ -212,5 +213,36 @@ vault:
         assert_eq!(cfg.kms_key_id, "arn:aws:kms:us-west-2:123:key/abc");
         assert_eq!(cfg.vault.custody_threshold, 1);
         assert_eq!(hex::encode(cfg.vault.launcher_id), "aa".repeat(32));
+    }
+
+    #[test]
+    fn parse_signer_coinset_base_url_falls_back_to_legacy_msp_field() {
+        let mut signer = serde_json::Map::new();
+        signer.insert("kms_key_id".to_string(), Value::String("key-1".to_string()));
+        signer.insert(
+            "coinset_msp_base_url".to_string(),
+            Value::String("https://coinset.legacy.example/".to_string()),
+        );
+        assert_eq!(
+            parse_signer_coinset_base_url(&signer),
+            "https://coinset.legacy.example/"
+        );
+    }
+
+    #[test]
+    fn parse_signer_coinset_base_url_prefers_canonical_over_legacy_msp_field() {
+        let mut signer = serde_json::Map::new();
+        signer.insert(
+            "coinset_base_url".to_string(),
+            Value::String("https://coinset.canonical.example/".to_string()),
+        );
+        signer.insert(
+            "coinset_msp_base_url".to_string(),
+            Value::String("https://coinset.legacy.example/".to_string()),
+        );
+        assert_eq!(
+            parse_signer_coinset_base_url(&signer),
+            "https://coinset.canonical.example/"
+        );
     }
 }

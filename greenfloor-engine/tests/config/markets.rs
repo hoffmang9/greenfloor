@@ -1,6 +1,7 @@
 use greenfloor_engine::config::{
-    load_markets_config_with_overlay, parse_markets_config, resolve_coin_list_market,
-    resolve_market_for_build, MarketConfig, MarketsConfig,
+    ensure_market_receive_address_for_network, load_markets_config_with_overlay,
+    parse_markets_config, resolve_coin_list_market, resolve_market_for_build, MarketConfig,
+    MarketsConfig,
 };
 use greenfloor_engine::error::SignerResult;
 use serde_json::{json, Value};
@@ -299,6 +300,32 @@ fn resolve_coin_list_market_defaults_to_smallest_mainnet_receive_address() {
     .expect("markets");
     let market = resolve_coin_list_market(&markets, "mainnet", None, None).expect("default market");
     assert_eq!(market.market_id, "a-main");
+}
+
+#[test]
+fn resolve_coin_list_market_rejects_explicit_market_on_wrong_network() {
+    let markets = sample_markets();
+    let err = resolve_coin_list_market(&markets, "testnet11", Some("m1"), None)
+        .expect_err("mainnet receive_address on testnet11");
+    assert!(
+        err.to_string()
+            .contains("receive_address does not match operator network testnet11"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn ensure_market_receive_address_for_network_rejects_build_selection_mismatch() {
+    let markets = sample_markets();
+    let market =
+        resolve_market_for_build(&markets, Some("m1"), None, "testnet11").expect("market by id");
+    let err = ensure_market_receive_address_for_network(&market, "testnet11")
+        .expect_err("mainnet receive_address on testnet11");
+    assert!(
+        err.to_string()
+            .contains("receive_address does not match operator network testnet11"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
