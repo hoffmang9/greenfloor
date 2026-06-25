@@ -44,16 +44,6 @@ pub struct GatedOperatorMarket {
     pub operator_network: String,
 }
 
-/// Borrowed view of a gated operator market (daemon coin-op paths, asset resolution).
-#[derive(Debug, Clone, Copy)]
-pub struct OperatorMarketContext<'a> {
-    pub program: &'a ManagerProgramConfig,
-    pub signer: &'a SignerConfig,
-    pub market_row: &'a MarketConfig,
-    pub ticker_index: &'a CatTickerIndex,
-    pub operator_network: &'a str,
-}
-
 impl GatedOperatorMarket {
     #[must_use]
     pub fn assemble(
@@ -73,36 +63,11 @@ impl GatedOperatorMarket {
     }
 
     #[must_use]
-    pub fn as_context(&self) -> OperatorMarketContext<'_> {
-        OperatorMarketContext {
-            program: &self.program,
-            signer: &self.signer,
-            market_row: &self.market_row,
-            ticker_index: &self.ticker_index,
-            operator_network: &self.operator_network,
-        }
-    }
-
-    #[must_use]
     pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'_> {
-        self.as_context().asset_resolver()
-    }
-}
-
-impl<'a> OperatorMarketContext<'a> {
-    #[must_use]
-    pub fn asset_resolver(&self) -> crate::offer::OfferAssetResolver<'a> {
-        crate::offer::OfferAssetResolver::new(self.signer, self.ticker_index, self.operator_network)
-    }
-
-    #[must_use]
-    pub fn into_gated(self) -> GatedOperatorMarket {
-        GatedOperatorMarket::assemble(
-            self.program.clone(),
-            self.signer.clone(),
-            self.market_row.clone(),
-            self.ticker_index.clone(),
-            self.operator_network,
+        crate::offer::OfferAssetResolver::new(
+            &self.signer,
+            &self.ticker_index,
+            &self.operator_network,
         )
     }
 }
