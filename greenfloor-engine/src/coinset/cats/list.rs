@@ -4,7 +4,7 @@ use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use chia_sdk_driver::Cat;
 use futures_util::future::try_join_all;
 
-use super::{resolve, unspent_coin_records};
+use super::resolve;
 use crate::bech32m::decode_address;
 use crate::coinset::pagination::coin_records_by_puzzle_hash;
 use crate::coinset::retry::with_coinset_client_retries;
@@ -90,7 +90,7 @@ async fn unspent_cats_from_records(
     client: &CoinsetClient,
     records: Vec<CoinRecord>,
 ) -> SignerResult<Vec<Cat>> {
-    let records: Vec<CoinRecord> = unspent_coin_records(records).collect();
+    let records: Vec<CoinRecord> = records.into_iter().filter(|record| !record.spent).collect();
     cats_with_lineage_from_records(client, &records).await
 }
 

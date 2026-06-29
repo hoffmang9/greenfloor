@@ -1,10 +1,12 @@
 mod api;
 mod asset;
 mod backend;
+mod batch;
 mod broadcast;
 mod cats;
 pub(crate) mod coin_select;
 mod direct_api;
+mod json_util;
 mod offer_assets;
 mod pagination;
 mod parse;
@@ -12,6 +14,7 @@ mod poll;
 mod presplit;
 pub mod probe;
 mod retry;
+mod rpc_result;
 mod scan_client;
 mod signer_client;
 mod spent_verify;
@@ -29,6 +32,7 @@ pub use api::{
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
+pub use batch::chunk_values;
 pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
 pub use cats::{
     cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats,
@@ -41,11 +45,11 @@ pub use direct_api::{
     resolve_direct_coinset_base_url, ResolvedCoinsetEndpoint, ResolvedDirectClient,
     DEFAULT_COINSET_BASE_URL, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
+pub use json_util::{to_coinset_hex, u64_from_value};
 pub use offer_assets::{lookup_asset_by_symbol, AssetInfo};
 pub use parse::{
-    chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,
-    coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
-    to_coinset_hex, u64_from_value,
+    coin_from_record, coin_id_from_record, coin_records_from_payload,
+    coin_spend_from_solution_payload, record_from_payload,
 };
 pub use presplit::{fetch_offer_input_cat, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
@@ -53,6 +57,7 @@ pub use retry::{
     with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,
     with_script_retries_with_policy, ScriptRetryPolicy,
 };
+pub use rpc_result::ensure_coinset_rpc_success;
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 pub use signer_client::{client_for_network, client_for_signer_on_network};
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};

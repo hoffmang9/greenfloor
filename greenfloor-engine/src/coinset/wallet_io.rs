@@ -6,7 +6,10 @@ use chia_puzzle_types::cat::CatArgs;
 use chia_traits::Streamable;
 use serde::Serialize;
 
-use super::{cats, direct_api, direct_coinset_client, is_xch_like_asset, xch::list_unspent_xch};
+use super::{
+    cats, direct_api, direct_coinset_client, is_xch_like_asset, json_util::to_coinset_hex,
+    xch::list_unspent_xch,
+};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
@@ -109,7 +112,7 @@ pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String
         .map_err(|err| SignerError::Other(format!("invalid spend_bundle_hex: {err}")))?;
     let bundle = SpendBundle::from_bytes(&bytes)
         .map_err(|err| SignerError::Other(format!("invalid spend bundle: {err}")))?;
-    Ok(format!("0x{}", hex::encode(bundle.hash())))
+    Ok(to_coinset_hex(bundle.hash().as_ref()))
 }
 
 /// Puzzle hash hex for receive address.
@@ -119,7 +122,7 @@ pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String
 /// Returns an error if the operation fails.
 pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResult<String> {
     let puzzle_hash = decode_address(receive_address)?;
-    Ok(format!("0x{}", hex::encode(puzzle_hash)))
+    Ok(to_coinset_hex(puzzle_hash.as_ref()))
 }
 
 /// Cat outer puzzle hash hex.
@@ -131,7 +134,7 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
     let puzzle_hash = decode_address(receive_address)?;
     let asset_bytes = hex_to_bytes32(asset_id)?;
     let cat_outer: [u8; 32] = CatArgs::curry_tree_hash(asset_bytes, puzzle_hash.into()).into();
-    Ok(format!("0x{}", hex::encode(cat_outer)))
+    Ok(to_coinset_hex(&cat_outer))
 }
 
 /// Extract coin id hints from offer text.

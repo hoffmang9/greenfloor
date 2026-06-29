@@ -2,7 +2,7 @@ use chia_protocol::SpendBundle;
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 use chia_traits::Streamable;
 
-use super::parse::ensure_coinset_typed_rpc_success;
+use super::rpc_result::ensure_coinset_success;
 use crate::error::SignerResult;
 use crate::hex::canonical_tx_id;
 
@@ -31,7 +31,11 @@ pub async fn broadcast_spend_bundle(
         .push_tx(spend_bundle)
         .await
         .map_err(crate::error::SignerError::from)?;
-    ensure_coinset_typed_rpc_success(&response, "push_tx failed")?;
+    ensure_coinset_success(
+        response.success,
+        response.error.as_deref(),
+        "push_tx failed",
+    )?;
     Ok(BroadcastSpendBundleResult {
         status: response.status,
         operation_id,
