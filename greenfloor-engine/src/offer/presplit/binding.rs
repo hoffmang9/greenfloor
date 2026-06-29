@@ -3,6 +3,7 @@ use chia_sdk_driver::Cat;
 use clvm_utils::TreeHash;
 
 use crate::error::{SignerError, SignerResult};
+use crate::offer::presplit::build::{plan_presplit_binding, PresplitPaymentContext};
 use crate::offer::presplit::cancel_binding::{self, PresplitBindingLookup, PresplitCoinBinding};
 
 /// Presplit offer binding: fixed CONDITIONS hash and maker P2 puzzle hash.
@@ -29,6 +30,21 @@ impl PresplitOfferBinding {
         }
     }
 
+    pub(crate) fn plan(
+        launcher_id: Bytes32,
+        terms: &crate::offer::types::OfferTerms,
+        receive_puzzle_hash: Bytes32,
+        offer_nonce: Bytes32,
+    ) -> SignerResult<Self> {
+        let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
+        plan_presplit_binding(
+            launcher_id,
+            &payment_ctx,
+            terms.offer_amount,
+            terms.expires_at,
+        )
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn from_presplit_coin_input(
         launcher_id: Bytes32,
@@ -41,9 +57,8 @@ impl PresplitOfferBinding {
             spend_bundle,
         )? {
             PresplitBindingLookup::Found(binding) => binding,
-            // Callers reach this after selecting a cancellable presplit maker input.
             PresplitBindingLookup::NotPresplitMaker => {
-                return Err(SignerError::OfferCancelNoSpendableInput);
+                return Err(SignerError::OfferCancelInputNotPresplitMaker);
             }
         };
         Ok(Self::from_coin_binding(coin, &binding))
@@ -68,7 +83,6 @@ pub fn verify_presplit_cat_offer_binding(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::presplit::predict_presplit_cat;
     use crate::offer::types::OfferTerms;
 
     #[test]
@@ -91,7 +105,7 @@ mod tests {
         let binding =
             PresplitOfferBinding::plan(launcher_id, &terms, Bytes32::default(), Bytes32::default())
                 .expect("binding");
-        let mismatched_cat = predict_presplit_cat(&source_cat, Bytes32::new([0x99; 32]), 1000);
+        let mismatched_cat = source_cat.child(Bytes32::new([0x99; 32]), 1000);
         let err = verify_presplit_cat_offer_binding(&mismatched_cat, &binding).unwrap_err();
         assert!(matches!(err, SignerError::PresplitCoinPuzzleHashMismatch));
     }

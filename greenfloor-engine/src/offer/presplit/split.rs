@@ -11,10 +11,6 @@ use crate::vault::materialize::{
 use crate::vault::members::nonce_member_puzzle_hash;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
-pub fn predict_presplit_cat(source_cat: &Cat, p2_puzzle_hash: Bytes32, offer_amount: u64) -> Cat {
-    source_cat.child(p2_puzzle_hash, offer_amount)
-}
-
 /// Validate presplit source cats.
 ///
 /// # Errors
@@ -93,8 +89,7 @@ where
 {
     validate_presplit_source_cats(source_cats.len())?;
     let source_cat = source_cats[0];
-    let presplit_cat =
-        predict_presplit_cat(&source_cat, params.p2_puzzle_hash, params.offer_amount);
+    let presplit_cat = source_cat.child(params.p2_puzzle_hash, params.offer_amount);
 
     let mut ctx = SpendContext::new();
     let mut conditions = Conditions::new();

@@ -8,9 +8,11 @@ use super::coinset_backend::SimulatorOfferCoinset;
 use super::harness::{fetch_cat_from_sim, sample_create_offer_request, SimulatorVaultHarness};
 use super::offer_cancel_fixtures::TEST_XCH_MOJO_MULT;
 use crate::offer::build::build_vault_cat_offer_with_spend;
+use crate::offer::presplit::split::{
+    build_presplit_split_spend_bundle_with_vault, PresplitSplitParams,
+};
 use crate::offer::presplit::{
-    build_presplit_split_spend_bundle_with_vault, offer_nonce_from_cats, vault_change_puzzle_hash,
-    PresplitOfferBinding, PresplitSplitParams,
+    offer_nonce_from_cats, vault_change_puzzle_hash, PresplitOfferBinding,
 };
 use crate::offer::types::{CreateOfferRequest, OfferExecutionMode, OfferInput};
 

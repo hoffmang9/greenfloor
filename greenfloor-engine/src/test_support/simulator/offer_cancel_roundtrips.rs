@@ -13,10 +13,8 @@ use super::offer_roundtrip_setup::{
 use crate::coinset::OfferCoinsetBackend;
 use crate::error::SignerError;
 use crate::offer::classify_cancellable_maker_input;
-use crate::offer::presplit::{
-    build_offer_from_presplit_input, vault_change_puzzle_hash, PresplitMakerInput,
-    PresplitOfferBinding,
-};
+use crate::offer::presplit::build::build_offer_from_presplit_xch;
+use crate::offer::presplit::{vault_change_puzzle_hash, PresplitOfferBinding};
 use crate::offer::reclaim::{
     build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
 };
@@ -589,8 +587,8 @@ async fn build_offer_cancel_spend_bundle_presplit_xch_returns_coin_to_vault() {
         let mut sim = harness.chain.sim.lock().expect("sim lock");
         sim.new_coin(binding.p2_puzzle_hash, offer_amount)
     };
-    let (offer_text, _, _) = build_offer_from_presplit_input(
-        PresplitMakerInput::Xch(presplit_coin),
+    let (offer_text, _, _) = build_offer_from_presplit_xch(
+        presplit_coin,
         harness.vault_ctx.launcher_id,
         &binding,
         &terms,
