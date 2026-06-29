@@ -2,7 +2,8 @@ use std::future::Future;
 
 use serde_json::Value;
 
-use super::super::parse::{coin_id_from_record, to_coinset_hex};
+use super::super::json_util::to_coinset_hex;
+use super::super::parse::coin_id_from_record;
 use super::super::scan_client::DirectCoinsetScanClient;
 use super::types::{HeightWindowCapability, ProbedHeightWindowCapability, ScanWindow};
 use crate::error::SignerResult;

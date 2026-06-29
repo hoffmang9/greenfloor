@@ -1,4 +1,4 @@
-use super::super::parse::to_coinset_hex;
+use super::super::json_util::to_coinset_hex;
 use super::super::scan_client::DirectCoinsetScanClient;
 use super::capability::{
     probe_height_window, probe_names, sample_coin_id_from_records, scan_window_from_peak,

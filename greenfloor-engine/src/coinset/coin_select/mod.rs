@@ -9,7 +9,7 @@ use chia_sdk_driver::Cat;
 use super::cats::{
     cat_from_record, coin_records_for_cat_outer_puzzle_hash, coin_records_for_coin_ids,
 };
-use super::parse::unspent_coin_records;
+use super::coin_records::unspent_coin_records;
 use crate::error::{SignerError, SignerResult};
 
 /// Minimum CAT output amount for offer/dust policy (1000 mojos = 1 CAT unit).
