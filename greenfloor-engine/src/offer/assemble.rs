@@ -10,7 +10,7 @@ use crate::hex::tree_hash_to_hex;
 use crate::offer::plan::{build_offer_payment_bundle, build_offer_request_conditions};
 use crate::offer::presplit::{
     build_offer_from_presplit_cat, build_presplit_split_spend_bundle, vault_change_puzzle_hash,
-    verify_presplit_cat_offer_binding, PresplitOfferBinding,
+    verify_presplit_cat_offer_binding, PresplitOfferBinding, PresplitPaymentContext,
 };
 use crate::offer::types::{
     CreateOfferResult, OfferArtifacts, OfferExecutionMode, OfferInput, PresplitArtifacts,
@@ -101,14 +101,9 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
     ));
-    let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
-        presplit_cat,
-        vault_ctx.launcher_id,
-        &binding,
-        terms,
-        receive_puzzle_hash,
-        offer_nonce,
-    )?;
+    let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
+    let (offer, spend_bundle_hex, offer_nonce_hex) =
+        build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, &binding, &payment_ctx)?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitNew,
@@ -163,14 +158,9 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
     ));
-    let (offer, spend_bundle_hex, offer_nonce_hex) = build_offer_from_presplit_cat(
-        presplit_cat,
-        vault_ctx.launcher_id,
-        &binding,
-        terms,
-        receive_puzzle_hash,
-        offer_nonce,
-    )?;
+    let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
+    let (offer, spend_bundle_hex, offer_nonce_hex) =
+        build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, &binding, &payment_ctx)?;
 
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::PresplitExisting,

@@ -1,23 +1,29 @@
 mod binding;
-pub(crate) mod build;
+mod build;
 mod cancel_binding;
 mod conditions;
-pub(crate) mod split;
+mod pipeline;
+mod split;
 
 use chia_protocol::Bytes32;
 use chia_sdk_driver::{Cat, Offer};
 
 pub use binding::{verify_presplit_cat_offer_binding, PresplitOfferBinding};
 pub(crate) use build::build_offer_from_presplit_cat;
+#[cfg(test)]
+pub(crate) use build::build_offer_from_presplit_xch;
 pub(crate) use cancel_binding::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
     verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup,
 };
 pub use conditions::build_presplit_conditions_inner_spend;
 pub(crate) use conditions::build_presplit_offer_cancel_inner_spend;
+pub(crate) use pipeline::PresplitPaymentContext;
 pub use split::{
     build_presplit_split_spend_bundle, validate_presplit_source_cats, vault_change_puzzle_hash,
 };
+#[cfg(test)]
+pub(crate) use split::{build_presplit_split_spend_bundle_with_vault, PresplitSplitParams};
 
 #[must_use]
 pub fn offer_nonce_from_cats(cats: &[Cat]) -> Bytes32 {

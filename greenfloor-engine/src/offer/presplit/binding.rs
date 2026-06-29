@@ -1,10 +1,12 @@
 use chia_protocol::{Bytes32, Coin, SpendBundle};
-use chia_sdk_driver::Cat;
+use chia_sdk_driver::{Cat, SpendContext};
 use clvm_utils::TreeHash;
 
 use crate::error::{SignerError, SignerResult};
-use crate::offer::presplit::build::{plan_presplit_binding, PresplitPaymentContext};
 use crate::offer::presplit::cancel_binding::{self, PresplitBindingLookup, PresplitCoinBinding};
+use crate::offer::presplit::pipeline::PresplitPaymentContext;
+use crate::offer::types::OfferTerms;
+use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
 
 /// Presplit offer binding: fixed CONDITIONS hash and maker P2 puzzle hash.
 ///
@@ -32,17 +34,22 @@ impl PresplitOfferBinding {
 
     pub(crate) fn plan(
         launcher_id: Bytes32,
-        terms: &crate::offer::types::OfferTerms,
+        terms: &OfferTerms,
         receive_puzzle_hash: Bytes32,
         offer_nonce: Bytes32,
     ) -> SignerResult<Self> {
         let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
-        plan_presplit_binding(
-            launcher_id,
-            &payment_ctx,
-            terms.offer_amount,
-            terms.expires_at,
-        )
+        let mut ctx = SpendContext::new();
+        let built =
+            payment_ctx.build_fixed_conditions(&mut ctx, terms.offer_amount, terms.expires_at)?;
+        let p2_hashes =
+            p2_conditions_or_singleton_puzzle_hash(built.fixed_conditions_tree_hash, launcher_id)?;
+        Ok(Self {
+            offer_amount: terms.offer_amount,
+            expires_at: terms.expires_at,
+            fixed_conditions_tree_hash: built.fixed_conditions_tree_hash,
+            p2_puzzle_hash: p2_hashes.puzzle_hash.into(),
+        })
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

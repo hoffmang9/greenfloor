@@ -11,6 +11,8 @@ use clvmr::{Allocator, NodePtr};
 use super::parse::binding_parse_err;
 use crate::error::SignerError;
 
+const MAX_PUZZLE_PEEL_DEPTH: usize = 8;
+
 #[derive(Debug)]
 pub(super) enum PeelError {
     NotPresplitLayout,
@@ -37,47 +39,49 @@ fn try_peel_puzzle_wrapper(
     Ok(None)
 }
 
-fn peel_index_wrapper_puzzle(
+/// Peel index/delegated-feeder wrappers until the innermost puzzle is reached.
+fn peel_puzzle_inward(
     allocator: &Allocator,
     mut puzzle: Puzzle,
-) -> Result<NodePtr, PeelError> {
-    for _ in 0..8 {
+    depth_exceeded: &'static str,
+) -> Result<Puzzle, PeelError> {
+    for _ in 0..MAX_PUZZLE_PEEL_DEPTH {
         match try_peel_puzzle_wrapper(allocator, puzzle)? {
             Some(inner) => puzzle = inner,
-            None => return Ok(puzzle.ptr()),
+            None => return Ok(puzzle),
         }
     }
-    Err(PeelError::Parse(binding_parse_err(
-        "presplit fixed member puzzle wrapper depth exceeded",
-    )))
+    Err(PeelError::Parse(binding_parse_err(depth_exceeded)))
 }
 
-fn peel_to_one_of_n_puzzle(
+/// Peel wrappers until a curried puzzle with `target_mod_hash` is found.
+fn peel_to_curried_mod(
     allocator: &Allocator,
     mut puzzle: Puzzle,
+    target_mod_hash: TreeHash,
+    not_layout: PeelError,
+    depth_exceeded: &'static str,
 ) -> Result<(NodePtr, NodePtr), PeelError> {
-    for _ in 0..8 {
+    for _ in 0..MAX_PUZZLE_PEEL_DEPTH {
         let Some(curried) = puzzle.as_curried() else {
-            return Err(PeelError::NotPresplitLayout);
+            return Err(not_layout);
         };
-        if curried.mod_hash == ONE_OF_N_HASH.into() {
+        if curried.mod_hash == target_mod_hash {
             return Ok((curried.curried_ptr, curried.args));
         }
         puzzle = match try_peel_puzzle_wrapper(allocator, puzzle)? {
             Some(inner) => inner,
-            None => return Err(PeelError::NotPresplitLayout),
+            None => return Err(not_layout),
         };
     }
-    Err(PeelError::Parse(binding_parse_err(
-        "presplit input inner puzzle wrapper depth exceeded",
-    )))
+    Err(PeelError::Parse(binding_parse_err(depth_exceeded)))
 }
 
 fn peel_to_one_of_n_solution(
     allocator: &Allocator,
     mut solution: NodePtr,
 ) -> Result<NodePtr, PeelError> {
-    for _ in 0..8 {
+    for _ in 0..MAX_PUZZLE_PEEL_DEPTH {
         if OneOfNSolution::<NodePtr, NodePtr>::from_clvm(allocator, solution).is_ok() {
             return Ok(solution);
         }
@@ -99,7 +103,13 @@ pub(super) fn presplit_fixed_delegated_puzzle_hash_from_inner(
     inner_puzzle: Puzzle,
     inner_solution: NodePtr,
 ) -> Result<TreeHash, PeelError> {
-    let (_one_of_n_puzzle, one_of_n_args_ptr) = peel_to_one_of_n_puzzle(allocator, inner_puzzle)?;
+    let (_one_of_n_puzzle, one_of_n_args_ptr) = peel_to_curried_mod(
+        allocator,
+        inner_puzzle,
+        ONE_OF_N_HASH.into(),
+        PeelError::NotPresplitLayout,
+        "presplit input inner puzzle wrapper depth exceeded",
+    )?;
     let one_of_n_solution_ptr = peel_to_one_of_n_solution(allocator, inner_solution)?;
     let _one_of_n_args = OneOfNArgs::from_clvm(allocator, one_of_n_args_ptr)
         .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
@@ -107,6 +117,11 @@ pub(super) fn presplit_fixed_delegated_puzzle_hash_from_inner(
         OneOfNSolution::<NodePtr, NodePtr>::from_clvm(allocator, one_of_n_solution_ptr)
             .map_err(|err| PeelError::Parse(binding_parse_err(err.to_string())))?;
     let member_puzzle = Puzzle::parse(allocator, one_of_n_solution.member_puzzle);
-    let fixed_delegated_puzzle_ptr = peel_index_wrapper_puzzle(allocator, member_puzzle)?;
+    let fixed_delegated_puzzle_ptr = peel_puzzle_inward(
+        allocator,
+        member_puzzle,
+        "presplit fixed member puzzle wrapper depth exceeded",
+    )?
+    .ptr();
     Ok(tree_hash(allocator, fixed_delegated_puzzle_ptr))
 }
