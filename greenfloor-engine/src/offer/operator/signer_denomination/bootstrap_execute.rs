@@ -3,8 +3,8 @@ use serde_json::json;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapCoin,
-    BootstrapPhaseSnapshot, BootstrapPlanOutcome, BootstrapReplanAfterCombine,
-    BootstrapWaitStepKind, PlannerLadderRow,
+    BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlanOutcome,
+    BootstrapReplanAfterCombine, BootstrapWaitStepKind, PlannerLadderRow,
 };
 
 use super::executed_after_split;
@@ -56,7 +56,7 @@ impl BootstrapShapeContext {
     ) -> BootstrapPhaseResult {
         self.executed_result(
             BootstrapPhaseSnapshot {
-                status: "executed",
+                status: BootstrapPhaseStatus::Executed,
                 reason: reason.to_string(),
                 ready: false,
             },

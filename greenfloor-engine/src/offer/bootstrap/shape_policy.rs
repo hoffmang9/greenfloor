@@ -35,7 +35,7 @@ pub(crate) fn sub_primary_shape_deferred_to_coin_ops(
             primary_size,
             true,
         ),
-        BootstrapPlanOutcome::NeedsShape(plan) if plan.requires_combine_first() => false,
+        _ if outcome.combine_first_pending() => false,
         BootstrapPlanOutcome::NeedsShape(plan) => {
             crate::coin_ops::shape_protection::defer_sub_primary_shape_to_coin_ops(
                 plan.total_output_amount,

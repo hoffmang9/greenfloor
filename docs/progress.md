@@ -16,6 +16,27 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-29 — Bootstrap phase mapping refactored (#157)
+
+Decomposed `offer/bootstrap/phase.rs` into `phase/mod.rs` + `phase/tests.rs`. Typed
+`BootstrapPhaseStatus` on snapshots; shared `outcome_reason` mapping; `combine_first_pending()`
+on `BootstrapPlanOutcome`; unified after-combine/split wait completion helpers. Snapshot
+block-error gating moved to `bootstrap_phase_snapshot_block_error()` in `gate.rs` (one-way
+`gate` → `phase`). See ADR 0017.
+
+### 2026-06-29 — Presplit module decomposed (#156)
+
+Split `offer/presplit/mod.rs` into `binding`, `build`, `conditions`, `split`, `pipeline`, and
+`cancel_binding/{mod,parse,peel}.rs`. `PresplitPaymentContext` deduplicates payment inputs
+across plan/input-spend/encode. Cancel inner spend remains
+`build_presplit_offer_cancel_inner_spend` in `conditions.rs`. See ADR 0017.
+
+### 2026-06-29 — Bootstrap planner decomposed (#155)
+
+Extracted domain model to `bootstrap/plan.rs`; slim orchestration in `planner.rs`;
+`planner/tests.rs` and shared `test_fixtures.rs` for planner/phase/replan tests. Centralized
+ladder deficit collection and `BootstrapPlan::needs_shape` invariants. See ADR 0017.
+
 ### 2026-06-22 — On-chain offer cancel hardened (ADR 0015)
 
 Shared cancel/reclaim spend builder (`offer/reclaim.rs`); Dexie is offer-file fetch only;
@@ -27,10 +48,11 @@ Operator state uses `cancel_submitted` until reconcile confirms `cancelled`. CLI
 ### 2026-06-21 — Offer publish module decomposed; bootstrap gate collapsed
 
 Split `offer/publish/mod.rs` into venue-focused `publish/dexie/` and `publish/assets/`
-(expectations + Dexie visibility). Bootstrap offer-creation gating moved to
-`offer/bootstrap/gate.rs` with typed `BootstrapPhaseStatus`. Operator block checks use
-`BootstrapPhaseResult::offer_creation_block_error()`; removed wrapper re-exports from
-`offer::`. See ADR 0014 and `rust-migration-ledger.md` for library-only breaking changes.
+(expectations + Dexie visibility). Bootstrap offer-creation gating policy moved to
+`offer/bootstrap/gate.rs`; typed phase snapshots later refined in ADR 0017 (#157). Operator
+block checks use `BootstrapPhaseResult::offer_creation_block_error()`; removed wrapper
+re-exports from `offer::`. See ADR 0014 and `rust-migration-ledger.md` for library-only
+breaking changes.
 
 ### 2026-06-21 — Vault coinset scan checkpoint module decomposed
 
@@ -83,5 +105,5 @@ to active decisions (`0013`, `0010`, `0007`, `0003`).
 
 - V1 scope: [`plan.md`](plan.md)
 - Operator procedures: [`runbook.md`](runbook.md)
-- Architecture decisions: [`README.md`](README.md) (start with ADR 0013, ADR 0015 for cancel)
+- Architecture decisions: [`README.md`](README.md) (start with ADR 0013, ADR 0015 for cancel, ADR 0017 for offer module layout)
 - Breaking changes / migration catch-up: [`rust-migration-ledger.md`](rust-migration-ledger.md)

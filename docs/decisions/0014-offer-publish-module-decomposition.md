@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-21)
+Accepted (2026-06-21; bootstrap layout refined in [0017](0017-offer-submodule-decompositions.md))
 
 ## Context
 
@@ -15,13 +15,15 @@ status/reason mapping across string fields, snapshot helpers, and operator resul
 
 1. **Split publish into venue-focused submodules.** `offer/publish/` now holds Dexie posting
    (`dexie/`) and publish-side asset helpers (`assets/expectations.rs`, `assets/visibility.rs`).
-   Bootstrap offer-creation gating lives in `offer/bootstrap/gate.rs`.
+   Bootstrap offer-creation **gating policy** lives in `offer/bootstrap/gate.rs`; typed phase
+   snapshots and status mapping live in `offer/bootstrap/phase/` (see ADR 0017).
 
-2. **Collapse bootstrap block API to operator results.** Offer build/post checks
-   `BootstrapPhaseResult::offer_creation_block_error()` (and the parallel
-   `BootstrapPhaseSnapshot::offer_creation_block_error()` for early-phase snapshots). Typed
-   `BootstrapPhaseStatus` is stored on `BootstrapPhaseResult`; JSON serialization still emits
-   the legacy `status` string field.
+2. **Collapse bootstrap block API.** Offer build/post checks
+   `BootstrapPhaseResult::offer_creation_block_error()`. Early-phase snapshots use
+   `bootstrap_phase_snapshot_block_error(&snapshot)` from `offer/bootstrap/gate.rs` (re-exported
+   as `offer::bootstrap::bootstrap_phase_snapshot_block_error`). Typed `BootstrapPhaseStatus`
+   is stored on both `BootstrapPhaseSnapshot` and `BootstrapPhaseResult`; JSON serialization
+   still emits the legacy `status` string field via `BootstrapPhaseStatus::as_str()`.
 
 3. **Keep publish-side asset normalization internal.** `OfferSideAssets` and
    `offer_side_assets_for_side` are `pub(crate)` — only `assets/expectations.rs` needs them.
@@ -50,6 +52,6 @@ Operator CLI JSON shapes are unchanged: bootstrap results still serialize `statu
 
 - External Rust crates depending on removed `offer::` re-exports must update imports or call
   operator JSON paths instead.
-- Bootstrap gating logic has a single typed path (`BootstrapPhaseStatus` → `BootstrapOfferGate`
-  → block error string).
+- Bootstrap gating has a single typed path: construct snapshots in `phase/`, interpret blocking
+  in `gate/` (`BootstrapPhaseStatus` → `BootstrapOfferGate` → block error string).
 - Publish module stays focused on venue posting and Dexie asset visibility.

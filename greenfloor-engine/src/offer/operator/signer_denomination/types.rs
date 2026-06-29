@@ -111,7 +111,7 @@ impl BootstrapPhaseResult {
 
     pub(super) fn from_snapshot(snapshot: BootstrapPhaseSnapshot) -> Self {
         Self {
-            phase_status: BootstrapPhaseStatus::from_snapshot_status(snapshot.status),
+            phase_status: snapshot.status,
             reason: snapshot.reason,
             ready: snapshot.ready,
             fee_mojos: 0,
@@ -253,18 +253,22 @@ impl BootstrapPhaseFailure {
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
     use crate::offer::bootstrap::{
-        BaseUnits, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPhaseSnapshot,
-        BootstrapPlan,
+        bootstrap_phase_snapshot_block_error, BaseUnits, BootstrapCombineInputs,
+        BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlan,
     };
 
     #[test]
     fn from_snapshot_block_error_matches_snapshot_gate() {
         for (status, reason, ready) in [
-            ("failed", "bootstrap_invalid_ladder", false),
-            ("skipped", "already_ready", false),
-            ("skipped", "seed_missing", false),
-            ("executed", "bootstrap_submitted", true),
-            ("executed", "split_submitted", false),
+            (
+                BootstrapPhaseStatus::Failed,
+                "bootstrap_invalid_ladder",
+                false,
+            ),
+            (BootstrapPhaseStatus::Skipped, "already_ready", false),
+            (BootstrapPhaseStatus::Skipped, "seed_missing", false),
+            (BootstrapPhaseStatus::Executed, "bootstrap_submitted", true),
+            (BootstrapPhaseStatus::Executed, "split_submitted", false),
         ] {
             let snapshot = BootstrapPhaseSnapshot {
                 status,
@@ -273,8 +277,9 @@ mod tests {
             };
             assert_eq!(
                 BootstrapPhaseResult::from_snapshot(snapshot.clone()).offer_creation_block_error(),
-                snapshot.offer_creation_block_error(),
-                "status={status} reason={reason} ready={ready}"
+                bootstrap_phase_snapshot_block_error(&snapshot),
+                "status={} reason={reason} ready={ready}",
+                status.as_str()
             );
         }
     }

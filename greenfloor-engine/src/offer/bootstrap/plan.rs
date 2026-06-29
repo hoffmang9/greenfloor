@@ -142,3 +142,11 @@ pub enum BootstrapPlanOutcome {
     InvalidLadder,
     InvalidCoins,
 }
+
+impl BootstrapPlanOutcome {
+    /// True when the planner still requires a combine-first funding step.
+    #[must_use]
+    pub(crate) fn combine_first_pending(&self) -> bool {
+        matches!(self, Self::NeedsShape(plan) if plan.requires_combine_first())
+    }
+}
