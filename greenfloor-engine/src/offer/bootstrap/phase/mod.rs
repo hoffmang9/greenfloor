@@ -1,0 +1,225 @@
+//! Bootstrap phase status/reason mapping after planner evaluation or post-split replan.
+
+use super::gate::bootstrap_offer_gate_for_snapshot;
+use super::plan::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
+use super::shape_policy::{
+    bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
+};
+
+#[cfg(test)]
+mod tests;
+
+/// Typed bootstrap phase status for offer-creation gating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapPhaseStatus {
+    Failed,
+    Executed,
+    Skipped,
+}
+
+impl BootstrapPhaseStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Executed => "executed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Manager-visible bootstrap phase fields (status / reason / ready).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapPhaseSnapshot {
+    pub status: BootstrapPhaseStatus,
+    pub reason: String,
+    pub ready: bool,
+}
+
+impl BootstrapPhaseSnapshot {
+    /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
+    #[must_use]
+    pub fn offer_creation_block_error(&self) -> Option<String> {
+        bootstrap_offer_gate_for_snapshot(self).block_error()
+    }
+}
+
+fn phase_snapshot(
+    status: BootstrapPhaseStatus,
+    reason: impl Into<String>,
+    ready: bool,
+) -> BootstrapPhaseSnapshot {
+    BootstrapPhaseSnapshot {
+        status,
+        reason: reason.into(),
+        ready,
+    }
+}
+
+fn executed_outcome_reason(outcome: &BootstrapPlanOutcome) -> (String, bool) {
+    match outcome {
+        BootstrapPlanOutcome::Ready => ("bootstrap_submitted".to_string(), true),
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => (
+            format!(
+                "bootstrap_submitted:still_underfunded:total_output_amount={total_output_amount}"
+            ),
+            false,
+        ),
+        BootstrapPlanOutcome::NeedsShape(plan) => (
+            if plan.requires_combine_first() {
+                "bootstrap_submitted:still_needs_combine".to_string()
+            } else {
+                "bootstrap_submitted:still_needs_split".to_string()
+            },
+            false,
+        ),
+        BootstrapPlanOutcome::InvalidLadder => (
+            "bootstrap_submitted:still_invalid_ladder".to_string(),
+            false,
+        ),
+        BootstrapPlanOutcome::InvalidCoins => {
+            ("bootstrap_submitted:still_invalid_coins".to_string(), false)
+        }
+    }
+}
+
+/// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
+#[must_use]
+pub fn bootstrap_early_phase(
+    outcome: &BootstrapPlanOutcome,
+    ladder_entries: &[PlannerLadderRow],
+    spendable_coins: &[BootstrapCoin],
+) -> Option<BootstrapPhaseSnapshot> {
+    if bootstrap_preflight_deferred_to_coin_ops(outcome, ladder_entries, spendable_coins)
+        || matches!(outcome, BootstrapPlanOutcome::Ready)
+    {
+        return Some(phase_snapshot(
+            BootstrapPhaseStatus::Skipped,
+            "already_ready",
+            false,
+        ));
+    }
+    Some(match outcome {
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => phase_snapshot(
+            BootstrapPhaseStatus::Skipped,
+            format!("bootstrap_underfunded:total_output_amount={total_output_amount}"),
+            false,
+        ),
+        BootstrapPlanOutcome::InvalidLadder => phase_snapshot(
+            BootstrapPhaseStatus::Failed,
+            "bootstrap_invalid_ladder",
+            false,
+        ),
+        BootstrapPlanOutcome::InvalidCoins => phase_snapshot(
+            BootstrapPhaseStatus::Failed,
+            "bootstrap_invalid_coins",
+            false,
+        ),
+        BootstrapPlanOutcome::NeedsShape(_) => return None,
+        BootstrapPlanOutcome::Ready => unreachable!(),
+    })
+}
+
+/// Map a post-split replan outcome to executed-phase status/reason/ready.
+#[must_use]
+pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
+    let (reason, ready) = executed_outcome_reason(remaining);
+    phase_snapshot(BootstrapPhaseStatus::Executed, reason, ready)
+}
+
+/// Which bootstrap shape step a confirmation wait is polling for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BootstrapWaitStepKind {
+    AfterCombine,
+    AfterSplit,
+}
+
+/// Result of evaluating one bootstrap shape wait poll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BootstrapWaitResolution {
+    Continue,
+    Complete(BootstrapPlanOutcome),
+}
+
+/// Inventory and ladder context required for after-combine bootstrap wait polling.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BootstrapWaitContext<'a> {
+    pub combine_target_amount: i64,
+    pub ladder_entries: &'a [PlannerLadderRow],
+    pub spendable_coins: &'a [BootstrapCoin],
+}
+
+/// Which bootstrap shape wait poll is being evaluated.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum BootstrapWaitPoll<'a> {
+    AfterCombine(BootstrapWaitContext<'a>),
+    AfterSplit,
+}
+
+/// Decide whether a bootstrap wait poll should continue or return its planner outcome.
+///
+/// After combine, completion follows planner semantics so transient `CannotFund` from
+/// partial change coins does not exit early. Once the combine target row is on-chain,
+/// [`offer_bootstrap_primary_row_complete`] ends the wait even when buffer deficits remain.
+/// After split, completion requires an on-chain inventory update plus a settled post-split
+/// planner outcome.
+#[must_use]
+pub(crate) fn resolve_bootstrap_wait_poll(
+    poll: BootstrapWaitPoll<'_>,
+    outcome: &BootstrapPlanOutcome,
+    observed_on_chain_update: bool,
+) -> BootstrapWaitResolution {
+    match poll {
+        BootstrapWaitPoll::AfterCombine(ctx) => {
+            if !outcome.combine_first_pending()
+                && offer_bootstrap_primary_row_complete(
+                    ctx.combine_target_amount,
+                    outcome,
+                    ctx.ladder_entries,
+                    ctx.spendable_coins,
+                )
+            {
+                return BootstrapWaitResolution::Complete(BootstrapPlanOutcome::Ready);
+            }
+            match outcome {
+                BootstrapPlanOutcome::Ready => BootstrapWaitResolution::Complete(outcome.clone()),
+                BootstrapPlanOutcome::NeedsShape(_) if !outcome.combine_first_pending() => {
+                    BootstrapWaitResolution::Complete(outcome.clone())
+                }
+                _ => BootstrapWaitResolution::Continue,
+            }
+        }
+        BootstrapWaitPoll::AfterSplit => {
+            if matches!(outcome, BootstrapPlanOutcome::Ready)
+                || (observed_on_chain_update && !outcome.combine_first_pending())
+            {
+                BootstrapWaitResolution::Complete(outcome.clone())
+            } else {
+                BootstrapWaitResolution::Continue
+            }
+        }
+    }
+}
+
+/// Manager/operator metadata for a completed bootstrap shape wait event.
+#[must_use]
+pub(crate) fn bootstrap_wait_event_metadata(
+    step: BootstrapWaitStepKind,
+    outcome: &BootstrapPlanOutcome,
+) -> (bool, String) {
+    if matches!(
+        (step, outcome),
+        (
+            BootstrapWaitStepKind::AfterCombine,
+            BootstrapPlanOutcome::NeedsShape(_)
+        )
+    ) {
+        return (false, "combine_step_complete".to_string());
+    }
+    let (reason, ready) = executed_outcome_reason(outcome);
+    (ready, reason)
+}

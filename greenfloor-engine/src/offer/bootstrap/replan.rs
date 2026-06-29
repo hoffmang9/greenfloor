@@ -31,7 +31,7 @@ pub(crate) fn bootstrap_replan_after_combine(
         | BootstrapPlanOutcome::CannotFund { .. }
         | BootstrapPlanOutcome::InvalidLadder
         | BootstrapPlanOutcome::InvalidCoins => BootstrapReplanAfterCombine::Complete(replanned),
-        BootstrapPlanOutcome::NeedsShape(plan) if plan.requires_combine_first() => {
+        BootstrapPlanOutcome::NeedsShape(plan) if replanned.combine_first_pending() => {
             // Still need another combine-first step for the primary row (for example 100@2).
             BootstrapReplanAfterCombine::Complete(BootstrapPlanOutcome::NeedsShape(plan))
         }

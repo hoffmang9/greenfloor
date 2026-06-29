@@ -1,14 +1,13 @@
 use super::{
     bootstrap_offer_gate_for_snapshot, bootstrap_offer_gate_for_status, BootstrapOfferGate,
-    BootstrapPhaseStatus,
 };
-use crate::offer::bootstrap::BootstrapPhaseSnapshot;
+use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPhaseStatus};
 
 #[test]
 fn snapshot_gate_typed_outcomes() {
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&BootstrapPhaseSnapshot {
-            status: "failed",
+            status: BootstrapPhaseStatus::Failed,
             reason: "split_error".to_string(),
             ready: false,
         }),
@@ -16,7 +15,7 @@ fn snapshot_gate_typed_outcomes() {
     );
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&BootstrapPhaseSnapshot {
-            status: "executed",
+            status: BootstrapPhaseStatus::Executed,
             reason: "split_submitted".to_string(),
             ready: false,
         }),
@@ -24,7 +23,7 @@ fn snapshot_gate_typed_outcomes() {
     );
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&BootstrapPhaseSnapshot {
-            status: "skipped",
+            status: BootstrapPhaseStatus::Skipped,
             reason: "already_ready".to_string(),
             ready: false,
         }),
@@ -32,7 +31,7 @@ fn snapshot_gate_typed_outcomes() {
     );
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&BootstrapPhaseSnapshot {
-            status: "skipped",
+            status: BootstrapPhaseStatus::Skipped,
             reason: "dry_run".to_string(),
             ready: false,
         }),
@@ -40,7 +39,7 @@ fn snapshot_gate_typed_outcomes() {
     );
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&BootstrapPhaseSnapshot {
-            status: "skipped",
+            status: BootstrapPhaseStatus::Skipped,
             reason: "seed_missing".to_string(),
             ready: false,
         }),
@@ -51,17 +50,13 @@ fn snapshot_gate_typed_outcomes() {
 #[test]
 fn snapshot_gate_matches_typed_status_gate() {
     let snapshot = BootstrapPhaseSnapshot {
-        status: "executed",
+        status: BootstrapPhaseStatus::Executed,
         reason: "split_submitted".to_string(),
         ready: false,
     };
     assert_eq!(
         bootstrap_offer_gate_for_snapshot(&snapshot),
-        bootstrap_offer_gate_for_status(
-            BootstrapPhaseStatus::from_snapshot_status(snapshot.status),
-            &snapshot.reason,
-            snapshot.ready
-        )
+        bootstrap_offer_gate_for_status(snapshot.status, &snapshot.reason, snapshot.ready)
     );
 }
 

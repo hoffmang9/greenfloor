@@ -1,6 +1,6 @@
 //! Offer-creation gating after denomination bootstrap preflight.
 
-use super::phase::BootstrapPhaseSnapshot;
+use super::phase::{BootstrapPhaseSnapshot, BootstrapPhaseStatus};
 
 const SKIP_CONTINUE_REASONS: &[&str] = &["already_ready", "dry_run"];
 
@@ -10,35 +10,6 @@ fn normalized_reason(reason: &str) -> String {
         "bootstrap_precheck_failed".to_string()
     } else {
         trimmed.to_string()
-    }
-}
-
-/// Typed bootstrap phase status for offer-creation gating.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BootstrapPhaseStatus {
-    Failed,
-    Executed,
-    Skipped,
-    Unknown,
-}
-
-impl BootstrapPhaseStatus {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Failed => "failed",
-            Self::Executed => "executed",
-            Self::Skipped => "skipped",
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub(crate) fn from_snapshot_status(status: &'static str) -> Self {
-        match status {
-            "failed" => Self::Failed,
-            "executed" => Self::Executed,
-            "skipped" => Self::Skipped,
-            _ => Self::Unknown,
-        }
     }
 }
 
@@ -68,11 +39,7 @@ impl BootstrapOfferGate {
 pub(crate) fn bootstrap_offer_gate_for_snapshot(
     snapshot: &BootstrapPhaseSnapshot,
 ) -> BootstrapOfferGate {
-    bootstrap_offer_gate_for_status(
-        BootstrapPhaseStatus::from_snapshot_status(snapshot.status),
-        &snapshot.reason,
-        snapshot.ready,
-    )
+    bootstrap_offer_gate_for_status(snapshot.status, &snapshot.reason, snapshot.ready)
 }
 
 /// Resolve whether offer creation should continue after bootstrap preflight fields.
