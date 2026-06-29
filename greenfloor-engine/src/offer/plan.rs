@@ -9,9 +9,7 @@ use chia_sdk_types::{conditions::AssertBeforeSecondsAbsolute, Conditions};
 use crate::coinset::{OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
-use crate::offer::presplit::{
-    offer_nonce_from_cats, offer_nonce_from_coin_ids, PresplitOfferBinding,
-};
+use crate::offer::presplit::{offer_nonce_from_cats, offer_nonce_from_coin_ids};
 use crate::offer::types::{OfferInput, OfferTerms};
 
 use crate::coinset::is_xch_like_asset;
@@ -100,16 +98,6 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
         }
     }
 }
-
-pub(crate) fn plan_presplit_binding(
-    terms: &OfferTerms,
-    receive_puzzle_hash: Bytes32,
-    offer_nonce: Bytes32,
-    launcher_id: Bytes32,
-) -> SignerResult<PresplitOfferBinding> {
-    PresplitOfferBinding::plan(launcher_id, terms, receive_puzzle_hash, offer_nonce)
-}
-
 pub(crate) struct OfferPaymentBundle {
     pub requested_payments: RequestedPayments,
     pub requested_asset_info: AssetInfo,

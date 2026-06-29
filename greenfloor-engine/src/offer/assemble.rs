@@ -7,12 +7,10 @@ use clvmr::Allocator;
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::tree_hash_to_hex;
-use crate::offer::plan::{
-    build_offer_payment_bundle, build_offer_request_conditions, plan_presplit_binding,
-};
+use crate::offer::plan::{build_offer_payment_bundle, build_offer_request_conditions};
 use crate::offer::presplit::{
     build_offer_from_presplit_cat, build_presplit_split_spend_bundle, vault_change_puzzle_hash,
-    verify_presplit_cat_offer_binding,
+    verify_presplit_cat_offer_binding, PresplitOfferBinding,
 };
 use crate::offer::types::{
     CreateOfferResult, OfferArtifacts, OfferExecutionMode, OfferInput, PresplitArtifacts,
@@ -71,11 +69,11 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
         ));
     };
 
-    let binding = plan_presplit_binding(
+    let binding = PresplitOfferBinding::plan(
+        vault_ctx.launcher_id,
         terms,
         receive_puzzle_hash,
         offer_nonce,
-        vault_ctx.launcher_id,
     )?;
     let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id)?;
 
@@ -153,11 +151,11 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
 
     let presplit_cat = coinset.fetch_offer_input_cat(*presplit_coin_id).await?;
     validate_existing_presplit_cat(&presplit_cat, offer_asset_id, terms.offer_amount)?;
-    let binding = plan_presplit_binding(
+    let binding = PresplitOfferBinding::plan(
+        vault_ctx.launcher_id,
         terms,
         receive_puzzle_hash,
         offer_nonce,
-        vault_ctx.launcher_id,
     )?;
     verify_presplit_cat_offer_binding(&presplit_cat, &binding)?;
     let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
