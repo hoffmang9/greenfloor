@@ -14,7 +14,8 @@ use crate::coinset::OfferCoinsetBackend;
 use crate::error::SignerError;
 use crate::offer::classify_cancellable_maker_input;
 use crate::offer::presplit::{
-    build_offer_from_presplit_input, vault_change_puzzle_hash, PresplitOfferBinding,
+    build_offer_from_presplit_xch, vault_change_puzzle_hash, PresplitOfferBinding,
+    PresplitPaymentContext,
 };
 use crate::offer::reclaim::{
     build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
@@ -99,9 +100,9 @@ async fn build_presplit_offer_reclaim_spend_returns_cat_to_vault() {
     let presplit_cat = setup.presplit_cat.expect("presplit cat");
     let presplit_coin_id = presplit_cat.coin.coin_id();
     let spend_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
-    let binding = PresplitOfferBinding::from_presplit_input_spend(
+    let binding = PresplitOfferBinding::from_presplit_coin_input(
         setup.harness.vault_ctx.launcher_id,
-        &presplit_cat,
+        presplit_cat.coin,
         &spend_bundle,
     )
     .expect("extract binding");
@@ -136,9 +137,9 @@ async fn build_offer_cancel_spend_bundle_presplit_existing_returns_cat_to_vault(
     let coinset = SimulatorOfferCoinset::new(&setup.harness.chain);
     coinset.register_cat(presplit_cat);
     let spend_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
-    let extracted = PresplitOfferBinding::from_presplit_input_spend(
+    let extracted = PresplitOfferBinding::from_presplit_coin_input(
         setup.harness.vault_ctx.launcher_id,
-        &presplit_cat,
+        presplit_cat.coin,
         &spend_bundle,
     )
     .expect("extract binding");
@@ -471,9 +472,9 @@ async fn build_offer_cancel_rejects_spent_presplit_cat() {
         .expect("presplit-existing offer");
     let presplit_cat = setup.presplit_cat.expect("presplit cat");
     let spend_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
-    let binding = PresplitOfferBinding::from_presplit_input_spend(
+    let binding = PresplitOfferBinding::from_presplit_coin_input(
         setup.harness.vault_ctx.launcher_id,
-        &presplit_cat,
+        presplit_cat.coin,
         &spend_bundle,
     )
     .expect("extract binding");
@@ -588,14 +589,13 @@ async fn build_offer_cancel_spend_bundle_presplit_xch_returns_coin_to_vault() {
         let mut sim = harness.chain.sim.lock().expect("sim lock");
         sim.new_coin(binding.p2_puzzle_hash, offer_amount)
     };
-    let (offer_text, _, _) = build_offer_from_presplit_input(
+    let payment_ctx =
+        PresplitPaymentContext::new(&terms, harness.chain.p2_message_hash, offer_nonce);
+    let (offer_text, _, _) = build_offer_from_presplit_xch(
         presplit_coin,
-        None,
         harness.vault_ctx.launcher_id,
         &binding,
-        &terms,
-        harness.chain.p2_message_hash,
-        offer_nonce,
+        &payment_ctx,
     )
     .expect("presplit xch offer");
     let presplit_coin_id = presplit_coin.coin_id();
