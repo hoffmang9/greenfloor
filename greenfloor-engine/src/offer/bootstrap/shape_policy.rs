@@ -5,20 +5,13 @@
 //! deficits are daemon coin-op scope; see [`crate::coin_ops::defer_low_watermark_split_to_post_bootstrap`].
 
 use super::ladder::ladder_shape_context_for_bootstrap;
-use super::planner::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
+use super::plan::{bootstrap_coin_amounts, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
 use crate::coin_ops::shape_protection::primary_row_satisfied;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BootstrapDeferScope {
     PreflightPrimaryRow,
     AfterCombineTarget { combine_target_amount: i64 },
-}
-
-fn spendable_amounts_base_units(spendable_coins: &[BootstrapCoin]) -> Vec<i64> {
-    spendable_coins
-        .iter()
-        .map(|coin| coin.amount.get())
-        .collect()
 }
 
 /// True when remaining shape work should defer to daemon coin ops instead of bootstrap.
@@ -65,7 +58,7 @@ fn bootstrap_shape_deferred_to_coin_ops(
 ) -> bool {
     let shape_ctx = ladder_shape_context_for_bootstrap(
         ladder_entries,
-        &spendable_amounts_base_units(spendable_coins),
+        &bootstrap_coin_amounts(spendable_coins),
     );
     match scope {
         BootstrapDeferScope::PreflightPrimaryRow => {
@@ -139,26 +132,13 @@ mod tests {
         bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
         sub_primary_shape_deferred_to_coin_ops,
     };
-    use crate::offer::bootstrap::{
-        bootstrap_replan_after_combine, plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin,
-        BootstrapCombineContext, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
-        BootstrapPlanOutcome, BootstrapReplanAfterCombine, LadderDeficit, PlannerLadderRow,
+    use crate::offer::bootstrap::test_fixtures::{
+        bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
     };
-
-    fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
-        PlannerLadderRow {
-            size_base_units: size,
-            target_count: target,
-            split_buffer_count: buffer,
-        }
-    }
-
-    fn coin(id: &str, amount: i64) -> BootstrapCoin {
-        BootstrapCoin {
-            id: id.to_string(),
-            amount: BaseUnits::new(amount),
-        }
-    }
+    use crate::offer::bootstrap::{
+        bootstrap_replan_after_combine, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
+        BootstrapPlan, BootstrapPlanOutcome, BootstrapReplanAfterCombine,
+    };
 
     #[test]
     fn sub_primary_deferred_rejects_combine_first_for_second_primary_row() {
@@ -173,12 +153,7 @@ mod tests {
             output_amounts_base_units: vec![100],
             total_output_amount: 100,
             change_amount: 5,
-            deficits: vec![LadderDeficit {
-                size_base_units: 100,
-                required_count: 2,
-                current_count: 1,
-                deficit_count: 1,
-            }],
+            deficits: vec![ladder_deficit(100, 2, 1)],
         });
         let spendable = vec![coin("first", 100)];
         assert!(!sub_primary_shape_deferred_to_coin_ops(
@@ -206,12 +181,7 @@ mod tests {
             coin("thirty_a", 30),
             coin("thirty_b", 30),
         ];
-        let replanned = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &after_one,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let replanned = plan_bootstrap(&ladder, &after_one);
         assert!(!sub_primary_shape_deferred_to_coin_ops(
             &replanned, 100, false
         ));
@@ -224,12 +194,7 @@ mod tests {
     fn aggregate_thirty_row_still_needs_split_after_combine() {
         let ladder = vec![row(10, 3, 0)];
         let spendable = vec![coin("combined", 30)];
-        let replanned = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let replanned = plan_bootstrap(&ladder, &spendable);
         assert!(!offer_bootstrap_primary_row_complete(
             30, &replanned, &ladder, &spendable,
         ));
@@ -244,8 +209,7 @@ mod tests {
 
         let ladder = eco181_bootstrap_ladder();
         let coins = eco181_after_combine_coins();
-        let outcome =
-            plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &BootstrapCombineContext::for_tests());
+        let outcome = plan_bootstrap(&ladder, &coins);
         assert!(sub_primary_shape_deferred_to_coin_ops(&outcome, 100, true,));
         assert!(bootstrap_preflight_deferred_to_coin_ops(
             &outcome, &ladder, &coins,

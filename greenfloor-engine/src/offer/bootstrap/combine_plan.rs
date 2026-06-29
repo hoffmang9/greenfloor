@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits};
 use super::combine_inputs::BootstrapCombineInputs;
 use super::ladder::ladder_shape_context_for_bootstrap;
-use super::planner::{BootstrapCoin, PlannerLadderRow};
+use super::plan::{spendable_bootstrap_coins, BootstrapCoin, PlannerLadderRow};
 use crate::coin_ops::cat_overshoot_change_would_be_dust;
 use crate::coin_ops::{select_combine_inputs_for_target_in, TargetAmountCoin};
 
@@ -63,11 +63,10 @@ fn partition_ladder_coins(
 }
 
 fn selection_candidates(coins: &[BootstrapCoin]) -> Vec<TargetAmountCoin> {
-    coins
-        .iter()
-        .filter(|coin| !coin.id.trim().is_empty() && coin.amount.get() > 0)
+    spendable_bootstrap_coins(coins)
+        .into_iter()
         .map(|coin| TargetAmountCoin {
-            id: coin.id.clone(),
+            id: coin.id,
             amount: coin.amount.get(),
         })
         .collect()
@@ -161,12 +160,7 @@ mod tests {
     };
     use crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins;
 
-    fn coin(id: &str, amount: i64) -> BootstrapCoin {
-        BootstrapCoin {
-            id: id.to_string(),
-            amount: BaseUnits::new(amount),
-        }
-    }
+    use crate::offer::bootstrap::test_fixtures::bootstrap_coin as coin;
 
     const CAT_ASSET: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
