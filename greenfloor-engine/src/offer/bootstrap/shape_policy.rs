@@ -5,20 +5,13 @@
 //! deficits are daemon coin-op scope; see [`crate::coin_ops::defer_low_watermark_split_to_post_bootstrap`].
 
 use super::ladder::ladder_shape_context_for_bootstrap;
-use super::planner::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
+use super::plan::{bootstrap_coin_amounts, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
 use crate::coin_ops::shape_protection::primary_row_satisfied;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BootstrapDeferScope {
     PreflightPrimaryRow,
     AfterCombineTarget { combine_target_amount: i64 },
-}
-
-fn spendable_amounts_base_units(spendable_coins: &[BootstrapCoin]) -> Vec<i64> {
-    spendable_coins
-        .iter()
-        .map(|coin| coin.amount.get())
-        .collect()
 }
 
 /// True when remaining shape work should defer to daemon coin ops instead of bootstrap.
@@ -65,7 +58,7 @@ fn bootstrap_shape_deferred_to_coin_ops(
 ) -> bool {
     let shape_ctx = ladder_shape_context_for_bootstrap(
         ladder_entries,
-        &spendable_amounts_base_units(spendable_coins),
+        &bootstrap_coin_amounts(spendable_coins),
     );
     match scope {
         BootstrapDeferScope::PreflightPrimaryRow => {
@@ -139,26 +132,12 @@ mod tests {
         bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
         sub_primary_shape_deferred_to_coin_ops,
     };
+    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, ladder_row as row};
     use crate::offer::bootstrap::{
-        bootstrap_replan_after_combine, plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin,
+        bootstrap_replan_after_combine, plan_bootstrap_mixed_outputs, BaseUnits,
         BootstrapCombineContext, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
-        BootstrapPlanOutcome, BootstrapReplanAfterCombine, LadderDeficit, PlannerLadderRow,
+        BootstrapPlanOutcome, BootstrapReplanAfterCombine, LadderDeficit,
     };
-
-    fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
-        PlannerLadderRow {
-            size_base_units: size,
-            target_count: target,
-            split_buffer_count: buffer,
-        }
-    }
-
-    fn coin(id: &str, amount: i64) -> BootstrapCoin {
-        BootstrapCoin {
-            id: id.to_string(),
-            amount: BaseUnits::new(amount),
-        }
-    }
 
     #[test]
     fn sub_primary_deferred_rejects_combine_first_for_second_primary_row() {

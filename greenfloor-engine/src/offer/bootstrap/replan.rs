@@ -1,6 +1,6 @@
 //! Post-combine replan policy for bootstrap shape execution.
 
-use super::planner::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
+use super::plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
 use super::shape_policy::offer_bootstrap_primary_row_complete;
 
 /// Next step after replanning inventory post-combine.
@@ -42,25 +42,10 @@ pub(crate) fn bootstrap_replan_after_combine(
 #[cfg(test)]
 mod tests {
     use super::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
+    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, ladder_row as row};
     use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
-        BootstrapPlanOutcome, PlannerLadderRow,
+        plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCombineContext, BootstrapPlanOutcome,
     };
-
-    fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
-        PlannerLadderRow {
-            size_base_units: size,
-            target_count: target,
-            split_buffer_count: buffer,
-        }
-    }
-
-    fn coin(id: &str, amount: i64) -> BootstrapCoin {
-        BootstrapCoin {
-            id: id.to_string(),
-            amount: BaseUnits::new(amount),
-        }
-    }
 
     #[test]
     fn replan_continues_split_for_non_ladder_combine_product() {

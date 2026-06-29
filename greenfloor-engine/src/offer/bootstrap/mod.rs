@@ -7,9 +7,13 @@ mod combine_submit;
 mod gate;
 mod ladder;
 mod phase;
+mod plan;
 mod planner;
 mod replan;
 mod shape_policy;
+
+#[cfg(test)]
+mod test_fixtures;
 
 pub use amounts::{
     base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
@@ -24,10 +28,11 @@ pub(crate) use phase::{
     bootstrap_wait_event_metadata, resolve_bootstrap_wait_poll, BootstrapWaitContext,
     BootstrapWaitPoll, BootstrapWaitResolution, BootstrapWaitStepKind,
 };
-pub use planner::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapFundingSource, BootstrapPlan,
-    BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
+pub use plan::{
+    BootstrapCoin, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
+    PlannerLadderRow,
 };
+pub use planner::plan_bootstrap_mixed_outputs;
 pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
 
 #[cfg(test)]

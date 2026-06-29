@@ -5,7 +5,7 @@ use crate::coin_ops::shape_protection::{
     SplittableCandidate,
 };
 
-use super::planner::{BootstrapCoin, PlannerLadderRow};
+use super::plan::{BootstrapCoin, PlannerLadderRow};
 
 /// Shape context for bootstrap planner / preflight from ladder rows and spendable amounts.
 #[must_use]
@@ -34,7 +34,7 @@ pub(crate) fn select_smallest_non_cannibalizing_bootstrap_coin<'a>(
 ) -> Option<&'a BootstrapCoin> {
     let candidates: Vec<SplittableCandidate<'_>> = spendable_coins
         .iter()
-        .filter(|coin| !coin.id.trim().is_empty())
+        .filter(|coin| coin.is_spendable())
         .map(|coin| SplittableCandidate {
             id: coin.id.as_str(),
             amount_base_units: coin.amount.get(),

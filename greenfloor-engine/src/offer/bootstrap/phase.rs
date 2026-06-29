@@ -1,6 +1,6 @@
 //! Bootstrap phase status/reason mapping after planner evaluation or post-split replan.
 
-use super::planner::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
+use super::plan::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
 use super::shape_policy::{
     bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
 };
@@ -220,25 +220,11 @@ mod tests {
         bootstrap_early_phase, bootstrap_executed_phase, resolve_bootstrap_wait_poll,
         BootstrapWaitContext, BootstrapWaitPoll, BootstrapWaitResolution,
     };
+    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, ladder_row as row};
     use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
-        BootstrapPlanOutcome, PlannerLadderRow,
+        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapCombineContext, BootstrapPlanOutcome,
+        PlannerLadderRow,
     };
-
-    fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
-        PlannerLadderRow {
-            size_base_units: size,
-            target_count: target,
-            split_buffer_count: buffer,
-        }
-    }
-
-    fn coin(id: &str, amount: i64) -> BootstrapCoin {
-        BootstrapCoin {
-            id: id.to_string(),
-            amount: BaseUnits::new(amount),
-        }
-    }
 
     fn after_combine_poll<'a>(
         combine_target_amount: i64,
