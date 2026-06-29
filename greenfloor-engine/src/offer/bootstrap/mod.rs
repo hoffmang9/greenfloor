@@ -23,6 +23,7 @@ pub use combine_inputs::BootstrapCombineInputs;
 pub use combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
 pub(crate) use combine_submit::bootstrap_combine_vault_outputs;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
+pub use gate::bootstrap_phase_snapshot_block_error;
 pub use phase::{
     bootstrap_early_phase, bootstrap_executed_phase, BootstrapPhaseSnapshot, BootstrapPhaseStatus,
 };

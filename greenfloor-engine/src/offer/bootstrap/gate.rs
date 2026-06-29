@@ -42,6 +42,12 @@ pub(crate) fn bootstrap_offer_gate_for_snapshot(
     bootstrap_offer_gate_for_status(snapshot.status, &snapshot.reason, snapshot.ready)
 }
 
+/// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
+#[must_use]
+pub fn bootstrap_phase_snapshot_block_error(snapshot: &BootstrapPhaseSnapshot) -> Option<String> {
+    bootstrap_offer_gate_for_snapshot(snapshot).block_error()
+}
+
 /// Resolve whether offer creation should continue after bootstrap preflight fields.
 #[must_use]
 pub(crate) fn bootstrap_offer_gate_for_status(

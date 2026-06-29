@@ -6,11 +6,11 @@ use crate::coin_ops::{
     SplitSkipReason,
 };
 use crate::offer::bootstrap::{
-    bootstrap_early_phase, bootstrap_preflight_deferred_to_coin_ops,
-    bootstrap_replan_after_combine, offer_bootstrap_primary_row_complete,
-    plan_bootstrap_mixed_outputs, resolve_bootstrap_wait_poll, BootstrapCombineContext,
-    BootstrapPlanOutcome, BootstrapReplanAfterCombine, BootstrapWaitContext, BootstrapWaitPoll,
-    BootstrapWaitResolution,
+    bootstrap_early_phase, bootstrap_phase_snapshot_block_error,
+    bootstrap_preflight_deferred_to_coin_ops, bootstrap_replan_after_combine,
+    offer_bootstrap_primary_row_complete, plan_bootstrap_mixed_outputs,
+    resolve_bootstrap_wait_poll, BootstrapCombineContext, BootstrapPlanOutcome,
+    BootstrapReplanAfterCombine, BootstrapWaitContext, BootstrapWaitPoll, BootstrapWaitResolution,
 };
 use crate::test_support::eco181_bootstrap_inventory::{
     eco181_after_combine_coins, eco181_after_combine_inventory_rows, eco181_bootstrap_coins,
@@ -146,7 +146,7 @@ pub fn run_eco181_shape_case(case: &Eco181ShapeCase) {
             let phase = bootstrap_early_phase(&outcome, &ladder, &coins).expect(case.name);
             assert_eq!(phase.reason, "already_ready", "{}", case.name);
             assert!(
-                phase.offer_creation_block_error().is_none(),
+                bootstrap_phase_snapshot_block_error(&phase).is_none(),
                 "{}",
                 case.name
             );

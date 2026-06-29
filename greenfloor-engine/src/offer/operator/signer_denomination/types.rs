@@ -253,8 +253,8 @@ impl BootstrapPhaseFailure {
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
     use crate::offer::bootstrap::{
-        BaseUnits, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPhaseSnapshot,
-        BootstrapPhaseStatus, BootstrapPlan,
+        bootstrap_phase_snapshot_block_error, BaseUnits, BootstrapCombineInputs,
+        BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlan,
     };
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
             };
             assert_eq!(
                 BootstrapPhaseResult::from_snapshot(snapshot.clone()).offer_creation_block_error(),
-                snapshot.offer_creation_block_error(),
+                bootstrap_phase_snapshot_block_error(&snapshot),
                 "status={} reason={reason} ready={ready}",
                 status.as_str()
             );
