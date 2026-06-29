@@ -1,6 +1,7 @@
-use chia_sdk_coinset::GetCoinRecordsResponse;
+use chia_sdk_coinset::{CoinRecord, GetCoinRecordsResponse};
 use serde_json::Value;
 
+use crate::coinset::rpc_result::ensure_coinset_success;
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,4 +51,16 @@ pub(crate) fn ensure_complete_page(pagination: &CoinsetRecordsPagination) -> Sig
         ));
     }
     Ok(())
+}
+
+pub(crate) fn coin_records_page_from_response(
+    response: GetCoinRecordsResponse,
+) -> SignerResult<(Vec<CoinRecord>, CoinsetRecordsPagination)> {
+    ensure_coinset_success(
+        response.success,
+        response.error.as_deref(),
+        "coinset request failed",
+    )?;
+    let pagination = pagination_from_response(&response);
+    Ok((response.coin_records.unwrap_or_default(), pagination))
 }

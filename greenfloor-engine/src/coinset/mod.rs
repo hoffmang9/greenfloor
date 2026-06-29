@@ -4,7 +4,6 @@ mod backend;
 mod batch;
 mod broadcast;
 mod cats;
-pub(crate) mod coin_records;
 pub(crate) mod coin_select;
 mod direct_api;
 mod json_util;

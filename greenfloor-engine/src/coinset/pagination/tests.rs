@@ -1,8 +1,7 @@
 use super::{
     coin_records_from_json_endpoint,
-    cursor::{pagination_from_payload, CoinsetRecordsPagination},
+    cursor::{coin_records_page_from_response, pagination_from_payload, CoinsetRecordsPagination},
     fetch_all_coinset_pages,
-    response::coin_records_page_from_response,
 };
 use crate::error::SignerError;
 

@@ -1,7 +1,6 @@
 mod list;
 mod resolve;
 
-pub(crate) use super::coin_records::unspent_coin_records;
 pub(crate) use list::{coin_records_for_cat_outer_puzzle_hash, coin_records_for_coin_ids};
 pub use list::{list_unspent_cats, list_unspent_cats_by_ids};
 pub(crate) use resolve::cat_from_record;

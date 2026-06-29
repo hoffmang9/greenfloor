@@ -9,7 +9,6 @@ use chia_sdk_driver::Cat;
 use super::cats::{
     cat_from_record, coin_records_for_cat_outer_puzzle_hash, coin_records_for_coin_ids,
 };
-use super::coin_records::unspent_coin_records;
 use crate::error::{SignerError, SignerResult};
 
 /// Minimum CAT output amount for offer/dust policy (1000 mojos = 1 CAT unit).
@@ -186,12 +185,17 @@ pub(crate) async fn select_cats_for_spend(
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
     let records = if explicit_coin_ids.is_empty() {
-        unspent_coin_records(
-            coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id).await?,
-        )
-        .collect()
+        coin_records_for_cat_outer_puzzle_hash(client, receive_address, asset_id)
+            .await?
+            .into_iter()
+            .filter(|record| !record.spent)
+            .collect()
     } else {
-        unspent_coin_records(coin_records_for_coin_ids(client, explicit_coin_ids).await?).collect()
+        coin_records_for_coin_ids(client, explicit_coin_ids)
+            .await?
+            .into_iter()
+            .filter(|record| !record.spent)
+            .collect()
     };
     select_cats_for_spend_from_records(client, records, explicit_coin_ids, target_amount).await
 }

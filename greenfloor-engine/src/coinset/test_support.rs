@@ -1,5 +1,6 @@
 //! Shared coinset test fixtures (not production paths).
 
+use super::json_util::to_coinset_hex;
 use chia_protocol::{Bytes32, Coin, CoinSpend};
 use chia_sdk_driver::{Cat, CatInfo};
 use serde_json::json;
@@ -70,7 +71,7 @@ pub fn mock_unspent_coin_record_by_name_body(coin: &Coin) -> String {
 
 pub fn coin_record_by_name_request_json(coin_id: Bytes32) -> serde_json::Value {
     json!({
-        "name": format!("0x{}", hex::encode(coin_id.to_bytes())),
+        "name": to_coinset_hex(coin_id.to_bytes().as_ref()),
     })
 }
 

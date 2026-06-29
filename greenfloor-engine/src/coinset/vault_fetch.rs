@@ -65,10 +65,11 @@ mod tests {
     use clvm_utils::TreeHash;
 
     use super::fetch_latest_vault;
+    use crate::coinset::json_util::to_coinset_hex;
     use crate::error::SignerError;
 
     fn hex32(byte: u8) -> String {
-        format!("0x{}", hex::encode([byte; 32]))
+        to_coinset_hex(&[byte; 32])
     }
 
     fn coin_record_json(

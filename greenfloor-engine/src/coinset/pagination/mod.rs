@@ -4,7 +4,6 @@
 //! for follow-up requests. The public docs omit these fields; see `docs/COINSET_DOCS_AND_API.md`.
 
 mod cursor;
-mod response;
 
 use std::future::Future;
 
@@ -15,8 +14,10 @@ use super::retry::with_coinset_client_retries;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::LogContext;
 
-pub(crate) use cursor::{ensure_complete_page, pagination_from_payload, CoinsetRecordsPagination};
-pub(crate) use response::coin_records_page_from_response;
+pub(crate) use cursor::{
+    coin_records_page_from_response, ensure_complete_page, pagination_from_payload,
+    CoinsetRecordsPagination,
+};
 
 const MAX_COINSET_RECORD_PAGES: usize = 10_000;
 

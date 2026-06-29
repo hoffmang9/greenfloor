@@ -7,6 +7,7 @@ accepted decision** when onboarding.
 
 | ADR                                                              | Topic                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [0018](decisions/0018-coinset-parse-decomposition.md)            | **Coinset submodule layout** — parse, pagination, rpc_result, json_util |
 | [0017](decisions/0017-offer-submodule-decompositions.md)         | **Offer submodule layout** — bootstrap planner/phase + presplit         |
 | [0015](decisions/0015-on-chain-offer-cancel.md)                  | **On-chain offer cancel** — reclaim spend, `cancel_submitted` lifecycle |
 | [0014](decisions/0014-offer-publish-module-decomposition.md)     | **Offer publish decomposition** — bootstrap gate + publish assets       |
