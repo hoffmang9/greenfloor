@@ -220,11 +220,10 @@ mod tests {
         bootstrap_early_phase, bootstrap_executed_phase, resolve_bootstrap_wait_poll,
         BootstrapWaitContext, BootstrapWaitPoll, BootstrapWaitResolution,
     };
-    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, ladder_row as row};
-    use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapCombineContext, BootstrapPlanOutcome,
-        PlannerLadderRow,
+    use crate::offer::bootstrap::test_fixtures::{
+        bootstrap_coin as coin, ladder_row as row, plan_bootstrap,
     };
+    use crate::offer::bootstrap::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
 
     fn after_combine_poll<'a>(
         combine_target_amount: i64,
@@ -242,12 +241,7 @@ mod tests {
     fn early_phase_skips_when_needs_split() {
         let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let outcome = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let outcome = plan_bootstrap(&ladder, &spendable);
         assert!(bootstrap_early_phase(&outcome, &ladder, &spendable).is_none());
     }
 
@@ -294,12 +288,7 @@ mod tests {
     fn after_combine_wait_not_complete_on_cannot_fund_even_when_inventory_changed() {
         let ladder = vec![row(100, 1, 0)];
         let change_only = vec![coin("change", 5)];
-        let outcome = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &change_only,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let outcome = plan_bootstrap(&ladder, &change_only);
         assert_eq!(
             resolve_bootstrap_wait_poll(
                 after_combine_poll(100, &ladder, &change_only),
@@ -326,12 +315,7 @@ mod tests {
     fn after_combine_wait_completes_when_single_coin_split_plan_available() {
         let ladder = vec![row(100, 1, 0)];
         let spendable = vec![coin("combined", 100)];
-        let outcome = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let outcome = plan_bootstrap(&ladder, &spendable);
         assert!(matches!(
             resolve_bootstrap_wait_poll(
                 after_combine_poll(100, &ladder, &spendable),
@@ -364,8 +348,7 @@ mod tests {
 
         let ladder = eco181_bootstrap_ladder();
         let coins = eco181_bootstrap_coins();
-        let outcome =
-            plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &BootstrapCombineContext::for_tests());
+        let outcome = plan_bootstrap(&ladder, &coins);
         let BootstrapPlanOutcome::NeedsShape(plan) = &outcome else {
             panic!("expected combine-first plan");
         };
@@ -386,12 +369,7 @@ mod tests {
 
         let ladder = vec![row(100, 2, 0)];
         let spendable = vec![coin("combined", 100)];
-        let needs_split = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let needs_split = plan_bootstrap(&ladder, &spendable);
         assert_eq!(
             resolve_bootstrap_wait_poll(BootstrapWaitPoll::AfterSplit, &needs_split, false),
             BootstrapWaitResolution::Continue
@@ -420,12 +398,7 @@ mod tests {
             coin("ten-c", 10),
             coin("ten-d", 10),
         ];
-        let combine_first = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &fragmented,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let combine_first = plan_bootstrap(&ladder, &fragmented);
         let BootstrapPlanOutcome::NeedsShape(plan) = &combine_first else {
             panic!("expected combine-first plan, got {combine_first:?}");
         };

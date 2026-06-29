@@ -42,21 +42,19 @@ pub(crate) fn bootstrap_replan_after_combine(
 #[cfg(test)]
 mod tests {
     use super::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
-    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, ladder_row as row};
+    use crate::offer::bootstrap::test_fixtures::{
+        bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
+    };
     use crate::offer::bootstrap::{
-        plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCombineContext, BootstrapPlanOutcome,
+        BaseUnits, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
+        BootstrapPlanOutcome,
     };
 
     #[test]
     fn replan_continues_split_for_non_ladder_combine_product() {
         let ladder = vec![row(10, 3, 0)];
         let spendable = vec![coin("combined", 30)];
-        let replanned = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let replanned = plan_bootstrap(&ladder, &spendable);
         assert!(matches!(
             bootstrap_replan_after_combine(30, replanned, &ladder, &spendable),
             BootstrapReplanAfterCombine::ContinueSplit(_)
@@ -73,12 +71,7 @@ mod tests {
             coin("thirty_a", 30),
             coin("thirty_b", 30),
         ];
-        let replanned = plan_bootstrap_mixed_outputs(
-            &ladder,
-            &spendable,
-            5,
-            &BootstrapCombineContext::for_tests(),
-        );
+        let replanned = plan_bootstrap(&ladder, &spendable);
         assert!(matches!(
             bootstrap_replan_after_combine(100, replanned, &ladder, &spendable),
             BootstrapReplanAfterCombine::Complete(BootstrapPlanOutcome::CannotFund {
@@ -89,10 +82,6 @@ mod tests {
 
     #[test]
     fn replan_still_needs_combine_when_replan_is_combine_first() {
-        use crate::offer::bootstrap::{
-            BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
-        };
-
         let ladder = vec![row(100, 2, 0)];
         let spendable = vec![coin("first", 100)];
         let replanned = BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
@@ -106,12 +95,7 @@ mod tests {
             output_amounts_base_units: vec![100],
             total_output_amount: 100,
             change_amount: 5,
-            deficits: vec![crate::offer::bootstrap::LadderDeficit {
-                size_base_units: 100,
-                required_count: 2,
-                current_count: 1,
-                deficit_count: 1,
-            }],
+            deficits: vec![ladder_deficit(100, 2, 1)],
         });
         assert!(matches!(
             bootstrap_replan_after_combine(100, replanned, &ladder, &spendable),

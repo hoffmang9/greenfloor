@@ -15,7 +15,22 @@ pub struct LadderDeficit {
     pub size_base_units: i64,
     pub required_count: i64,
     pub current_count: i64,
-    pub deficit_count: i64,
+}
+
+impl LadderDeficit {
+    #[must_use]
+    pub fn new(size_base_units: i64, required_count: i64, current_count: i64) -> Self {
+        Self {
+            size_base_units,
+            required_count,
+            current_count,
+        }
+    }
+
+    #[must_use]
+    pub fn deficit_count(&self) -> i64 {
+        self.required_count - self.current_count
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +93,11 @@ impl BootstrapPlan {
         output_amounts_base_units: Vec<i64>,
         deficits: Vec<LadderDeficit>,
     ) -> Self {
+        debug_assert_eq!(
+            total_output_amount,
+            output_amounts_base_units.iter().sum::<i64>(),
+            "total_output_amount must match output_amounts_base_units"
+        );
         Self {
             change_amount: funding_source_amount(&funding) - total_output_amount,
             funding,

@@ -284,12 +284,7 @@ mod tests {
                 output_amounts_base_units: vec![100],
                 total_output_amount: 100,
                 change_amount: 0,
-                deficits: vec![crate::offer::bootstrap::LadderDeficit {
-                    size_base_units: 100,
-                    required_count: 2,
-                    current_count: 1,
-                    deficit_count: 1,
-                }],
+                deficits: vec![crate::offer::bootstrap::LadderDeficit::new(100, 2, 1)],
             },
             ladder_entries: ladder,
             combine_context: crate::offer::bootstrap::BootstrapCombineContext::for_tests(),
