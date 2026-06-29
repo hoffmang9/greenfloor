@@ -52,6 +52,14 @@ pub enum BootstrapFundingSource {
     CombineFirst(BootstrapCombineInputs),
 }
 
+#[must_use]
+fn funding_source_amount(funding: &BootstrapFundingSource) -> i64 {
+    match funding {
+        BootstrapFundingSource::SingleCoin { amount, .. } => amount.get(),
+        BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total.get(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapPlan {
     pub funding: BootstrapFundingSource,
@@ -66,19 +74,17 @@ impl BootstrapPlan {
     #[must_use]
     pub(crate) fn needs_shape(
         funding: BootstrapFundingSource,
+        total_output_amount: i64,
         output_amounts_base_units: Vec<i64>,
         deficits: Vec<LadderDeficit>,
     ) -> Self {
-        let total_output_amount = output_amounts_base_units.iter().sum();
-        let mut plan = Self {
+        Self {
+            change_amount: funding_source_amount(&funding) - total_output_amount,
             funding,
             output_amounts_base_units,
             total_output_amount,
-            change_amount: 0,
             deficits,
-        };
-        plan.change_amount = plan.source_amount() - plan.total_output_amount;
-        plan
+        }
     }
 
     #[must_use]
@@ -96,10 +102,7 @@ impl BootstrapPlan {
 
     #[must_use]
     pub fn source_amount(&self) -> i64 {
-        match &self.funding {
-            BootstrapFundingSource::SingleCoin { amount, .. } => amount.get(),
-            BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total.get(),
-        }
+        funding_source_amount(&self.funding)
     }
 
     #[must_use]
@@ -108,12 +111,6 @@ impl BootstrapPlan {
             BootstrapFundingSource::CombineFirst(inputs) => Some(inputs),
             BootstrapFundingSource::SingleCoin { .. } => None,
         }
-    }
-
-    #[must_use]
-    pub fn combine_input_coin_ids(&self) -> Option<&[String]> {
-        self.combine_inputs()
-            .map(|inputs| inputs.input_coin_ids.as_slice())
     }
 }
 

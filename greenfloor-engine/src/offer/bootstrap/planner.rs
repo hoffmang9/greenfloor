@@ -65,65 +65,41 @@ fn collect_ladder_deficits(
     (deficits, output_amounts)
 }
 
-struct FundedShapePlanInput<'a> {
-    spendable_coins: &'a [BootstrapCoin],
-    spendable_amounts: &'a [i64],
-    sorted_ladder: &'a [PlannerLadderRow],
+fn resolve_funding(
+    spendable_coins: &[BootstrapCoin],
+    spendable_amounts: &[i64],
+    sorted_ladder: &[PlannerLadderRow],
     total_output_amount: i64,
     combine_input_cap: i64,
-    combine_context: &'a BootstrapCombineContext,
-    shape_ctx: &'a LadderShapeContext,
-    output_amounts: Vec<i64>,
-    deficits: Vec<LadderDeficit>,
-}
-
-fn build_funded_shape_plan(input: FundedShapePlanInput<'_>) -> BootstrapPlanOutcome {
-    let FundedShapePlanInput {
-        spendable_coins,
-        spendable_amounts,
-        sorted_ladder,
-        total_output_amount,
-        combine_input_cap,
-        combine_context,
-        shape_ctx,
-        output_amounts,
-        deficits,
-    } = input;
+    combine_context: &BootstrapCombineContext,
+    shape_ctx: &LadderShapeContext,
+) -> Result<BootstrapFundingSource, BootstrapPlanOutcome> {
     if let Some(coin) = select_smallest_non_cannibalizing_bootstrap_coin(
         spendable_coins,
         total_output_amount,
         shape_ctx,
     ) {
-        return BootstrapPlanOutcome::NeedsShape(BootstrapPlan::needs_shape(
-            BootstrapFundingSource::SingleCoin {
-                coin_id: coin.id.clone(),
-                amount: coin.amount,
-            },
-            output_amounts,
-            deficits,
-        ));
+        return Ok(BootstrapFundingSource::SingleCoin {
+            coin_id: coin.id.clone(),
+            amount: coin.amount,
+        });
     }
     if !aggregate_covers_without_single_coin(total_output_amount, spendable_amounts) {
-        return BootstrapPlanOutcome::CannotFund {
+        return Err(BootstrapPlanOutcome::CannotFund {
             total_output_amount,
-        };
+        });
     }
-    let Some(combine_inputs) = build_bootstrap_combine_plan(
+    build_bootstrap_combine_plan(
         &spendable_bootstrap_coins(spendable_coins),
         sorted_ladder,
         BaseUnits::new(total_output_amount),
         combine_input_cap,
         combine_context,
-    ) else {
-        return BootstrapPlanOutcome::CannotFund {
-            total_output_amount,
-        };
-    };
-    BootstrapPlanOutcome::NeedsShape(BootstrapPlan::needs_shape(
-        BootstrapFundingSource::CombineFirst(combine_inputs),
-        output_amounts,
-        deficits,
-    ))
+    )
+    .map(BootstrapFundingSource::CombineFirst)
+    .ok_or(BootstrapPlanOutcome::CannotFund {
+        total_output_amount,
+    })
 }
 
 /// Build a one-shot mixed-output bootstrap plan from ladder deficits.
@@ -150,17 +126,24 @@ pub fn plan_bootstrap_mixed_outputs(
     }
 
     let total_output_amount: i64 = output_amounts.iter().sum();
-    build_funded_shape_plan(FundedShapePlanInput {
+    let funding = match resolve_funding(
         spendable_coins,
-        spendable_amounts: &spendable_amounts,
-        sorted_ladder: &sorted_ladder,
+        &spendable_amounts,
+        &sorted_ladder,
         total_output_amount,
         combine_input_cap,
         combine_context,
-        shape_ctx: &shape_ctx,
+        &shape_ctx,
+    ) {
+        Ok(funding) => funding,
+        Err(outcome) => return outcome,
+    };
+    BootstrapPlanOutcome::NeedsShape(BootstrapPlan::needs_shape(
+        funding,
+        total_output_amount,
         output_amounts,
         deficits,
-    })
+    ))
 }
 
 #[cfg(test)]
