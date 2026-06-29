@@ -107,7 +107,8 @@ back to extraction from the Dexie offer file.
 
 8. **Presplit cancel inner spend follows ent-wallet `CONDITIONS_OR_SINGLETON` / `SINGLETON`
    path:** cancel delegated spend at MIPS top level + vault singleton member for
-   fast-forward (see `build_presplit_offer_cancel_inner_spend` in `offer/presplit.rs`).
+   fast-forward (see `build_presplit_offer_cancel_inner_spend` in
+   `offer/presplit/conditions.rs`, re-exported from `presplit/mod.rs`).
 
 ## Consequences
 
@@ -123,4 +124,5 @@ back to extraction from the Dexie offer file.
 
 - Dexie integration notes: [DEXIE_DOCS_AND_API.md](../DEXIE_DOCS_AND_API.md)
 - Operator procedures: [runbook.md](../runbook.md)
+- Offer module layout: [0017](0017-offer-submodule-decompositions.md)
 - ent-wallet presplit cancel: `../ent-wallet/packages/utils/src/chia/p2.ts` (`P2ConditionsOrSingletonType.SINGLETON`)

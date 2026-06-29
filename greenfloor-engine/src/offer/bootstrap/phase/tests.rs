@@ -1,6 +1,7 @@
 use super::{
-    bootstrap_early_phase, bootstrap_executed_phase, resolve_bootstrap_wait_poll,
-    BootstrapPhaseStatus, BootstrapWaitContext, BootstrapWaitPoll, BootstrapWaitResolution,
+    bootstrap_early_phase, bootstrap_executed_phase, bootstrap_wait_event_metadata,
+    resolve_bootstrap_wait_poll, BootstrapPhaseStatus, BootstrapWaitContext, BootstrapWaitPoll,
+    BootstrapWaitResolution, BootstrapWaitStepKind,
 };
 use crate::offer::bootstrap::test_fixtures::{
     bootstrap_coin as coin, ladder_row as row, plan_bootstrap,
@@ -135,6 +136,24 @@ fn after_combine_wait_continues_while_combine_first_still_pending() {
         resolve_bootstrap_wait_poll(after_combine_poll(100, &ladder, &coins), &outcome, false,),
         BootstrapWaitResolution::Continue,
     );
+}
+
+#[test]
+fn wait_event_metadata_reports_combine_step_complete_after_combine() {
+    let ladder = vec![row(10, 2, 0)];
+    let spendable = vec![coin("coin-big", 100)];
+    let needs_shape = plan_bootstrap(&ladder, &spendable);
+    let BootstrapPlanOutcome::NeedsShape(plan) = &needs_shape else {
+        panic!("expected shape plan, got {needs_shape:?}");
+    };
+    assert!(!plan.requires_combine_first());
+    let (ready, reason) =
+        bootstrap_wait_event_metadata(BootstrapWaitStepKind::AfterCombine, &needs_shape);
+    assert!(!ready);
+    assert_eq!(reason, "combine_step_complete");
+    assert!(bootstrap_executed_phase(&needs_shape)
+        .reason
+        .contains("still_needs_split"));
 }
 
 #[test]

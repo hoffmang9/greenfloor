@@ -125,6 +125,10 @@ fn after_split_wait_complete_outcome(
     }
 }
 
+fn skipped_already_ready_snapshot() -> BootstrapPhaseSnapshot {
+    phase_snapshot(BootstrapPhaseStatus::Skipped, "already_ready", false)
+}
+
 /// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
 #[must_use]
 pub fn bootstrap_early_phase(
@@ -132,19 +136,12 @@ pub fn bootstrap_early_phase(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
 ) -> Option<BootstrapPhaseSnapshot> {
-    if bootstrap_preflight_deferred_to_coin_ops(outcome, ladder_entries, spendable_coins) {
-        return Some(phase_snapshot(
-            BootstrapPhaseStatus::Skipped,
-            "already_ready",
-            false,
-        ));
+    if bootstrap_preflight_deferred_to_coin_ops(outcome, ladder_entries, spendable_coins)
+        || matches!(outcome, BootstrapPlanOutcome::Ready)
+    {
+        return Some(skipped_already_ready_snapshot());
     }
     match outcome {
-        BootstrapPlanOutcome::Ready => Some(phase_snapshot(
-            BootstrapPhaseStatus::Skipped,
-            "already_ready",
-            false,
-        )),
         BootstrapPlanOutcome::NeedsShape(_) => None,
         BootstrapPlanOutcome::CannotFund {
             total_output_amount,
@@ -163,6 +160,7 @@ pub fn bootstrap_early_phase(
             "bootstrap_invalid_coins",
             false,
         )),
+        BootstrapPlanOutcome::Ready => unreachable!(),
     }
 }
 
