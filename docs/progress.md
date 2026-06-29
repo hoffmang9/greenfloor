@@ -16,6 +16,14 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-29 — Coinset parse and pagination decomposed (#158)
+
+Split monolithic `coinset/parse.rs` into `parse/{payload,record,tests}.rs`; extracted
+`rpc_result`, `json_util`, and `batch`. Split `pagination.rs` into `pagination/` with cursor
+parsing in `cursor.rs` and async page orchestration in `mod.rs`. Unified typed and JSON RPC
+success checks; inlined unspent `CoinRecord` filtering; adopted `to_coinset_hex` across in-crate
+callers. Public `greenfloor_engine::coinset::*` re-exports unchanged. See ADR 0018.
+
 ### 2026-06-29 — Bootstrap phase mapping refactored (#157)
 
 Decomposed `offer/bootstrap/phase.rs` into `phase/mod.rs` + `phase/tests.rs`. Typed
