@@ -1,18 +1,28 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use chia_protocol::Bytes32;
 use serde_json::json;
 
-use super::batches::{all_batches_failed, DustBatchRunSelection};
+use super::batches::{
+    all_batches_failed, executed_batch_entry, fail_remaining_batches, failed_batch_entry,
+    finalize_plan_batches_report, DustBatchRunSelection,
+};
 use super::combine_test_support::{
     dust_combine_batch_from_ids, ok_mixed_split_result, sample_combine_batch_plan, RECEIVE_ADDRESS,
 };
-use super::execute::{drive_combine_batch_plan, BatchDriver, CombineBatchExecutor};
+use super::execute::{CombineBatchExecutor, CombineBatchPlanOutcome};
 use crate::coinset::CoinsetClient;
 use crate::error::SignerError;
 use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCombineBatch, ProvenDustCoin};
+
+trait BatchDriver {
+    async fn run_batch(
+        &self,
+        batch: &DustCombineBatch,
+    ) -> crate::error::SignerResult<MixedSplitResult>;
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> Result<(), String>;
+}
 
 struct MockBatchDriver {
     batch_calls: Arc<AtomicUsize>,
@@ -33,13 +43,51 @@ impl BatchDriver for MockBatchDriver {
         Ok(ok_mixed_split_result())
     }
 
-    async fn wait_spent(&self, _coin_ids: &[Bytes32]) -> crate::error::SignerResult<()> {
+    async fn wait_for_batch_spent(&self, _batch: &DustCombineBatch) -> Result<(), String> {
         self.wait_calls.fetch_add(1, Ordering::SeqCst);
         if self.fail_wait {
-            Err(SignerError::CombineInputVerifyTimeout)
+            Err("combine input verify timeout".to_string())
         } else {
             Ok(())
         }
+    }
+}
+
+async fn drive_combine_batch_plan<D: BatchDriver>(
+    selection: &DustBatchRunSelection<'_>,
+    driver: &D,
+) -> CombineBatchPlanOutcome {
+    let mut batch_results = Vec::new();
+    let mut job_failed = false;
+    let batches_to_run = selection.combinable_batches();
+    let plan = selection.plan();
+
+    for (index, batch) in batches_to_run.iter().enumerate() {
+        let remaining = &batches_to_run[index + 1..];
+        match driver.run_batch(batch).await {
+            Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
+            Err(err) => {
+                batch_results.push(failed_batch_entry(batch, &err.to_string()));
+                fail_remaining_batches(&mut batch_results, remaining, "prior_batch_combine_failed");
+                return CombineBatchPlanOutcome {
+                    job_failed: true,
+                    batches: finalize_plan_batches_report(batch_results, plan),
+                };
+            }
+        }
+        if remaining.is_empty() {
+            continue;
+        }
+        if let Err(reason) = driver.wait_for_batch_spent(batch).await {
+            fail_remaining_batches(&mut batch_results, remaining, &reason);
+            job_failed = true;
+            break;
+        }
+    }
+
+    CombineBatchPlanOutcome {
+        job_failed,
+        batches: finalize_plan_batches_report(batch_results, plan),
     }
 }
 
@@ -56,12 +104,12 @@ async fn execute_waits_between_batches_and_runs_all_when_verify_succeeds() {
     };
 
     let selection = DustBatchRunSelection::new(&plan, None);
-    let (failed, batches) = drive_combine_batch_plan(&selection, &driver).await;
+    let outcome = drive_combine_batch_plan(&selection, &driver).await;
 
-    assert!(!failed);
+    assert!(!outcome.job_failed);
     assert_eq!(batch_calls.load(Ordering::SeqCst), 3);
     assert_eq!(wait_calls.load(Ordering::SeqCst), 2);
-    let entries = batches.as_array().expect("batch array");
+    let entries = outcome.batches.as_array().expect("batch array");
     assert_eq!(entries.len(), 4);
     assert!(entries
         .iter()
@@ -80,10 +128,10 @@ async fn execute_skips_remaining_batches_when_verify_times_out() {
         fail_combine_after_first: false,
     };
     let selection = DustBatchRunSelection::new(&plan, None);
-    let (failed, batches) = drive_combine_batch_plan(&selection, &driver).await;
+    let outcome = drive_combine_batch_plan(&selection, &driver).await;
 
-    assert!(failed);
-    let entries = batches.as_array().expect("batch array");
+    assert!(outcome.job_failed);
+    let entries = outcome.batches.as_array().expect("batch array");
     assert_eq!(entries[0].get("status"), Some(&json!("executed")));
     assert_eq!(entries[1].get("status"), Some(&json!("failed")));
     assert_eq!(entries[2].get("status"), Some(&json!("failed")));
@@ -104,11 +152,11 @@ async fn execute_skips_remaining_batches_when_combine_fails() {
         fail_combine_after_first: true,
     };
     let selection = DustBatchRunSelection::new(&plan, None);
-    let (failed, batches) = drive_combine_batch_plan(&selection, &driver).await;
+    let outcome = drive_combine_batch_plan(&selection, &driver).await;
 
-    assert!(failed);
+    assert!(outcome.job_failed);
     assert_eq!(batch_calls.load(Ordering::SeqCst), 2);
-    let entries = batches.as_array().expect("batch array");
+    let entries = outcome.batches.as_array().expect("batch array");
     assert_eq!(entries[0].get("status"), Some(&json!("executed")));
     assert_eq!(entries[1].get("status"), Some(&json!("failed")));
     assert_eq!(
@@ -135,12 +183,12 @@ async fn execute_respects_max_batches() {
     };
 
     let selection = DustBatchRunSelection::new(&plan, Some(1));
-    let (failed, batches) = drive_combine_batch_plan(&selection, &driver).await;
+    let outcome = drive_combine_batch_plan(&selection, &driver).await;
 
-    assert!(!failed);
+    assert!(!outcome.job_failed);
     assert_eq!(batch_calls.load(Ordering::SeqCst), 1);
     assert_eq!(wait_calls.load(Ordering::SeqCst), 0);
-    let entries = batches.as_array().expect("batch array");
+    let entries = outcome.batches.as_array().expect("batch array");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].get("status"), Some(&json!("executed")));
     assert_eq!(entries[1].get("status"), Some(&json!("orphan")));
@@ -177,7 +225,7 @@ async fn combine_batch_executor_rejects_zero_total_batch() {
         crate::coinset::CoinSpentVerifyConfig::default(),
     );
     let err = executor
-        .run_batch(&DustCombineBatch {
+        .combine_batch(&DustCombineBatch {
             items: vec![ProvenDustCoin::from_cat(cat)],
         })
         .await
@@ -196,7 +244,7 @@ async fn combine_batch_executor_rejects_invalid_cat_asset_id() {
         crate::coinset::CoinSpentVerifyConfig::default(),
     );
     let err = executor
-        .run_batch(&dust_combine_batch_from_ids(&[1]))
+        .combine_batch(&dust_combine_batch_from_ids(&[1]))
         .await
         .unwrap_err();
     assert!(err.to_string().contains("invalid hex"));

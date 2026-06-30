@@ -200,7 +200,7 @@ pub(crate) async fn finalize_job_report(
                     ));
                 }
             };
-            let (job_failed, batches) = Box::pin(super::execute::execute_combine_batches(
+            let outcome = Box::pin(super::execute::execute_combine_batches(
                 signer,
                 &client,
                 &job.receive_address,
@@ -209,7 +209,14 @@ pub(crate) async fn finalize_job_report(
                 *verify,
             ))
             .await;
-            combine_job_report(job, &scan, coinset, &selection, batches, job_failed)
+            combine_job_report(
+                job,
+                &scan,
+                coinset,
+                &selection,
+                outcome.batches,
+                outcome.job_failed,
+            )
         }
     })
 }

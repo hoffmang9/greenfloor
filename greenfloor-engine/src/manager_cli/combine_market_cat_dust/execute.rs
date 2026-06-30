@@ -1,4 +1,3 @@
-use chia_protocol::Bytes32;
 use serde_json::Value;
 
 use crate::coinset::{
@@ -18,9 +17,9 @@ use super::batches::{
     DustBatchRunSelection,
 };
 
-pub(crate) trait BatchDriver {
-    async fn run_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult>;
-    async fn wait_spent(&self, coin_ids: &[Bytes32]) -> SignerResult<()>;
+pub(crate) struct CombineBatchPlanOutcome {
+    pub job_failed: bool,
+    pub batches: Value,
 }
 
 pub(crate) struct CombineBatchExecutor {
@@ -47,10 +46,11 @@ impl CombineBatchExecutor {
             verify,
         }
     }
-}
 
-impl BatchDriver for CombineBatchExecutor {
-    async fn run_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult> {
+    pub(crate) async fn combine_batch(
+        &self,
+        batch: &DustCombineBatch,
+    ) -> SignerResult<MixedSplitResult> {
         let total = batch.total_amount();
         if total == 0 {
             return Err(SignerError::Other("dust batch total is zero".to_string()));
@@ -74,72 +74,52 @@ impl BatchDriver for CombineBatchExecutor {
         .await
     }
 
-    async fn wait_spent(&self, coin_ids: &[Bytes32]) -> SignerResult<()> {
-        wait_until_coins_spent(&self.client, coin_ids, self.verify).await
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> Result<(), String> {
+        let coin_ids = batch.coin_ids().map_err(|err| err.to_string())?;
+        wait_until_coins_spent(&self.client, &coin_ids, self.verify)
+            .await
+            .map_err(|err| err.to_string())
     }
-}
 
-async fn abort_after_wait<D: BatchDriver>(
-    driver: &D,
-    batch: &DustCombineBatch,
-    batch_results: &mut Vec<Value>,
-    remaining: &[DustCombineBatch],
-) -> bool {
-    let reason = match batch.coin_ids() {
-        Ok(coin_ids) => match driver.wait_spent(&coin_ids).await {
-            Ok(()) => return false,
-            Err(err) => err.to_string(),
-        },
-        Err(err) => err.to_string(),
-    };
-    fail_remaining_batches(batch_results, remaining, &reason);
-    true
-}
+    #[allow(clippy::large_futures)]
+    pub async fn run(&self, selection: &DustBatchRunSelection<'_>) -> CombineBatchPlanOutcome {
+        let mut batch_results = Vec::new();
+        let mut job_failed = false;
+        let batches_to_run = selection.combinable_batches();
+        let plan = selection.plan();
 
-#[allow(clippy::large_futures)]
-pub(crate) async fn drive_combine_batch_plan<D: BatchDriver>(
-    selection: &DustBatchRunSelection<'_>,
-    driver: &D,
-) -> (bool, Value) {
-    let mut batch_results = Vec::new();
-    let mut job_failed = false;
-    let batches_to_run = selection.combinable_batches();
-    let plan = selection.plan();
-
-    for (index, batch) in batches_to_run.iter().enumerate() {
-        match driver.run_batch(batch).await {
-            Ok(result) => {
-                batch_results.push(executed_batch_entry(batch, &result));
-                if index + 1 < batches_to_run.len() {
-                    job_failed = abort_after_wait(
-                        driver,
-                        batch,
+        for (index, batch) in batches_to_run.iter().enumerate() {
+            let remaining = &batches_to_run[index + 1..];
+            match self.combine_batch(batch).await {
+                Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
+                Err(err) => {
+                    batch_results.push(failed_batch_entry(batch, &err.to_string()));
+                    fail_remaining_batches(
                         &mut batch_results,
-                        &batches_to_run[index + 1..],
-                    )
-                    .await;
-                    if job_failed {
-                        break;
-                    }
+                        remaining,
+                        "prior_batch_combine_failed",
+                    );
+                    return CombineBatchPlanOutcome {
+                        job_failed: true,
+                        batches: finalize_plan_batches_report(batch_results, plan),
+                    };
                 }
             }
-            Err(err) => {
+            if remaining.is_empty() {
+                continue;
+            }
+            if let Err(reason) = self.wait_for_batch_spent(batch).await {
+                fail_remaining_batches(&mut batch_results, remaining, &reason);
                 job_failed = true;
-                batch_results.push(failed_batch_entry(batch, &err.to_string()));
-                fail_remaining_batches(
-                    &mut batch_results,
-                    &batches_to_run[index + 1..],
-                    "prior_batch_combine_failed",
-                );
                 break;
             }
         }
-    }
 
-    (
-        job_failed,
-        finalize_plan_batches_report(batch_results, plan),
-    )
+        CombineBatchPlanOutcome {
+            job_failed,
+            batches: finalize_plan_batches_report(batch_results, plan),
+        }
+    }
 }
 
 #[allow(clippy::large_futures)]
@@ -150,13 +130,14 @@ pub async fn execute_combine_batches(
     cat_asset_id: &str,
     selection: &DustBatchRunSelection<'_>,
     verify: CoinSpentVerifyConfig,
-) -> (bool, Value) {
-    let executor = CombineBatchExecutor::new(
+) -> CombineBatchPlanOutcome {
+    CombineBatchExecutor::new(
         signer_config.clone(),
         receive_address.to_string(),
         cat_asset_id.to_string(),
         client.clone(),
         verify,
-    );
-    drive_combine_batch_plan(selection, &executor).await
+    )
+    .run(selection)
+    .await
 }
