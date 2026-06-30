@@ -114,6 +114,11 @@ impl CoinOpExecContext {
         fee_mojos: u64,
     ) -> SignerResult<String> {
         #[cfg(test)]
+        if self.test_overrides.take_mixed_split_stale_first_failure() {
+            let _ = (output_amounts, coin_ids, fee_mojos);
+            return Err(SignerError::MixedSplitSelectedCoinsNotSpendable);
+        }
+        #[cfg(test)]
         if let Some(operation_id) = self.test_overrides.mixed_split_operation_id_override() {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());

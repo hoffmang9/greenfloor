@@ -18,6 +18,30 @@ use super::prep::{
 };
 use super::COIN_OP_ERROR_PREFIX;
 
+struct SplitPlanContext<'a> {
+    plan: &'a CoinOpPlan,
+    amount_per_coin_mojos: i64,
+    required_amount: i64,
+    prefetched_spendable: &'a [SpendableCoin],
+    split_protection: Option<&'a SplitSourceProtection>,
+}
+
+struct SplitAttemptContext<'a> {
+    plan_ctx: &'a SplitPlanContext<'a>,
+    first_attempt: bool,
+    attempted_coin_ids: &'a HashSet<String>,
+}
+
+impl<'a> SplitAttemptContext<'a> {
+    fn prefetched_spendable(&self) -> Option<&'a [SpendableCoin]> {
+        if self.first_attempt {
+            Some(self.plan_ctx.prefetched_spendable)
+        } else {
+            None
+        }
+    }
+}
+
 fn split_execution_scalars(
     plan: &CoinOpPlan,
     amount_per_coin_mojos: i64,
@@ -92,23 +116,25 @@ async fn submit_combine_prereq_for_split(
 
 async fn split_candidate_spendable(
     ctx: &CoinOpExecContext,
-    plan: &CoinOpPlan,
-    attempted_coin_ids: &HashSet<String>,
-    prefetched_spendable: Option<&[SpendableCoin]>,
+    attempt: &SplitAttemptContext<'_>,
 ) -> CoinOpSkipResult<Vec<SpendableCoin>> {
-    let fresh =
-        if let Some(prefetched) = prefetched_spendable.filter(|_| attempted_coin_ids.is_empty()) {
-            prefetched.to_vec()
-        } else {
-            unwatched_spendable(
-                ctx,
-                skip_if_spendable_empty(
-                    plan,
-                    list_spendable_coins_for_plan(ctx, plan).await?,
-                    "no_spendable_split_coin_available",
-                )?,
-            )
-        };
+    let plan = attempt.plan_ctx.plan;
+    let attempted_coin_ids = attempt.attempted_coin_ids;
+    let fresh = if let Some(prefetched) = attempt
+        .prefetched_spendable()
+        .filter(|_| attempted_coin_ids.is_empty())
+    {
+        prefetched.to_vec()
+    } else {
+        unwatched_spendable(
+            ctx,
+            skip_if_spendable_empty(
+                plan,
+                list_spendable_coins_for_plan(ctx, plan).await?,
+                "no_spendable_split_coin_available",
+            )?,
+        )
+    };
     Ok(fresh
         .into_iter()
         .filter(|coin| !attempted_coin_ids.contains(&coin.id))
@@ -117,14 +143,13 @@ async fn split_candidate_spendable(
 
 async fn submit_daemon_split_for_coin(
     ctx: &CoinOpExecContext,
-    plan: &CoinOpPlan,
-    amount_per_coin_mojos: i64,
+    attempt: &SplitAttemptContext<'_>,
     selected_coin_id: String,
-    first_attempt: bool,
 ) -> Result<SplitAttemptFlow, PlanSkip> {
+    let plan = attempt.plan_ctx.plan;
     let (amount_u64, output_count, fee_mojos) = split_execution_scalars(
         plan,
-        amount_per_coin_mojos,
+        attempt.plan_ctx.amount_per_coin_mojos,
         ctx.gated.program.coin_ops_split_fee_mojos,
     )?;
     match ctx
@@ -140,7 +165,7 @@ async fn submit_daemon_split_for_coin(
             "signer_split_submitted",
             operation_id,
         )])),
-        Err(err) if err.is_mixed_split_selected_coins_not_spendable() && first_attempt => {
+        Err(err) if err.is_mixed_split_selected_coins_not_spendable() && attempt.first_attempt => {
             Ok(SplitAttemptFlow::Retry(selected_coin_id))
         }
         Err(err) => Ok(SplitAttemptFlow::Skipped(vec![skip_item_for_plan(
@@ -150,27 +175,20 @@ async fn submit_daemon_split_for_coin(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn attempt_daemon_split(
     ctx: &CoinOpExecContext,
-    plan: &CoinOpPlan,
-    amount_per_coin_mojos: i64,
-    required_amount: i64,
-    first_attempt: bool,
-    attempted_coin_ids: &HashSet<String>,
-    prefetched_spendable: Option<&[SpendableCoin]>,
-    split_protection: Option<&SplitSourceProtection>,
+    attempt: &SplitAttemptContext<'_>,
 ) -> Result<SplitAttemptFlow, PlanSkip> {
-    let candidate_spendable =
-        split_candidate_spendable(ctx, plan, attempted_coin_ids, prefetched_spendable).await?;
+    let plan_ctx = attempt.plan_ctx;
+    let candidate_spendable = split_candidate_spendable(ctx, attempt).await?;
     let params = DaemonAutoSplitParams {
         candidate_spendable: &candidate_spendable,
-        required_amount_mojos: required_amount,
+        required_amount_mojos: plan_ctx.required_amount,
         canonical_asset_id: ctx.gated.market_row.base_asset.trim(),
         combine_input_cap: ctx.combine_input_cap,
-        allow_combine_prereq: first_attempt,
+        allow_combine_prereq: attempt.first_attempt,
     };
-    let selection = if let Some(protection) = split_protection {
+    let selection = if let Some(protection) = plan_ctx.split_protection {
         plan_daemon_low_watermark_split(&params, protection)
     } else {
         plan_daemon_auto_split_selection(&params)
@@ -178,26 +196,19 @@ async fn attempt_daemon_split(
 
     match selection {
         SplitAutoSelectPlan::CombinePrereq(prereq) => {
-            submit_combine_prereq_for_split(ctx, plan, &prereq).await
+            submit_combine_prereq_for_split(ctx, plan_ctx.plan, &prereq).await
         }
         SplitAutoSelectPlan::Skip(SplitSkipReason::NoSpendableMeetsRequired) => {
             Ok(SplitAttemptFlow::NoMatch)
         }
         SplitAutoSelectPlan::Skip(reason) => {
             Ok(SplitAttemptFlow::Skipped(vec![skip_item_for_plan(
-                plan,
+                plan_ctx.plan,
                 reason.as_str(),
             )]))
         }
         SplitAutoSelectPlan::Coin(selected) => {
-            submit_daemon_split_for_coin(
-                ctx,
-                plan,
-                amount_per_coin_mojos,
-                selected.coin_id,
-                first_attempt,
-            )
-            .await
+            submit_daemon_split_for_coin(ctx, attempt, selected.coin_id).await
         }
     }
 }
@@ -230,27 +241,22 @@ async fn execute_daemon_split_plan_inner(
         return Err(plan_skip(plan, "bootstrap_primary_shape_deferred"));
     }
     let split_protection = low_watermark_split_protection(ctx, plan, &spendable);
-    let protection_ref = split_protection.as_ref();
-    let prefetched = spendable.as_slice();
+    let plan_ctx = SplitPlanContext {
+        plan,
+        amount_per_coin_mojos,
+        required_amount,
+        prefetched_spendable: spendable.as_slice(),
+        split_protection: split_protection.as_ref(),
+    };
     let mut attempted_coin_ids = HashSet::new();
 
     for first_attempt in [true, false] {
-        match attempt_daemon_split(
-            ctx,
-            plan,
-            amount_per_coin_mojos,
-            required_amount,
+        let attempt = SplitAttemptContext {
+            plan_ctx: &plan_ctx,
             first_attempt,
-            &attempted_coin_ids,
-            if first_attempt {
-                Some(prefetched)
-            } else {
-                None
-            },
-            protection_ref,
-        )
-        .await
-        {
+            attempted_coin_ids: &attempted_coin_ids,
+        };
+        match attempt_daemon_split(ctx, &attempt).await {
             Ok(SplitAttemptFlow::Executed(items)) => return Ok((items, 1)),
             Ok(SplitAttemptFlow::Skipped(items)) => return Ok((items, 0)),
             Ok(SplitAttemptFlow::Retry(coin_id)) => {

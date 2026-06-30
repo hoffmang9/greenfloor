@@ -518,13 +518,13 @@ async fn coin_split_executes_with_test_overrides() {
             size_base_units: None,
             max_iterations: 1,
         },
-        CoinOpTestOverrides {
-            wallet_coins: Some(vec![SpendableCoin {
+        CoinOpTestOverrides::new(
+            Some(vec![SpendableCoin {
                 id: coin_id.clone(),
                 amount: 1_000_000,
             }]),
-            mixed_split_operation_id: Some("split-op-test".to_string()),
-        },
+            Some("split-op-test".to_string()),
+        ),
     )
     .await
     .expect("coin-split");
