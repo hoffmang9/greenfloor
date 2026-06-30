@@ -24,7 +24,7 @@
 //! | `main.rs` | daemon / create-offer CLI arms only |
 //!
 //! Production batch orchestration lives in `combine_market_cat_dust/execute.rs`.
-//! Unit tests use a local `BatchDriver` seam in `execute_test.rs` only.
+//! Unit tests use a local `BatchPlanRunner` seam in `execute.rs` only.
 
 mod daemon;
 mod manager;

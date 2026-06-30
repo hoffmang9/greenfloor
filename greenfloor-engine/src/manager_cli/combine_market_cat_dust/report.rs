@@ -191,15 +191,7 @@ pub(crate) async fn finalize_job_report(
     Ok(match run_mode {
         CombineRunMode::Preview => preview_job_report(job, &scan, coinset, &selection, readiness),
         CombineRunMode::Execute { signer, verify } => {
-            let client = match coinset.client() {
-                Ok(client) => client,
-                Err(err) => {
-                    let batches = super::batches::all_batches_failed(&selection, &err.to_string());
-                    return Ok(combine_job_report(
-                        job, &scan, coinset, &selection, batches, true,
-                    ));
-                }
-            };
+            let client = coinset.client()?;
             let outcome = Box::pin(super::execute::execute_combine_batches(
                 signer,
                 &client,

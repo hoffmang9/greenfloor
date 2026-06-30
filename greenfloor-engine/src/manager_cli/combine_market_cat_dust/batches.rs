@@ -123,12 +123,6 @@ pub(crate) fn finalize_plan_batches_report(
     json!(batch_results)
 }
 
-pub(crate) fn all_batches_failed(selection: &DustBatchRunSelection<'_>, reason: &str) -> Value {
-    let mut batch_results = Vec::new();
-    fail_remaining_batches(&mut batch_results, selection.combinable_batches(), reason);
-    finalize_plan_batches_report(batch_results, selection.plan())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
