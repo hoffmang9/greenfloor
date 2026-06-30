@@ -194,10 +194,9 @@ pub(crate) async fn finalize_job_report(
             let client = match coinset.client() {
                 Ok(client) => client,
                 Err(err) => {
-                    let (job_failed, batches) =
-                        super::execute::all_batches_failed(&selection, &err.to_string());
+                    let batches = super::batches::all_batches_failed(&selection, &err.to_string());
                     return Ok(combine_job_report(
-                        job, &scan, coinset, &selection, batches, job_failed,
+                        job, &scan, coinset, &selection, batches, true,
                     ));
                 }
             };

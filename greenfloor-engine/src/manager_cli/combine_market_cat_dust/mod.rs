@@ -2,6 +2,8 @@ mod batches;
 #[cfg(test)]
 mod combine_test_support;
 mod execute;
+#[cfg(test)]
+mod execute_test;
 mod jobs;
 #[cfg(test)]
 mod lineage_e2e_test;

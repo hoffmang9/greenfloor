@@ -2,8 +2,10 @@ use super::jobs::CatDustJob;
 use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint};
 use crate::hex::hex_to_bytes32;
 use crate::test_support::simulator::harness::{fetch_cat_from_sim_by_id, SimulatorVaultHarness};
+use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{
-    dust_coins_from_scan, plan_dust_batches, DustPlan, ProvenDustCoin, ScanResult,
+    dust_coins_from_scan, plan_dust_batches, DustBatchPlan, DustCoin, DustCombineBatch, DustPlan,
+    ProvenDustCoin, ScanResult,
 };
 
 pub(super) const RECEIVE_ADDRESS: &str =
@@ -20,6 +22,57 @@ pub(super) fn sample_job(cat_asset_id: &str) -> CatDustJob {
 
 pub(super) fn test_coinset_endpoint() -> ResolvedCoinsetEndpoint {
     resolve_coinset_endpoint("mainnet", "https://api.coinset.org", None)
+}
+
+pub(super) fn proven_dust(coin_id: &str, amount: u64) -> ProvenDustCoin {
+    let mut cat = crate::coinset::test_support::cat_with_amount(amount);
+    cat.coin = chia_protocol::Coin::new(
+        hex_to_bytes32(coin_id).expect("coin id"),
+        cat.coin.puzzle_hash,
+        amount,
+    );
+    ProvenDustCoin::from_cat(cat)
+}
+
+pub(super) fn dust_combine_batch_from_ids(ids: &[u8]) -> DustCombineBatch {
+    DustCombineBatch {
+        items: ids
+            .iter()
+            .map(|id| {
+                let parent = format!("{id:064x}");
+                proven_dust(&parent, 100)
+            })
+            .collect(),
+    }
+}
+
+pub(super) fn sample_combine_batch_plan() -> DustPlan {
+    DustPlan {
+        scan_dust_count: 4,
+        batches: DustBatchPlan {
+            combinable_batches: vec![
+                dust_combine_batch_from_ids(&[1]),
+                dust_combine_batch_from_ids(&[2]),
+                dust_combine_batch_from_ids(&[3]),
+            ],
+            uncombinable: vec![DustCoin {
+                coin_id: "f".repeat(64),
+                amount: 1,
+            }],
+        },
+        lineage_excluded: Vec::new(),
+    }
+}
+
+pub(super) fn ok_mixed_split_result() -> MixedSplitResult {
+    MixedSplitResult {
+        spend_bundle_hex: String::new(),
+        broadcast_status: Some("submitted".to_string()),
+        selected_coin_ids: vec!["aa".repeat(64)],
+        offered_total: 200,
+        target_total: 200,
+        change_amount: 0,
+    }
 }
 
 pub(super) fn dust_plan_from_scan_without_lineage(

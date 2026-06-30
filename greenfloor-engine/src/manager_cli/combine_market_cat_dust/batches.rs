@@ -58,6 +58,15 @@ fn single_coin_status_entry(coin: &DustCoin, status: &str) -> Value {
     })
 }
 
+fn extend_entries_with_non_combinable(entries: &mut Vec<Value>, plan: &DustPlan) {
+    for coin in &plan.batches.uncombinable {
+        entries.push(single_coin_status_entry(coin, "orphan"));
+    }
+    for coin in &plan.lineage_excluded {
+        entries.push(single_coin_status_entry(coin, "lineage_excluded"));
+    }
+}
+
 pub fn preview_batches_report(selection: &DustBatchRunSelection<'_>, can_combine: bool) -> Value {
     let plan = selection.plan();
     let mut entries = Vec::new();
@@ -68,12 +77,7 @@ pub fn preview_batches_report(selection: &DustBatchRunSelection<'_>, can_combine
             "would_combine": can_combine,
         }));
     }
-    for coin in &plan.batches.uncombinable {
-        entries.push(single_coin_status_entry(coin, "orphan"));
-    }
-    for coin in &plan.lineage_excluded {
-        entries.push(single_coin_status_entry(coin, "lineage_excluded"));
-    }
+    extend_entries_with_non_combinable(&mut entries, plan);
     json!(entries)
 }
 
@@ -101,39 +105,36 @@ pub fn failed_batch_entry(batch: &DustCombineBatch, err: &str) -> Value {
     })
 }
 
-pub fn append_status_entries(report: &mut Value, coins: &[DustCoin], status: &str) {
-    let Some(entries) = report.as_array_mut() else {
-        return;
-    };
-    for coin in coins {
-        entries.push(single_coin_status_entry(coin, status));
+pub(crate) fn fail_remaining_batches(
+    batch_results: &mut Vec<Value>,
+    remaining: &[DustCombineBatch],
+    reason: &str,
+) {
+    for skipped in remaining {
+        batch_results.push(failed_batch_entry(skipped, reason));
     }
 }
 
-pub fn append_orphan_entries(report: &mut Value, orphans: &[DustCoin]) {
-    append_status_entries(report, orphans, "orphan");
+pub(crate) fn finalize_plan_batches_report(
+    mut batch_results: Vec<Value>,
+    plan: &DustPlan,
+) -> Value {
+    extend_entries_with_non_combinable(&mut batch_results, plan);
+    json!(batch_results)
 }
 
-pub fn append_lineage_excluded_entries(report: &mut Value, coins: &[DustCoin]) {
-    append_status_entries(report, coins, "lineage_excluded");
+pub(crate) fn all_batches_failed(selection: &DustBatchRunSelection<'_>, reason: &str) -> Value {
+    let mut batch_results = Vec::new();
+    fail_remaining_batches(&mut batch_results, selection.combinable_batches(), reason);
+    finalize_plan_batches_report(batch_results, selection.plan())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coinset::test_support::cat_with_amount;
-    use crate::hex::hex_to_bytes32;
-    use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin, ProvenDustCoin};
+    use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin};
 
-    fn proven_dust(coin_id: &str, amount: u64) -> ProvenDustCoin {
-        let mut cat = cat_with_amount(amount);
-        cat.coin = chia_protocol::Coin::new(
-            hex_to_bytes32(coin_id).expect("coin id"),
-            cat.coin.puzzle_hash,
-            amount,
-        );
-        ProvenDustCoin::from_cat(cat)
-    }
+    use super::super::combine_test_support::proven_dust;
 
     #[test]
     fn preview_batches_report_uses_unified_schema() {
