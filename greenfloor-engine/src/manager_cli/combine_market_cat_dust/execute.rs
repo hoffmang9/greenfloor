@@ -22,6 +22,11 @@ pub(crate) struct CombineBatchPlanOutcome {
     pub batches: Value,
 }
 
+pub(crate) trait BatchPlanRunner {
+    async fn run_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult>;
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> Result<(), String>;
+}
+
 pub(crate) struct CombineBatchExecutor {
     signer_config: SignerConfig,
     receive_address: String,
@@ -83,42 +88,56 @@ impl CombineBatchExecutor {
 
     #[allow(clippy::large_futures)]
     pub async fn run(&self, selection: &DustBatchRunSelection<'_>) -> CombineBatchPlanOutcome {
-        let mut batch_results = Vec::new();
-        let mut job_failed = false;
-        let batches_to_run = selection.combinable_batches();
-        let plan = selection.plan();
+        run_batch_plan(self, selection).await
+    }
+}
 
-        for (index, batch) in batches_to_run.iter().enumerate() {
-            let remaining = &batches_to_run[index + 1..];
-            match self.combine_batch(batch).await {
-                Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
-                Err(err) => {
-                    batch_results.push(failed_batch_entry(batch, &err.to_string()));
-                    fail_remaining_batches(
-                        &mut batch_results,
-                        remaining,
-                        "prior_batch_combine_failed",
-                    );
-                    return CombineBatchPlanOutcome {
-                        job_failed: true,
-                        batches: finalize_plan_batches_report(batch_results, plan),
-                    };
-                }
-            }
-            if remaining.is_empty() {
-                continue;
-            }
-            if let Err(reason) = self.wait_for_batch_spent(batch).await {
-                fail_remaining_batches(&mut batch_results, remaining, &reason);
-                job_failed = true;
-                break;
+impl BatchPlanRunner for CombineBatchExecutor {
+    async fn run_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult> {
+        self.combine_batch(batch).await
+    }
+
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> Result<(), String> {
+        self.wait_for_batch_spent(batch).await
+    }
+}
+
+#[allow(clippy::large_futures)]
+pub(crate) async fn run_batch_plan<R: BatchPlanRunner>(
+    runner: &R,
+    selection: &DustBatchRunSelection<'_>,
+) -> CombineBatchPlanOutcome {
+    let mut batch_results = Vec::new();
+    let mut job_failed = false;
+    let batches_to_run = selection.combinable_batches();
+    let plan = selection.plan();
+
+    for (index, batch) in batches_to_run.iter().enumerate() {
+        let remaining = &batches_to_run[index + 1..];
+        match runner.run_batch(batch).await {
+            Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
+            Err(err) => {
+                batch_results.push(failed_batch_entry(batch, &err.to_string()));
+                fail_remaining_batches(&mut batch_results, remaining, "prior_batch_combine_failed");
+                return CombineBatchPlanOutcome {
+                    job_failed: true,
+                    batches: finalize_plan_batches_report(batch_results, plan),
+                };
             }
         }
-
-        CombineBatchPlanOutcome {
-            job_failed,
-            batches: finalize_plan_batches_report(batch_results, plan),
+        if remaining.is_empty() {
+            continue;
         }
+        if let Err(reason) = runner.wait_for_batch_spent(batch).await {
+            fail_remaining_batches(&mut batch_results, remaining, &reason);
+            job_failed = true;
+            break;
+        }
+    }
+
+    CombineBatchPlanOutcome {
+        job_failed,
+        batches: finalize_plan_batches_report(batch_results, plan),
     }
 }
 

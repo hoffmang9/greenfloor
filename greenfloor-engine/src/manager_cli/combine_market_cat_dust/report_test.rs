@@ -1,10 +1,12 @@
 use super::batches::DustBatchRunSelection;
 use super::combine_test_support::{
-    dust_plan_from_scan_without_lineage, sample_job, test_coinset_endpoint,
+    dust_plan_from_scan_without_lineage, register_lineage_mocks_for_scan_coins, sample_job,
+    test_coinset_endpoint,
 };
-use super::report::{preview_job_report, vault_signer_ready};
+use super::report::{finalize_job_report, preview_job_report, vault_signer_ready, CombineRunMode};
 use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
+use crate::coinset::resolve_coinset_endpoint;
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{
     load_combine_command_resources, load_program_config, CombineCommandLoadRequest,
@@ -146,6 +148,61 @@ async fn preview_job_report_caps_selected_batches_when_max_batches_set() {
         .expect("batches");
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].get("status"), Some(&json!("preview")));
+}
+
+#[tokio::test]
+async fn finalize_execute_job_report_runs_combine_batches() {
+    let (scan, harness) = sim_dust_scan_result(&[400, 300]);
+    let job = sample_job(
+        scan.coins
+            .first()
+            .and_then(|row| row.cat_asset_id.as_deref())
+            .expect("asset id"),
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_combine_test_configs(dir.path(), &job.cat_asset_id, true);
+    let program_path = dir.path().join("program.yaml");
+    let program = load_program_config(&program_path).expect("program");
+    let loaded = load_combine_command_resources(&CombineCommandLoadRequest {
+        program_path: &program_path,
+        markets_path: &dir.path().join("markets.yaml"),
+        testnet_markets_path: None,
+        request_network: Some("mainnet"),
+        coinset_base_url: Some("http://127.0.0.1:1"),
+        preview_mode: false,
+    })
+    .expect("loaded resources");
+    let signer = loaded.execution_signer.expect("execution signer");
+    let readiness = vault_signer_ready(&program, &job.signer_key_id);
+
+    let mut server = mockito::Server::new_async().await;
+    register_lineage_mocks_for_scan_coins(&mut server, &scan, &harness);
+    let coinset =
+        resolve_coinset_endpoint("mainnet", "https://api.coinset.org", Some(&server.url()));
+
+    let report = finalize_job_report(
+        &job,
+        scan,
+        &coinset,
+        1000,
+        2,
+        Some(1),
+        &CombineRunMode::Execute {
+            signer: &signer,
+            verify: CoinSpentVerifyConfig::default(),
+        },
+        readiness,
+    )
+    .await
+    .expect("execute report");
+
+    assert_eq!(report.get("status"), Some(&json!("error")));
+    let batches = report
+        .get("batches")
+        .and_then(|value| value.as_array())
+        .expect("batch array");
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].get("status"), Some(&json!("failed")));
 }
 
 #[tokio::test]
