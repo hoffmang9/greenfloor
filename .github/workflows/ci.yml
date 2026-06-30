@@ -206,6 +206,16 @@ jobs:
           shared-key: test
           install-nextest: "true"
 
+      - name: Install cargo-audit
+        if: matrix.os == 'ubuntu-24.04-arm'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Cargo audit (greenfloor-engine)
+        if: matrix.os == 'ubuntu-24.04-arm'
+        run: cargo audit --manifest-path "${{ env.CARGO_MANIFEST }}"
+
       - name: Build and test greenfloor-engine
         run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}" --features test-support
 
