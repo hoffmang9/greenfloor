@@ -191,17 +191,8 @@ pub(crate) async fn finalize_job_report(
     Ok(match run_mode {
         CombineRunMode::Preview => preview_job_report(job, &scan, coinset, &selection, readiness),
         CombineRunMode::Execute { signer, verify } => {
-            let client = match coinset.client() {
-                Ok(client) => client,
-                Err(err) => {
-                    let (job_failed, batches) =
-                        super::execute::all_batches_failed(&selection, &err.to_string());
-                    return Ok(combine_job_report(
-                        job, &scan, coinset, &selection, batches, job_failed,
-                    ));
-                }
-            };
-            let (job_failed, batches) = Box::pin(super::execute::execute_combine_batches(
+            let client = coinset.client()?;
+            let outcome = Box::pin(super::execute::execute_combine_batches(
                 signer,
                 &client,
                 &job.receive_address,
@@ -210,7 +201,14 @@ pub(crate) async fn finalize_job_report(
                 *verify,
             ))
             .await;
-            combine_job_report(job, &scan, coinset, &selection, batches, job_failed)
+            combine_job_report(
+                job,
+                &scan,
+                coinset,
+                &selection,
+                outcome.batches,
+                outcome.job_failed,
+            )
         }
     })
 }

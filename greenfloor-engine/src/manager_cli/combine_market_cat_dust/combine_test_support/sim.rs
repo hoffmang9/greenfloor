@@ -1,28 +1,10 @@
-use super::jobs::CatDustJob;
-use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint};
 use crate::hex::hex_to_bytes32;
 use crate::test_support::simulator::harness::{fetch_cat_from_sim_by_id, SimulatorVaultHarness};
 use crate::vault_coinset_scan::{
     dust_coins_from_scan, plan_dust_batches, DustPlan, ProvenDustCoin, ScanResult,
 };
 
-pub(super) const RECEIVE_ADDRESS: &str =
-    "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-
-pub(super) fn sample_job(cat_asset_id: &str) -> CatDustJob {
-    CatDustJob {
-        cat_asset_id: cat_asset_id.to_string(),
-        signer_key_id: "key-main-1".to_string(),
-        receive_address: RECEIVE_ADDRESS.to_string(),
-        market_ids: vec!["dust_m".to_string()],
-    }
-}
-
-pub(super) fn test_coinset_endpoint() -> ResolvedCoinsetEndpoint {
-    resolve_coinset_endpoint("mainnet", "https://api.coinset.org", None)
-}
-
-pub(super) fn dust_plan_from_scan_without_lineage(
+pub(in crate::manager_cli::combine_market_cat_dust) fn dust_plan_from_scan_without_lineage(
     scan: &ScanResult,
     harness: &SimulatorVaultHarness,
     dust_threshold_mojos: u64,
@@ -44,7 +26,7 @@ pub(super) fn dust_plan_from_scan_without_lineage(
     }
 }
 
-pub(super) fn register_lineage_mocks_for_scan_coins(
+pub(in crate::manager_cli::combine_market_cat_dust) fn register_lineage_mocks_for_scan_coins(
     server: &mut mockito::ServerGuard,
     scan: &ScanResult,
     harness: &crate::test_support::simulator::harness::SimulatorVaultHarness,
