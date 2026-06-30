@@ -1,6 +1,9 @@
 use serde_json::Value;
 
+use crate::coin_ops::CoinOpPlan;
 use crate::error::SignerResult;
+
+use super::COIN_OP_ERROR_PREFIX;
 
 #[derive(Debug, Clone)]
 pub struct CoinOpExecItem {
@@ -22,7 +25,8 @@ pub struct CoinOpExecutionResult {
     pub signer_selection: Value,
 }
 
-pub(crate) type CoinOpSkipResult<T> = Result<T, (Vec<CoinOpExecItem>, u64)>;
+pub(crate) type PlanSkip = (Vec<CoinOpExecItem>, u64);
+pub(crate) type CoinOpSkipResult<T> = Result<T, PlanSkip>;
 
 pub(crate) fn skip_item(
     op_type: &str,
@@ -38,6 +42,19 @@ pub(crate) fn skip_item(
         reason: reason.into(),
         operation_id: None,
     }
+}
+
+pub(crate) fn skip_item_for_plan(plan: &CoinOpPlan, reason: impl Into<String>) -> CoinOpExecItem {
+    skip_item(
+        plan.op_type.as_str(),
+        plan.size_base_units,
+        plan.op_count,
+        reason,
+    )
+}
+
+pub(crate) fn plan_skip(plan: &CoinOpPlan, reason: impl Into<String>) -> PlanSkip {
+    (vec![skip_item_for_plan(plan, reason)], 0)
 }
 
 pub(crate) fn executed_item(
@@ -57,21 +74,40 @@ pub(crate) fn executed_item(
     }
 }
 
-pub(crate) fn skip_on_signer_err<T>(
-    op_type: &str,
-    size_base_units: i64,
-    op_count: i64,
+pub(crate) fn executed_item_for_plan(
+    plan: &CoinOpPlan,
+    reason: impl Into<String>,
+    operation_id: String,
+) -> CoinOpExecItem {
+    executed_item(
+        plan.op_type.as_str(),
+        plan.size_base_units,
+        plan.op_count,
+        reason,
+        operation_id,
+    )
+}
+
+pub(crate) fn skip_on_signer_err_for_plan<T>(
+    plan: &CoinOpPlan,
     result: SignerResult<T>,
 ) -> CoinOpSkipResult<T> {
     result.map_err(|err| {
         (
-            vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
-                format!("{}:{err}", super::COIN_OP_ERROR_PREFIX),
+            vec![skip_item_for_plan(
+                plan,
+                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
             )],
             0,
         )
     })
+}
+
+pub(crate) async fn execute_daemon_coin_op_plan(
+    inner: impl std::future::Future<Output = CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)>>,
+) -> (Vec<CoinOpExecItem>, u64) {
+    match inner.await {
+        Ok(result) => result,
+        Err(skip) => skip,
+    }
 }

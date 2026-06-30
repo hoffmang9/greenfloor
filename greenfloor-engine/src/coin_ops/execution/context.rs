@@ -8,7 +8,7 @@ use crate::coin_ops::{
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
 use crate::config::{GatedOperatorMarket, MarketConfig};
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
 use crate::offer::OfferAssetResolver;
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
@@ -114,6 +114,11 @@ impl CoinOpExecContext {
         fee_mojos: u64,
     ) -> SignerResult<String> {
         #[cfg(test)]
+        if self.test_overrides.take_mixed_split_stale_first_failure() {
+            let _ = (output_amounts, coin_ids, fee_mojos);
+            return Err(SignerError::MixedSplitSelectedCoinsNotSpendable);
+        }
+        #[cfg(test)]
         if let Some(operation_id) = self.test_overrides.mixed_split_operation_id_override() {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());
@@ -137,7 +142,8 @@ impl CoinOpExecContext {
             request,
             true,
         )
-        .await?;
+        .await
+        .map_err(SignerError::normalize_mixed_split_error)?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
     }
 

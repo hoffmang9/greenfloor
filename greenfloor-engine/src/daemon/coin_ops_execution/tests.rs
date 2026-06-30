@@ -68,10 +68,10 @@ fn test_exec_context(
         base_unit_mojo_multiplier: 1_000,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::new(),
-        test_overrides: CoinOpTestOverrides {
-            wallet_coins: Some(spendable),
-            mixed_split_operation_id: mixed_split_operation_id.map(str::to_string),
-        },
+        test_overrides: CoinOpTestOverrides::new(
+            Some(spendable),
+            mixed_split_operation_id.map(str::to_string),
+        ),
     }
 }
 
@@ -190,8 +190,8 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
-        CoinOpTestOverrides {
-            wallet_coins: Some(vec![
+        CoinOpTestOverrides::new(
+            Some(vec![
                 SpendableCoin {
                     id: test_coin_id('a'),
                     amount: 100_000,
@@ -205,8 +205,8 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
                     amount: 10_000,
                 },
             ]),
-            mixed_split_operation_id: Some("managed-op-test".to_string()),
-        },
+            Some("managed-op-test".to_string()),
+        ),
     )
     .await;
 
@@ -405,6 +405,39 @@ async fn run_daemon_split_plan_submits_when_spendable_coin_available() {
 }
 
 #[tokio::test]
+async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
+    let mut market = sample_market("xch1test");
+    market.base_asset = test_coin_id('f');
+    let ctx = {
+        let mut ctx = test_exec_context(
+            market,
+            vec![
+                SpendableCoin {
+                    id: test_coin_id('a'),
+                    amount: 100_000,
+                },
+                SpendableCoin {
+                    id: test_coin_id('b'),
+                    amount: 80_000,
+                },
+            ],
+            Some("split-retry-op"),
+        );
+        ctx.test_overrides = ctx.test_overrides.with_mixed_split_stale_first();
+        ctx
+    };
+    let plan = sample_plan(CoinOpKind::Split);
+
+    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+
+    assert_eq!(executed, 1);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].status, "executed");
+    assert_eq!(items[0].reason, "signer_split_submitted");
+    assert_eq!(items[0].operation_id.as_deref(), Some("split-retry-op"));
+}
+
+#[tokio::test]
 async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     let ctx = test_exec_context(
         sample_market("xch1test"),
@@ -416,7 +449,7 @@ async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     );
     let plan = sample_plan(CoinOpKind::Combine);
 
-    let (items, executed) = execute_daemon_combine_plan(&ctx, &plan).await;
+    let (items, executed) = Box::pin(execute_daemon_combine_plan(&ctx, &plan)).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
