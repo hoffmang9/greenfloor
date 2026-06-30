@@ -55,8 +55,14 @@ opt-level = 1
 
 [dependencies]
 anyhow = "1.0"
+# aws-sdk-kms default "rustls" enables legacy hyper-rustls 0.24 / rustls-webpki < 0.103.13 (GHSA-82j2-j2ch-gfr8).
+# Use default-https-client (hyper 1.x / rustls 0.23) instead.
 aws-config = "1"
-aws-sdk-kms = "1"
+aws-sdk-kms = { version = "1", default-features = false, features = [
+  "behavior-version-latest",
+  "default-https-client",
+  "rt-tokio",
+] }
 base64 = "0.22"
 bip39 = "2.2.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
