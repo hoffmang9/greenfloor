@@ -113,6 +113,9 @@ pub enum SignerError {
     #[error("invalid output amount")]
     InvalidOutputAmount,
 
+    #[error("selected mixed split coins are not spendable")]
+    MixedSplitSelectedCoinsNotSpendable,
+
     #[error("missing receive address")]
     MissingReceiveAddress,
 
@@ -253,7 +256,30 @@ fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
     MARKERS.iter().any(|marker| normalized.contains(marker))
 }
 
+const MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE: &str = "Some selected coins are not spendable";
+
+fn mixed_split_selected_coins_not_spendable_message(message: &str) -> bool {
+    message.contains(MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE)
+}
+
 impl SignerError {
+    #[must_use]
+    pub fn is_mixed_split_selected_coins_not_spendable(&self) -> bool {
+        matches!(self, Self::MixedSplitSelectedCoinsNotSpendable)
+    }
+
+    #[must_use]
+    pub fn normalize_mixed_split_error(err: Self) -> Self {
+        if matches!(err, Self::MixedSplitSelectedCoinsNotSpendable) {
+            return err;
+        }
+        if mixed_split_selected_coins_not_spendable_message(&err.to_string()) {
+            Self::MixedSplitSelectedCoinsNotSpendable
+        } else {
+            err
+        }
+    }
+
     #[must_use]
     pub fn is_sqlite_fatal(&self) -> bool {
         matches!(self, Self::SqliteOpenFailed { .. })
@@ -394,6 +420,22 @@ mod tests {
             !SignerError::Driver("invalid mod hash".to_string()).is_parallel_dispatch_transient()
         );
         assert!(!SignerError::InsufficientCatCoins.is_parallel_dispatch_transient());
+    }
+
+    #[test]
+    fn mixed_split_selected_coins_not_spendable_is_classified() {
+        assert!(SignerError::MixedSplitSelectedCoinsNotSpendable
+            .is_mixed_split_selected_coins_not_spendable());
+        assert!(
+            !SignerError::Other("upstream: Some selected coins are not spendable".to_string())
+                .is_mixed_split_selected_coins_not_spendable()
+        );
+        assert!(matches!(
+            SignerError::normalize_mixed_split_error(SignerError::Other(
+                "Some selected coins are not spendable".to_string()
+            )),
+            SignerError::MixedSplitSelectedCoinsNotSpendable
+        ));
     }
 
     #[test]

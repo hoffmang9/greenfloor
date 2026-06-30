@@ -416,7 +416,7 @@ async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     );
     let plan = sample_plan(CoinOpKind::Combine);
 
-    let (items, executed) = execute_daemon_combine_plan(&ctx, &plan).await;
+    let (items, executed) = Box::pin(execute_daemon_combine_plan(&ctx, &plan)).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
