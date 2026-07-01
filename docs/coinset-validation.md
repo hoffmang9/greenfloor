@@ -121,6 +121,11 @@ Output includes `lineage_model: "parent_tree_with_same_block_merge_edges"`.
   stops early (`scan.scan_stop_reason` in output).
 - Optional overrides match other vault scan commands: `--network`, `--coinset-base-url`,
   `--launcher-id`, `--launcher-id-file`.
+- **Merge heuristics:** `merges[]` clusters inputs co-spent in the same block with the
+  same vault puzzle hash. Unrelated coins of the same asset batch-spent in the same block
+  may appear as a merge even when they were not combined; combines spanning blocks or with
+  only partial inputs in the scan set may be missed. Treat `merge_count` as a hint, not
+  spend-bundle truth.
 
 Compare spot totals against market inventory when debugging:
 

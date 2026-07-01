@@ -530,6 +530,27 @@ mod tests {
     }
 
     #[test]
+    fn trace_skips_merge_when_same_block_spends_have_no_outputs_in_scan() {
+        let input_a = id(1);
+        let input_b = id(2);
+        let external = id(0xee);
+        let ph = puzzle(0x33);
+        let rows = vec![
+            row(&input_a, &external, 1000, 50, 1, &ph),
+            row(&input_b, &external, 2000, 50, 2, &ph),
+        ];
+        let trace = build_asset_trace("aa".repeat(64).as_str(), "cat", &rows);
+        assert_eq!(trace.merge_count, 0);
+        assert!(trace.merges.is_empty());
+        let input_a_coin = trace
+            .coins
+            .iter()
+            .find(|coin| coin.coin_id == input_a)
+            .expect("input_a");
+        assert!(input_a_coin.co_input_coin_ids.is_empty());
+    }
+
+    #[test]
     fn trace_emits_manager_json_shape_smoke() {
         let trace = build_asset_trace("xch", "xch", &[]);
         let payload = serde_json::to_value(&trace).expect("json");

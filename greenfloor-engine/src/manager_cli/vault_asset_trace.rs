@@ -7,8 +7,7 @@ use crate::error::SignerResult;
 use crate::manager_cli::commands::ManagerCommands;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::vault_scan::{resolve_manager_vault_launcher, run_manager_vault_scan};
-use crate::offer::{OfferAssetResolver, VaultTraceAssetKind};
-use crate::vault_coinset_scan::types::AssetTypeFilter;
+use crate::offer::OfferAssetResolver;
 use crate::vault_coinset_scan::{build_asset_trace, ScanResult};
 
 pub struct VaultAssetTraceRequest<'a> {
@@ -21,21 +20,7 @@ pub struct VaultAssetTraceRequest<'a> {
     pub asset: &'a str,
 }
 
-fn asset_type_label(kind: VaultTraceAssetKind) -> &'static str {
-    match kind {
-        VaultTraceAssetKind::Xch => "xch",
-        VaultTraceAssetKind::Cat => "cat",
-    }
-}
-
-fn asset_type_filter(kind: VaultTraceAssetKind) -> AssetTypeFilter {
-    match kind {
-        VaultTraceAssetKind::Xch => AssetTypeFilter::Xch,
-        VaultTraceAssetKind::Cat => AssetTypeFilter::Cat,
-    }
-}
-
-fn trace_payload(
+pub(crate) fn trace_payload(
     scan: &ScanResult,
     trace: &crate::vault_coinset_scan::asset_trace::AssetTraceResult,
     requested_asset: &str,
@@ -93,17 +78,16 @@ pub async fn run_vault_asset_trace(request: VaultAssetTraceRequest<'_>) -> Signe
         &launcher.launcher_id,
         request.max_nonce,
         true,
-        asset_type_filter(resolved_asset.kind),
-        match resolved_asset.kind {
-            VaultTraceAssetKind::Cat => Some(resolved_asset.asset_id.as_str()),
-            VaultTraceAssetKind::Xch => None,
-        },
+        resolved_asset.kind.scan_asset_type(),
+        resolved_asset
+            .kind
+            .scan_cat_asset_id(&resolved_asset.asset_id),
     )
     .await?;
 
     let trace = build_asset_trace(
         &resolved_asset.asset_id,
-        asset_type_label(resolved_asset.kind),
+        resolved_asset.kind.json_label(),
         &scan.coins,
     );
 
@@ -142,26 +126,46 @@ pub async fn run_vault_asset_trace_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{load_program_bundle_gated, operator_ticker_index_from_paths};
-    use crate::offer::OfferAssetResolver;
+    use crate::manager_cli::vault_scan_sim::sim_dust_scan_result;
+    use crate::offer::VaultTraceAssetKind;
+    use crate::vault_coinset_scan::build_asset_trace;
 
-    #[tokio::test]
-    async fn resolve_vault_trace_asset_accepts_xch_aliases() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let program = dir.path().join("program.yaml");
-        crate::test_support::minimal_program::write_minimal_program_with_signer(
-            &program,
-            crate::test_support::minimal_program::MinimalProgramParams::default(),
+    #[test]
+    fn trace_payload_from_sim_scan_matches_manager_contract() {
+        let (scan, _) = sim_dust_scan_result(&[1000, 2000]);
+        let asset_id = scan
+            .coins
+            .first()
+            .and_then(|row| row.cat_asset_id.as_deref())
+            .expect("cat asset id");
+        let trace = build_asset_trace(asset_id, VaultTraceAssetKind::Cat.json_label(), &scan.coins);
+        let payload = trace_payload(&scan, &trace, asset_id);
+
+        assert_eq!(payload.get("status"), Some(&json!("ok")));
+        assert_eq!(payload.get("network"), Some(&json!("mainnet")));
+        assert_eq!(payload.get("launcher_id"), Some(&json!(scan.launcher_id)));
+        assert_eq!(payload.get("resolved_asset_id"), Some(&json!(asset_id)));
+        assert_eq!(payload.get("asset_type"), Some(&json!("cat")));
+        assert_eq!(
+            payload.get("lineage_model"),
+            Some(&json!("parent_tree_with_same_block_merge_edges"))
         );
-        let bundle = load_program_bundle_gated(&program).expect("bundle");
-        let index =
-            operator_ticker_index_from_paths(&dir.path().join("missing-markets.yaml"), None, None);
-        let resolver = OfferAssetResolver::new(&bundle.signer, &index, "mainnet");
-        let resolved_asset = resolver
-            .resolve_vault_trace_asset("txch")
-            .await
-            .expect("xch");
-        assert_eq!(resolved_asset.kind, VaultTraceAssetKind::Xch);
-        assert_eq!(resolved_asset.asset_id, "xch");
+        assert_eq!(payload.get("merge_count"), Some(&json!(0)));
+        assert_eq!(payload.get("coin_count"), Some(&json!(2)));
+        assert_eq!(
+            payload
+                .get("current_balance")
+                .and_then(|value| value.get("unspent_coin_count")),
+            Some(&json!(2))
+        );
+        assert_eq!(
+            payload
+                .get("scan")
+                .and_then(|value| value.get("include_spent")),
+            Some(&json!(true))
+        );
+        assert!(payload.get("coins").and_then(|v| v.as_array()).is_some());
+        assert!(payload.get("chains").and_then(|v| v.as_array()).is_some());
+        assert!(payload.get("merges").and_then(|v| v.as_array()).is_some());
     }
 }

@@ -19,6 +19,9 @@ mod setup;
 mod util;
 mod vault_asset_trace;
 mod vault_scan;
+#[cfg(test)]
+pub(crate) mod vault_scan_sim;
+mod vault_trace_asset_kind;
 
 #[cfg(test)]
 mod test_support;

@@ -268,6 +268,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_vault_trace_asset_accepts_xch_aliases() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        crate::test_support::minimal_program::write_minimal_program_with_signer(
+            &program,
+            crate::test_support::minimal_program::MinimalProgramParams::default(),
+        );
+        let bundle = load_program_bundle_gated(&program).expect("bundle");
+        let index =
+            operator_ticker_index_from_paths(&dir.path().join("missing-markets.yaml"), None, None);
+        let resolver = OfferAssetResolver::new(&bundle.signer, &index, "mainnet");
+        let resolved_asset = resolver
+            .resolve_vault_trace_asset("txch")
+            .await
+            .expect("xch");
+        assert_eq!(resolved_asset.kind, VaultTraceAssetKind::Xch);
+        assert_eq!(resolved_asset.asset_id, "xch");
+    }
+
+    #[tokio::test]
     async fn resolve_vault_trace_asset_rejects_empty_asset() {
         let dir = tempfile::tempdir().expect("tempdir");
         let program = dir.path().join("program.yaml");

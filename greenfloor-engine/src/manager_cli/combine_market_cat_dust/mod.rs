@@ -12,8 +12,6 @@ mod lineage_e2e_test;
 mod report;
 #[cfg(test)]
 mod report_test;
-#[cfg(test)]
-mod sim_harness;
 
 use jobs::{build_enabled_cat_jobs, CatDustJob};
 use report::{

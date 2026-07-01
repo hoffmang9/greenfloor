@@ -1,3 +1,5 @@
+//! Simulator-backed vault scan fixtures shared by dust and trace tests.
+
 use chia_sdk_driver::Cat;
 
 use crate::hex::normalize_hex_id;
