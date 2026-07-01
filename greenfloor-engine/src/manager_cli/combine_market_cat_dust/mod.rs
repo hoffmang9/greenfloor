@@ -1,6 +1,6 @@
-mod batches;
 #[cfg(test)]
 mod batch_plan_test;
+mod batches;
 #[cfg(test)]
 mod combine_test_support;
 mod execute;

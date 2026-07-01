@@ -13,14 +13,19 @@ use crate::vault::mixed_split::{
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
 use super::batches::{
-    combine_batch_stderr_tail, executed_batch_entry, fail_remaining_batches,
+    batch_stderr_tail, executed_batch_entry, fail_remaining_batches,
     fail_remaining_batches_with_tail, failed_batch_entry, finalize_plan_batches_report,
-    wait_batch_stderr_tail, BatchReportReason, DustBatchRunSelection,
+    BatchReportReason, DustBatchRunSelection,
 };
 
 pub(crate) struct CombineBatchPlanOutcome {
     pub job_failed: bool,
     pub batches: Value,
+}
+
+pub(crate) trait BatchPlanRunner {
+    async fn combine_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult>;
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()>;
 }
 
 pub(crate) struct CombineBatchExecutor {
@@ -47,11 +52,10 @@ impl CombineBatchExecutor {
             verify,
         }
     }
+}
 
-    pub(crate) async fn combine_batch(
-        &self,
-        batch: &DustCombineBatch,
-    ) -> SignerResult<MixedSplitResult> {
+impl BatchPlanRunner for CombineBatchExecutor {
+    async fn combine_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult> {
         let total = batch.total_amount();
         if total == 0 {
             return Err(SignerError::Other("dust batch total is zero".to_string()));
@@ -75,7 +79,7 @@ impl CombineBatchExecutor {
         .await
     }
 
-    pub(crate) async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()> {
+    async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()> {
         let coin_ids = batch.coin_ids()?;
         wait_until_coins_spent(&self.client, &coin_ids, self.verify).await
     }
@@ -93,8 +97,8 @@ fn plan_outcome(
 }
 
 #[allow(clippy::large_futures)]
-pub(crate) async fn run_batch_plan(
-    executor: &CombineBatchExecutor,
+pub(crate) async fn run_batch_plan<R: BatchPlanRunner>(
+    runner: &R,
     selection: &DustBatchRunSelection<'_>,
 ) -> CombineBatchPlanOutcome {
     let mut batch_results = Vec::new();
@@ -104,13 +108,10 @@ pub(crate) async fn run_batch_plan(
 
     for (index, batch) in batches_to_run.iter().enumerate() {
         let remaining = &batches_to_run[index + 1..];
-        match executor.combine_batch(batch).await {
+        match runner.combine_batch(batch).await {
             Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
             Err(err) => {
-                batch_results.push(failed_batch_entry(
-                    batch,
-                    &combine_batch_stderr_tail(&err),
-                ));
+                batch_results.push(failed_batch_entry(batch, &batch_stderr_tail(&err)));
                 fail_remaining_batches(
                     &mut batch_results,
                     remaining,
@@ -120,11 +121,11 @@ pub(crate) async fn run_batch_plan(
             }
         }
         if !remaining.is_empty() {
-            if let Err(err) = executor.wait_for_batch_spent(batch).await {
+            if let Err(err) = runner.wait_for_batch_spent(batch).await {
                 fail_remaining_batches_with_tail(
                     &mut batch_results,
                     remaining,
-                    &wait_batch_stderr_tail(&err),
+                    &batch_stderr_tail(&err),
                 );
                 job_failed = true;
                 break;

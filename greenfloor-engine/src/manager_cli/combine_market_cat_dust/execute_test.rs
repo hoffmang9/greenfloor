@@ -1,30 +1,15 @@
 use super::combine_test_support::{
-    dust_combine_batch_from_ids, RECEIVE_ADDRESS,
+    dust_combine_batch_from_ids, test_combine_batch_executor,
+    test_combine_batch_executor_with_asset,
 };
-use super::execute::CombineBatchExecutor;
+use super::execute::BatchPlanRunner;
 use crate::coinset::test_support::{
     coin_record_by_name_request_json, mock_get_coin_record_by_name_body,
     mock_unspent_coin_record_by_name_body,
 };
-use crate::coinset::{CoinSpentVerifyConfig, CoinsetClient};
+use crate::coinset::CoinSpentVerifyConfig;
 use crate::error::SignerError;
 use crate::vault_coinset_scan::{DustCombineBatch, ProvenDustCoin};
-
-const TEST_CAT_ASSET_ID: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-
-fn test_executor(
-    coinset_url: &str,
-    cat_asset_id: &str,
-    verify: CoinSpentVerifyConfig,
-) -> CombineBatchExecutor {
-    CombineBatchExecutor::new(
-        crate::test_support::signer_config::test_signer_config(coinset_url),
-        RECEIVE_ADDRESS.to_string(),
-        cat_asset_id.to_string(),
-        CoinsetClient::new(coinset_url.to_string()),
-        verify,
-    )
-}
 
 #[tokio::test]
 async fn combine_batch_executor_rejects_zero_total_batch() {
@@ -34,8 +19,7 @@ async fn combine_batch_executor_rejects_zero_total_batch() {
         cat.coin.puzzle_hash,
         0,
     );
-    let executor = test_executor("http://127.0.0.1:1", TEST_CAT_ASSET_ID, CoinSpentVerifyConfig::default());
-    let err = executor
+    let err = test_combine_batch_executor("http://127.0.0.1:1", CoinSpentVerifyConfig::default())
         .combine_batch(&DustCombineBatch {
             items: vec![ProvenDustCoin::from_cat(cat)],
         })
@@ -46,11 +30,14 @@ async fn combine_batch_executor_rejects_zero_total_batch() {
 
 #[tokio::test]
 async fn combine_batch_executor_rejects_invalid_cat_asset_id() {
-    let executor = test_executor("http://127.0.0.1:1", "not-valid-hex", CoinSpentVerifyConfig::default());
-    let err = executor
-        .combine_batch(&dust_combine_batch_from_ids(&[1]))
-        .await
-        .unwrap_err();
+    let err = test_combine_batch_executor_with_asset(
+        "http://127.0.0.1:1",
+        "not-valid-hex",
+        CoinSpentVerifyConfig::default(),
+    )
+    .combine_batch(&dust_combine_batch_from_ids(&[1]))
+    .await
+    .unwrap_err();
     assert!(err.to_string().contains("invalid hex"));
 }
 
@@ -70,9 +57,8 @@ async fn combine_batch_executor_waits_until_inputs_are_spent() {
             .await;
     }
 
-    test_executor(
+    test_combine_batch_executor(
         &server.url(),
-        TEST_CAT_ASSET_ID,
         CoinSpentVerifyConfig {
             timeout_seconds: 5,
             poll_seconds: 1,
@@ -97,9 +83,8 @@ async fn combine_batch_executor_verify_times_out_when_inputs_stay_unspent() {
         .create_async()
         .await;
 
-    let err = test_executor(
+    let err = test_combine_batch_executor(
         &server.url(),
-        TEST_CAT_ASSET_ID,
         CoinSpentVerifyConfig {
             timeout_seconds: 1,
             poll_seconds: 1,
