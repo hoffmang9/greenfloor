@@ -26,7 +26,9 @@ use crate::config::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::vault_scan::{resolve_manager_vault_launcher, run_manager_vault_scan};
+use crate::manager_cli::vault_scan::{
+    manager_vault_scan_params, resolve_manager_vault_launcher, run_manager_vault_scan,
+};
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 use crate::vault_coinset_scan::ScanResult;
 
@@ -89,7 +91,7 @@ async fn run_vault_scan_for_job(
     max_nonce: u32,
     cat_asset_id: &str,
 ) -> SignerResult<ScanResult> {
-    run_manager_vault_scan(
+    run_manager_vault_scan(manager_vault_scan_params(
         mgr,
         coinset,
         launcher_id,
@@ -97,7 +99,7 @@ async fn run_vault_scan_for_job(
         false,
         AssetTypeFilter::Cat,
         Some(cat_asset_id),
-    )
+    ))
     .await
 }
 

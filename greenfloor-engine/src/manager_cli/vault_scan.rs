@@ -27,21 +27,18 @@ pub fn resolve_manager_vault_launcher(
     Ok(resolved)
 }
 
-/// Run a vault Coinset scan using shared manager config paths.
-///
-/// # Errors
-///
-/// Returns an error if the scan fails.
-pub async fn run_manager_vault_scan(
-    mgr: &ManagerContext,
-    coinset: &ResolvedCoinsetEndpoint,
-    launcher_id: &str,
+/// Build vault scan parameters from manager paths and a resolved Coinset endpoint.
+#[must_use]
+pub fn manager_vault_scan_params<'a>(
+    mgr: &'a ManagerContext,
+    coinset: &'a ResolvedCoinsetEndpoint,
+    launcher_id: &'a str,
     max_nonce: u32,
     include_spent: bool,
     asset_type: AssetTypeFilter,
-    cat_asset_id: Option<&str>,
-) -> SignerResult<ScanResult> {
-    ScanState::run(build_vault_scan_request(&VaultScanParams {
+    cat_asset_id: Option<&'a str>,
+) -> VaultScanParams<'a> {
+    VaultScanParams {
         network: coinset.network,
         coinset_base_url: Some(coinset.base_url()),
         launcher_id,
@@ -52,6 +49,14 @@ pub async fn run_manager_vault_scan(
         cats_config: &mgr.cats_config,
         markets_config: &mgr.markets_config,
         testnet_markets_config: mgr.testnet_markets_path(),
-    }))
-    .await
+    }
+}
+
+/// Run a vault Coinset scan using shared manager config paths.
+///
+/// # Errors
+///
+/// Returns an error if the scan fails.
+pub async fn run_manager_vault_scan(params: VaultScanParams<'_>) -> SignerResult<ScanResult> {
+    ScanState::run(build_vault_scan_request(&params)).await
 }

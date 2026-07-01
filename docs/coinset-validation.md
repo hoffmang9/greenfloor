@@ -91,6 +91,8 @@ Output includes `lineage_model: "parent_tree_with_same_block_merge_edges"`.
 | Field                                  | Meaning                                                                        |
 | -------------------------------------- | ------------------------------------------------------------------------------ |
 | `lineage_model`                        | Graph semantics for clients (`parent_tree_with_same_block_merge_edges`)        |
+| `lineage_coin_count`                   | Coins in the lineage graph (after row normalization)                           |
+| `scan.scanned_row_count`               | Raw vault scan rows returned for this asset filter                             |
 | `current_balance.unspent_coin_count`   | Live unspent coins for this asset in the scan                                  |
 | `current_balance.unspent_amount_mojos` | Sum of unspent amounts (mojos; 1000 mojos = 1 CAT unit)                        |
 | `reception_count`                      | Coins whose parent is outside this asset’s scanned set (external entry)        |
