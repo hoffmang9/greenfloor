@@ -17,6 +17,8 @@ mod paths;
 mod runtime;
 mod setup;
 mod util;
+mod vault_asset_trace;
+mod vault_scan;
 
 #[cfg(test)]
 mod test_support;

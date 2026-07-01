@@ -83,6 +83,10 @@ Vault KMS / signer operations:
 # List vault inventory (XCH + CAT)
 greenfloor-manager coins-list
 
+# Trace one asset from reception through lineage to current balance (vault-wide)
+greenfloor-manager vault-asset-trace --asset xch
+greenfloor-manager vault-asset-trace --asset wUSDC.b
+
 # Split one coin into target denominations (waits through signature + mempool + confirmation + reorg watch)
 greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10
 

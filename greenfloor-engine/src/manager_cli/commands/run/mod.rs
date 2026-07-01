@@ -48,6 +48,10 @@ impl ManagerCommands {
             | ManagerCommands::CoinSplit { .. }
             | ManagerCommands::CoinCombine { .. }) => coin_ops::run_command(cmd, ctx).await,
             ManagerCommands::CombineMarketCatDust { .. } => dust::run_command(self, ctx).await,
+            ManagerCommands::VaultAssetTrace { .. } => {
+                crate::manager_cli::vault_asset_trace::run_vault_asset_trace_command(self, ctx)
+                    .await
+            }
             ManagerCommands::FlagGroups { .. } => flag_groups::run_command(self, ctx),
         }
     }

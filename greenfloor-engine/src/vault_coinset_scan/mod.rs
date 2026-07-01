@@ -1,5 +1,6 @@
 //! Vault Coinset scan: nonce-based member puzzle hash discovery and CAT classification.
 
+pub mod asset_trace;
 pub mod cat_detect;
 pub mod checkpoint;
 pub mod cli;
@@ -14,6 +15,7 @@ pub mod state;
 pub mod types;
 pub mod window;
 
+pub use asset_trace::build_asset_trace;
 pub use cli::{run_vault_coinset_scan_command, VaultCoinsetScanCliArgs};
 pub use dust::{
     dust_coins_from_scan, plan_dust_batches, plan_dust_from_scan_with_lineage,
@@ -23,8 +25,6 @@ pub use launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, LauncherIdSource, ResolveLauncherIdParams,
     ResolvedLauncherId,
 };
-pub use request::{
-    build_cat_dust_scan_request, CatDustScanParams, ScanRequest, ScanTuningDefaults,
-};
+pub use request::{build_vault_scan_request, ScanRequest, ScanTuningDefaults, VaultScanParams};
 pub use result::ScanResult;
 pub use state::ScanState;

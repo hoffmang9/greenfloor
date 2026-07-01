@@ -30,6 +30,7 @@ fail fast with `engine_cli_binary_unavailable` unless binaries were built or env
 
 - `greenfloor-engine coinset probe` — probe Coinset height-window API support for vault scans.
 - `greenfloor-engine vault-coinset-scan` — nonce member puzzle hash scan via Coinset (checkpointed).
+- `greenfloor-manager vault-asset-trace` — per-asset lineage from reception to current balance (XCH or CAT).
 - `greenfloor-manager combine-market-cat-dust` — batch dust combine for enabled market CAT assets.
 
 Legacy `cloud_wallet:` blocks are rejected at Rust config load.

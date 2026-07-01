@@ -28,10 +28,9 @@ use crate::config::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
-use crate::vault_coinset_scan::{
-    build_cat_dust_scan_request, cache_resolved_launcher_id, resolve_launcher_id,
-    CatDustScanParams, ResolveLauncherIdParams, ScanResult, ScanState,
-};
+use crate::manager_cli::vault_scan::{resolve_manager_vault_launcher, run_manager_vault_scan};
+use crate::vault_coinset_scan::types::AssetTypeFilter;
+use crate::vault_coinset_scan::ScanResult;
 
 pub use report::CombineExecutionFlags;
 
@@ -92,17 +91,16 @@ async fn run_vault_scan_for_job(
     max_nonce: u32,
     cat_asset_id: &str,
 ) -> SignerResult<ScanResult> {
-    let request = build_cat_dust_scan_request(&CatDustScanParams {
-        network: coinset.network,
-        coinset_base_url: Some(coinset.base_url()),
+    run_manager_vault_scan(
+        mgr,
+        coinset,
         launcher_id,
         max_nonce,
-        cat_asset_id,
-        cats_config: &mgr.cats_config,
-        markets_config: &mgr.markets_config,
-        testnet_markets_config: mgr.testnet_markets_path(),
-    });
-    ScanState::run(request).await
+        false,
+        AssetTypeFilter::Cat,
+        Some(cat_asset_id),
+    )
+    .await
 }
 
 async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
@@ -199,22 +197,11 @@ pub async fn run_combine_market_cat_dust(
         return Ok(0);
     }
 
-    let resolved_launcher = match resolve_launcher_id(&ResolveLauncherIdParams {
-        launcher_id: request.launcher_id,
-        launcher_id_file: request.launcher_id_file,
-        program_config: Some(&mgr.program_config),
-        preloaded_program: None,
-    }) {
-        Ok(resolved) => resolved,
-        Err(err) => return emit_command_error(mgr, "launcher_id_resolution_failed", err),
-    };
-    if let Err(err) = cache_resolved_launcher_id(
-        request.launcher_id_file,
-        resolved_launcher.source,
-        &resolved_launcher.launcher_id,
-    ) {
-        return emit_command_error(mgr, "launcher_id_cache_failed", err);
-    }
+    let resolved_launcher =
+        match resolve_manager_vault_launcher(mgr, request.launcher_id, request.launcher_id_file) {
+            Ok(resolved) => resolved,
+            Err(err) => return emit_command_error(mgr, "launcher_id_resolution_failed", err),
+        };
 
     let run_mode = match loaded.execution_signer.as_ref() {
         Some(signer) => CombineRunMode::Execute {

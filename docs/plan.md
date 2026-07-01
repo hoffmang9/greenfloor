@@ -48,6 +48,7 @@ Core trading/runtime (V1):
 
 Adjunct operator commands:
 
+- `vault-asset-trace` — per-asset vault lineage from reception to current balance (XCH or CAT)
 - `combine-market-cat-dust` — batch merge sub-unit CAT dust for enabled markets
 - `cats-add`, `cats-list`, `cats-delete` — CAT catalog in `cats.yaml`
 - `set-log-level` — update `app.log_level` in program config

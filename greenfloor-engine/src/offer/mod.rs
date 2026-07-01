@@ -28,6 +28,7 @@ pub use action::{
 };
 pub use assets::{
     normalize_asset_id, resolve_offer_asset_ids, OfferAssetResolver, ResolvedMarketOfferAssets,
+    ResolvedVaultTraceAsset, VaultTraceAssetKind,
 };
 pub use bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
