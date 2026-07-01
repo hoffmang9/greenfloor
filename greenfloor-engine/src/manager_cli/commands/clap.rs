@@ -315,7 +315,7 @@ pub enum ManagerCommands {
             help = "Asset to trace: xch/txch, CAT ticker, or CAT asset id hex"
         )]
         asset: String,
-        #[arg(long, default_value = "mainnet")]
+        #[arg(long, default_value = "")]
         network: String,
         #[arg(long, default_value = "")]
         coinset_base_url: String,
