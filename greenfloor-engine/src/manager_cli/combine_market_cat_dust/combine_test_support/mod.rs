@@ -1,9 +1,11 @@
 mod execute;
+mod executor;
 mod sim;
 
 pub(super) use execute::{
     dust_combine_batch_from_ids, ok_mixed_split_result, proven_dust, sample_combine_batch_plan,
 };
+pub(super) use executor::{test_combine_batch_executor, test_combine_batch_executor_with_asset};
 pub(super) use sim::{dust_plan_from_scan_without_lineage, register_lineage_mocks_for_scan_coins};
 
 use super::jobs::CatDustJob;

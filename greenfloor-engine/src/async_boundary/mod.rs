@@ -23,8 +23,7 @@
 //! | `daemon/coin_ops_execution/runner.rs` | managed coin-op plan execution |
 //! | `main.rs` | daemon / create-offer CLI arms only |
 //!
-//! Production batch orchestration lives in `combine_market_cat_dust/execute.rs`.
-//! Unit tests use a local `BatchPlanRunner` seam in `execute.rs` only.
+//! Production batch combine and sequential orchestration live in `combine_market_cat_dust/execute.rs`.
 
 mod daemon;
 mod manager;

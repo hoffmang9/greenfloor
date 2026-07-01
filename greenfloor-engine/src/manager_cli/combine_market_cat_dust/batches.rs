@@ -1,7 +1,34 @@
 use serde_json::{json, Value};
 
+use crate::error::SignerError;
 use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCoin, DustCombineBatch, DustPlan};
+
+/// Stable `stderr_tail` values written into batch execution reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchReportReason {
+    PriorBatchCombineFailed,
+    CombineInputVerifyTimeout,
+}
+
+impl BatchReportReason {
+    pub(crate) const fn stderr_tail(self) -> &'static str {
+        match self {
+            Self::PriorBatchCombineFailed => "prior_batch_combine_failed",
+            Self::CombineInputVerifyTimeout => "combine input verify timeout",
+        }
+    }
+}
+
+pub(crate) fn batch_stderr_tail(err: &SignerError) -> String {
+    match err {
+        SignerError::CombineInputVerifyTimeout => BatchReportReason::CombineInputVerifyTimeout
+            .stderr_tail()
+            .to_string(),
+        SignerError::Other(msg) => msg.clone(),
+        _ => err.to_string(),
+    }
+}
 
 /// Full dust plan plus an optional cap on combinable batches for this run.
 #[derive(Debug, Clone, Copy)]
@@ -108,10 +135,10 @@ pub fn failed_batch_entry(batch: &DustCombineBatch, err: &str) -> Value {
 pub(crate) fn fail_remaining_batches(
     batch_results: &mut Vec<Value>,
     remaining: &[DustCombineBatch],
-    reason: &str,
+    stderr_tail: &str,
 ) {
     for skipped in remaining {
-        batch_results.push(failed_batch_entry(skipped, reason));
+        batch_results.push(failed_batch_entry(skipped, stderr_tail));
     }
 }
 
@@ -129,6 +156,34 @@ mod tests {
     use crate::vault_coinset_scan::{plan_dust_batches, DustBatchPlan, DustCoin};
 
     use super::super::combine_test_support::proven_dust;
+
+    #[test]
+    fn batch_report_reasons_use_stable_stderr_tails() {
+        assert_eq!(
+            BatchReportReason::PriorBatchCombineFailed.stderr_tail(),
+            "prior_batch_combine_failed"
+        );
+        assert_eq!(
+            BatchReportReason::CombineInputVerifyTimeout.stderr_tail(),
+            "combine input verify timeout"
+        );
+    }
+
+    #[test]
+    fn batch_stderr_tail_maps_special_cases_and_delegates_display() {
+        assert_eq!(
+            batch_stderr_tail(&SignerError::CombineInputVerifyTimeout),
+            "combine input verify timeout"
+        );
+        assert_eq!(
+            batch_stderr_tail(&SignerError::Other("dust batch total is zero".to_string())),
+            "dust batch total is zero"
+        );
+        assert_eq!(
+            batch_stderr_tail(&SignerError::PreselectedCatCoinIdsMismatch),
+            SignerError::PreselectedCatCoinIdsMismatch.to_string()
+        );
+    }
 
     #[test]
     fn preview_batches_report_uses_unified_schema() {
