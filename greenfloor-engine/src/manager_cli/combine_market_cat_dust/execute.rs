@@ -13,9 +13,8 @@ use crate::vault::mixed_split::{
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
 use super::batches::{
-    batch_stderr_tail, executed_batch_entry, fail_remaining_batches,
-    fail_remaining_batches_with_tail, failed_batch_entry, finalize_plan_batches_report,
-    BatchReportReason, DustBatchRunSelection,
+    batch_stderr_tail, executed_batch_entry, fail_remaining_batches, failed_batch_entry,
+    finalize_plan_batches_report, BatchReportReason, DustBatchRunSelection,
 };
 
 pub(crate) struct CombineBatchPlanOutcome {
@@ -23,6 +22,8 @@ pub(crate) struct CombineBatchPlanOutcome {
     pub batches: Value,
 }
 
+/// Test seam for [`run_batch_plan`]; production uses [`CombineBatchExecutor`] only.
+#[doc(hidden)]
 pub(crate) trait BatchPlanRunner {
     async fn combine_batch(&self, batch: &DustCombineBatch) -> SignerResult<MixedSplitResult>;
     async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()>;
@@ -115,18 +116,14 @@ pub(crate) async fn run_batch_plan<R: BatchPlanRunner>(
                 fail_remaining_batches(
                     &mut batch_results,
                     remaining,
-                    BatchReportReason::PriorBatchCombineFailed,
+                    BatchReportReason::PriorBatchCombineFailed.stderr_tail(),
                 );
                 return plan_outcome(true, batch_results, plan);
             }
         }
         if !remaining.is_empty() {
             if let Err(err) = runner.wait_for_batch_spent(batch).await {
-                fail_remaining_batches_with_tail(
-                    &mut batch_results,
-                    remaining,
-                    &batch_stderr_tail(&err),
-                );
+                fail_remaining_batches(&mut batch_results, remaining, &batch_stderr_tail(&err));
                 job_failed = true;
                 break;
             }

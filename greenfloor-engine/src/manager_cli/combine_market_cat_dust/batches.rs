@@ -25,19 +25,6 @@ pub(crate) fn batch_stderr_tail(err: &SignerError) -> String {
         SignerError::CombineInputVerifyTimeout => BatchReportReason::CombineInputVerifyTimeout
             .stderr_tail()
             .to_string(),
-        SignerError::CatOutputBelowMinimum => "cat output below minimum mojos".to_string(),
-        SignerError::CatChangeBelowMinimum => "cat change below minimum mojos".to_string(),
-        SignerError::PreselectedCatCoinIdsMismatch => {
-            "preselected cat coins do not match requested coin ids".to_string()
-        }
-        SignerError::MixedSplitVaultWithFeeNotSupported => {
-            "mixed split vault with fee not supported".to_string()
-        }
-        SignerError::InvalidOutputAmount => "invalid output amount".to_string(),
-        SignerError::MissingOutputAmounts => "missing output amounts".to_string(),
-        SignerError::MixedSplitSelectedCoinsNotSpendable => {
-            "selected mixed split coins are not spendable".to_string()
-        }
         SignerError::Other(msg) => msg.clone(),
         _ => err.to_string(),
     }
@@ -148,14 +135,6 @@ pub fn failed_batch_entry(batch: &DustCombineBatch, err: &str) -> Value {
 pub(crate) fn fail_remaining_batches(
     batch_results: &mut Vec<Value>,
     remaining: &[DustCombineBatch],
-    reason: BatchReportReason,
-) {
-    fail_remaining_batches_with_tail(batch_results, remaining, reason.stderr_tail());
-}
-
-pub(crate) fn fail_remaining_batches_with_tail(
-    batch_results: &mut Vec<Value>,
-    remaining: &[DustCombineBatch],
     stderr_tail: &str,
 ) {
     for skipped in remaining {
@@ -191,18 +170,18 @@ mod tests {
     }
 
     #[test]
-    fn batch_stderr_tail_maps_combine_relevant_errors() {
+    fn batch_stderr_tail_maps_special_cases_and_delegates_display() {
         assert_eq!(
             batch_stderr_tail(&SignerError::CombineInputVerifyTimeout),
             "combine input verify timeout"
         );
         assert_eq!(
-            batch_stderr_tail(&SignerError::PreselectedCatCoinIdsMismatch),
-            "preselected cat coins do not match requested coin ids"
-        );
-        assert_eq!(
             batch_stderr_tail(&SignerError::Other("dust batch total is zero".to_string())),
             "dust batch total is zero"
+        );
+        assert_eq!(
+            batch_stderr_tail(&SignerError::PreselectedCatCoinIdsMismatch),
+            SignerError::PreselectedCatCoinIdsMismatch.to_string()
         );
     }
 
