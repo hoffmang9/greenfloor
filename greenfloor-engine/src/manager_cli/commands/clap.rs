@@ -308,6 +308,24 @@ pub enum ManagerCommands {
         #[arg(long, default_value_t = 8)]
         verify_poll_seconds: u64,
     },
+    /// Trace one asset from vault reception through intermediate coins to current balance.
+    VaultAssetTrace {
+        #[arg(
+            long,
+            help = "Asset to trace: xch/txch, CAT ticker, or CAT asset id hex"
+        )]
+        asset: String,
+        #[arg(long, default_value = "")]
+        network: String,
+        #[arg(long, default_value = "")]
+        coinset_base_url: String,
+        #[arg(long, default_value = "")]
+        launcher_id: String,
+        #[arg(long, default_value = "~/.greenfloor/cache/vault_launcher_id.txt")]
+        launcher_id_file: String,
+        #[arg(long, default_value_t = 100)]
+        max_nonce: u32,
+    },
     #[command(hide = true, about = "Emit global/subcommand CLI flag groups as JSON")]
     FlagGroups {
         subcommand: String,

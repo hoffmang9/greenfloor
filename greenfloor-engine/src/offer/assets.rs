@@ -16,6 +16,20 @@ pub struct ResolvedMarketOfferAssets {
     pub quote_asset_for_offer: String,
 }
 
+/// Asset kind for vault-wide lineage trace commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultTraceAssetKind {
+    Xch,
+    Cat,
+}
+
+/// Resolved asset for `vault-asset-trace`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedVaultTraceAsset {
+    pub asset_id: String,
+    pub kind: VaultTraceAssetKind,
+}
+
 /// Signer-backed offer asset resolution using a pre-built operator ticker index.
 pub struct OfferAssetResolver<'a> {
     pub(crate) signer: &'a SignerConfig,
@@ -64,6 +78,52 @@ impl<'a> OfferAssetResolver<'a> {
         self.resolve_pair(base_asset.trim(), "xch")
             .await
             .map(|(base, _)| base)
+    }
+
+    /// Resolve an inventory filter (`coins-list --asset`, hex id or ticker).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if asset resolution fails.
+    pub async fn resolve_inventory_asset(&self, filter: &str) -> SignerResult<String> {
+        if crate::hex::is_hex_id(filter) {
+            return Ok(crate::hex::normalize_hex_id(filter));
+        }
+        self.resolve_base(filter).await
+    }
+
+    /// Resolve one vault-wide asset for lineage trace (`vault-asset-trace --asset`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `--asset` is empty or resolution fails.
+    pub async fn resolve_vault_trace_asset(
+        &self,
+        asset: &str,
+    ) -> SignerResult<ResolvedVaultTraceAsset> {
+        let trimmed = asset.trim();
+        if trimmed.is_empty() {
+            return Err(SignerError::Other(
+                "vault-asset-trace requires --asset (xch, ticker, or CAT asset id)".to_string(),
+            ));
+        }
+        if is_xch_like_asset(trimmed) {
+            return Ok(ResolvedVaultTraceAsset {
+                asset_id: "xch".to_string(),
+                kind: VaultTraceAssetKind::Xch,
+            });
+        }
+        let asset_id = self.resolve_inventory_asset(trimmed).await?;
+        if is_xch_like_asset(&asset_id) {
+            return Ok(ResolvedVaultTraceAsset {
+                asset_id: "xch".to_string(),
+                kind: VaultTraceAssetKind::Xch,
+            });
+        }
+        Ok(ResolvedVaultTraceAsset {
+            asset_id,
+            kind: VaultTraceAssetKind::Cat,
+        })
     }
 
     /// Resolve base and quote asset ids for a configured market row.
@@ -172,7 +232,9 @@ async fn resolve_one_asset(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::build_cat_ticker_index_lenient;
+    use crate::config::{
+        build_cat_ticker_index_lenient, load_program_bundle_gated, operator_ticker_index_from_paths,
+    };
     use chia_sdk_coinset::CoinsetClient;
 
     #[test]
@@ -203,6 +265,47 @@ mod tests {
     fn ensure_distinct_non_xch_pair_allows_xch_pair() {
         let cat = "a".repeat(64);
         ensure_distinct_non_xch_pair(&cat, "xch").expect("xch leg");
+    }
+
+    #[tokio::test]
+    async fn resolve_vault_trace_asset_accepts_xch_aliases() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        crate::test_support::minimal_program::write_minimal_program_with_signer(
+            &program,
+            crate::test_support::minimal_program::MinimalProgramParams::default(),
+        );
+        let bundle = load_program_bundle_gated(&program).expect("bundle");
+        let index =
+            operator_ticker_index_from_paths(&dir.path().join("missing-markets.yaml"), None, None);
+        let resolver = OfferAssetResolver::new(&bundle.signer, &index, "mainnet");
+        let resolved_asset = resolver
+            .resolve_vault_trace_asset("txch")
+            .await
+            .expect("xch");
+        assert_eq!(resolved_asset.kind, VaultTraceAssetKind::Xch);
+        assert_eq!(resolved_asset.asset_id, "xch");
+    }
+
+    #[tokio::test]
+    async fn resolve_vault_trace_asset_rejects_empty_asset() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        crate::test_support::minimal_program::write_minimal_program_with_signer(
+            &program,
+            crate::test_support::minimal_program::MinimalProgramParams::default(),
+        );
+        let bundle = load_program_bundle_gated(&program).expect("bundle");
+        let index =
+            operator_ticker_index_from_paths(&dir.path().join("missing-markets.yaml"), None, None);
+        let resolver = OfferAssetResolver::new(&bundle.signer, &index, "mainnet");
+        let err = resolver
+            .resolve_vault_trace_asset("  ")
+            .await
+            .expect_err("empty asset");
+        assert!(err
+            .to_string()
+            .contains("vault-asset-trace requires --asset"));
     }
 
     #[tokio::test]

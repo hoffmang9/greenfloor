@@ -17,6 +17,10 @@ mod paths;
 mod runtime;
 mod setup;
 mod util;
+mod vault_asset_trace;
+mod vault_scan;
+#[cfg(test)]
+pub(crate) mod vault_scan_sim;
 
 #[cfg(test)]
 mod test_support;

@@ -45,6 +45,11 @@ Optional developer bootstrap for testnet markets:
   - `greenfloor-manager coin-status`
   - Optional asset scope: `greenfloor-manager coins-list --asset <ticker|CAT-id|Asset-id|xch>`
   - Optional asset scope: `greenfloor-manager coin-status --asset <ticker|CAT-id|Asset-id|xch>`
+- Trace one asset from reception through spent/unspent lineage to current balance
+  (vault-wide scan, one asset per invocation; includes combine merge edges):
+  - `greenfloor-manager vault-asset-trace --asset xch`
+  - `greenfloor-manager vault-asset-trace --asset <ticker|CAT-id-hex>`
+  - Details: `docs/coinset-validation.md` §4
 - **CAT dust via Coinset (enabled markets):** Sub-unit CAT outputs (strictly below **1000** mojos per coin) can be merged with the direct Coinset signer path, one batch per `keys.registry` signer used on the market rows. From the repo root: `PATH="$(pwd)/.venv/bin:$PATH" greenfloor-manager combine-market-cat-dust --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml --json`. Prefer `--dry-run` or `--list-only` before live combines; `--cat-asset-id <hex>` scopes a single asset; optional `--testnet-markets-config` matches daemon overlay semantics.
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`

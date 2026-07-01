@@ -8,7 +8,6 @@ use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::SpendableCoin;
 use crate::config::{load_gated_operator_market, GatedOperatorMarketLoadRequest};
 use crate::error::SignerResult;
-use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::offer::OfferAssetResolver;
 
 pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
@@ -71,8 +70,5 @@ pub(super) async fn resolve_asset_filter(
     resolver: &OfferAssetResolver<'_>,
     filter: &str,
 ) -> SignerResult<String> {
-    if is_hex_id(filter) {
-        return Ok(normalize_hex_id(filter));
-    }
-    resolver.resolve_base(filter).await
+    resolver.resolve_inventory_asset(filter).await
 }

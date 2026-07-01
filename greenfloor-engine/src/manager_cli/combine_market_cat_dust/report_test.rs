@@ -4,7 +4,6 @@ use super::combine_test_support::{
     test_coinset_endpoint,
 };
 use super::report::{finalize_job_report, preview_job_report, vault_signer_ready, CombineRunMode};
-use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::resolve_coinset_endpoint;
 use crate::coinset::CoinSpentVerifyConfig;
@@ -14,6 +13,7 @@ use crate::config::{
 use crate::manager_cli::test_support::{
     pop_json, write_combine_test_configs, ManagerContextBuilder,
 };
+use crate::manager_cli::vault_scan_sim::sim_dust_scan_result;
 use crate::minimal_program_template::{materialize_minimal_program_text, MinimalProgramParams};
 use chia_sdk_coinset::ChiaRpcClient;
 use serde_json::json;
