@@ -84,16 +84,3 @@ failure on the next push.
 "Commit the feature files but leave `some_module.rs` fmt unstaged because it wasn't
 part of the story." If pre-commit passed with that file modified, it belongs in the
 commit.
-
-**When unsure, include it.** A slightly broader commit beats a dirty tree or CI surprise.
-
-## Retroactive branch (already pushed to main)
-
-If a commit was accidentally pushed to main directly, create a retroactive
-branch at the same commit so CI can run via PR:
-
-```bash
-git checkout -b fix/my-fix <commit-sha>
-git push -u origin fix/my-fix
-gh pr create --base main --title "..." --body "..."
-```
