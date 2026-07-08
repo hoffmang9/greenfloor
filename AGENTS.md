@@ -24,6 +24,11 @@ Severity tags:
 - `[MUST]` Use Coinset.org HTTP and WebSocket APIs for blockchain access: coin lookup, mempool/tx
   signals, fee estimates, and tx submission (`greenfloor-engine/src/coinset/` and daemon websocket
   handlers). Scripts reach Coinset through `greenfloor-engine coinset …` subcommands.
+- `[SHOULD]` For read-only blockchain lookups during agent work, use the **Coinset MCP server**
+  (`.cursor/mcp.json` → `https://mcp.coinset.org/`). MCP is read-only: no keys, no signing, no
+  `push_tx` / `push_offer`. Operator submit paths remain `greenfloor-engine coinset push-tx` and
+  direct HTTP broadcast. Tool catalog and operating rules: `docs/COINSET_DOCS_AND_API.md` →
+  **Coinset MCP Server**; spot-check parity: `docs/coinset-validation.md` §6.
 - `[MUST]` Treat offers as `offer1...` Bech32m strings. Operator paths validate/decode in Rust.
 - `[MUST]` Fix the primary path; do not add fallback execution paths to hide correctness gaps.
 - `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.

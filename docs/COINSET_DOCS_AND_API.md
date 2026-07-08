@@ -8,14 +8,21 @@ skill as the canonical operator workflow reference:
 
 - [coinset CLI SKILL.md](https://raw.githubusercontent.com/coinset-org/cli/refs/heads/main/SKILL.md)
 
+For agent/IDE blockchain lookups (read-only), use the Coinset MCP server:
+
+- Project config: `.cursor/mcp.json` (enable **coinset** in Cursor Settings → MCP after clone)
+- Endpoint: `https://mcp.coinset.org/` (Streamable HTTP MCP transport; not a browser page)
+- Server: `coinset-mcp` v0.1.0
+- Upstream docs: `https://www.coinset.org/docs/mcp`
+
 For repo-specific execution and host validation, use:
 
 - `docs/coinset-validation.md`
 - `greenfloor-engine coinset probe`
 
-This file summarizes the public docs currently available from `https://www.coinset.org/docs` and linked usage pages.
+This file summarizes the public docs currently available from `https://www.coinset.org/docs`, the Coinset MCP server at `https://mcp.coinset.org/`, and linked usage pages.
 
-**As of:** 2026-06-24
+**As of:** 2026-07-08
 
 ## Overview
 
@@ -26,6 +33,10 @@ This file summarizes the public docs currently available from `https://www.coins
 - The API supports **HTTP/2** (negotiated automatically by modern HTTP clients).
 - Real-time updates are documented via WebSocket at `wss://api.coinset.org/ws` (also referenced as `wss://coinset.org/ws` in older notes).
 - Docs site is hosted separately at `https://www.coinset.org/docs`.
+- **MCP server** (read-only, agent-friendly): `https://mcp.coinset.org/` — one endpoint serves both mainnet and testnet11; pass `network` on a tool or infer from `xch1…`/`txch1…` addresses.
+- **OpenAPI specs** (exact request/response schemas for every proxied endpoint):
+  - Full node: `https://www.coinset.org/openapi/full_node.yaml`
+  - Coinset extensions: `https://www.coinset.org/openapi/coinset.yaml`
 
 ### Network Routing (Explicit)
 
@@ -244,6 +255,111 @@ curl -X POST "https://api.coinset.org/<endpoint>" \
 wscat -c wss://coinset.org/ws
 ```
 
+## Coinset MCP Server (`https://mcp.coinset.org/`)
+
+Read-only MCP server backed by Coinset. **No wallet, no keys, no signing, no `push_tx` / `push_offer`.**
+GreenFloor operator submit paths (`greenfloor-engine coinset push-tx`, offer cancel broadcast) use the direct HTTP API, not MCP.
+
+### Connection
+
+- Transport: MCP over HTTP with Server-Sent Events (SSE).
+- Clients must send `Accept: application/json, text/event-stream` and `Content-Type: application/json`.
+- Session: server returns `Mcp-Session-Id` on `initialize`; include it on subsequent requests.
+- Protocol version: `2024-11-05`.
+
+### Operating rules
+
+- Always check the `success` field on every result; surface `error.kind` / `error.message` on failure.
+- Addresses (`xch1…` / `txch1…`) and `0x`-hex puzzle hashes are interchangeable inputs everywhere.
+- Amounts are in mojos: 1 XCH = 1,000,000,000,000 mojos; 1 CAT unit = 1,000 mojos.
+- Prefer confirmed block data over mempool data for definitive answers; mempool items can disappear.
+- When tracing coin history, pass `include_spent=true` so spent coins are returned.
+- Explain spends from conditions/additions/removals outward; then puzzle layers; then raw CLVM.
+- For wallet questions: `get_address_balance` + `list_address_assets` + `list_transactions` (`include_pending` merges mempool).
+- For "what does this tx/offer do": `get_transaction` / `decode_offer`, then `inspect` for deep analysis.
+
+### Tool catalog (24 tools)
+
+| Tool                    | Description                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search`                | Universal search: route any string (address, tx id, coin id, block, offer id, NFT id) to its match.                                                     |
+| `find_coins`            | Find coins by `name`, `names`, `puzzle_hash`, `parent_ids`, or `hint`. Supports `include_spent`, height filters, `cursor` pagination, `limit`, `order`. |
+| `get_address_balance`   | Combined balance for an address: XCH (confirmed/locked/pending), CAT balances, NFT counts.                                                              |
+| `list_address_assets`   | List distinct CAT asset ids or NFT launcher ids held at an address.                                                                                     |
+| `list_transactions`     | List transactions by `address`, `coin`, `block`, `cat_asset`, or `nft`. `include_pending` merges mempool txs (address only).                            |
+| `get_transaction`       | Parsed tx summary (transfers, swaps, AMM, royalties, fee, memos); optional `include_state`, `include_graph`.                                            |
+| `wait_for_confirmation` | Poll tx lifecycle until confirmed/rejected/removed or timeout (`poll_interval_secs`, `timeout_secs`).                                                   |
+| `get_block`             | Block record by height or header hash; optional coin spends.                                                                                            |
+| `get_block_changes`     | All coins created and destroyed in a block (paginated).                                                                                                 |
+| `list_reorgs`           | Recent chain reorganization events (paginated).                                                                                                         |
+| `get_chain_state`       | Peak height/hash, netspace, difficulty, sync status, mempool size.                                                                                      |
+| `mempool`               | Actions: `list`, `get_by_tx`, `get_by_coin`, `is_pending`.                                                                                              |
+| `get_asset_info`        | Asset metadata for `cat`, `nft`, or `singleton` by id.                                                                                                  |
+| `get_asset_coins`       | Coins for a CAT asset id (optional owner address) or NFT id.                                                                                            |
+| `get_clawback_coins`    | Pending time-locked (clawback) coins for a receiver address.                                                                                            |
+| `decode_offer`          | Decode an `offer1…` string locally into offered vs requested assets.                                                                                    |
+| `get_offer`             | Offer state and lifecycle for an offer id.                                                                                                              |
+| `list_offers`           | List offers by `address`, `cat_asset`, or `nft`; optional `status` filter (`open`, `pending`, `confirmed`, `cancel_pending`, `cancelled`, `expired`).   |
+| `inspect`               | Decode conditions, additions/removals, puzzle layers. Source: `coin`, `block`, `mempool_tx`, or `offer`.                                                |
+| `estimate_fee`          | Recommended fee (mojos) for a transaction cost and target inclusion times.                                                                              |
+| `get_price`             | Current XCH price in USD; optionally convert a mojo amount to USD.                                                                                      |
+| `convert_address`       | Convert between Chia address and puzzle hash (local, no network).                                                                                       |
+| `compute_coin_id`       | Compute coin id = sha256(parent \|\| puzzle_hash \|\| amount) (local, no network).                                                                      |
+| `clvm`                  | Local CLVM: `tree_hash`, `run`, `uncurry`, `curry`.                                                                                                     |
+
+### MCP resources (reference data)
+
+| URI                                     | Name              | Contents                                                                       |
+| --------------------------------------- | ----------------- | ------------------------------------------------------------------------------ |
+| `coinset://guide/operating-rules`       | operating-rules   | Read-only usage guide (mirrors section above).                                 |
+| `coinset://reference/openapi`           | openapi           | Links to full_node.yaml and coinset.yaml OpenAPI specs.                        |
+| `coinset://reference/conditions`        | conditions        | CLVM condition opcode reference (CREATE*COIN, AGG_SIG*\*, timelocks, etc.).    |
+| `coinset://reference/puzzle-mod-hashes` | puzzle-mod-hashes | Well-known puzzle module hashes (p2, CAT v2, singleton, settlement, NFT, DID). |
+
+### MCP prompts (guided workflows)
+
+| Prompt                | Description                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `network_status`      | Summarize current Chia network state and XCH price.                 |
+| `address_summary`     | Summarize an address: balances, assets, recent activity, USD value. |
+| `transaction_summary` | Explain a transaction's transfers, swaps, and fee.                  |
+| `offer_summary`       | Decode an offer and assess what is given vs received.               |
+| `block_summary`       | Summarize a block: counts and notable coins.                        |
+
+### MCP ↔ HTTP API mapping (selected)
+
+| MCP tool                         | Underlying Coinset HTTP endpoints (conceptual)          |
+| -------------------------------- | ------------------------------------------------------- |
+| `find_coins` (`by=puzzle_hash`)  | `get_coin_records_by_puzzle_hash`                       |
+| `find_coins` (`by=hint`)         | `get_coin_records_by_hint`                              |
+| `find_coins` (`by=parent_ids`)   | `get_coin_records_by_parent_ids`                        |
+| `find_coins` (`by=name`)         | `get_coin_record_by_name`                               |
+| `mempool` (`action=list`)        | `get_all_mempool_tx_ids` / `get_all_mempool_items`      |
+| `mempool` (`action=get_by_tx`)   | `get_mempool_item_by_tx_id`                             |
+| `mempool` (`action=get_by_coin`) | `get_mempool_items_by_coin_name`                        |
+| `get_block`                      | `get_block_record` / `get_block_spends_with_conditions` |
+| `get_chain_state`                | `get_blockchain_state`                                  |
+| `estimate_fee`                   | `get_fee_estimate`                                      |
+
+MCP tools add parsed summaries, lifecycle state, pagination helpers, and local CLVM/offer decode that raw HTTP responses do not provide.
+
+### Well-known puzzle module hashes
+
+Match against `clvm` `uncurry` `mod_hash`:
+
+| Puzzle                               | Module hash                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| standard tx (p2_delegated_or_hidden) | `0xe9aaa49f45bad5c889b86ee3341550c155cfdd10c3a6757de618d20612fffd52` |
+| CAT v2                               | `0x37bef360ee858133b69d595a906dc45d01af50379dad515eb9518abb7c1d2a7a` |
+| singleton top layer v1.1             | `0x7faa3253bfddd1e0decb0906b2dc6247bbc4cf608f58345d173adb63e8b47c9f` |
+| singleton launcher                   | `0xeff07522495060c066f66f32acc2a77e3a3e737aca8baea4d1a64ea4cdc13da9` |
+| settlement payments (offers)         | `0xcfbfdeed5c4ca2de3d0bf520b9cb4bb7743a359bd2e6a188d19ce7dffc21d3e7` |
+| NFT state layer                      | `0xa04d9f57764f54a43e4030befb4d80026e870519aaa66334aef8304f5d0393c2` |
+| NFT ownership layer                  | `0xc5abea79afaa001b5427dfa0c8cf42ca6f38f5841b78f9b3c252733eb2de2726` |
+| DID inner puzzle                     | `0x33143d2bef64f14036742673afd158126b94284b4530a28c354fac202b0c910e` |
+
+CAT `asset_id` is its TAIL program hash; singleton/NFT/DID `launcher_id` identifies the singleton.
+
 ## GreenFloor operator usage
 
 - Offer lifecycle reads (coin lookup, vault singleton, mempool tx ids): `greenfloor-engine`
@@ -260,6 +376,9 @@ wscat -c wss://coinset.org/ws
 
 ## Source Pages
 
+- https://mcp.coinset.org/ (MCP server; SSE transport, not a browser page)
+- https://www.coinset.org/openapi/full_node.yaml
+- https://www.coinset.org/openapi/coinset.yaml
 - https://www.coinset.org/docs
 - https://coinset.org/
 - https://www.coinset.org/docs/usage/blocks/get_additions_and_removals
