@@ -109,10 +109,12 @@ pub fn apply_watch_hits_batch(store: &SqliteStore, watched_keys: &[String]) -> S
         return Ok(());
     }
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
-    for row in &rows {
-        apply_mempool_hit_for_row(store, row, &cancel_by_offer)?;
-    }
-    Ok(())
+    store.unchecked_transaction_scope("watch_hits_batch", |store| {
+        for row in &rows {
+            apply_mempool_hit_for_row(store, row, &cancel_by_offer)?;
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]

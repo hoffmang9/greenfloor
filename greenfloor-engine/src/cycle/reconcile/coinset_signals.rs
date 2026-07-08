@@ -46,14 +46,22 @@ impl CoinsetSignalSummary {
         }
     }
 
-    /// Watch-hit / inventory signal with no concrete spend-bundle id yet.
+    /// Watch-hit signal: maker coin/p2 observed without a concrete spend-bundle id yet.
+    ///
+    /// Sets `has_mempool` only — do not fabricate `has_tx_ids`.
     #[must_use]
     pub fn mempool_hit() -> Self {
         Self {
-            has_tx_ids: true,
+            has_tx_ids: false,
             has_confirmed: false,
             has_mempool: true,
         }
+    }
+
+    /// True when any Coinset activity is known (tx ids and/or mempool/confirmed flags).
+    #[must_use]
+    pub fn has_coinset_activity(self) -> bool {
+        self.has_tx_ids || self.has_confirmed || self.has_mempool
     }
 }
 
@@ -128,11 +136,12 @@ mod tests {
     }
 
     #[test]
-    fn mempool_hit_summary_is_synthetic_without_tx_ids() {
+    fn mempool_hit_summary_is_mempool_without_fabricated_tx_ids() {
         let summary = CoinsetSignalSummary::mempool_hit();
-        assert!(summary.has_tx_ids);
+        assert!(!summary.has_tx_ids);
         assert!(summary.has_mempool);
         assert!(!summary.has_confirmed);
+        assert!(summary.has_coinset_activity());
         assert!(!CoinsetTxSignals::default().summary().has_mempool);
     }
 }

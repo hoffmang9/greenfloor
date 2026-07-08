@@ -18,14 +18,12 @@ pub struct AugmentedDexieOffers {
     pub offers: Vec<Value>,
 }
 
-fn offer_id_from_payload(offer: &Value) -> Option<String> {
-    offer
-        .as_object()
-        .and_then(|obj| obj.get("id"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+fn offer_matches_local_id(offer: &Value, local_offer_id: &str) -> bool {
+    offer.as_object().is_some_and(|obj| {
+        crate::daemon::dexie_size::dexie_offer_lookup_keys(obj)
+            .iter()
+            .any(|key| key == local_offer_id)
+    })
 }
 
 fn apply_missing_watched_offer(
@@ -53,35 +51,62 @@ fn apply_missing_watched_offer(
     })
 }
 
-pub async fn augment_dexie_offers_for_watchlist(
+fn record_watchlist_augment_error(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    error: &str,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<()> {
+    metrics.cycle_errors += 1;
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::WARN,
+        "dexie watchlist augment failed",
+        DEXIE_WATCHLIST_AUGMENT_ERROR,
+        &serde_json::json!({
+            "market_id": market_id,
+            "offer_id": offer_id,
+            "error": error,
+        }),
+        Some(market_id),
+    )
+}
+
+fn index_list_offers_by_local_id(
+    list_offers: &[Value],
+    dexie_offer_ids: &HashSet<String>,
+) -> (HashMap<String, Value>, HashSet<String>) {
+    let mut augmented_by_local_id: HashMap<String, Value> = HashMap::default();
+    let mut matched_local_ids = HashSet::default();
+    for offer in list_offers {
+        let Some(obj) = offer.as_object() else {
+            continue;
+        };
+        for key in crate::daemon::dexie_size::dexie_offer_lookup_keys(obj) {
+            if dexie_offer_ids.contains(&key) {
+                matched_local_ids.insert(key.clone());
+                augmented_by_local_id
+                    .entry(key)
+                    .or_insert_with(|| offer.clone());
+            }
+        }
+    }
+    (augmented_by_local_id, matched_local_ids)
+}
+
+async fn fetch_missing_watched_offers(
     dexie: &DexieClient,
     store: &SqliteStore,
     market_id: &str,
-    list_offers: &[Value],
-    our_offer_ids: &HashSet<String>,
+    dexie_offer_ids: &HashSet<String>,
+    augmented_by_local_id: &mut HashMap<String, Value>,
     state_by_offer_id: &mut HashMap<String, String>,
     metrics: &mut ReconcileMarketCycleMetrics,
-) -> SignerResult<AugmentedDexieOffers> {
-    let dexie_offer_ids_in_list: HashSet<String> = list_offers
-        .iter()
-        .filter_map(offer_id_from_payload)
-        .collect();
-
-    let mut augmented_by_id: HashMap<String, Value> = HashMap::default();
-    for offer in list_offers {
-        if let Some(offer_id) = offer_id_from_payload(offer) {
-            augmented_by_id.insert(offer_id, offer.clone());
-        }
-    }
-
-    let beyond_cap_ids: HashSet<String> = our_offer_ids
-        .difference(&dexie_offer_ids_in_list)
-        .cloned()
-        .collect();
+) -> SignerResult<HashSet<String>> {
     let mut missing_watched_offer_ids = HashSet::default();
-
-    for watched_offer_id in our_offer_ids {
-        if augmented_by_id.contains_key(watched_offer_id) {
+    for watched_offer_id in dexie_offer_ids {
+        if augmented_by_local_id.contains_key(watched_offer_id) {
             continue;
         }
         match dexie.get_offer(watched_offer_id).await {
@@ -98,7 +123,18 @@ pub async fn augment_dexie_offers_for_watchlist(
                         metrics,
                     )?;
                 } else if let Some(single_offer) = payload.get("offer") {
-                    augmented_by_id.insert(watched_offer_id.clone(), single_offer.clone());
+                    if offer_matches_local_id(single_offer, watched_offer_id) {
+                        augmented_by_local_id
+                            .insert(watched_offer_id.clone(), single_offer.clone());
+                    } else {
+                        record_watchlist_augment_error(
+                            store,
+                            market_id,
+                            watched_offer_id,
+                            "dexie get_offer payload did not match local offer id",
+                            metrics,
+                        )?;
+                    }
                 }
             }
             Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
@@ -113,53 +149,99 @@ pub async fn augment_dexie_offers_for_watchlist(
                 )?;
             }
             Err(err) => {
-                metrics.cycle_errors += 1;
-                LogContext::MARKET_CYCLE.dual_audit(
+                record_watchlist_augment_error(
                     store,
-                    Level::WARN,
-                    "dexie watchlist augment failed",
-                    DEXIE_WATCHLIST_AUGMENT_ERROR,
-                    &serde_json::json!({
-                        "market_id": market_id,
-                        "offer_id": watched_offer_id,
-                        "error": err.to_string(),
-                    }),
-                    Some(market_id),
+                    market_id,
+                    watched_offer_id,
+                    &err.to_string(),
+                    metrics,
                 )?;
             }
         }
     }
+    Ok(missing_watched_offer_ids)
+}
 
-    for beyond_offer_id in beyond_cap_ids.difference(&missing_watched_offer_ids) {
-        if augmented_by_id.contains_key(beyond_offer_id) {
+async fn fetch_beyond_cap_offers(
+    dexie: &DexieClient,
+    store: &SqliteStore,
+    market_id: &str,
+    beyond_cap_ids: &HashSet<String>,
+    missing_watched_offer_ids: &HashSet<String>,
+    augmented_by_local_id: &mut HashMap<String, Value>,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<()> {
+    for beyond_offer_id in beyond_cap_ids.difference(missing_watched_offer_ids) {
+        if augmented_by_local_id.contains_key(beyond_offer_id) {
             continue;
         }
         match dexie.get_offer(beyond_offer_id).await {
             Ok(response) => {
                 if let Some(single_offer) = response.body().get("offer") {
-                    augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
+                    if offer_matches_local_id(single_offer, beyond_offer_id) {
+                        augmented_by_local_id.insert(beyond_offer_id.clone(), single_offer.clone());
+                    }
                 }
             }
             Err(err) => {
-                metrics.cycle_errors += 1;
-                LogContext::MARKET_CYCLE.dual_audit(
+                record_watchlist_augment_error(
                     store,
-                    Level::WARN,
-                    "dexie watchlist augment failed",
-                    DEXIE_WATCHLIST_AUGMENT_ERROR,
-                    &serde_json::json!({
-                        "market_id": market_id,
-                        "offer_id": beyond_offer_id,
-                        "error": err.to_string(),
-                    }),
-                    Some(market_id),
+                    market_id,
+                    beyond_offer_id,
+                    &err.to_string(),
+                    metrics,
                 )?;
             }
         }
     }
+    Ok(())
+}
+
+/// Augment Dexie list results for Dexie-authoritative watched offers only.
+///
+/// Callers must pass the Dexie-authoritative subset of the market watchlist.
+/// Coinset/splash offers are intentionally excluded so they never hit Dexie HTTP.
+pub async fn augment_dexie_offers_for_watchlist(
+    dexie: &DexieClient,
+    store: &SqliteStore,
+    market_id: &str,
+    list_offers: &[Value],
+    dexie_offer_ids: &HashSet<String>,
+    state_by_offer_id: &mut HashMap<String, String>,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<AugmentedDexieOffers> {
+    if dexie_offer_ids.is_empty() {
+        return Ok(AugmentedDexieOffers { offers: Vec::new() });
+    }
+    let (mut augmented_by_local_id, dexie_matched_local_ids) =
+        index_list_offers_by_local_id(list_offers, dexie_offer_ids);
+    let beyond_cap_ids: HashSet<String> = dexie_offer_ids
+        .difference(&dexie_matched_local_ids)
+        .cloned()
+        .collect();
+    let missing_watched_offer_ids = fetch_missing_watched_offers(
+        dexie,
+        store,
+        market_id,
+        dexie_offer_ids,
+        &mut augmented_by_local_id,
+        state_by_offer_id,
+        metrics,
+    )
+    .await?;
+    fetch_beyond_cap_offers(
+        dexie,
+        store,
+        market_id,
+        &beyond_cap_ids,
+        &missing_watched_offer_ids,
+        &mut augmented_by_local_id,
+        metrics,
+    )
+    .await?;
 
     Ok(AugmentedDexieOffers {
-        offers: augmented_by_id.into_values().collect(),
+        offers: augmented_by_local_id.into_values().collect(),
     })
 }
 

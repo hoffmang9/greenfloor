@@ -182,9 +182,9 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
 - Non-envelope / legacy flat payloads are ignored. Mainnet operators should confirm live frames match this envelope.
 - Frame routing (GreenFloor):
   - **Transaction** frames: record tx signals; inventory `p2` hits mark markets stale (90s
-    freshness gate); durable `offer_coin_watches` hits (p2 and/or coin id) drive
-    `mempool_observed` via reconcile. HTTP enrichment uses
-    `get_coin_records_by_puzzle_hashes` when needed.
+    freshness gate); durable `offer_coin_watches` hits (maker-specific p2 and/or coin id)
+    drive `mempool_observed` via reconcile. Shared market inventory p2s are not stored on
+    per-offer watches. HTTP enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
   - **Offer** frames: drive offer lifecycle by `offer_id` / status only. Offer-frame `p2s`
     must **not** mark inventory stale or apply watch-hit lifecycle.
 - HTTP webhooks are out of scope; cancel and other spends use `POST /push_tx`, not the WebSocket.

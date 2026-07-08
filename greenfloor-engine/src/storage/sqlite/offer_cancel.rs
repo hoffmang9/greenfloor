@@ -12,6 +12,8 @@ pub struct OfferCancelWrite<'a> {
     pub execution_mode: Option<OfferExecutionMode>,
     pub cancel_submitted_tx_id: Option<&'a str>,
     pub cancel_submitted_at: Option<&'a str>,
+    /// Publish venue (`coinset` / `dexie` / `splash`); set at post time only.
+    pub publish_venue: Option<&'a str>,
 }
 
 pub(crate) fn cancel_metadata_params(
@@ -92,9 +94,10 @@ impl SqliteStore {
                   fixed_delegated_puzzle_hash,
                   execution_mode,
                   cancel_submitted_tx_id,
-                  cancel_submitted_at
+                  cancel_submitted_at,
+                  publish_venue
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
@@ -112,7 +115,8 @@ impl SqliteStore {
                     WHEN excluded.state = 'cancel_submitted'
                       THEN COALESCE(excluded.cancel_submitted_at, offer_state.cancel_submitted_at)
                     ELSE NULL
-                  END
+                  END,
+                  publish_venue = COALESCE(excluded.publish_venue, offer_state.publish_venue)
                 ",
                 params![
                     offer_id,
@@ -125,10 +129,100 @@ impl SqliteStore {
                     execution_mode_str.as_deref(),
                     cancel.cancel_submitted_tx_id,
                     cancel_submitted_at,
+                    cancel.publish_venue,
                 ],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
         Ok(())
+    }
+
+    /// Whether Dexie is authoritative for missing-offer / 404 lifecycle decisions.
+    ///
+    /// - Explicit `dexie` → yes
+    /// - Explicit `coinset` / `splash` → no
+    /// - Legacy `NULL` venue: treat 64-hex offer ids as Coinset trade ids (not Dexie);
+    ///   other ids (historical Dexie bech32) remain Dexie-authoritative.
+    #[must_use]
+    pub fn is_dexie_authoritative_for_offer(offer_id: &str, publish_venue: Option<&str>) -> bool {
+        if let Some(venue) = publish_venue
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            venue.eq_ignore_ascii_case("dexie")
+        } else {
+            let normalized = crate::hex::normalize_hex_id(offer_id);
+            normalized.len() != 64
+        }
+    }
+
+    /// Publish venue recorded at post time (`coinset` / `dexie` / `splash`).
+    ///
+    /// Returns `None` when the offer is absent or venue was never persisted (legacy rows).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn offer_publish_venue_for_id(&self, offer_id: &str) -> SignerResult<Option<String>> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(None);
+        }
+        self.conn
+            .query_row(
+                "SELECT publish_venue FROM offer_state WHERE offer_id = ?1",
+                params![clean],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to read offer_state publish_venue for {clean}: {err}"
+                ))
+            })
+            .map(|row| row.flatten().filter(|value| !value.trim().is_empty()))
+    }
+
+    /// Whether Dexie missing-offer / 404 should drive lifecycle for this offer id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the venue lookup fails.
+    pub fn is_dexie_authoritative_offer(&self, offer_id: &str) -> SignerResult<bool> {
+        let venue = self.offer_publish_venue_for_id(offer_id)?;
+        Ok(Self::is_dexie_authoritative_for_offer(
+            offer_id,
+            venue.as_deref(),
+        ))
+    }
+
+    /// Watched lifecycle offer ids for one market that are Dexie-authoritative.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_dexie_authoritative_watched_offer_ids(
+        &self,
+        market_id: &str,
+    ) -> SignerResult<Vec<String>> {
+        let clean_market = market_id.trim();
+        if clean_market.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = self.list_offer_states(Some(clean_market), 5000)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let Ok(state) = crate::cycle::ReconcileState::parse(&row.state) else {
+                continue;
+            };
+            if !state.is_watched_for_reconcile() {
+                continue;
+            }
+            if self.is_dexie_authoritative_offer(&row.offer_id)? {
+                out.push(row.offer_id);
+            }
+        }
+        out.sort();
+        Ok(out)
     }
 
     /// Load cancel metadata persisted at offer post time.
@@ -229,5 +323,30 @@ impl SqliteStore {
             store.observe_mempool_tx_ids(std::slice::from_ref(&stored_cancel_tx_id))?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod venue_authority_tests {
+    use super::SqliteStore;
+
+    #[test]
+    fn dexie_authority_uses_explicit_venue_and_legacy_id_shape() {
+        assert!(SqliteStore::is_dexie_authoritative_for_offer(
+            "offer-bech32-like",
+            Some("dexie")
+        ));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
+            &"ab".repeat(32),
+            Some("coinset")
+        ));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
+            &"ab".repeat(32),
+            None
+        ));
+        assert!(SqliteStore::is_dexie_authoritative_for_offer(
+            "legacy-dexie-id",
+            None
+        ));
     }
 }

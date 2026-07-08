@@ -24,9 +24,10 @@ pub use persist::{persist_offer_post_records, upsert_offer_post_record};
 pub mod test_support;
 pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
-    CoinOpLedgerEntry, CycleWriteStore, OfferPostPersistRecord, OfferReservationAcquireOutcome,
-    OfferReservationLeaseRequest, OfferReservationLeaseRow, OfferReservationRejectReason,
-    OfferStateDetailRow, OfferStateListRow, SqliteStore, StoredAlertState, TxSignalStateRow,
+    CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
+    OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
+    OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow, SqliteStore,
+    StoredAlertState, TxSignalStateRow,
 };
 
 #[cfg(test)]

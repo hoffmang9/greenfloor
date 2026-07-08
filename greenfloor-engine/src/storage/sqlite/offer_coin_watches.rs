@@ -157,72 +157,29 @@ impl SqliteStore {
     ///
     /// Returns an error if `SQLite` reads fail.
     pub fn list_market_ids_for_watched_keys(&self, keys: &[String]) -> SignerResult<Vec<String>> {
-        let normalized: Vec<String> = keys
-            .iter()
-            .map(|key| normalize_hex_id(key))
-            .filter(|key| key.len() == 64)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        if normalized.is_empty() {
-            return Ok(Vec::new());
-        }
-        let placeholders: Vec<String> = (1..=normalized.len())
-            .map(|idx| format!("?{idx}"))
-            .collect();
-        let query = format!(
-            "SELECT DISTINCT market_id FROM offer_coin_watches WHERE coin_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut stmt = self.conn.prepare(&query).map_err(|err| {
-            SignerError::Other(format!("offer_coin_watches market prepare: {err}"))
-        })?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(normalized.iter()), |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|err| SignerError::Other(format!("offer_coin_watches market query: {err}")))?;
-        let mut out = Vec::new();
-        for row in rows {
-            let market_id = row.map_err(|err| {
-                SignerError::Other(format!("offer_coin_watches market row: {err}"))
-            })?;
-            if !market_id.trim().is_empty() {
-                out.push(market_id);
-            }
-        }
-        out.sort();
-        Ok(out)
+        let mut markets = self.query_distinct_watch_column("market_id", keys)?;
+        markets.sort();
+        Ok(markets)
     }
 
     /// Sync durable watches for watched lifecycle offers in one market pass.
     ///
-    /// - No watch rows yet: seed from cancel/presplit metadata plus market inventory p2s
-    ///   (upgrade path when watches did not exist at post time).
-    /// - Already has watches: merge any missing market inventory p2s so transaction-frame
-    ///   puzzle-hash hits can match maker spends.
+    /// Upgrade/migration helper: seed missing watches from cancel/presplit metadata.
+    /// Prefer atomic post persist + schema migration backfill for production paths.
+    ///
+    /// Market inventory receive/CAT outer puzzle hashes are intentionally **not**
+    /// written into per-offer watches.
     ///
     /// Idempotent. Returns the number of offers whose watch rows were written.
     ///
     /// # Errors
     ///
     /// Returns an error if `SQLite` reads or writes fail.
-    pub fn sync_offer_watches_for_market(
-        &self,
-        market_id: &str,
-        market_p2s: &[String],
-    ) -> SignerResult<u64> {
+    pub fn sync_offer_watches_for_market(&self, market_id: &str) -> SignerResult<u64> {
         let clean_market = market_id.trim();
         if clean_market.is_empty() {
             return Ok(0);
         }
-        let normalized_market_p2s: Vec<String> = market_p2s
-            .iter()
-            .map(|p2| normalize_hex_id(p2))
-            .filter(|p2| p2.len() == 64)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
         let rows = self.list_offer_states(Some(clean_market), 5000)?;
         let mut updated = 0u64;
         for row in rows {
@@ -234,37 +191,21 @@ impl SqliteStore {
             }
             let existing_coins = self.list_watched_coin_ids_for_offer(&row.offer_id)?;
             let existing_p2s = self.list_watched_p2s_for_offer(&row.offer_id)?;
-            let has_watch = !existing_coins.is_empty() || !existing_p2s.is_empty();
-
-            let (coins, mut p2s) = if has_watch {
-                (existing_coins.clone(), existing_p2s.clone())
-            } else if let Some(meta) = self.offer_cancel_metadata_for_id(&row.offer_id)? {
-                let mut coins = Vec::new();
-                if let Some(coin) = meta.fields.input_coin_id {
-                    coins.push(coin);
-                }
-                let mut p2s = Vec::new();
-                if let Some(p2) = meta.fields.fixed_delegated_puzzle_hash {
-                    p2s.push(normalize_hex_id(&p2));
-                }
-                (coins, p2s)
-            } else {
-                if normalized_market_p2s.is_empty() {
-                    continue;
-                }
-                (Vec::new(), Vec::new())
-            };
-
-            for p2 in &normalized_market_p2s {
-                if !p2s.iter().any(|existing| existing == p2) {
-                    p2s.push(p2.clone());
-                }
+            if !existing_coins.is_empty() || !existing_p2s.is_empty() {
+                continue;
             }
-            if has_watch {
-                if coins == existing_coins && p2s == existing_p2s {
-                    continue;
-                }
-            } else if coins.is_empty() && p2s.is_empty() {
+            let Some(meta) = self.offer_cancel_metadata_for_id(&row.offer_id)? else {
+                continue;
+            };
+            let mut coins = Vec::new();
+            if let Some(coin) = meta.fields.input_coin_id {
+                coins.push(coin);
+            }
+            let mut p2s = Vec::new();
+            if let Some(p2) = meta.fields.fixed_delegated_puzzle_hash {
+                p2s.push(normalize_hex_id(&p2));
+            }
+            if coins.is_empty() && p2s.is_empty() {
                 continue;
             }
             self.replace_offer_coin_watches(&row.offer_id, &row.market_id, &coins, &p2s)?;
@@ -328,6 +269,15 @@ impl SqliteStore {
         &self,
         keys: &[String],
     ) -> SignerResult<Vec<crate::storage::OfferStateListRow>> {
+        let offer_ids = self.query_distinct_watch_column("offer_id", keys)?;
+        self.list_offer_states_for_ids(&offer_ids)
+    }
+
+    fn query_distinct_watch_column(
+        &self,
+        column: &str,
+        keys: &[String],
+    ) -> SignerResult<Vec<String>> {
         let normalized: Vec<String> = keys
             .iter()
             .map(|key| normalize_hex_id(key))
@@ -338,36 +288,33 @@ impl SqliteStore {
         if normalized.is_empty() {
             return Ok(Vec::new());
         }
-        let offer_ids: Vec<String> = {
-            let placeholders: Vec<String> = (1..=normalized.len())
-                .map(|idx| format!("?{idx}"))
-                .collect();
-            let query = format!(
-                "SELECT DISTINCT offer_id FROM offer_coin_watches WHERE coin_id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut stmt = self.conn.prepare(&query).map_err(|err| {
-                SignerError::Other(format!("offer_coin_watches offer_ids prepare: {err}"))
+        let placeholders: Vec<String> = (1..=normalized.len())
+            .map(|idx| format!("?{idx}"))
+            .collect();
+        let query = format!(
+            "SELECT DISTINCT {column} FROM offer_coin_watches WHERE coin_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&query).map_err(|err| {
+            SignerError::Other(format!("offer_coin_watches {column} prepare: {err}"))
+        })?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(normalized.iter()), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches {column} query: {err}"))
             })?;
-            let rows = stmt
-                .query_map(rusqlite::params_from_iter(normalized.iter()), |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(|err| {
-                    SignerError::Other(format!("offer_coin_watches offer_ids query: {err}"))
-                })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let offer_id = row.map_err(|err| {
-                    SignerError::Other(format!("offer_coin_watches offer_ids row: {err}"))
-                })?;
-                if !offer_id.trim().is_empty() {
-                    out.push(offer_id);
-                }
+        let mut out = Vec::new();
+        for row in rows {
+            let value = row.map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches {column} row: {err}"))
+            })?;
+            if !value.trim().is_empty() {
+                out.push(value);
             }
-            out
-        };
-        self.list_offer_states_for_ids(&offer_ids)
+        }
+        Ok(out)
     }
 
     /// List offer ids watching a given coin id or p2.
@@ -520,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_offer_watches_seeds_from_cancel_metadata_and_merges_market_p2s() {
+    fn sync_offer_watches_seeds_from_cancel_metadata_only() {
         use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
         use crate::storage::sqlite::OfferCancelWrite;
 
@@ -529,7 +476,6 @@ mod tests {
         let offer_id = "ab".repeat(32);
         let coin = "cd".repeat(32);
         let meta_p2 = "ef".repeat(32);
-        let market_p2 = "11".repeat(32);
         let fields = PresplitCancelFields {
             input_coin_id: Some(coin.clone()),
             fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
@@ -553,54 +499,40 @@ mod tests {
             .expect("empty")
             .is_empty());
 
-        let updated = store
-            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
-            .expect("sync");
+        let updated = store.sync_offer_watches_for_market("m1").expect("sync");
         assert_eq!(updated, 1);
         let watched = store.list_watched_coin_ids_for_market("m1").expect("coins");
         assert!(watched.contains(&coin));
         assert!(!watched.contains(&meta_p2));
-        assert!(!watched.contains(&market_p2));
         assert_eq!(
             store
                 .list_offer_ids_for_watched_coin(&meta_p2)
                 .expect("meta p2"),
             vec![offer_id.clone()]
         );
-        assert_eq!(
-            store
-                .list_offer_ids_for_watched_coin(&market_p2)
-                .expect("market p2"),
-            vec![offer_id.clone()]
-        );
 
         let updated_again = store
-            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
+            .sync_offer_watches_for_market("m1")
             .expect("idempotent");
         assert_eq!(updated_again, 0);
     }
 
     #[test]
-    fn sync_offer_watches_merges_inventory_p2s_onto_existing_coin_watches() {
+    fn sync_offer_watches_leaves_existing_coin_watches_unchanged() {
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let offer_id = "ab".repeat(32);
         let coin = "cd".repeat(32);
-        let market_p2 = "ef".repeat(32);
         store
             .upsert_offer_state(&offer_id, "m1", "open", None)
             .expect("upsert");
         store
             .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
             .expect("coin watch");
-        let updated = store
-            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
-            .expect("sync");
-        assert_eq!(updated, 1);
+        let updated = store.sync_offer_watches_for_market("m1").expect("sync");
+        assert_eq!(updated, 0);
         assert_eq!(
-            store
-                .list_offer_ids_for_watched_coin(&market_p2)
-                .expect("p2"),
+            store.list_offer_ids_for_watched_coin(&coin).expect("coin"),
             vec![offer_id]
         );
         assert!(store

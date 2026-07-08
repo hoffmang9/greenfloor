@@ -122,27 +122,10 @@ pub(super) fn offer_post_persist_record(
     if let Some(p2) = cancel_fields.fixed_delegated_puzzle_hash.clone() {
         watched_p2s.push(p2);
     }
-    // Seed market inventory p2s so transaction-frame puzzle-hash hits can match
-    // maker spends even when Coinset frames omit coin ids.
-    let base = ctx.offer_assets.base_asset_id.trim();
-    let base_asset_id =
-        if base.is_empty() || base.eq_ignore_ascii_case("xch") || base.eq_ignore_ascii_case("txch")
-        {
-            None
-        } else {
-            Some(base)
-        };
-    match crate::coinset::market_inventory_p2s(&ctx.gated.market_row.receive_address, base_asset_id)
-    {
-        Ok(market_p2s) => watched_p2s.extend(market_p2s),
-        Err(err) => {
-            tracing::warn!(
-                market_id = %ctx.gated.market_row.market_id,
-                error = %err,
-                "failed to derive market inventory p2s for offer watches; continuing with cancel-metadata p2s only"
-            );
-        }
-    }
+    // Do not seed shared market inventory receive/CAT outer p2s into per-offer
+    // watches: those hashes are common to every open offer on the market and would
+    // promote all of them on any deposit/spend. Inventory freshness uses
+    // InventoryP2Index separately; lifecycle watch hits need maker-specific keys.
     watched_p2s.sort();
     watched_p2s.dedup();
     Some(OfferPostPersistRecord {

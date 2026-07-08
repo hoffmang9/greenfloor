@@ -190,13 +190,14 @@ pass `include_spent=true` when tracing coin history. Full catalog:
   HTTP webhooks are not used. Operator `websocket_url` query strings are replaced with these
   required filters. Loop and `greenfloord --once` both build the index; config reload rebuilds
   it and reconnects WS so filters stay current.
-- Durable `offer_coin_watches` (maker coins + known maker / market inventory p2s) are
-  registered at post and cleared on terminal lifecycle. Reconcile
-  `sync_offer_watches_for_market` seeds missing watches from cancel metadata and merges
-  market inventory p2s so transaction-frame puzzle-hash hits can match. Optional coin-id
-  fields on transaction frames are also matched when present. Offer-frame `p2s` must not
-  drive watches. Inventory freshness skips blind HTTP polls within 90s when no relevant
-  WS activity.
+- Durable `offer_coin_watches` (maker coins + known maker p2s) are registered
+  atomically at post and cleared on terminal lifecycle. Schema migration backfills
+  missing watches from cancel metadata. Shared market inventory p2s are not written
+  into per-offer watches. Optional coin-id fields on transaction frames are matched
+  when present. Offer-frame `p2s` must not drive watches. Dexie reconcile runs only
+  for Dexie-authoritative offers; Coinset/splash offers skip Dexie HTTP. Dexie list
+  matching uses `trade_id` ∪ bech32 `id`. Inventory freshness skips blind HTTP polls
+  within 90s when no relevant WS activity.
 - Cancel remains `POST /push_tx` + WS watch; do not submit spends over WebSocket.
 - Mainnet frame shape: documented `WsEnvelope` (`message.type` + `message.data`). Non-envelope
   payloads are ignored.

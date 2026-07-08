@@ -6,7 +6,12 @@ use serde_json::Value;
 
 use crate::hex::normalize_hex_id;
 
-fn dexie_offer_lookup_keys(offer_obj: &serde_json::Map<String, Value>) -> Vec<String> {
+/// Lookup keys for matching a Dexie offer payload to local `offer_state.offer_id`.
+///
+/// Prefers normalized 64-hex `trade_id` (canonical Coinset / Dexie trade id), then
+/// Dexie bech32 `id`.
+#[must_use]
+pub fn dexie_offer_lookup_keys(offer_obj: &serde_json::Map<String, Value>) -> Vec<String> {
     let mut keys = Vec::new();
     let mut seen = std::collections::HashSet::new();
     if let Some(trade_id) = offer_obj

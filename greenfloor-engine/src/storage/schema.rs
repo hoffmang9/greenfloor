@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS offer_state (
   fixed_delegated_puzzle_hash TEXT NULL,
   execution_mode TEXT NULL,
   cancel_submitted_tx_id TEXT NULL,
-  cancel_submitted_at TEXT NULL
+  cancel_submitted_at TEXT NULL,
+  publish_venue TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS coin_op_ledger (

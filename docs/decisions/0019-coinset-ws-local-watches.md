@@ -19,16 +19,19 @@ never the operator transport.
 2. **Inbound signals:** Coinset WebSocket only (`events=transaction,offer` +
    `tx_status=pending,confirmed` + stable market `p2` filters). No HTTP webhooks /
    API keys.
-3. **Watches:** durable SQLite `offer_coin_watches` registered at post (maker coins +
-   known maker p2s + market inventory p2s). Reconcile runs one
-   `sync_offer_watches_for_market` pass: seed missing watches from cancel/presplit
-   metadata and merge market inventory p2s so transaction-frame puzzle-hash hits can
-   match. Optional coin-id fields on transaction frames are matched when present. WS
-   offer events and watch hits drive lifecycle transitions directly; Dexie reconcile
-   remains backfill.
-4. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Do not submit
+3. **Watches:** durable SQLite `offer_coin_watches` registered atomically at post
+   (maker coins + known maker p2s such as fixed delegated puzzle hash). Schema
+   migration backfills missing watches from cancel/presplit metadata for pre-upgrade
+   rows. Shared market inventory receive/CAT outer p2s are **not** stored on
+   per-offer watches; `InventoryP2Index` still drives WS filters and inventory
+   freshness. Optional coin-id fields on transaction frames are matched when present.
+   WS offer events and watch hits drive lifecycle transitions directly.
+4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
+   `publish_venue=dexie`, or legacy non-hex ids). Coinset/splash offers skip Dexie
+   HTTP entirely. Dexie list matching uses `trade_id` ∪ bech32 `id`.
+5. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Do not submit
    spends over WebSocket.
-5. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
+6. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
    90s max-staleness and reuse last bucket counts when fresh.
 
 ## Consequences

@@ -4,6 +4,9 @@ use crate::error::SignerResult;
 
 /// Upsert offer lifecycle state for one posted offer record.
 ///
+/// State metadata and durable watches are written in one `SQLite` transaction so a
+/// crash cannot leave an open offer without watch rows.
+///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
@@ -11,25 +14,28 @@ pub fn upsert_offer_post_record(
     store: &SqliteStore,
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
-    store.upsert_offer_state_with_metadata_at(
-        &record.offer_id,
-        &record.market_id,
-        OfferLifecycleState::Open.as_str(),
-        None,
-        &super::sqlite::utcnow_iso(),
-        super::sqlite::OfferCancelWrite {
-            fields: Some(&record.cancel_fields),
-            execution_mode: record.execution_mode,
-            ..Default::default()
-        },
-    )?;
-    store.replace_offer_coin_watches(
-        &record.offer_id,
-        &record.market_id,
-        &record.watched_coin_ids,
-        &record.watched_p2s,
-    )?;
-    Ok(())
+    store.unchecked_transaction_scope("offer_post_record", |store| {
+        store.upsert_offer_state_with_metadata_at(
+            &record.offer_id,
+            &record.market_id,
+            OfferLifecycleState::Open.as_str(),
+            None,
+            &super::sqlite::utcnow_iso(),
+            super::sqlite::OfferCancelWrite {
+                fields: Some(&record.cancel_fields),
+                execution_mode: record.execution_mode,
+                publish_venue: Some(record.publish_venue.as_str()),
+                ..Default::default()
+            },
+        )?;
+        store.replace_offer_coin_watches(
+            &record.offer_id,
+            &record.market_id,
+            &record.watched_coin_ids,
+            &record.watched_p2s,
+        )?;
+        Ok(())
+    })
 }
 
 /// Persist offer post records (`SQLite` offer state only; tracing lives in dispatch layer).
@@ -85,6 +91,13 @@ mod tests {
             .find(|row| row.offer_id == "offer-123")
             .expect("offer row");
         assert_eq!(state.state, "open");
+        assert_eq!(
+            store
+                .offer_publish_venue_for_id("offer-123")
+                .expect("venue")
+                .as_deref(),
+            Some("dexie")
+        );
         let watched = store
             .list_watched_coin_ids_for_market("m1")
             .expect("watches");

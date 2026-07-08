@@ -129,7 +129,7 @@ fn cancel_submitted_status_fallback_transition(
     chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
     match dexie_status {
-        None if summary.has_tx_ids => {
+        None if summary.has_coinset_activity() => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),

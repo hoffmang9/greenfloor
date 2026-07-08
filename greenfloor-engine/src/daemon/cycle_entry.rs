@@ -68,13 +68,7 @@ async fn process_one_market(
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
     let reconcile = crate::cycle_locked!(write_store, |store| {
-        run_reconcile_market_cycle(
-            &store,
-            &resources.dexie,
-            market,
-            &resources.network,
-            resources.coinset.inventory_p2s().as_ref(),
-        )
+        run_reconcile_market_cycle(&store, &resources.dexie, market, &resources.network)
     })?;
     let phase_context = MarketCycleContext {
         resources,

@@ -61,6 +61,9 @@ pub async fn detect_stale_open_offers_for_requeue(
         }
         let market_id = candidate.market_id.trim().to_string();
         let offer_id = candidate.offer_id.trim().to_string();
+        if !store.is_dexie_authoritative_offer(&offer_id)? {
+            continue;
+        }
         let hit = match dexie.get_offer(&offer_id).await {
             Ok(response) => {
                 if response.is_explicit_failure() {

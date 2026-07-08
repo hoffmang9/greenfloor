@@ -13,10 +13,8 @@ use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::build_dexie_size_by_offer_id;
+use super::dexie_size::{build_dexie_size_by_offer_id, dexie_offer_lookup_keys};
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::watchlist::watchlist_offer_ids;
-use crate::daemon::coinset_ws::InventoryP2Index;
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
     transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
@@ -61,18 +59,20 @@ pub(crate) fn apply_reconcile_transition(
         last_seen_status,
         dexie_error,
     } = params;
-    persist_offer_lifecycle_transition(
-        store,
-        market_id,
-        offer_id,
-        transition,
-        last_seen_status,
-        &ReconcilePersistOptions {
-            action: "reconcile_coins_and_offers",
-            venue: Some("dexie"),
-            dexie_error,
-        },
-    )?;
+    if transition.changed || last_seen_status.is_some() {
+        persist_offer_lifecycle_transition(
+            store,
+            market_id,
+            offer_id,
+            transition,
+            last_seen_status,
+            &ReconcilePersistOptions {
+                action: "reconcile_coins_and_offers",
+                venue: Some("dexie"),
+                dexie_error,
+            },
+        )?;
+    }
     if transition.changed {
         state_by_offer_id.insert(
             offer_id.to_string(),
@@ -95,18 +95,27 @@ pub async fn run_reconcile_market_cycle(
     dexie: &DexieClient,
     market: &MarketConfig,
     network: &str,
-    inventory_p2s: &InventoryP2Index,
 ) -> SignerResult<ReconcileMarketCycleResult> {
     let market_id = market.market_id.as_str();
     let mut metrics = ReconcileMarketCycleMetrics::default();
+
+    // Coinset/splash offers are lifecycle-driven by WS + local watches. Dexie HTTP
+    // reconcile is only for Dexie-authoritative watched offers.
+    let dexie_offer_ids: HashSet<String> = store
+        .list_dexie_authoritative_watched_offer_ids(market_id)?
+        .into_iter()
+        .collect();
+    if dexie_offer_ids.is_empty() {
+        return Ok(ReconcileMarketCycleResult {
+            offers: Vec::new(),
+            dexie_size_by_offer_id: HashMap::default(),
+            dexie_fetch_error: None,
+            metrics,
+        });
+    }
+
     let dexie_offered_asset = resolve_trade_asset_for_network(&market.base_asset, network);
     let dexie_requested_asset = resolve_quote_asset_for_offer(&market.quote_asset, network);
-
-    // Upgrade / heal path: one pass seeds missing watches from cancel metadata and
-    // merges market inventory p2s so transaction-frame p2 hits can match maker spends.
-    let _ =
-        store.sync_offer_watches_for_market(market_id, &inventory_p2s.p2s_for_market(market_id))?;
-
     let offers = match dexie
         .get_offers(&dexie_offered_asset, &dexie_requested_asset)
         .await
@@ -131,8 +140,6 @@ pub async fn run_reconcile_market_cycle(
         }
     };
 
-    let our_offer_ids: HashSet<String> =
-        watchlist_offer_ids(store, market_id)?.into_iter().collect();
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()
@@ -144,7 +151,7 @@ pub async fn run_reconcile_market_cycle(
         store,
         market_id,
         &offers,
-        &our_offer_ids,
+        &dexie_offer_ids,
         &mut state_by_offer_id,
         &mut metrics,
     )
@@ -158,28 +165,26 @@ pub async fn run_reconcile_market_cycle(
     let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
 
     for raw in &augmented_offers {
-        let Some(offer_id) = raw
-            .as_object()
-            .and_then(|obj| obj.get("id"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
+        let Some(offer_obj) = raw.as_object() else {
+            continue;
+        };
+        let lookup_keys = dexie_offer_lookup_keys(offer_obj);
+        let Some(local_offer_id) = lookup_keys
+            .iter()
+            .find(|key| dexie_offer_ids.contains(key.as_str()))
+            .cloned()
         else {
             continue;
         };
-        if !our_offer_ids.contains(&offer_id) {
-            continue;
-        }
         let current_state = state_by_offer_id
-            .get(&offer_id)
+            .get(&local_offer_id)
             .map_or("open", String::as_str);
         let (transition, status) =
-            transition_from_list_offer_payload(store, &offer_id, current_state, raw, env)?;
+            transition_from_list_offer_payload(store, &local_offer_id, current_state, raw, env)?;
         apply_reconcile_transition(ReconcileTransitionParams {
             store,
             market_id,
-            offer_id: &offer_id,
+            offer_id: &local_offer_id,
             transition: &transition,
             metrics: &mut metrics,
             state_by_offer_id: &mut state_by_offer_id,
@@ -232,7 +237,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-50", "m1", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-50",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = mockito::Server::new_async().await;
@@ -247,15 +262,10 @@ mod tests {
             .with_body(r#"{"success":false,"error":"Not Found"}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        let result = run_reconcile_market_cycle(
-            &store,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-            &InventoryP2Index::default(),
-        )
-        .await
-        .expect("reconcile");
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -282,6 +292,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconcile_does_not_expire_coinset_offer_on_dexie_404() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let offer_id = "ab".repeat(32);
+        store
+            .upsert_offer_state_with_metadata_at(
+                &offer_id,
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("coinset"),
+                    ..Default::default()
+                },
+            )
+            .expect("seed");
+
+        let mut server = mockito::Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"offers":[]}"#)
+            .create();
+        let _single = server
+            .mock("GET", format!("/v1/offers/{offer_id}").as_str())
+            .with_status(404)
+            .with_body(r#"{"success":false,"error":"Not Found"}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
+
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == offer_id)
+            .expect("offer row");
+        assert_eq!(row.state, "open");
+        assert!(!result.metrics.immediate_requeue_requested);
+    }
+
+    #[tokio::test]
+    async fn reconcile_matches_dexie_trade_id_to_local_offer_id() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let trade_id = "ab".repeat(32);
+        let bech32_id = "7hj4tAYZEm9xTTniZiEVsPZ3mAnWvdposXizL3kDcjvo";
+        store
+            .upsert_offer_state_with_metadata_at(
+                &trade_id,
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
+            .expect("seed");
+
+        let mut server = mockito::Server::new_async().await;
+        let body = format!(
+            r#"{{"success":true,"offers":[{{"id":"{bech32_id}","trade_id":"0x{trade_id}","status":4,"offered":[{{"asset_id":"asset1","amount":50000}}],"requested":[{{"asset_id":"xch","amount":1000}}]}}]}}"#
+        );
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
+
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == trade_id)
+            .expect("offer row");
+        assert_eq!(row.state, "tx_block_confirmed");
+        assert_eq!(row.last_seen_status, Some(4));
+        assert!(result.metrics.immediate_requeue_requested);
+    }
+
+    #[tokio::test]
     async fn reconcile_requests_immediate_requeue_on_dexie_status_confirmed() {
         let dir = tempdir().expect("tempdir");
         let db_path = dir.path().join("state.db");
@@ -299,15 +401,10 @@ mod tests {
             )
             .create();
         let dexie = DexieClient::new(server.url());
-        let result = run_reconcile_market_cycle(
-            &store,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-            &InventoryP2Index::default(),
-        )
-        .await
-        .expect("reconcile");
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -330,6 +427,19 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state_with_metadata_at(
+                "offer-open",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
+            .expect("seed");
 
         let mut server = mockito::Server::new_async().await;
         let _list = server
@@ -341,15 +451,9 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        run_reconcile_market_cycle(
-            &store,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-            &InventoryP2Index::default(),
-        )
-        .await
-        .expect("reconcile");
+        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+            .await
+            .expect("reconcile");
     }
 
     #[tokio::test]
@@ -368,15 +472,9 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[{"id":"offer-open","status":5}]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        run_reconcile_market_cycle(
-            &store,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-            &InventoryP2Index::default(),
-        )
-        .await
-        .expect("reconcile");
+        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+            .await
+            .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows

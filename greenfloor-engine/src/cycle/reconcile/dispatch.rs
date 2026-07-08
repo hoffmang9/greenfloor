@@ -99,7 +99,7 @@ pub(crate) fn apply_watched_offer_dispatch(
     status: Option<i64>,
     current_state: &ReconcileState,
 ) -> ReconcileTransition {
-    let status = StatusClass::from_option(status, coinset.has_tx_ids);
+    let status = StatusClass::from_option(status, coinset.has_coinset_activity());
     dispatch(coinset, status, current_state).apply(current_state)
 }
 
@@ -108,7 +108,7 @@ pub(crate) fn apply_coinset_taker_dispatch_if_present(
     dexie_status: Option<i64>,
     current_state: &ReconcileState,
 ) -> Option<ReconcileTransition> {
-    let status = StatusClass::from_option(dexie_status, coinset.has_tx_ids);
+    let status = StatusClass::from_option(dexie_status, coinset.has_coinset_activity());
     let selected = dispatch(coinset, status, current_state);
     match selected {
         ReconcileDispatch::CoinsetConfirmed | ReconcileDispatch::CoinsetMempool => {

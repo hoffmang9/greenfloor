@@ -56,9 +56,97 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     add_column_if_missing(conn, "offer_state", "execution_mode", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_tx_id", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_at", "TEXT NULL")?;
+    add_column_if_missing(conn, "offer_state", "publish_venue", "TEXT NULL")?;
     ensure_offer_coin_watches_table(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
+    // One-shot upgrade: seed missing watches from cancel metadata for open offers
+    // that predate durable offer_coin_watches. Post path is now atomic, so this is
+    // not needed on the reconcile hot path.
+    backfill_missing_offer_coin_watches(conn)?;
+    Ok(())
+}
+
+fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
+    // Watched lifecycle states that should have durable watches when cancel metadata exists.
+    let mut stmt = conn
+        .prepare(
+            r"
+            SELECT offer_id, market_id, presplit_input_coin_id, fixed_delegated_puzzle_hash
+            FROM offer_state
+            WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility', 'cancel_submitted')
+              AND NOT EXISTS (
+                SELECT 1 FROM offer_coin_watches w WHERE w.offer_id = offer_state.offer_id
+              )
+              AND (
+                (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
+                OR (fixed_delegated_puzzle_hash IS NOT NULL AND length(trim(fixed_delegated_puzzle_hash)) > 0)
+              )
+            ",
+        )
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to prepare offer_coin_watches backfill query: {err}"
+            ))
+        })?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to query offer_coin_watches backfill rows: {err}"
+            ))
+        })?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for row in rows {
+        let (offer_id, market_id, input_coin, delegated_p2) = row.map_err(|err| {
+            SignerError::Other(format!(
+                "failed to read offer_coin_watches backfill row: {err}"
+            ))
+        })?;
+        if let Some(coin_id) = input_coin
+            .as_deref()
+            .map(crate::hex::normalize_hex_id)
+            .filter(|value| value.len() == 64)
+        {
+            conn.execute(
+                r"
+                INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+                VALUES (?1, ?2, ?3, 'coin', ?4)
+                ",
+                params![coin_id, offer_id, market_id, now],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to backfill offer_coin_watches coin for {offer_id}: {err}"
+                ))
+            })?;
+        }
+        if let Some(p2_id) = delegated_p2
+            .as_deref()
+            .map(crate::hex::normalize_hex_id)
+            .filter(|value| value.len() == 64)
+        {
+            conn.execute(
+                r"
+                INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+                VALUES (?1, ?2, ?3, 'p2', ?4)
+                ",
+                params![p2_id, offer_id, market_id, now],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to backfill offer_coin_watches p2 for {offer_id}: {err}"
+                ))
+            })?;
+        }
+    }
     Ok(())
 }
 
