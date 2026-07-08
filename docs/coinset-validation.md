@@ -9,7 +9,10 @@ GreenFloor operator coin ops use the native manager (`greenfloor-manager coins-l
 - Coinset IO uses `greenfloor-engine coinset` (`post` and `push-tx` subcommands).
 - Vault identity and launcher resolution use Rust config load (`program.yaml` via
   `--program-config`). Legacy `cloud_wallet:` blocks are rejected at Rust config load.
-- Use Coinset CLI for spot verification against engine output when debugging.
+- Use Coinset CLI or the **Coinset MCP server** (`.cursor/mcp.json` → `https://mcp.coinset.org/`) for spot
+  verification against engine output when debugging. MCP is read-only (no `push_tx`);
+  see `docs/COINSET_DOCS_AND_API.md` → **Coinset MCP Server** for tool catalog and
+  operating rules. Enable **coinset** in Cursor Settings → MCP after cloning the repo.
 
 ## 1) Probe endpoint capabilities
 
@@ -159,6 +162,24 @@ coinset get_coin_record_by_name <coin_id_hex>
 ```
 
 Reference: [coinset CLI SKILL.md](https://raw.githubusercontent.com/coinset-org/cli/refs/heads/main/SKILL.md)
+
+### MCP parity checks (read-only, agent/IDE)
+
+When debugging from Cursor or another MCP client, equivalent spot checks:
+
+| Goal                      | MCP tool                | Key parameters                                                |
+| ------------------------- | ----------------------- | ------------------------------------------------------------- |
+| Coins at puzzle hash      | `find_coins`            | `by=puzzle_hash`, `id=<hex or address>`, `include_spent=true` |
+| Coins by hint             | `find_coins`            | `by=hint`, `id=<hint hex>`, `include_spent=true`              |
+| Single coin record        | `find_coins`            | `by=name`, `id=<coin_id_hex>`                                 |
+| Address balance           | `get_address_balance`   | `address=<xch1…>`                                             |
+| Mempool tx ids            | `mempool`               | `action=list`                                                 |
+| Tx lifecycle after submit | `wait_for_confirmation` | `tx_id=<0x-hex>`                                              |
+| Offer decode              | `decode_offer`          | `offer=offer1…`                                               |
+
+MCP operating rules: always check `success`; prefer confirmed block data over mempool;
+pass `include_spent=true` when tracing coin history. Full catalog:
+`docs/COINSET_DOCS_AND_API.md` → **Coinset MCP Server**.
 
 ## 7) Failure handling
 
