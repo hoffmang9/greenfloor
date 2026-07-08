@@ -176,12 +176,15 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
   - `tx_status=pending,confirmed`
   - repeatable `p2=<puzzle_hash>` for each enabled market receive puzzle and CAT outer hash
     (CAT id from hex `base_asset` or `cats.yaml` ticker index)
-- Documented `transaction` frames carry tx `ids` + `p2s` (not coin ids). Offer frames carry `offer_id` + `status` (+ optional `tx_id` / `p2s`).
+- Documented `transaction` frames carry tx `ids` + `p2s`. Optional coin-name fields
+  (`coin_ids` / `removals` / …) are parsed when present but are not required by Coinset docs.
+  Offer frames carry `offer_id` + `status` (+ optional `tx_id` / `p2s`).
 - Non-envelope / legacy flat payloads are ignored. Mainnet operators should confirm live frames match this envelope.
 - Frame routing (GreenFloor):
   - **Transaction** frames: record tx signals; inventory `p2` hits mark markets stale (90s
-    freshness gate); durable `offer_coin_watches` hits drive `mempool_observed` via reconcile.
-    HTTP enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
+    freshness gate); durable `offer_coin_watches` hits (p2 and/or coin id) drive
+    `mempool_observed` via reconcile. HTTP enrichment uses
+    `get_coin_records_by_puzzle_hashes` when needed.
   - **Offer** frames: drive offer lifecycle by `offer_id` / status only. Offer-frame `p2s`
     must **not** mark inventory stale or apply watch-hit lifecycle.
 - HTTP webhooks are out of scope; cancel and other spends use `POST /push_tx`, not the WebSocket.

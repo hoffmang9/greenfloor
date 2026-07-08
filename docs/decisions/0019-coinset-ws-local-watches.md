@@ -20,8 +20,12 @@ never the operator transport.
    `tx_status=pending,confirmed` + stable market `p2` filters). No HTTP webhooks /
    API keys.
 3. **Watches:** durable SQLite `offer_coin_watches` registered at post (maker coins +
-   known maker p2s). WS offer events and watch hits drive lifecycle transitions
-   directly; Dexie reconcile remains backfill.
+   known maker p2s + market inventory p2s). Reconcile runs one
+   `sync_offer_watches_for_market` pass: seed missing watches from cancel/presplit
+   metadata and merge market inventory p2s so transaction-frame puzzle-hash hits can
+   match. Optional coin-id fields on transaction frames are matched when present. WS
+   offer events and watch hits drive lifecycle transitions directly; Dexie reconcile
+   remains backfill.
 4. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Do not submit
    spends over WebSocket.
 5. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within

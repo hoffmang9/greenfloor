@@ -19,6 +19,8 @@ pub struct WsTransactionEvent {
     pub status: String,
     pub tx_ids: Vec<String>,
     pub p2s: Vec<String>,
+    /// Optional coin names when present on the frame (not guaranteed by Coinset docs).
+    pub coin_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +32,20 @@ pub enum WsEvent {
 /// Coinset puzzle-hash field names on transaction/offer data objects.
 const P2_KEYS: &[&str] = &["p2s", "incoming_p2s", "outgoing_p2s", "maker_p2s", "p2"];
 
+/// Optional coin-name field names on transaction data objects.
+const COIN_ID_KEYS: &[&str] = &[
+    "coin_ids",
+    "coinIds",
+    "coins",
+    "coin_names",
+    "coinNames",
+    "removals",
+    "spent_coins",
+    "spentCoins",
+    "input_coins",
+    "inputCoins",
+];
+
 fn push_hex64(raw: &str, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     let normalized = normalize_hex_id(raw);
     if normalized.len() == 64 && seen.insert(normalized.clone()) {
@@ -37,27 +53,34 @@ fn push_hex64(raw: &str, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     }
 }
 
-fn collect_p2s(value: &Value, out: &mut Vec<String>, seen: &mut HashSet<String>) {
+fn collect_hex64(value: &Value, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     match value {
         Value::String(raw) => push_hex64(raw, out, seen),
         Value::Array(items) => {
             for item in items {
-                collect_p2s(item, out, seen);
+                collect_hex64(item, out, seen);
+            }
+        }
+        Value::Object(obj) => {
+            for key in ["id", "coin_id", "coinId", "name", "coin_name", "coinName"] {
+                if let Some(Value::String(raw)) = obj.get(key) {
+                    push_hex64(raw, out, seen);
+                }
             }
         }
         _ => {}
     }
 }
 
-fn p2s_from_object(obj: &serde_json::Map<String, Value>) -> Vec<String> {
-    let mut p2s = Vec::new();
+fn hex64_list_from_object(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for key in P2_KEYS {
+    for key in keys {
         if let Some(value) = obj.get(*key) {
-            collect_p2s(value, &mut p2s, &mut seen);
+            collect_hex64(value, &mut out, &mut seen);
         }
     }
-    p2s
+    out
 }
 
 fn tx_ids_from_data(data: &Value) -> Vec<String> {
@@ -80,11 +103,20 @@ fn parse_transaction(data: &Value) -> WsTransactionEvent {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    let p2s = data.as_object().map(p2s_from_object).unwrap_or_default();
+    let (p2s, coin_ids) = data
+        .as_object()
+        .map(|obj| {
+            (
+                hex64_list_from_object(obj, P2_KEYS),
+                hex64_list_from_object(obj, COIN_ID_KEYS),
+            )
+        })
+        .unwrap_or_default();
     WsTransactionEvent {
         status,
         tx_ids: tx_ids_from_data(data),
         p2s,
+        coin_ids,
     }
 }
 
@@ -108,7 +140,10 @@ fn parse_offer(data: &Value) -> Option<WsOfferEvent> {
         .and_then(Value::as_str)
         .map(normalize_hex_id)
         .filter(|value| value.len() == 64);
-    let p2s = data.as_object().map(p2s_from_object).unwrap_or_default();
+    let p2s = data
+        .as_object()
+        .map(|obj| hex64_list_from_object(obj, P2_KEYS))
+        .unwrap_or_default();
     Some(WsOfferEvent {
         offer_id,
         status,
@@ -154,6 +189,7 @@ mod tests {
                 assert_eq!(event.status, "pending");
                 assert_eq!(event.tx_ids, vec![tx.clone()]);
                 assert_eq!(event.p2s, vec!["cd".repeat(32)]);
+                assert!(event.coin_ids.is_empty());
             }
             WsEvent::Offer(_) => panic!("expected transaction"),
         }
@@ -168,6 +204,28 @@ mod tests {
             WsEvent::Transaction(event) => {
                 assert_eq!(event.status, "confirmed");
                 assert_eq!(event.tx_ids, vec![tx]);
+            }
+            WsEvent::Offer(_) => panic!("expected transaction"),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_transaction_collects_optional_coin_ids() {
+        let tx = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let payload = json!({
+            "message": {
+                "type": "transaction",
+                "data": {
+                    "status": "pending",
+                    "ids": [tx],
+                    "removals": [{"coin_id": format!("0x{coin}")}]
+                }
+            }
+        });
+        match parse_ws_event(&payload).expect("event") {
+            WsEvent::Transaction(event) => {
+                assert_eq!(event.coin_ids, vec![coin]);
             }
             WsEvent::Offer(_) => panic!("expected transaction"),
         }

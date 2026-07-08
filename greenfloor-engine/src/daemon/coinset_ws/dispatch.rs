@@ -97,24 +97,29 @@ fn record_ws_confirmed_tx_ids(
     )
 }
 
-fn record_observed_p2s(
+fn record_observed_watch_keys(
     store: &SqliteStore,
     ctx: &CoinsetProcessContext,
     observed_p2s: &[String],
+    observed_coin_ids: &[String],
 ) -> SignerResult<()> {
     let inventory_markets = ctx.inventory_p2s().market_ids_for_p2s(observed_p2s);
     for market_id in &inventory_markets {
         ctx.inventory_freshness.mark_stale(market_id);
     }
-    let watch_markets = store.list_market_ids_for_watched_keys(observed_p2s)?;
-    apply_watch_hits_batch(store, observed_p2s)?;
+    let mut watch_keys: Vec<String> = observed_p2s
+        .iter()
+        .chain(observed_coin_ids.iter())
+        .cloned()
+        .collect();
+    watch_keys.sort();
+    watch_keys.dedup();
+    let watch_markets = store.list_market_ids_for_watched_keys(&watch_keys)?;
+    apply_watch_hits_batch(store, &watch_keys)?;
     if inventory_markets.is_empty() && watch_markets.is_empty() {
         return Ok(());
     }
-    let mut sample: Vec<String> = observed_p2s
-        .iter()
-        .map(|key| normalize_hex_id(key))
-        .collect();
+    let mut sample: Vec<String> = watch_keys.iter().map(|key| normalize_hex_id(key)).collect();
     sample.sort();
     sample.truncate(10);
     let mut market_ids = inventory_markets;
@@ -126,7 +131,8 @@ fn record_observed_p2s(
         COIN_WATCH_HIT,
         &json!({
             "p2_count": observed_p2s.len(),
-            "p2s_sample": sample,
+            "coin_id_count": observed_coin_ids.len(),
+            "keys_sample": sample,
             "market_ids": market_ids,
             "source": "coinset_websocket",
         }),
@@ -150,8 +156,8 @@ pub(crate) fn apply_ws_event(
                 }
                 _ => {}
             }
-            if !tx.p2s.is_empty() {
-                record_observed_p2s(store, ctx, &tx.p2s)?;
+            if !tx.p2s.is_empty() || !tx.coin_ids.is_empty() {
+                record_observed_watch_keys(store, ctx, &tx.p2s, &tx.coin_ids)?;
             }
         }
         WsEvent::Offer(offer) => {

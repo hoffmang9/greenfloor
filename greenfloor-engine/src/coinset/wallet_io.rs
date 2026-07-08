@@ -137,6 +137,59 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
     Ok(to_coinset_hex(&cat_outer))
 }
 
+/// Inventory puzzle hashes for one market receive address (inner + optional CAT outer).
+///
+/// `base_asset_id` should already be a resolved CAT asset id. Pass `None` (or xch/txch)
+/// for XCH-only markets.
+///
+/// # Errors
+///
+/// Returns an error if the receive address is empty or cannot be decoded, or if a CAT
+/// outer hash cannot be derived when a non-XCH base asset id is provided.
+pub fn market_inventory_p2s(
+    receive_address: &str,
+    base_asset_id: Option<&str>,
+) -> SignerResult<Vec<String>> {
+    let receive = receive_address.trim();
+    if receive.is_empty() {
+        return Err(SignerError::Other(
+            "receive_address is required for market inventory p2s".to_string(),
+        ));
+    }
+    let mut p2s = Vec::new();
+    let mut seen = HashSet::new();
+    let inner = normalize_hex_id(&puzzle_hash_hex_for_receive_address(receive)?);
+    if inner.len() != 64 {
+        return Err(SignerError::Other(format!(
+            "receive puzzle hash for `{receive}` is not 64 hex chars (len={})",
+            inner.len()
+        )));
+    }
+    seen.insert(inner.clone());
+    p2s.push(inner);
+
+    let Some(base) = base_asset_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(p2s);
+    };
+    if base.eq_ignore_ascii_case("xch") || base.eq_ignore_ascii_case("txch") {
+        return Ok(p2s);
+    }
+    let outer = normalize_hex_id(&cat_outer_puzzle_hash_hex(receive, base)?);
+    if outer.len() != 64 {
+        return Err(SignerError::Other(format!(
+            "CAT outer puzzle hash for `{receive}` / `{base}` is not 64 hex chars (len={})",
+            outer.len()
+        )));
+    }
+    if seen.insert(outer.clone()) {
+        p2s.push(outer);
+    }
+    Ok(p2s)
+}
+
 /// Extract coin id hints from offer text.
 ///
 /// # Errors

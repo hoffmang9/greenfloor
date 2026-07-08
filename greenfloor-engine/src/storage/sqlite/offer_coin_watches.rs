@@ -195,6 +195,130 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Sync durable watches for watched lifecycle offers in one market pass.
+    ///
+    /// - No watch rows yet: seed from cancel/presplit metadata plus market inventory p2s
+    ///   (upgrade path when watches did not exist at post time).
+    /// - Already has watches: merge any missing market inventory p2s so transaction-frame
+    ///   puzzle-hash hits can match maker spends.
+    ///
+    /// Idempotent. Returns the number of offers whose watch rows were written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads or writes fail.
+    pub fn sync_offer_watches_for_market(
+        &self,
+        market_id: &str,
+        market_p2s: &[String],
+    ) -> SignerResult<u64> {
+        let clean_market = market_id.trim();
+        if clean_market.is_empty() {
+            return Ok(0);
+        }
+        let normalized_market_p2s: Vec<String> = market_p2s
+            .iter()
+            .map(|p2| normalize_hex_id(p2))
+            .filter(|p2| p2.len() == 64)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let rows = self.list_offer_states(Some(clean_market), 5000)?;
+        let mut updated = 0u64;
+        for row in rows {
+            let Ok(state) = crate::cycle::ReconcileState::parse(&row.state) else {
+                continue;
+            };
+            if !state.is_watched_for_reconcile() {
+                continue;
+            }
+            let existing_coins = self.list_watched_coin_ids_for_offer(&row.offer_id)?;
+            let existing_p2s = self.list_watched_p2s_for_offer(&row.offer_id)?;
+            let has_watch = !existing_coins.is_empty() || !existing_p2s.is_empty();
+
+            let (coins, mut p2s) = if has_watch {
+                (existing_coins.clone(), existing_p2s.clone())
+            } else if let Some(meta) = self.offer_cancel_metadata_for_id(&row.offer_id)? {
+                let mut coins = Vec::new();
+                if let Some(coin) = meta.fields.input_coin_id {
+                    coins.push(coin);
+                }
+                let mut p2s = Vec::new();
+                if let Some(p2) = meta.fields.fixed_delegated_puzzle_hash {
+                    p2s.push(normalize_hex_id(&p2));
+                }
+                (coins, p2s)
+            } else {
+                if normalized_market_p2s.is_empty() {
+                    continue;
+                }
+                (Vec::new(), Vec::new())
+            };
+
+            for p2 in &normalized_market_p2s {
+                if !p2s.iter().any(|existing| existing == p2) {
+                    p2s.push(p2.clone());
+                }
+            }
+            if has_watch {
+                if coins == existing_coins && p2s == existing_p2s {
+                    continue;
+                }
+            } else if coins.is_empty() && p2s.is_empty() {
+                continue;
+            }
+            self.replace_offer_coin_watches(&row.offer_id, &row.market_id, &coins, &p2s)?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
+
+    fn list_watched_coin_ids_for_offer(&self, offer_id: &str) -> SignerResult<Vec<String>> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT coin_id FROM offer_coin_watches WHERE offer_id = ?1 AND kind = 'coin'")
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches offer coins: {err}")))?;
+        let rows = stmt
+            .query_map(params![clean], |row| row.get::<_, String>(0))
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches offer coins query: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches offer coins row: {err}"))
+            })?);
+        }
+        Ok(out)
+    }
+
+    fn list_watched_p2s_for_offer(&self, offer_id: &str) -> SignerResult<Vec<String>> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT coin_id FROM offer_coin_watches WHERE offer_id = ?1 AND kind = 'p2'")
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches offer p2s: {err}")))?;
+        let rows = stmt
+            .query_map(params![clean], |row| row.get::<_, String>(0))
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches offer p2s query: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches offer p2s row: {err}"))
+            })?);
+        }
+        Ok(out)
+    }
+
     /// List offer state rows watching any of the given coin/p2 keys (deduped by `offer_id`).
     ///
     /// # Errors
@@ -393,5 +517,95 @@ mod tests {
             .collect();
         assert_eq!(by_id.remove(&offer_a).as_deref(), Some("open"));
         assert_eq!(by_id.remove(&offer_b).as_deref(), Some("mempool_observed"));
+    }
+
+    #[test]
+    fn sync_offer_watches_seeds_from_cancel_metadata_and_merges_market_p2s() {
+        use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+        use crate::storage::sqlite::OfferCancelWrite;
+
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let meta_p2 = "ef".repeat(32);
+        let market_p2 = "11".repeat(32);
+        let fields = PresplitCancelFields {
+            input_coin_id: Some(coin.clone()),
+            fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
+        };
+        store
+            .upsert_offer_state_with_metadata_at(
+                &offer_id,
+                "m1",
+                "open",
+                None,
+                &super::utcnow_iso(),
+                OfferCancelWrite {
+                    fields: Some(&fields),
+                    execution_mode: Some(OfferExecutionMode::PresplitExisting),
+                    ..OfferCancelWrite::default()
+                },
+            )
+            .expect("upsert metadata");
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("empty")
+            .is_empty());
+
+        let updated = store
+            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
+            .expect("sync");
+        assert_eq!(updated, 1);
+        let watched = store.list_watched_coin_ids_for_market("m1").expect("coins");
+        assert!(watched.contains(&coin));
+        assert!(!watched.contains(&meta_p2));
+        assert!(!watched.contains(&market_p2));
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&meta_p2)
+                .expect("meta p2"),
+            vec![offer_id.clone()]
+        );
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&market_p2)
+                .expect("market p2"),
+            vec![offer_id.clone()]
+        );
+
+        let updated_again = store
+            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
+            .expect("idempotent");
+        assert_eq!(updated_again, 0);
+    }
+
+    #[test]
+    fn sync_offer_watches_merges_inventory_p2s_onto_existing_coin_watches() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let market_p2 = "ef".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+            .expect("coin watch");
+        let updated = store
+            .sync_offer_watches_for_market("m1", std::slice::from_ref(&market_p2))
+            .expect("sync");
+        assert_eq!(updated, 1);
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&market_p2)
+                .expect("p2"),
+            vec![offer_id]
+        );
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("coins")
+            .contains(&coin));
     }
 }

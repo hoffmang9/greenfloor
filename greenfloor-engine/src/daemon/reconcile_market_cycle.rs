@@ -16,6 +16,7 @@ use crate::storage::SqliteStore;
 use super::dexie_size::build_dexie_size_by_offer_id;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::watchlist::watchlist_offer_ids;
+use crate::daemon::coinset_ws::InventoryP2Index;
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
     transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
@@ -94,11 +95,17 @@ pub async fn run_reconcile_market_cycle(
     dexie: &DexieClient,
     market: &MarketConfig,
     network: &str,
+    inventory_p2s: &InventoryP2Index,
 ) -> SignerResult<ReconcileMarketCycleResult> {
     let market_id = market.market_id.as_str();
     let mut metrics = ReconcileMarketCycleMetrics::default();
     let dexie_offered_asset = resolve_trade_asset_for_network(&market.base_asset, network);
     let dexie_requested_asset = resolve_quote_asset_for_offer(&market.quote_asset, network);
+
+    // Upgrade / heal path: one pass seeds missing watches from cancel metadata and
+    // merges market inventory p2s so transaction-frame p2 hits can match maker spends.
+    let _ =
+        store.sync_offer_watches_for_market(market_id, &inventory_p2s.p2s_for_market(market_id))?;
 
     let offers = match dexie
         .get_offers(&dexie_offered_asset, &dexie_requested_asset)
@@ -240,10 +247,15 @@ mod tests {
             .with_body(r#"{"success":false,"error":"Not Found"}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        let result =
-            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
-                .await
-                .expect("reconcile");
+        let result = run_reconcile_market_cycle(
+            &store,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+            &InventoryP2Index::default(),
+        )
+        .await
+        .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -287,10 +299,15 @@ mod tests {
             )
             .create();
         let dexie = DexieClient::new(server.url());
-        let result =
-            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
-                .await
-                .expect("reconcile");
+        let result = run_reconcile_market_cycle(
+            &store,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+            &InventoryP2Index::default(),
+        )
+        .await
+        .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -324,9 +341,15 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
-            .await
-            .expect("reconcile");
+        run_reconcile_market_cycle(
+            &store,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+            &InventoryP2Index::default(),
+        )
+        .await
+        .expect("reconcile");
     }
 
     #[tokio::test]
@@ -345,9 +368,15 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[{"id":"offer-open","status":5}]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
-            .await
-            .expect("reconcile");
+        run_reconcile_market_cycle(
+            &store,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+            &InventoryP2Index::default(),
+        )
+        .await
+        .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows

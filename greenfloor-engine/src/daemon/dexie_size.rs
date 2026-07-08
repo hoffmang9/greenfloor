@@ -6,6 +6,38 @@ use serde_json::Value;
 
 use crate::hex::normalize_hex_id;
 
+fn dexie_offer_lookup_keys(offer_obj: &serde_json::Map<String, Value>) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Some(trade_id) = offer_obj
+        .get("trade_id")
+        .and_then(Value::as_str)
+        .map(normalize_hex_id)
+        .filter(|value| value.len() == 64)
+    {
+        if seen.insert(trade_id.clone()) {
+            keys.push(trade_id);
+        }
+    }
+    if let Some(id) = offer_obj
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    {
+        if seen.insert(id.clone()) {
+            keys.push(id);
+        }
+    }
+    keys
+}
+
+/// Build offered-base size by offer id for strategy / pending-visibility lookups.
+///
+/// Indexes both normalized Dexie `trade_id` (64-hex) and Dexie bech32 `id` so lookups
+/// succeed whether local `offer_state.offer_id` is the canonical trade id or the
+/// venue list id.
 pub fn build_dexie_size_by_offer_id(offers: &[Value], base_asset_id: &str) -> HashMap<String, i64> {
     let clean_base = base_asset_id.trim().to_ascii_lowercase();
     let mut result = HashMap::default();
@@ -13,13 +45,8 @@ pub fn build_dexie_size_by_offer_id(offers: &[Value], base_asset_id: &str) -> Ha
         let Some(offer_obj) = offer.as_object() else {
             continue;
         };
-        let offer_id = offer_obj
-            .get("trade_id")
-            .and_then(Value::as_str)
-            .map(normalize_hex_id)
-            .filter(|value| value.len() == 64)
-            .unwrap_or_default();
-        if offer_id.is_empty() {
+        let keys = dexie_offer_lookup_keys(offer_obj);
+        if keys.is_empty() {
             continue;
         }
         let Some(offered) = offer_obj.get("offered").and_then(Value::as_array) else {
@@ -40,7 +67,9 @@ pub fn build_dexie_size_by_offer_id(offers: &[Value], base_asset_id: &str) -> Ha
             }
             if let Some(size) = item_obj.get("amount").and_then(Value::as_i64) {
                 if size > 0 {
-                    result.insert(offer_id.clone(), size);
+                    for key in &keys {
+                        result.insert(key.clone(), size);
+                    }
                 }
             }
         }
@@ -54,14 +83,26 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn builds_dexie_size_map_prefers_trade_id() {
+    fn builds_dexie_size_map_indexes_trade_id_and_bech32_id() {
         let trade_id = "ab".repeat(32);
+        let bech32_id = "7hj4tAYZEm9xTTniZiEVsPZ3mAnWvdposXizL3kDcjvo";
         let offers = vec![json!({
-            "id": "7hj4tAYZEm9xTTniZiEVsPZ3mAnWvdposXizL3kDcjvo",
+            "id": bech32_id,
             "trade_id": format!("0x{trade_id}"),
             "offered": [{"id": "base", "amount": 5}]
         })];
         let sizes = build_dexie_size_by_offer_id(&offers, "base");
         assert_eq!(sizes.get(&trade_id).copied(), Some(5));
+        assert_eq!(sizes.get(bech32_id).copied(), Some(5));
+    }
+
+    #[test]
+    fn builds_dexie_size_map_from_id_only_when_trade_id_absent() {
+        let offers = vec![json!({
+            "id": "offer-1",
+            "offered": [{"id": "asset1", "amount": 5}]
+        })];
+        let sizes = build_dexie_size_by_offer_id(&offers, "asset1");
+        assert_eq!(sizes.get("offer-1").copied(), Some(5));
     }
 }

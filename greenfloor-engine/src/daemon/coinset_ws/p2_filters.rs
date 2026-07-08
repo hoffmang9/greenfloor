@@ -4,12 +4,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::coinset::{cat_outer_puzzle_hash_hex, puzzle_hash_hex_for_receive_address};
+use crate::coinset::market_inventory_p2s;
 use crate::config::{
     load_markets_config_with_overlay, lookup_asset_id_from_ticker, operator_ticker_index_from_paths,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::hex::normalize_hex_id;
 use crate::offer::assets::normalize_asset_id;
 
 /// Process-wide inventory p2 set plus reverse map for freshness invalidation.
@@ -42,49 +41,27 @@ impl InventoryP2Index {
                     market.market_id
                 )));
             }
-            let inner = normalize_hex_id(&puzzle_hash_hex_for_receive_address(receive)?);
-            if inner.len() == 64 {
-                markets_by_p2
-                    .entry(inner)
-                    .or_default()
-                    .insert(market.market_id.clone());
-            } else {
-                tracing::warn!(
-                    market_id = %market.market_id,
-                    puzzle_hash_len = inner.len(),
-                    "skipping non-64-char receive puzzle hash for inventory p2 index"
-                );
-            }
-
             let base = market.base_asset.trim();
-            if base.is_empty()
+            let base_asset_id = if base.is_empty()
                 || base.eq_ignore_ascii_case("xch")
                 || base.eq_ignore_ascii_case("txch")
             {
-                continue;
-            }
-            let asset_id = if let Ok(normalized) = normalize_asset_id(base) {
-                normalized
+                None
+            } else if let Ok(normalized) = normalize_asset_id(base) {
+                Some(normalized)
             } else if let Some(resolved) = lookup_asset_id_from_ticker(&ticker_index, base)? {
-                normalize_asset_id(&resolved)?
+                Some(normalize_asset_id(&resolved)?)
             } else {
                 return Err(SignerError::Other(format!(
                     "market {} base_asset `{base}` could not be resolved to a CAT asset id for ws p2 filters",
                     market.market_id
                 )));
             };
-            let outer = normalize_hex_id(&cat_outer_puzzle_hash_hex(receive, &asset_id)?);
-            if outer.len() == 64 {
+            for p2 in market_inventory_p2s(receive, base_asset_id.as_deref())? {
                 markets_by_p2
-                    .entry(outer)
+                    .entry(p2)
                     .or_default()
                     .insert(market.market_id.clone());
-            } else {
-                tracing::warn!(
-                    market_id = %market.market_id,
-                    puzzle_hash_len = outer.len(),
-                    "skipping non-64-char CAT outer puzzle hash for inventory p2 index"
-                );
             }
         }
         let p2s: Vec<String> = markets_by_p2.keys().cloned().collect();
@@ -112,11 +89,28 @@ impl InventoryP2Index {
     pub fn market_ids_for_p2s(&self, observed_p2s: &[String]) -> Vec<String> {
         let mut markets = BTreeSet::new();
         for p2 in observed_p2s {
-            let normalized = normalize_hex_id(p2);
+            let normalized = crate::hex::normalize_hex_id(p2);
             if let Some(ids) = self.markets_by_p2.get(&normalized) {
                 markets.extend(ids.iter().cloned());
             }
         }
         markets.into_iter().collect()
+    }
+
+    /// Inventory p2s registered for one market id.
+    #[must_use]
+    pub fn p2s_for_market(&self, market_id: &str) -> Vec<String> {
+        let clean = market_id.trim();
+        if clean.is_empty() {
+            return Vec::new();
+        }
+        let mut p2s: Vec<String> = self
+            .markets_by_p2
+            .iter()
+            .filter(|(_, markets)| markets.iter().any(|id| id == clean))
+            .map(|(p2, _)| p2.clone())
+            .collect();
+        p2s.sort();
+        p2s
     }
 }
