@@ -197,8 +197,7 @@ pub async fn run_daemon_cycle_once(
             resources.program(),
             &store,
             &request.coinset_base_url,
-            resources.inventory_p2s.as_ref(),
-            &resources.inventory_freshness,
+            resources.coinset.as_ref(),
             request.poll_coinset_mempool,
             request.use_websocket_capture,
         )

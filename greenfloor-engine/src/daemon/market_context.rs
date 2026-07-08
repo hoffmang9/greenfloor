@@ -8,9 +8,8 @@ use crate::config::{
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
 
-use super::coinset_ws::InventoryP2Index;
+use super::coinset_ws::{CoinsetProcessContext, InventoryP2Index};
 use super::cycle_paths::DaemonCyclePaths;
-use super::inventory_freshness::InventoryFreshnessCache;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
 
@@ -24,9 +23,8 @@ pub struct DaemonCycleResources {
     pub network: String,
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
-    pub inventory_freshness: Arc<InventoryFreshnessCache>,
-    /// Stable maker/inventory p2 index for WS filters and freshness.
-    pub inventory_p2s: Arc<InventoryP2Index>,
+    /// Process-scoped Coinset WS inventory filters + freshness.
+    pub coinset: Arc<CoinsetProcessContext>,
     pub ticker_index: CatTickerIndex,
 }
 
@@ -70,8 +68,7 @@ impl DaemonCycleResources {
         network: String,
         dexie: DexieClient,
         paths: DaemonCyclePaths,
-        inventory_freshness: Arc<InventoryFreshnessCache>,
-        inventory_p2s: Arc<InventoryP2Index>,
+        coinset: Arc<CoinsetProcessContext>,
         ticker_index: CatTickerIndex,
     ) -> Self {
         Self {
@@ -80,8 +77,7 @@ impl DaemonCycleResources {
             network,
             dexie,
             paths,
-            inventory_freshness,
-            inventory_p2s,
+            coinset,
             ticker_index,
         }
     }
@@ -152,14 +148,17 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     )?;
     super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
     let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
-    let inventory_freshness = request.inventory_freshness.clone();
-    let inventory_p2s = if request.inventory_p2s.p2s().is_empty() {
-        InventoryP2Index::from_markets(
+    let coinset = if request.coinset.inventory_p2s.p2s().is_empty() {
+        let inventory_p2s = InventoryP2Index::from_markets(
             &request.markets_path,
             request.testnet_markets_path.as_deref(),
-        )?
+        )?;
+        CoinsetProcessContext::new(
+            inventory_p2s,
+            Arc::clone(&request.coinset.inventory_freshness),
+        )
     } else {
-        request.inventory_p2s.clone()
+        Arc::clone(&request.coinset)
     };
     let ticker_index = operator_ticker_index_from_paths(
         &request.markets_path,
@@ -176,8 +175,7 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
             request.markets_path.clone(),
             request.testnet_markets_path.clone(),
         ),
-        inventory_freshness,
-        inventory_p2s,
+        coinset,
         ticker_index,
     ))
 }
@@ -186,7 +184,7 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
 
     use crate::config::empty_cat_ticker_index;
@@ -228,8 +226,7 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            InventoryFreshnessCache::new(),
-            Arc::new(InventoryP2Index::default()),
+            CoinsetProcessContext::empty(),
             empty_cat_ticker_index(),
         )
     }
@@ -244,5 +241,80 @@ mod tests {
         let selected = resources.selected_markets(&["enabled".to_string(), "missing".to_string()]);
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].market_id, "enabled");
+    }
+
+    #[test]
+    fn load_cycle_resources_rebuilds_empty_p2_index_preserving_freshness() {
+        use crate::daemon::inventory_freshness::InventoryFreshnessCache;
+        use crate::daemon::run_once::{
+            DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest,
+        };
+        use crate::test_support::minimal_program::{
+            write_minimal_program_with_signer, MinimalProgramParams,
+        };
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        let markets_path = dir.path().join("markets.yaml");
+        std::fs::write(
+            &markets_path,
+            r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "xch"
+    base_symbol: "XCH"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#,
+        )
+        .expect("markets");
+        let freshness = InventoryFreshnessCache::new();
+        freshness.mark_fresh("m1", BTreeMap::from([(10, 1)]));
+        let request = DaemonRunOnceRequest {
+            program_path,
+            markets_path,
+            testnet_markets_path: None,
+            state_db_override: None,
+            coinset_base_url: "https://api.coinset.org".to_string(),
+            state_dir: dir.path().to_path_buf(),
+            poll_coinset_mempool: false,
+            use_websocket_capture: false,
+            allowed_key_ids: Vec::new(),
+            dispatch_state: DaemonDispatchState::default(),
+            test_controls: DaemonCycleTestControls::default(),
+            coinset: CoinsetProcessContext::new(
+                Arc::new(InventoryP2Index::default()),
+                Arc::clone(&freshness),
+            ),
+        };
+        let resources = load_cycle_resources(&request).expect("load");
+        assert!(
+            Arc::ptr_eq(
+                &resources.coinset.inventory_freshness,
+                &request.coinset.inventory_freshness
+            ),
+            "freshness Arc must be preserved across empty-index rebuild"
+        );
+        assert!(!resources
+            .coinset
+            .inventory_freshness
+            .needs_refresh("m1", crate::daemon::INVENTORY_MAX_STALENESS));
     }
 }

@@ -26,7 +26,6 @@ pub const COINSET_WS_PAYLOAD_IGNORED: &str = "coinset_ws_payload_ignored";
 pub const COINSET_WS_MEMPOOL_EVENT: &str = "coinset_ws_mempool_event";
 pub const COINSET_WS_TX_BLOCK_EVENT: &str = "coinset_ws_tx_block_event";
 pub const TX_BLOCK_CONFIRMED: &str = "tx_block_confirmed";
-pub const COINSET_WS_COIN_OBSERVED: &str = "coinset_ws_coin_observed";
 pub const COIN_WATCH_HIT: &str = "coin_watch_hit";
 pub const COINSET_WS_ONCE_STARTED: &str = "coinset_ws_once_started";
 pub const COINSET_WS_ONCE_CONNECTED: &str = "coinset_ws_once_connected";

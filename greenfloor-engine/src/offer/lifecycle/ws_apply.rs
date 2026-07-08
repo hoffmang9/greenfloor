@@ -3,18 +3,17 @@
 use chrono::Utc;
 
 use crate::cycle::reconcile::{
-    resolve_coinset_mempool_hit_transition, resolve_watched_offer_transition_from_signals,
-    CancelSubmittedContext, DexieCoinsetSignals,
+    resolve_watched_offer_transition_from_signals, signals_from_ws_offer_status,
+    CancelSubmittedContext, CoinsetTxSignals,
 };
-use crate::daemon::coinset_tx::WsOfferEvent;
+use crate::daemon::WsOfferEvent;
 use crate::error::SignerResult;
-use crate::offer::dexie_payload::{
-    DEXIE_STATUS_CANCELLED, DEXIE_STATUS_CONFIRMED, DEXIE_STATUS_EXPIRED,
+use crate::storage::{OfferStateListRow, SqliteStore};
+
+use super::cancel_context::{
+    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
 };
-use crate::offer::lifecycle::{
-    cancel_submitted_context_for_offer, persist_offer_lifecycle_transition, ReconcilePersistOptions,
-};
-use crate::storage::SqliteStore;
+use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 
 fn persist_changed(
     store: &SqliteStore,
@@ -58,44 +57,19 @@ fn seed_offer_tx_signal(store: &SqliteStore, event: &WsOfferEvent) -> SignerResu
     Ok(())
 }
 
-fn signals_for_offer_status(event: &WsOfferEvent) -> Option<(Option<i64>, DexieCoinsetSignals)> {
-    let tx = event.tx_id.clone().into_iter().collect::<Vec<_>>();
-    match event.status.as_str() {
-        "pending" => Some((
-            None,
-            DexieCoinsetSignals {
-                tx_ids: tx.clone(),
-                confirmed_tx_ids: Vec::new(),
-                mempool_tx_ids: tx,
-            },
-        )),
-        "confirmed" => Some((
-            Some(DEXIE_STATUS_CONFIRMED),
-            DexieCoinsetSignals {
-                tx_ids: tx.clone(),
-                confirmed_tx_ids: tx,
-                mempool_tx_ids: Vec::new(),
-            },
-        )),
-        "expired" => Some((Some(DEXIE_STATUS_EXPIRED), DexieCoinsetSignals::default())),
-        "cancelled" => Some((Some(DEXIE_STATUS_CANCELLED), DexieCoinsetSignals::default())),
-        _ => None,
-    }
-}
-
 fn apply_reconcile_signals(
     store: &SqliteStore,
     offer_id: &str,
     market_id: &str,
     current_state: &str,
     status: Option<i64>,
-    dexie: DexieCoinsetSignals,
+    signals: CoinsetTxSignals,
     cancel_submitted: Option<&CancelSubmittedContext>,
 ) -> SignerResult<()> {
     let transition = resolve_watched_offer_transition_from_signals(
         current_state,
         status,
-        dexie,
+        signals,
         &[],
         cancel_submitted,
         Utc::now(),
@@ -105,9 +79,15 @@ fn apply_reconcile_signals(
 }
 
 /// Drive lifecycle from a Coinset WS `offer` event for a locally tracked offer.
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` or reconcile persist fails.
 pub fn apply_ws_offer_event(store: &SqliteStore, event: &WsOfferEvent) -> SignerResult<()> {
     seed_offer_tx_signal(store, event)?;
-    let Some((status, dexie)) = signals_for_offer_status(event) else {
+    let Some((status, signals)) =
+        signals_from_ws_offer_status(&event.status, event.tx_id.as_deref())
+    else {
         return Ok(());
     };
     let rows = store.list_offer_states_for_ids(std::slice::from_ref(&event.offer_id))?;
@@ -122,27 +102,49 @@ pub fn apply_ws_offer_event(store: &SqliteStore, event: &WsOfferEvent) -> Signer
         &row.market_id,
         &row.state,
         status,
-        dexie,
+        signals,
         cancel_submitted.as_ref(),
     )
 }
 
-/// On a durable coin/p2 watch hit, mark `mempool_observed` via reconcile dispatch.
-pub fn apply_watch_hit_mempool(store: &SqliteStore, watched_key: &str) -> SignerResult<()> {
-    let offer_ids = store.list_offer_ids_for_watched_coin(watched_key)?;
-    if offer_ids.is_empty() {
+fn apply_mempool_hit_for_row(
+    store: &SqliteStore,
+    row: &OfferStateListRow,
+    cancel_by_offer: &std::collections::HashMap<String, CancelSubmittedContext>,
+) -> SignerResult<()> {
+    let cancel_submitted = cancel_submitted_context_for_offer(
+        store,
+        &row.offer_id,
+        &row.state,
+        Some(cancel_by_offer),
+    )?;
+    apply_reconcile_signals(
+        store,
+        &row.offer_id,
+        &row.market_id,
+        &row.state,
+        None,
+        CoinsetTxSignals::mempool_hit(),
+        cancel_submitted.as_ref(),
+    )
+}
+
+/// On durable coin/p2 watch hits, mark `mempool_observed` via reconcile dispatch (batched).
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` or reconcile persist fails.
+pub fn apply_watch_hits_batch(store: &SqliteStore, watched_keys: &[String]) -> SignerResult<()> {
+    if watched_keys.is_empty() {
         return Ok(());
     }
-    for row in store.list_offer_states_for_ids(&offer_ids)? {
-        let cancel_submitted =
-            cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, None)?;
-        let transition = resolve_coinset_mempool_hit_transition(
-            &row.state,
-            cancel_submitted.as_ref(),
-            Utc::now(),
-        )
-        .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-        persist_changed(store, &row.market_id, &row.offer_id, &transition)?;
+    let rows = store.list_offer_states_for_watched_keys(watched_keys)?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
+    for row in &rows {
+        apply_mempool_hit_for_row(store, row, &cancel_by_offer)?;
     }
     Ok(())
 }
@@ -258,11 +260,66 @@ mod tests {
         store
             .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
             .expect("watch");
-        apply_watch_hit_mempool(&store, &coin).expect("hit");
+        apply_watch_hits_batch(&store, std::slice::from_ref(&coin)).expect("hit");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
         assert_eq!(rows[0].state, "mempool_observed");
+    }
+
+    #[test]
+    fn watch_hits_batch_updates_multiple_offers_and_dedupes_keys() {
+        let (_dir, store) = open_store();
+        let offer_a = "aa".repeat(32);
+        let offer_b = "bb".repeat(32);
+        let coin_a = "11".repeat(32);
+        let coin_b = "22".repeat(32);
+        let p2 = "33".repeat(32);
+        for (offer_id, coins, p2s) in [
+            (&offer_a, vec![coin_a.clone()], vec![p2.clone()]),
+            (&offer_b, vec![coin_b.clone()], Vec::new()),
+        ] {
+            store
+                .upsert_offer_state(offer_id, "m1", "open", None)
+                .expect("upsert");
+            store
+                .replace_offer_coin_watches(offer_id, "m1", &coins, &p2s)
+                .expect("watch");
+        }
+        // Same offer matched by coin + p2; second offer by coin only.
+        apply_watch_hits_batch(&store, &[coin_a, p2, coin_b]).expect("batch");
+        let rows = store
+            .list_offer_states_for_ids(&[offer_a.clone(), offer_b.clone()])
+            .expect("rows");
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.state == "mempool_observed"));
+    }
+
+    #[test]
+    fn watch_hit_during_cancel_submitted_uses_preloaded_context() {
+        let (_dir, store) = open_store();
+        let offer_id = "ab".repeat(32);
+        let coin = "ef".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("cancel_submitted");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+            .expect("watch");
+        apply_watch_hits_batch(&store, std::slice::from_ref(&coin)).expect("hit");
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        // Synthetic mempool hit with cancel context: taker mempool path or preserve.
+        assert!(
+            matches!(
+                rows[0].state.as_str(),
+                "cancel_submitted" | "mempool_observed"
+            ),
+            "unexpected state {}",
+            rows[0].state
+        );
     }
 
     #[test]

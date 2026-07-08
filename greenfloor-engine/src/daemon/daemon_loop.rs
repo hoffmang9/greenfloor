@@ -8,7 +8,7 @@ use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::resolve_state_db_path;
 
-use super::coinset_ws::{start_coinset_websocket_loop, InventoryP2Index};
+use super::coinset_ws::{start_coinset_websocket_loop, CoinsetProcessContext, InventoryP2Index};
 use super::cycle_entry::run_daemon_cycle_once;
 use super::inventory_freshness::InventoryFreshnessCache;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
@@ -66,8 +66,7 @@ fn loop_should_continue(
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
-    inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<InventoryP2Index>,
+    coinset: Arc<CoinsetProcessContext>,
     test_controls: DaemonCycleTestControls,
 ) -> SignerResult<i32> {
     let once_request = DaemonRunOnceRequest {
@@ -82,8 +81,7 @@ async fn run_one_loop_cycle(
         allowed_key_ids: request.allowed_key_ids.clone(),
         dispatch_state: dispatch_state.clone(),
         test_controls,
-        inventory_freshness,
-        inventory_p2s,
+        coinset,
     };
     let response = run_daemon_cycle_once(&once_request).await?;
     *dispatch_state = response.dispatch_state;
@@ -100,17 +98,16 @@ async fn run_daemon_loop_inner(
 
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
-    let inventory_freshness = InventoryFreshnessCache::new();
     let inventory_p2s = InventoryP2Index::from_markets(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
+    let coinset = CoinsetProcessContext::new(inventory_p2s, InventoryFreshnessCache::new());
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,
         request.coinset_base_url.clone(),
-        inventory_freshness.clone(),
-        inventory_p2s.clone(),
+        Arc::clone(&coinset),
     );
 
     let mut dispatch_state = DaemonDispatchState::default();
@@ -125,8 +122,7 @@ async fn run_daemon_loop_inner(
         let exit_code = run_one_loop_cycle(
             &request,
             &mut dispatch_state,
-            inventory_freshness.clone(),
-            inventory_p2s.clone(),
+            Arc::clone(&coinset),
             loop_cycle_test_controls(
                 #[cfg(test)]
                 harness_ref,

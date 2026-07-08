@@ -8,6 +8,7 @@ mod persist;
 mod reconcile_watched_offers;
 mod status_cli;
 mod transition;
+mod ws_apply;
 
 pub use cancel::{
     cancel_offer_on_chain, cancel_offers_on_chain, CancelOfferOnChainParams,
@@ -34,3 +35,4 @@ pub use transition::{
     resolve_watched_offer_transition_from_dexie_fetch, transition_from_dexie_offer_payload,
     transition_from_list_offer_payload, WatchedOfferTransitionEnv,
 };
+pub use ws_apply::{apply_watch_hits_batch, apply_ws_offer_event};

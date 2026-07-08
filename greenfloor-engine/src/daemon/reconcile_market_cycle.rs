@@ -126,7 +126,6 @@ pub async fn run_reconcile_market_cycle(
 
     let our_offer_ids: HashSet<String> =
         watchlist_offer_ids(store, market_id)?.into_iter().collect();
-    let _ = store.backfill_offer_coin_watches_from_cancel_metadata(market_id)?;
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()

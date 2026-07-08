@@ -23,14 +23,12 @@ pub fn upsert_offer_post_record(
             ..Default::default()
         },
     )?;
-    if !record.watched_coin_ids.is_empty() || !record.watched_p2s.is_empty() {
-        store.replace_offer_coin_watches(
-            &record.offer_id,
-            &record.market_id,
-            &record.watched_coin_ids,
-            &record.watched_p2s,
-        )?;
-    }
+    store.replace_offer_coin_watches(
+        &record.offer_id,
+        &record.market_id,
+        &record.watched_coin_ids,
+        &record.watched_p2s,
+    )?;
     Ok(())
 }
 
@@ -137,5 +135,47 @@ mod tests {
             metadata.execution_mode,
             Some(OfferExecutionMode::PresplitExisting)
         );
+    }
+
+    #[test]
+    fn upsert_offer_post_record_empty_watches_clears_prior_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
+        let offer_id = "offer-clear";
+        let coin = "ab".repeat(32);
+        store
+            .upsert_offer_state(offer_id, "m1", "open", None)
+            .expect("seed state");
+        store
+            .replace_offer_coin_watches(offer_id, "m1", std::slice::from_ref(&coin), &[])
+            .expect("seed watch");
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("list")
+            .contains(&coin));
+
+        upsert_offer_post_record(
+            &store,
+            &OfferPostPersistRecord {
+                offer_id: offer_id.to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 10,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: PresplitCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
+            },
+        )
+        .expect("persist empty watches");
+
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("cleared")
+            .is_empty());
     }
 }

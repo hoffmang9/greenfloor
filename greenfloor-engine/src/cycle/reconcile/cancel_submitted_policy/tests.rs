@@ -46,6 +46,7 @@ fn dexie_signals(
         tx_ids: tx_ids.to_vec(),
         confirmed_tx_ids: confirmed.to_vec(),
         mempool_tx_ids: mempool.to_vec(),
+        ..Default::default()
     }
 }
 

@@ -218,6 +218,7 @@ fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
         tx_ids: coinset_tx_ids,
         confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
         mempool_tx_ids: coinset_mempool_tx_ids,
+        ..Default::default()
     };
     let chain_confirmed = coinset_confirmed_tx_ids.clone();
     resolve_watched_offer_decision(
@@ -291,6 +292,7 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
                 tx_ids: coinset_tx_ids,
                 confirmed_tx_ids: coinset_confirmed_tx_ids,
                 mempool_tx_ids: coinset_mempool_tx_ids,
+                ..Default::default()
             },
             &chain_confirmed,
             None,
@@ -493,6 +495,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
             tx_ids: vec![],
             confirmed_tx_ids: vec![],
             mempool_tx_ids: vec![],
+            ..Default::default()
         },
         &[],
         Some(&ctx),
@@ -512,6 +515,7 @@ fn cancel_submitted_preserves_when_context_missing() {
             tx_ids: vec![],
             confirmed_tx_ids: vec![],
             mempool_tx_ids: vec![],
+            ..Default::default()
         },
         &[],
         None,

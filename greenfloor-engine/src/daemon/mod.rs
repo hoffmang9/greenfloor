@@ -55,9 +55,10 @@ pub use cli::{
 pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecutionResult,
 };
+pub use coinset_tx::WsOfferEvent;
 pub use coinset_ws::{
-    resolve_coinset_ws_url_with_p2s, stable_inventory_p2s_from_markets,
-    start_coinset_websocket_loop, CoinsetWebsocketLoopHandle, InventoryP2Index,
+    resolve_coinset_ws_url_with_p2s, start_coinset_websocket_loop, CoinsetProcessContext,
+    CoinsetWebsocketLoopHandle, InventoryP2Index,
 };
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use cycle_paths::DaemonCyclePaths;

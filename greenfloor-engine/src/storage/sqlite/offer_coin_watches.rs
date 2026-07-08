@@ -216,6 +216,57 @@ impl SqliteStore {
         Ok(seeded)
     }
 
+    /// List offer state rows watching any of the given coin/p2 keys (deduped by `offer_id`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_offer_states_for_watched_keys(
+        &self,
+        keys: &[String],
+    ) -> SignerResult<Vec<crate::storage::OfferStateListRow>> {
+        let normalized: Vec<String> = keys
+            .iter()
+            .map(|key| normalize_hex_id(key))
+            .filter(|key| key.len() == 64)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if normalized.is_empty() {
+            return Ok(Vec::new());
+        }
+        let offer_ids: Vec<String> = {
+            let placeholders: Vec<String> = (1..=normalized.len())
+                .map(|idx| format!("?{idx}"))
+                .collect();
+            let query = format!(
+                "SELECT DISTINCT offer_id FROM offer_coin_watches WHERE coin_id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut stmt = self.conn.prepare(&query).map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches offer_ids prepare: {err}"))
+            })?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(normalized.iter()), |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|err| {
+                    SignerError::Other(format!("offer_coin_watches offer_ids query: {err}"))
+                })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let offer_id = row.map_err(|err| {
+                    SignerError::Other(format!("offer_coin_watches offer_ids row: {err}"))
+                })?;
+                if !offer_id.trim().is_empty() {
+                    out.push(offer_id);
+                }
+            }
+            out
+        };
+        self.list_offer_states_for_ids(&offer_ids)
+    }
+
     /// List offer ids watching a given coin id or p2.
     ///
     /// # Errors
@@ -290,6 +341,43 @@ mod tests {
             .list_market_ids_for_watched_keys(&[p2])
             .expect("markets");
         assert_eq!(markets, vec!["m1".to_string()]);
+    }
+
+    #[test]
+    fn list_offer_states_for_watched_keys_dedupes_and_joins_state() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_a = "aa".repeat(32);
+        let offer_b = "bb".repeat(32);
+        let coin = "11".repeat(32);
+        let p2 = "22".repeat(32);
+        store
+            .upsert_offer_state(&offer_a, "m1", "open", None)
+            .expect("a");
+        store
+            .upsert_offer_state(&offer_b, "m1", "mempool_observed", None)
+            .expect("b");
+        store
+            .replace_offer_coin_watches(
+                &offer_a,
+                "m1",
+                std::slice::from_ref(&coin),
+                std::slice::from_ref(&p2),
+            )
+            .expect("watch a");
+        store
+            .replace_offer_coin_watches(&offer_b, "m1", std::slice::from_ref(&coin), &[])
+            .expect("watch b");
+        let rows = store
+            .list_offer_states_for_watched_keys(&[coin, p2])
+            .expect("rows");
+        assert_eq!(rows.len(), 2);
+        let mut by_id: std::collections::HashMap<_, _> = rows
+            .into_iter()
+            .map(|row| (row.offer_id, row.state))
+            .collect();
+        assert_eq!(by_id.remove(&offer_a).as_deref(), Some("open"));
+        assert_eq!(by_id.remove(&offer_b).as_deref(), Some("mempool_observed"));
     }
 
     #[test]

@@ -69,7 +69,6 @@ impl CoinOpsPhaseHarness {
                 &store,
                 &self.ctx.cycle_context(),
                 market,
-                &[],
                 wallet_counts,
                 &BTreeMap::new(),
                 &BTreeMap::new(),

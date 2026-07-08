@@ -108,19 +108,3 @@ impl InventoryP2Index {
         markets.into_iter().collect()
     }
 }
-
-/// Build the stable p2 list from enabled markets (compat wrapper).
-///
-/// # Errors
-///
-/// Returns an error if index construction fails.
-pub fn stable_inventory_p2s_from_markets(
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-) -> SignerResult<Vec<String>> {
-    Ok(
-        InventoryP2Index::from_markets(markets_path, testnet_markets_path)?
-            .p2s()
-            .to_vec(),
-    )
-}

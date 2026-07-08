@@ -140,18 +140,22 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
 
+    let selected = "aa".repeat(32);
+    let presplit_coin = "bb".repeat(32);
+    let input_coin = "cc".repeat(32);
+    let p2 = "dd".repeat(32);
     let create = CreateOfferResult {
         offer: "offer1".to_string(),
         spend_bundle_hex: String::new(),
-        selected_coin_ids: Vec::new(),
+        selected_coin_ids: vec![selected.clone()],
         offer_nonce: String::new(),
         execution_mode: OfferExecutionMode::PresplitNew,
         split_spend_bundle_hex: None,
-        presplit_coin_id: Some("cc".repeat(64)),
+        presplit_coin_id: Some(presplit_coin.clone()),
         split_broadcast_status: None,
         presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
-            "coin".to_string(),
-            "puzzle".to_string(),
+            input_coin.clone(),
+            p2.clone(),
         )),
     };
     let presplit = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&create))
@@ -162,8 +166,13 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     );
     assert_eq!(
         presplit.cancel_fields.input_coin_id.as_deref(),
-        Some("coin")
+        Some(input_coin.as_str())
     );
+    assert_eq!(
+        presplit.watched_coin_ids,
+        vec![selected, presplit_coin, input_coin]
+    );
+    assert_eq!(presplit.watched_p2s, vec![p2]);
 }
 
 #[test]

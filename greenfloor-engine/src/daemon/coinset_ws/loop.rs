@@ -1,12 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-
-use super::p2_filters::InventoryP2Index;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -15,10 +11,12 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::config::ManagerProgramConfig;
 use crate::operator_log::{
     LogContext, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED,
+    COINSET_WS_ONCE_ERROR,
 };
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll};
+use super::process_context::CoinsetProcessContext;
 use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub struct CoinsetWebsocketLoopHandle {
@@ -46,12 +44,12 @@ impl Drop for CoinsetWebsocketLoopHandle {
 /// # Panics
 ///
 /// Panics if the dedicated Tokio runtime cannot be constructed.
+#[must_use]
 pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<InventoryP2Index>,
+    coinset: Arc<CoinsetProcessContext>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -65,8 +63,7 @@ pub fn start_coinset_websocket_loop(
             db_path,
             program,
             coinset_base_url,
-            inventory_freshness,
-            inventory_p2s,
+            coinset,
             stop_flag,
         ));
     });
@@ -80,14 +77,14 @@ async fn run_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<InventoryP2Index>,
+    coinset: Arc<CoinsetProcessContext>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let ws_url = resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, inventory_p2s.p2s());
+    let ws_url =
+        resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, coinset.inventory_p2s.p2s());
     let reconnect =
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
@@ -110,8 +107,18 @@ async fn run_coinset_websocket_loop(
                 while !stop.load(Ordering::SeqCst) {
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            let _ =
-                                handle_ws_text(&store, &inventory_p2s, &inventory_freshness, &text);
+                            if let Err(err) = handle_ws_text(&store, &coinset, &text) {
+                                tracing::warn!(
+                                    error = %err,
+                                    "coinset websocket payload handler failed"
+                                );
+                                LogContext::COINSET.audit_best_effort(
+                                    &store,
+                                    COINSET_WS_ONCE_ERROR,
+                                    &json!({"error": err.to_string()}),
+                                    None,
+                                );
+                            }
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;
@@ -143,7 +150,6 @@ mod tests {
     use super::super::once_timings::OnceCaptureTimings;
     use super::super::url::resolve_coinset_ws_url_with_p2s;
     use super::*;
-    use crate::daemon::inventory_freshness::InventoryFreshnessCache;
     use mockito::Server;
     use tempfile::tempdir;
 
@@ -185,8 +191,7 @@ mod tests {
             &store,
             &program,
             &server.url(),
-            &InventoryP2Index::default(),
-            &InventoryFreshnessCache::new(),
+            &CoinsetProcessContext::empty(),
             OnceCaptureTimings {
                 capture_window: Duration::from_millis(50),
                 reconnect: Duration::from_millis(10),
@@ -218,8 +223,7 @@ mod tests {
             db_path,
             program,
             "https://example.test".to_string(),
-            InventoryFreshnessCache::new(),
-            Arc::new(InventoryP2Index::default()),
+            CoinsetProcessContext::empty(),
         );
         handle.stop();
     }
@@ -233,8 +237,7 @@ mod tests {
             db_path,
             sample_program(),
             "https://example.test".to_string(),
-            InventoryFreshnessCache::new(),
-            Arc::new(InventoryP2Index::default()),
+            CoinsetProcessContext::empty(),
             stop,
         )
         .await;
@@ -278,8 +281,7 @@ mod tests {
                 db_path,
                 program,
                 coinset_base_url,
-                InventoryFreshnessCache::new(),
-                Arc::new(InventoryP2Index::default()),
+                CoinsetProcessContext::empty(),
                 stop_flag,
             ));
         });

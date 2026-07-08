@@ -4,8 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::daemon::coinset_ws::InventoryP2Index;
-use crate::daemon::inventory_freshness::InventoryFreshnessCache;
+use crate::daemon::coinset_ws::CoinsetProcessContext;
 
 #[cfg(test)]
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
@@ -47,22 +46,16 @@ pub struct DaemonRunOnceRequest {
     pub dispatch_state: DaemonDispatchState,
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,
-    #[serde(skip, default = "default_inventory_freshness")]
-    pub inventory_freshness: Arc<InventoryFreshnessCache>,
-    #[serde(skip, default = "default_inventory_p2_index")]
-    pub inventory_p2s: Arc<InventoryP2Index>,
+    #[serde(skip, default = "default_coinset_process_context")]
+    pub coinset: Arc<CoinsetProcessContext>,
 }
 
 fn default_poll_coinset_mempool() -> bool {
     true
 }
 
-fn default_inventory_freshness() -> Arc<InventoryFreshnessCache> {
-    InventoryFreshnessCache::new()
-}
-
-fn default_inventory_p2_index() -> Arc<InventoryP2Index> {
-    Arc::new(InventoryP2Index::default())
+fn default_coinset_process_context() -> Arc<CoinsetProcessContext> {
+    CoinsetProcessContext::empty()
 }
 
 impl DaemonRunOnceRequest {

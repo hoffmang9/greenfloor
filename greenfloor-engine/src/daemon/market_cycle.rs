@@ -64,7 +64,6 @@ async fn execute_post_reconcile_phases(
                 &store,
                 ctx,
                 market,
-                &ctx.reconcile.offers,
                 &bucket_counts,
                 &strategy.sell_active_counts,
                 &strategy.newly_executed_sell_counts,

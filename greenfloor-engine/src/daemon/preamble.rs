@@ -11,8 +11,7 @@ use crate::operator_log::{
 };
 use crate::storage::SqliteStore;
 
-use super::coinset_ws::{capture_coinset_websocket_once, InventoryP2Index};
-use super::inventory_freshness::InventoryFreshnessCache;
+use super::coinset_ws::{capture_coinset_websocket_once, CoinsetProcessContext};
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -26,8 +25,7 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
-    inventory_p2s: &InventoryP2Index,
-    inventory_freshness: &InventoryFreshnessCache,
+    coinset: &CoinsetProcessContext,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
@@ -59,14 +57,8 @@ pub async fn run_cycle_preamble(
     }
 
     if use_websocket_capture {
-        if let Err(err) = capture_coinset_websocket_once(
-            store,
-            program,
-            coinset_base_url,
-            inventory_p2s,
-            inventory_freshness,
-        )
-        .await
+        if let Err(err) =
+            capture_coinset_websocket_once(store, program, coinset_base_url, coinset).await
         {
             result.cycle_error_count += 1;
             LogContext::DAEMON_CYCLE.dual_audit(
@@ -215,13 +207,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
 
-        let freshness = InventoryFreshnessCache::new();
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "",
-            &InventoryP2Index::default(),
-            &freshness,
+            &CoinsetProcessContext::empty(),
             false,
             false,
         )
@@ -242,13 +232,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
 
-        let freshness = InventoryFreshnessCache::new();
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
-            &InventoryP2Index::default(),
-            &freshness,
+            &CoinsetProcessContext::empty(),
             true,
             false,
         )

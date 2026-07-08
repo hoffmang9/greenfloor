@@ -67,8 +67,7 @@ pub fn test_cycle_context(
                 dir.path().join("markets.yaml"),
                 None,
             ),
-            super::inventory_freshness::InventoryFreshnessCache::new(),
-            std::sync::Arc::new(super::coinset_ws::InventoryP2Index::default()),
+            super::coinset_ws::CoinsetProcessContext::empty(),
             empty_cat_ticker_index(),
         ),
         dispatch: MarketDispatchContext {
