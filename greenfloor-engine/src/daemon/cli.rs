@@ -13,7 +13,6 @@ use super::lock::DaemonInstanceLock;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
-use super::watchlist::cache::CoinWatchlistCache;
 
 fn parse_key_ids(raw: &str) -> Vec<String> {
     raw.split(',')
@@ -83,7 +82,8 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
-            coin_watchlist: CoinWatchlistCache::new(),
+            inventory_freshness: crate::daemon::InventoryFreshnessCache::new(),
+            inventory_p2s: None,
         };
         let response = run_daemon_cycle_once(&request).await?;
         return Ok(response.exit_code);
@@ -114,7 +114,7 @@ pub async fn run_daemon_cycle_once_from_json(
 }
 
 fn parse_daemon_run_once_request(value: Value) -> SignerResult<DaemonRunOnceRequest> {
-    DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())
+    DaemonRunOnceRequest::from_json_value(value)
 }
 
 /// Run daemon loop from json.
@@ -159,10 +159,8 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_daemon_run_once_request, parse_key_ids, DaemonRunOnceRequest};
-    use crate::daemon::watchlist::cache::CoinWatchlistCache;
+    use super::{parse_daemon_run_once_request, parse_key_ids};
     use serde_json::json;
-    use std::sync::Arc;
 
     #[test]
     fn parse_key_ids_splits_and_trims_csv_values() {
@@ -187,19 +185,5 @@ mod tests {
             request.testnet_markets_path.as_deref(),
             Some(std::path::Path::new("/tmp/testnet-markets.yaml"))
         );
-    }
-
-    #[test]
-    fn daemon_run_once_request_json_attaches_watchlist_cache() {
-        let value = json!({
-            "program_path": "config/program.yaml",
-            "markets_path": "config/markets.yaml",
-            "coinset_base_url": "https://api.coinset.org",
-            "state_dir": "/tmp/state",
-        });
-        let watchlist = CoinWatchlistCache::new();
-        let request =
-            DaemonRunOnceRequest::from_json_value(value, watchlist.clone()).expect("request");
-        assert!(Arc::ptr_eq(&request.coin_watchlist, &watchlist));
     }
 }

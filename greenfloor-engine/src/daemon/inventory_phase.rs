@@ -15,6 +15,10 @@ use super::coinset_spendable::list_spendable_base_unit_amounts_for_signer;
 use super::market_context::DaemonCycleResources;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
+///
+/// # Errors
+///
+/// Returns an error when the configured hex id does not match the resolved asset id.
 pub fn assert_inventory_asset_resolution_matches_config(
     market: &MarketConfig,
     resolved_base_asset_id: &str,
@@ -40,6 +44,12 @@ pub fn assert_inventory_asset_resolution_matches_config(
     Ok(())
 }
 
+/// Scan spendable inventory into ladder bucket counts, skipping HTTP when WS freshness allows.
+///
+/// # Errors
+///
+/// Returns an error when Coinset inventory scanning or audit persistence fails.
+#[allow(clippy::too_many_lines)]
 pub async fn run_inventory_phase(
     store: &SqliteStore,
     resources: &DaemonCycleResources,
@@ -55,6 +65,30 @@ pub async fn run_inventory_phase(
         .collect();
     if ladder_sizes.is_empty() {
         return Ok(BTreeMap::default());
+    }
+
+    if !resources.inventory_freshness.needs_refresh(
+        &market.market_id,
+        super::inventory_freshness::INVENTORY_MAX_STALENESS,
+    ) {
+        if let Some(cached) = resources
+            .inventory_freshness
+            .cached_buckets(&market.market_id)
+        {
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::DEBUG,
+                "inventory bucket scan skipped (fresh)",
+                INVENTORY_BUCKET_SCAN,
+                &json!({
+                    "market_id": market.market_id,
+                    "source": "coinset_ws_fresh",
+                    "bucket_counts": cached,
+                }),
+                Some(&market.market_id),
+            )?;
+            return Ok(cached);
+        }
     }
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
@@ -78,6 +112,9 @@ pub async fn run_inventory_phase(
 
     match scan_result {
         Ok((resolved_base_asset_id, coin_count, bucket_counts)) => {
+            resources
+                .inventory_freshness
+                .mark_fresh(&market.market_id, bucket_counts.clone());
             LogContext::MARKET_CYCLE.dual_audit(
                 store,
                 Level::DEBUG,
@@ -173,5 +210,17 @@ mod tests {
         let market = sample_market("my-cat-ticker");
         assert_inventory_asset_resolution_matches_config(&market, "c".repeat(64).as_str())
             .expect("symbol config uses resolved id only");
+    }
+
+    #[test]
+    fn freshness_cache_preserves_last_buckets() {
+        let freshness = super::super::inventory_freshness::InventoryFreshnessCache::new();
+        let buckets = BTreeMap::from([(1, 3), (10, 1)]);
+        freshness.mark_fresh("m1", buckets.clone());
+        assert!(!freshness.needs_refresh(
+            "m1",
+            super::super::inventory_freshness::INVENTORY_MAX_STALENESS
+        ));
+        assert_eq!(freshness.cached_buckets("m1"), Some(buckets));
     }
 }

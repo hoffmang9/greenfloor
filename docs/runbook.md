@@ -73,9 +73,10 @@ Optional developer bootstrap for testnet markets:
   - If multiple markets share the same pair, rerun with explicit `--market-id`.
   - Use `--markets-config` only when overriding the default config path.
   - Use `--testnet-markets-config ~/.greenfloor/config/testnet-markets.yaml` only when you want to include optional testnet market stanzas.
-  - Publish venue is selected by `venues.offer_publish.provider` in `~/.greenfloor/config/program.yaml` (`dexie` or `splash`).
-    - Optional one-off override: `--venue dexie` or `--venue splash`
+  - Publish venue is selected by `venues.offer_publish.provider` in `~/.greenfloor/config/program.yaml` (`coinset`, `dexie`, or `splash`; default `coinset`).
+    - Optional one-off override: `--venue coinset`, `--venue dexie`, or `--venue splash`
     - Optional URL overrides: `--dexie-base-url ...` and `--splash-base-url ...`
+  - Coinset path posts via `POST /push_offer` and marks the offer `open` on accept (no Dexie visibility wait).
   - Dexie path validates offer text with `chia-wallet-sdk` before submission; if validation fails, manager blocks submit and returns a `wallet_sdk_offer_verify_*` error.
   - On successful Dexie post, command JSON now includes a direct browser link:
     - `results[].result.offer_view_url` (for example `https://dexie.space/offers/<offer_id>`).
@@ -83,7 +84,7 @@ Optional developer bootstrap for testnet markets:
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
   - Reconcile output includes:
-    - `taker_signal`: Coinset-confirmed taker signal (`none` or `coinset_tx_block_webhook`).
+    - `taker_signal`: Coinset-confirmed taker signal (`none` or `coinset_tx_block_websocket`).
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`

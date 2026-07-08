@@ -12,12 +12,18 @@ pub(super) struct VenueFields {
 }
 
 pub(super) fn parse_venue_config(raw: &Value) -> SignerResult<VenueFields> {
-    let offer_publish_venue =
-        optional_str_section(venues_subsection(raw, "offer_publish"), "provider", "dexie")
-            .to_ascii_lowercase();
-    if offer_publish_venue != "dexie" && offer_publish_venue != "splash" {
+    let offer_publish_venue = optional_str_section(
+        venues_subsection(raw, "offer_publish"),
+        "provider",
+        "coinset",
+    )
+    .to_ascii_lowercase();
+    if offer_publish_venue != "coinset"
+        && offer_publish_venue != "dexie"
+        && offer_publish_venue != "splash"
+    {
         return Err(config_err(
-            "venues.offer_publish.provider must be one of: dexie, splash",
+            "venues.offer_publish.provider must be one of: coinset, dexie, splash",
         ));
     }
     Ok(VenueFields {

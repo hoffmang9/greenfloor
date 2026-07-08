@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use greenfloor_engine::daemon::run_daemon_cycle_once;
-use greenfloor_engine::daemon::watchlist::CoinWatchlistCache;
 use greenfloor_engine::daemon::DaemonRunOnceRequest;
 use serde_json::{json, Value};
 
@@ -33,9 +32,8 @@ use env_fixture::EnvRestoreGuard;
 
 pub async fn run_daemon_once_async(request_json: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
     let _env = EnvRestoreGuard::set(env);
-    let request =
-        DaemonRunOnceRequest::from_json_value(request_json.clone(), CoinWatchlistCache::new())
-            .expect("parse daemon once request");
+    let request = DaemonRunOnceRequest::from_json_value(request_json.clone())
+        .expect("parse daemon once request");
     request
         .test_controls
         .ensure_allowed()

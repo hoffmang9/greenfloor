@@ -45,7 +45,7 @@ venues:
   splash:
     api_base: http://localhost:4000
   offer_publish:
-    provider: dexie
+    provider: coinset
 coin_ops:
   minimum_fee_mojos: 10000000
 signer:
@@ -83,7 +83,7 @@ markets:
 
     let program = load_program_config(&program_path).expect("program");
     program.require_signer_offer_path().expect("signer path");
-    assert_eq!(program.offer_publish_venue, "dexie");
+    assert_eq!(program.offer_publish_venue, "coinset");
     let markets = load_markets_config(&markets_path).expect("markets");
     let market = resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");
     assert_eq!(market.market_id, "m1");

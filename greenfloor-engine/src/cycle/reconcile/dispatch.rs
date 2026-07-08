@@ -8,8 +8,8 @@ use super::builders::{
 use super::coinset_signals::CoinsetSignalSummary;
 use super::metadata::{
     REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
-    REASON_MISSING_STATUS, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
-    TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    REASON_MISSING_STATUS, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBSOCKET,
+    TAKER_COINSET_TX_BLOCK_WEBSOCKET, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
 use super::state::ReconcileState;
@@ -68,8 +68,8 @@ impl ReconcileDispatch {
             Self::CoinsetConfirmed => open_signal_transition(
                 OfferSignal::TxConfirmed,
                 REASON_COINSET_CONFIRMED,
-                SIGNAL_SOURCE_COINSET_WEBHOOK,
-                TAKER_COINSET_TX_BLOCK_WEBHOOK,
+                SIGNAL_SOURCE_COINSET_WEBSOCKET,
+                TAKER_COINSET_TX_BLOCK_WEBSOCKET,
                 TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
             ),
             Self::CoinsetMempool => {

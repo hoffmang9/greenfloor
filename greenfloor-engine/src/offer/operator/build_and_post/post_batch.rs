@@ -294,6 +294,8 @@ mod tests {
             created_extra: json!({}),
             cancel_fields: PresplitCancelFields::default(),
             execution_mode: Some(OfferExecutionMode::Direct),
+            watched_coin_ids: Vec::new(),
+            watched_p2s: Vec::new(),
         };
         let payload = strategy_offer_execution_payload(&record);
         assert_eq!(

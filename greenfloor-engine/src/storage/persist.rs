@@ -22,7 +22,16 @@ pub fn upsert_offer_post_record(
             execution_mode: record.execution_mode,
             ..Default::default()
         },
-    )
+    )?;
+    if !record.watched_coin_ids.is_empty() || !record.watched_p2s.is_empty() {
+        store.replace_offer_coin_watches(
+            &record.offer_id,
+            &record.market_id,
+            &record.watched_coin_ids,
+            &record.watched_p2s,
+        )?;
+    }
+    Ok(())
 }
 
 /// Persist offer post records (`SQLite` offer state only; tracing lives in dispatch layer).
@@ -65,6 +74,8 @@ mod tests {
                 created_extra: json!({}),
                 cancel_fields: PresplitCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: vec!["ab".repeat(32)],
+                watched_p2s: Vec::new(),
             }],
         )
         .expect("persist");
@@ -76,6 +87,10 @@ mod tests {
             .find(|row| row.offer_id == "offer-123")
             .expect("offer row");
         assert_eq!(state.state, "open");
+        let watched = store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("watches");
+        assert!(watched.contains(&"ab".repeat(32)));
     }
 
     #[test]
@@ -100,6 +115,8 @@ mod tests {
                     fixed_delegated_puzzle_hash: Some("d".repeat(64)),
                 },
                 execution_mode: Some(OfferExecutionMode::PresplitExisting),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
             }],
         )
         .expect("persist");

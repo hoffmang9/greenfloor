@@ -56,8 +56,30 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     add_column_if_missing(conn, "offer_state", "execution_mode", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_tx_id", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_at", "TEXT NULL")?;
+    ensure_offer_coin_watches_table(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
+    Ok(())
+}
+
+fn ensure_offer_coin_watches_table(conn: &Connection) -> SignerResult<()> {
+    conn.execute_batch(
+        r"
+        CREATE TABLE IF NOT EXISTS offer_coin_watches (
+          coin_id TEXT NOT NULL,
+          offer_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'coin',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (coin_id, offer_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_market
+          ON offer_coin_watches(market_id);
+        CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_offer
+          ON offer_coin_watches(offer_id);
+        ",
+    )
+    .map_err(|err| SignerError::Other(format!("offer_coin_watches migrate: {err}")))?;
     Ok(())
 }
 

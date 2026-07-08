@@ -5,7 +5,7 @@ use serde_json::json;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use crate::error::SignerResult;
 use crate::operator_log::{
     LogContext, COINSET_WS_ONCE_CONNECTED, COINSET_WS_ONCE_DISCONNECTED, COINSET_WS_ONCE_STARTED,
@@ -14,19 +14,21 @@ use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll, ws_error};
 use super::once_timings::OnceCaptureTimings;
-use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url};
+use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub async fn capture_coinset_websocket_once(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    coin_watchlist: &CoinWatchlistCache,
+    inventory_p2s: &[String],
+    inventory_freshness: &InventoryFreshnessCache,
 ) -> SignerResult<()> {
     capture_coinset_websocket_once_with_timings(
         store,
         program,
         coinset_base_url,
-        coin_watchlist,
+        inventory_p2s,
+        inventory_freshness,
         OnceCaptureTimings::from_program(program),
     )
     .await
@@ -36,11 +38,12 @@ pub async fn capture_coinset_websocket_once_with_timings(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    coin_watchlist: &CoinWatchlistCache,
+    inventory_p2s: &[String],
+    inventory_freshness: &InventoryFreshnessCache,
     timings: OnceCaptureTimings,
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
-    let ws_url = resolve_coinset_ws_url(program, coinset_base_url);
+    let ws_url = resolve_coinset_ws_url_with_p2s(program, coinset_base_url, inventory_p2s);
     LogContext::COINSET.audit(
         store,
         COINSET_WS_ONCE_STARTED,
@@ -68,39 +71,37 @@ pub async fn capture_coinset_websocket_once_with_timings(
                     let wait_for = remaining.min(Duration::from_secs(1));
                     match tokio::time::timeout(wait_for, ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            handle_ws_text(store, coin_watchlist, &text)?;
+                            handle_ws_text(store, inventory_freshness, &text).await?;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
-                            ws.send(Message::Pong(payload))
-                                .await
-                                .map_err(|err| ws_error(&err))?;
+                            let _ = ws.send(Message::Pong(payload)).await;
                         }
-                        Ok(Some(Ok(Message::Close(_)))) => {
-                            return Err(crate::error::SignerError::Other(
-                                "coinset_ws_once_closed".to_string(),
-                            ));
-                        }
-                        Ok(Some(Err(err))) => {
-                            return Err(ws_error(&err));
-                        }
-                        Ok(None) => break,
+                        Ok(Some(Err(err))) => return Err(ws_error(&err)),
+                        Ok(None | Some(Ok(Message::Close(_)))) => break,
                         _ => {}
                     }
                 }
+                LogContext::COINSET.audit(
+                    store,
+                    COINSET_WS_ONCE_DISCONNECTED,
+                    &json!({"ws_url": ws_url, "reason": "capture_window"}),
+                    None,
+                )?;
+                return Ok(());
             }
             Err(err) => {
                 LogContext::COINSET.audit(
                     store,
                     COINSET_WS_ONCE_DISCONNECTED,
-                    &json!({"error": err.to_string()}),
+                    &json!({"ws_url": ws_url, "error": err.to_string()}),
                     None,
                 )?;
+                if tokio::time::Instant::now() + reconnect >= deadline {
+                    return Err(ws_error(&err));
+                }
+                tokio::time::sleep(reconnect).await;
             }
         }
-        if tokio::time::Instant::now() >= deadline {
-            break;
-        }
-        tokio::time::sleep(reconnect).await;
     }
     Ok(())
 }

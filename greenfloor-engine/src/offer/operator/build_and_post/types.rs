@@ -93,6 +93,29 @@ impl PublishResult {
             body: result.into_value(),
         }
     }
+
+    /// Map Coinset `push_offer` JSON into a publish result.
+    ///
+    /// Canonical `offer_id` is the 64-hex trade id (Dexie `trade_id`), normalized
+    /// without a `0x` prefix.
+    pub fn from_coinset_push_offer(body: Value) -> Self {
+        use crate::hex::normalize_hex_id;
+
+        let success = body
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let offer_id = body
+            .get("offer_id")
+            .and_then(Value::as_str)
+            .map(normalize_hex_id)
+            .filter(|value| !value.is_empty());
+        Self {
+            success: success && offer_id.is_some(),
+            offer_id,
+            body,
+        }
+    }
 }
 
 pub(super) fn timing_payload(

@@ -9,7 +9,9 @@ use crate::offer::publish::expected_publish_asset_fields;
 
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
-use super::publish::{finalize_publish_payload, offer_post_persist_record, publish_offer};
+use super::publish::{
+    finalize_publish_payload, offer_post_persist_record, publish_offer, CoinsetPublishEndpoint,
+};
 use super::types::{timing_payload, PostAttemptSuccess, PostFailure, PostIterationOutcome};
 use super::BuildAndPostOfferRequest;
 use crate::metrics::metric_millis_to_u64;
@@ -82,6 +84,7 @@ async fn create_offer_for_post(
     Ok(Ok((created, create_phase_ms)))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn publish_created_offer(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
@@ -90,6 +93,7 @@ async fn publish_created_offer(
     started: Instant,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
+    coinset: Option<CoinsetPublishEndpoint<'_>>,
 ) -> SignerResult<PostIterationOutcome> {
     let side = created.side.as_str();
     let asset_fields = expected_publish_asset_fields(
@@ -104,6 +108,7 @@ async fn publish_created_offer(
         &ctx.publish_venue,
         dexie,
         splash,
+        coinset,
         created.offer_text.trim(),
         request.venue.drop_only,
         request.venue.claim_rewards,
@@ -176,6 +181,15 @@ pub(super) async fn run_post_iteration(
         Err(outcome) => return Ok((bootstrap_action, outcome)),
     };
 
+    let coinset = if ctx.publish_venue == "coinset" {
+        let base = ctx.gated.signer.coinset_base_url.trim();
+        Some(CoinsetPublishEndpoint {
+            network: ctx.gated.operator_network.as_str(),
+            base_url: if base.is_empty() { None } else { Some(base) },
+        })
+    } else {
+        None
+    };
     let outcome = publish_created_offer(
         request,
         ctx,
@@ -184,6 +198,7 @@ pub(super) async fn run_post_iteration(
         started,
         dexie,
         splash,
+        coinset,
     )
     .await?;
 

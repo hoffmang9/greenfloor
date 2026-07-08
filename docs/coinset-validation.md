@@ -181,6 +181,17 @@ MCP operating rules: always check `success`; prefer confirmed block data over me
 pass `include_spent=true` when tracing coin history. Full catalog:
 `docs/COINSET_DOCS_AND_API.md` → **Coinset MCP Server**.
 
+### Offer publish + WS filters (operator)
+
+- Default publish venue is Coinset `POST /push_offer` (`venues.offer_publish.provider: coinset`).
+  Canonical offer id is the 64-hex spend-bundle hash (Dexie `trade_id`).
+- Daemon WS URL includes `events=transaction,offer&tx_status=pending,confirmed` plus stable
+  market `p2` filters (receive puzzle + CAT outer from cats ticker index). HTTP webhooks are
+  not used. Operator `websocket_url` query strings are replaced with these required filters.
+- Cancel remains `POST /push_tx` + WS watch; do not submit spends over WebSocket.
+- Mainnet frame shape: documented `WsEnvelope` (`message.type` + `message.data`). Non-envelope
+  payloads are ignored.
+
 ## 7) Failure handling
 
 - If batched range support is false, run full-window scans without incremental mode.

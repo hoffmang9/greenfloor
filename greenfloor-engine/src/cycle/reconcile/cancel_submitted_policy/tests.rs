@@ -7,8 +7,8 @@ use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::reconcile::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_CANCEL_TX_CHAIN_CONFIRMED,
     REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
-    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
-    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_COINSET_TX_BLOCK_WEBHOOK,
+    SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBSOCKET,
+    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_COINSET_TX_BLOCK_WEBSOCKET,
     TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
@@ -447,9 +447,9 @@ fn cancel_submitted_moves_to_tx_block_confirmed_on_dexie_taker_confirm() {
         ReconcileState::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
     );
     assert_eq!(transition.reason, REASON_COINSET_CONFIRMED);
-    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_WEBHOOK);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_WEBSOCKET);
     assert_eq!(transition.signal, Some(OfferSignal::TxConfirmed));
-    assert_eq!(transition.taker_signal, TAKER_COINSET_TX_BLOCK_WEBHOOK);
+    assert_eq!(transition.taker_signal, TAKER_COINSET_TX_BLOCK_WEBSOCKET);
     assert_eq!(
         transition.taker_diagnostic,
         TAKER_DIAGNOSTIC_COINSET_CONFIRMED

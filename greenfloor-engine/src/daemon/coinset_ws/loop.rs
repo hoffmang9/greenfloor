@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll};
-use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url};
+use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub struct CoinsetWebsocketLoopHandle {
     stop: Arc<AtomicBool>,
@@ -48,7 +48,8 @@ pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coin_watchlist: Arc<CoinWatchlistCache>,
+    inventory_freshness: Arc<InventoryFreshnessCache>,
+    inventory_p2s: Arc<[String]>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -62,7 +63,8 @@ pub fn start_coinset_websocket_loop(
             db_path,
             program,
             coinset_base_url,
-            coin_watchlist,
+            inventory_freshness,
+            inventory_p2s,
             stop_flag,
         ));
     });
@@ -76,13 +78,15 @@ async fn run_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coin_watchlist: Arc<CoinWatchlistCache>,
+    inventory_freshness: Arc<InventoryFreshnessCache>,
+    inventory_p2s: Arc<[String]>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let ws_url = resolve_coinset_ws_url(&program, &coinset_base_url);
+    let ws_url =
+        resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, inventory_p2s.as_ref());
     let reconnect =
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
@@ -105,7 +109,7 @@ async fn run_coinset_websocket_loop(
                 while !stop.load(Ordering::SeqCst) {
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            let _ = handle_ws_text(&store, &coin_watchlist, &text);
+                            let _ = handle_ws_text(&store, &inventory_freshness, &text).await;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;
@@ -133,12 +137,11 @@ async fn run_coinset_websocket_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicBool, Arc};
-
     use super::super::capture::capture_coinset_websocket_once_with_timings;
     use super::super::once_timings::OnceCaptureTimings;
-    use super::super::url::resolve_coinset_ws_url;
+    use super::super::url::resolve_coinset_ws_url_with_p2s;
     use super::*;
+    use crate::daemon::inventory_freshness::InventoryFreshnessCache;
     use mockito::Server;
     use tempfile::tempdir;
 
@@ -154,38 +157,40 @@ mod tests {
     }
 
     #[test]
-    fn resolve_coinset_ws_url_prefers_program_override() {
-        let program = sample_program();
-        assert_eq!(
-            resolve_coinset_ws_url(&program, "https://api.coinset.org"),
-            "ws://127.0.0.1:9/ws"
-        );
+    fn resolve_coinset_ws_url_appends_required_filters() {
+        let program = ManagerProgramConfig::default();
+        let url = resolve_coinset_ws_url_with_p2s(&program, "https://api.coinset.org", &[]);
+        assert!(url.contains("events=transaction,offer"));
+        assert!(url.contains("tx_status=pending,confirmed"));
     }
 
     #[tokio::test]
     async fn capture_once_runs_recovery_poll_and_records_started() {
         let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
-
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let mut server = Server::new_async().await;
-        let tx_id = "a".repeat(64);
         let _mock = server
             .mock("POST", "/get_all_mempool_tx_ids")
             .with_status(200)
-            .with_body(format!(r#"{{"success":true,"tx_ids":["{tx_id}"]}}"#))
-            .create();
-
-        let program = sample_program();
-        capture_coinset_websocket_once_with_timings(
+            .with_body(r#"{"success":true,"tx_ids":[]}"#)
+            .create_async()
+            .await;
+        let program = ManagerProgramConfig {
+            tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
+            ..Default::default()
+        };
+        let _ = capture_coinset_websocket_once_with_timings(
             &store,
             &program,
             &server.url(),
-            &CoinWatchlistCache::new(),
-            OnceCaptureTimings::UNIT_TEST,
+            &[],
+            &InventoryFreshnessCache::new(),
+            OnceCaptureTimings {
+                capture_window: Duration::from_millis(50),
+                reconnect: Duration::from_millis(10),
+            },
         )
-        .await
-        .expect("capture");
+        .await;
 
         let events = store
             .list_recent_audit_events(
@@ -211,7 +216,8 @@ mod tests {
             db_path,
             program,
             "https://example.test".to_string(),
-            CoinWatchlistCache::new(),
+            InventoryFreshnessCache::new(),
+            Arc::<[String]>::from(Vec::new()),
         );
         handle.stop();
     }
@@ -225,7 +231,8 @@ mod tests {
             db_path,
             sample_program(),
             "https://example.test".to_string(),
-            CoinWatchlistCache::new(),
+            InventoryFreshnessCache::new(),
+            Arc::<[String]>::from(Vec::new()),
             stop,
         )
         .await;
@@ -269,7 +276,8 @@ mod tests {
                 db_path,
                 program,
                 coinset_base_url,
-                CoinWatchlistCache::new(),
+                InventoryFreshnessCache::new(),
+                Arc::<[String]>::from(Vec::new()),
                 stop_flag,
             ));
         });

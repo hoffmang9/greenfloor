@@ -1,4 +1,4 @@
-//! Per-market daemon-cycle reconcile: Dexie list fetch, watchlist updates, lifecycle transitions.
+//! Per-market daemon-cycle reconcile: Dexie list fetch and lifecycle transitions.
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,8 +15,7 @@ use crate::storage::SqliteStore;
 
 use super::coinset_tx::build_dexie_size_by_offer_id;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::watchlist::cache::CoinWatchlistCache;
-use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
+use super::watchlist::watchlist_offer_ids;
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
     transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
@@ -92,7 +91,6 @@ pub(crate) fn apply_reconcile_transition(
 
 pub async fn run_reconcile_market_cycle(
     store: &SqliteStore,
-    coin_watchlist: &CoinWatchlistCache,
     dexie: &DexieClient,
     market: &MarketConfig,
     network: &str,
@@ -183,8 +181,6 @@ pub async fn run_reconcile_market_cycle(
         })?;
     }
 
-    update_market_coin_watchlist_from_offers(store, coin_watchlist, market_id, &augmented_offers)?;
-
     Ok(ReconcileMarketCycleResult {
         offers: augmented_offers,
         dexie_size_by_offer_id,
@@ -204,7 +200,6 @@ mod tests {
     use super::*;
     use crate::adapters::DexieClient;
     use crate::config::MarketConfig;
-    use crate::daemon::watchlist::cache::CoinWatchlistCache;
     use crate::storage::SqliteStore;
 
     fn sample_market(base_asset: &str, quote_asset: &str) -> MarketConfig {
@@ -245,17 +240,10 @@ mod tests {
             .with_body(r#"{"success":false,"error":"Not Found"}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        let watchlist = CoinWatchlistCache::new();
-
-        let result = run_reconcile_market_cycle(
-            &store,
-            &watchlist,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-        )
-        .await
-        .expect("reconcile");
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -299,17 +287,10 @@ mod tests {
             )
             .create();
         let dexie = DexieClient::new(server.url());
-        let watchlist = CoinWatchlistCache::new();
-
-        let result = run_reconcile_market_cycle(
-            &store,
-            &watchlist,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-        )
-        .await
-        .expect("reconcile");
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
@@ -343,17 +324,9 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        let watchlist = CoinWatchlistCache::new();
-
-        run_reconcile_market_cycle(
-            &store,
-            &watchlist,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-        )
-        .await
-        .expect("reconcile");
+        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+            .await
+            .expect("reconcile");
     }
 
     #[tokio::test]
@@ -372,17 +345,9 @@ mod tests {
             .with_body(r#"{"success":true,"offers":[{"id":"offer-open","status":5}]}"#)
             .create();
         let dexie = DexieClient::new(server.url());
-        let watchlist = CoinWatchlistCache::new();
-
-        run_reconcile_market_cycle(
-            &store,
-            &watchlist,
-            &dexie,
-            &sample_market("asset1", "xch"),
-            "mainnet",
-        )
-        .await
-        .expect("reconcile");
+        run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+            .await
+            .expect("reconcile");
 
         let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows

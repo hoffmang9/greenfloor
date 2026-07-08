@@ -5,6 +5,7 @@ mod audit;
 mod coin_ops;
 mod migrations;
 mod offer_cancel;
+mod offer_coin_watches;
 mod offers;
 mod pricing;
 mod reservations;
@@ -43,6 +44,10 @@ pub struct OfferPostPersistRecord {
     pub created_extra: serde_json::Value,
     pub cancel_fields: PresplitCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
+    /// Maker coin ids to watch on Coinset WS (from create/select or offer decode).
+    pub watched_coin_ids: Vec<String>,
+    /// Maker puzzle hashes (p2) to watch on Coinset WS when known at post time.
+    pub watched_p2s: Vec<String>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};

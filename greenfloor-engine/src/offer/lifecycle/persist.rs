@@ -32,6 +32,9 @@ pub fn persist_offer_lifecycle_transition(
         &transition.new_state.as_str(),
         last_seen_status,
     )?;
+    if transition.new_state.is_terminal() {
+        store.clear_offer_coin_watches(offer_id)?;
+    }
     let mut payload = json!({
         "offer_id": offer_id,
         "market_id": market_id,

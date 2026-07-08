@@ -24,13 +24,20 @@ pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
 pub(crate) use cancel_submitted_policy::cancel_tx_chain_confirmed;
 pub use cancel_submitted_policy::CancelSubmittedContext;
 pub use coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
-pub(crate) use metadata::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
+pub(crate) use metadata::{
+    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK, REASON_POTENTIAL_TAKE_SEEN,
+    REASON_TAKE_CONFIRMED_ON_TX_BLOCK, SIGNAL_SOURCE_COINSET_WEBSOCKET,
+    TAKER_COINSET_TX_BLOCK_WEBSOCKET, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
+};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
+pub(crate) use builders::open_signal_transition;
 use builders::{
     missing_watched_offer_expired, missing_watched_offer_preserved, unchanged, unsupported_venue,
 };
+pub(crate) use transition::ReconcileTransition;
 
 use decision::resolve_watched_offer_decision;
 

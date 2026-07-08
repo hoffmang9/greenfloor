@@ -207,6 +207,8 @@ fn flush_post_batch_writes_offer_state() {
                 created_extra: json!({}),
                 cancel_fields: PresplitCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
             }],
             &[],
         )

@@ -149,3 +149,40 @@ pub async fn push_tx_hex(
         "operation_id": result.operation_id,
     }))
 }
+
+/// Push an `offer1...` string to Coinset (`POST /push_offer`).
+///
+/// On success Coinset returns a canonical 64-hex `offer_id` (spend-bundle hash /
+/// Dexie `trade_id`). Splash relay flags are passed through when present.
+///
+/// # Errors
+///
+/// Returns an error if the RPC call fails or Coinset reports `success: false`.
+pub async fn push_offer_text(
+    network: &str,
+    base_url: Option<&str>,
+    offer_text: &str,
+) -> SignerResult<Value> {
+    let offer = offer_text.trim();
+    if offer.is_empty() {
+        return Err(SignerError::Other("offer text is required".to_string()));
+    }
+    let payload =
+        post_coinset_rpc(network, base_url, "push_offer", json!({ "offer": offer })).await?;
+    if payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(payload);
+    }
+    let error = payload
+        .get("error")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("coinset_push_offer_failed");
+    Err(SignerError::Other(format!(
+        "coinset_push_offer_error:{error}"
+    )))
+}

@@ -14,6 +14,7 @@ mod daemon_loop;
 mod disabled_markets;
 #[cfg(test)]
 mod dispatch_test_controls;
+mod inventory_freshness;
 mod inventory_phase;
 mod lock;
 mod logging;
@@ -56,11 +57,14 @@ pub use coin_ops_execution::{
 };
 pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{
-    resolve_coinset_ws_url, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
+    resolve_coinset_ws_url_with_p2s, stable_inventory_p2s_from_markets,
+    start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
 };
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use cycle_paths::DaemonCyclePaths;
 pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
+pub use inventory_freshness::{InventoryFreshnessCache, INVENTORY_MAX_STALENESS};
+pub use inventory_phase::{assert_inventory_asset_resolution_matches_config, run_inventory_phase};
 pub use lock::DaemonInstanceLock;
 pub use logging::{default_log_level, sync_daemon_file_logging, warn_if_log_level_auto_healed};
 pub use market_context::{
@@ -84,7 +88,5 @@ pub use run_once::{
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,
     active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
-    match_watched_coin_ids, set_watched_coin_ids_for_market,
-    update_market_coin_watchlist_from_offers, watched_coin_ids_for_market, watchlist_offer_ids,
-    CoinWatchlistCache, RESEED_MEMPOOL_MAX_AGE_SECONDS,
+    watchlist_offer_ids, RESEED_MEMPOOL_MAX_AGE_SECONDS,
 };

@@ -171,6 +171,20 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
 ### WebSocket
 
 - `GET /ws` - realtime stream for new transactions, mempool items, and offer files
+- GreenFloor daemon connects with query filters (always applied; configured URL query is replaced):
+  - `events=transaction,offer`
+  - `tx_status=pending,confirmed`
+  - repeatable `p2=<puzzle_hash>` for each enabled market receive puzzle and CAT outer hash
+    (CAT id from hex `base_asset` or `cats.yaml` ticker index)
+- Documented `transaction` frames carry tx `ids` + `p2s` (not coin ids). Offer frames carry `offer_id` + `status` (+ optional `tx_id`).
+- Non-envelope / legacy flat payloads are ignored. Mainnet operators should confirm live frames match this envelope.
+- On watched p2 hits the daemon marks inventory stale, drives `mempool_observed`, and HTTP-enriches via `get_coin_records_by_puzzle_hashes`.
+- HTTP webhooks are out of scope; cancel and other spends use `POST /push_tx`, not the WebSocket.
+
+### Offers
+
+- `POST /push_offer` - body `{ "offer": "offer1..." }`; success returns 64-hex `offer_id` (spend-bundle hash / Dexie `trade_id`)
+- GreenFloor default publish venue is `coinset` via this endpoint; Dexie/Splash remain explicit opt-ins
 
 ## Integration Cheat Sheet (Required Body Fields)
 
@@ -206,6 +220,7 @@ Use this as a quick "minimum payload" guide when wiring clients.
 | `POST /get_puzzle_and_solution`                 | `coin_id`                                                                                |
 | `POST /get_puzzle_and_solution_with_conditions` | `coin_id`                                                                                |
 | `POST /push_tx`                                 | `spend_bundle`                                                                           |
+| `POST /push_offer`                              | `offer` (`offer1...`)                                                                    |
 
 ### Fees / Full Node / Mempool / WebSocket
 

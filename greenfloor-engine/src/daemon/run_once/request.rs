@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 
 #[cfg(test)]
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
@@ -46,16 +46,19 @@ pub struct DaemonRunOnceRequest {
     pub dispatch_state: DaemonDispatchState,
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,
-    #[serde(skip, default = "default_coin_watchlist")]
-    pub coin_watchlist: Arc<CoinWatchlistCache>,
+    #[serde(skip, default = "default_inventory_freshness")]
+    pub inventory_freshness: Arc<InventoryFreshnessCache>,
+    /// Stable inventory p2 filters; shared with WS loop when set by `daemon_loop`.
+    #[serde(skip, default)]
+    pub inventory_p2s: Option<Arc<[String]>>,
 }
 
 fn default_poll_coinset_mempool() -> bool {
     true
 }
 
-fn default_coin_watchlist() -> Arc<CoinWatchlistCache> {
-    CoinWatchlistCache::new()
+fn default_inventory_freshness() -> Arc<InventoryFreshnessCache> {
+    InventoryFreshnessCache::new()
 }
 
 impl DaemonRunOnceRequest {
@@ -64,13 +67,8 @@ impl DaemonRunOnceRequest {
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub fn from_json_value(
-        value: Value,
-        coin_watchlist: Arc<CoinWatchlistCache>,
-    ) -> crate::error::SignerResult<Self> {
-        let mut request: Self = serde_json::from_value(value)
-            .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-        request.coin_watchlist = coin_watchlist;
-        Ok(request)
+    pub fn from_json_value(value: Value) -> crate::error::SignerResult<Self> {
+        serde_json::from_value(value)
+            .map_err(|err| crate::error::SignerError::Other(err.to_string()))
     }
 }

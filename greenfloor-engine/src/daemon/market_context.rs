@@ -9,9 +9,9 @@ use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
 
 use super::cycle_paths::DaemonCyclePaths;
+use super::inventory_freshness::InventoryFreshnessCache;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
-use super::watchlist::cache::CoinWatchlistCache;
 
 /// Config and clients loaded once per daemon cycle.
 #[derive(Debug, Clone)]
@@ -23,7 +23,9 @@ pub struct DaemonCycleResources {
     pub network: String,
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
-    pub coin_watchlist: Arc<CoinWatchlistCache>,
+    pub inventory_freshness: Arc<InventoryFreshnessCache>,
+    /// Stable maker/inventory p2s for WS filters (computed once per daemon process when set).
+    pub inventory_p2s: Arc<[String]>,
     pub ticker_index: CatTickerIndex,
 }
 
@@ -60,13 +62,15 @@ impl DaemonCycleResources {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_program_config(
         program_config: CycleProgramConfig,
         markets: MarketsConfig,
         network: String,
         dexie: DexieClient,
         paths: DaemonCyclePaths,
-        coin_watchlist: Arc<CoinWatchlistCache>,
+        inventory_freshness: Arc<InventoryFreshnessCache>,
+        inventory_p2s: Arc<[String]>,
         ticker_index: CatTickerIndex,
     ) -> Self {
         Self {
@@ -75,7 +79,8 @@ impl DaemonCycleResources {
             network,
             dexie,
             paths,
-            coin_watchlist,
+            inventory_freshness,
+            inventory_p2s,
             ticker_index,
         }
     }
@@ -146,7 +151,14 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     )?;
     super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
     let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
-    let coin_watchlist = request.coin_watchlist.clone();
+    let inventory_freshness = request.inventory_freshness.clone();
+    let inventory_p2s = match &request.inventory_p2s {
+        Some(p2s) => p2s.clone(),
+        None => Arc::from(super::coinset_ws::stable_inventory_p2s_from_markets(
+            &request.markets_path,
+            request.testnet_markets_path.as_deref(),
+        )?),
+    };
     let ticker_index = operator_ticker_index_from_paths(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -162,7 +174,8 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
             request.markets_path.clone(),
             request.testnet_markets_path.clone(),
         ),
-        coin_watchlist,
+        inventory_freshness,
+        inventory_p2s,
         ticker_index,
     ))
 }
@@ -213,7 +226,8 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            CoinWatchlistCache::new(),
+            InventoryFreshnessCache::new(),
+            Arc::<[String]>::from(Vec::new()),
             empty_cat_ticker_index(),
         )
     }

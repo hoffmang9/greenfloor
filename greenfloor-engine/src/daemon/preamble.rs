@@ -12,7 +12,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::coinset_ws::capture_coinset_websocket_once;
-use super::watchlist::cache::CoinWatchlistCache;
+use super::inventory_freshness::InventoryFreshnessCache;
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -26,7 +26,8 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
-    coin_watchlist: &CoinWatchlistCache,
+    inventory_p2s: &[String],
+    inventory_freshness: &InventoryFreshnessCache,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
@@ -58,8 +59,14 @@ pub async fn run_cycle_preamble(
     }
 
     if use_websocket_capture {
-        if let Err(err) =
-            capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
+        if let Err(err) = capture_coinset_websocket_once(
+            store,
+            program,
+            coinset_base_url,
+            inventory_p2s,
+            inventory_freshness,
+        )
+        .await
         {
             result.cycle_error_count += 1;
             LogContext::DAEMON_CYCLE.dual_audit(
@@ -186,7 +193,6 @@ pub(crate) fn xch_price_from_env_override() -> SignerResult<Option<f64>> {
 mod tests {
     use super::*;
     use crate::daemon::test_support::{open_test_store, sample_mainnet_program};
-    use crate::daemon::watchlist::CoinWatchlistCache;
     use crate::operator_log::XCH_PRICE_SNAPSHOT;
     use crate::test_env::EnvRestoreGuard;
 
@@ -208,13 +214,14 @@ mod tests {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
-        let watchlist = CoinWatchlistCache::new();
 
+        let freshness = InventoryFreshnessCache::new();
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "",
-            &watchlist,
+            &[],
+            &freshness,
             false,
             false,
         )
@@ -234,13 +241,14 @@ mod tests {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
-        let watchlist = CoinWatchlistCache::new();
 
+        let freshness = InventoryFreshnessCache::new();
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
-            &watchlist,
+            &[],
+            &freshness,
             true,
             false,
         )
