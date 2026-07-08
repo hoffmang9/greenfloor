@@ -34,4 +34,6 @@ never the operator transport.
 - Mainnet-first; testnet11 WS hardening deferred.
 - Daemon loop and CLI `--once` both build `InventoryP2Index` from markets before
   WS capture/subscribe. Config reload rebuilds the index and reconnects WS so
-  p2 filters stay current without a process restart.
+  p2 filters stay current without a process restart. The `config_reloaded` audit
+  payload includes `inventory_p2_rebuild: ok|failed`; a failed rebuild keeps prior
+  filters.

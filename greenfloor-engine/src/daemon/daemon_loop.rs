@@ -131,7 +131,7 @@ async fn run_daemon_loop_inner(
         handle_reload_marker_if_present(
             &request.state_dir,
             &resolve_state_db_path(&runtime.home_dir, request.state_db_override.as_deref()),
-            Some(&coinset),
+            &coinset,
             &request.markets_path,
             request.testnet_markets_path.as_deref(),
         );

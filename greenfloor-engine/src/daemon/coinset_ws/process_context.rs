@@ -9,6 +9,8 @@ use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use crate::error::SignerResult;
 
 /// Shared process context for Coinset WS filters, freshness, and inventory skip.
+///
+/// Always share via `Arc<CoinsetProcessContext>` — do not clone the inner struct.
 #[derive(Debug)]
 pub struct CoinsetProcessContext {
     inventory_p2s: RwLock<Arc<InventoryP2Index>>,
@@ -78,25 +80,5 @@ impl CoinsetProcessContext {
     #[must_use]
     pub fn take_ws_reconnect_requested(&self) -> bool {
         self.reconnect_requested.swap(false, Ordering::SeqCst)
-    }
-}
-
-impl Default for CoinsetProcessContext {
-    fn default() -> Self {
-        Self {
-            inventory_p2s: RwLock::new(Arc::new(InventoryP2Index::default())),
-            inventory_freshness: InventoryFreshnessCache::new(),
-            reconnect_requested: AtomicBool::new(false),
-        }
-    }
-}
-
-impl Clone for CoinsetProcessContext {
-    fn clone(&self) -> Self {
-        Self {
-            inventory_p2s: RwLock::new(self.inventory_p2s()),
-            inventory_freshness: Arc::clone(&self.inventory_freshness),
-            reconnect_requested: AtomicBool::new(self.reconnect_requested.load(Ordering::SeqCst)),
-        }
     }
 }

@@ -78,7 +78,9 @@ pub use program_runtime::{
     load_daemon_program_runtime, use_websocket_capture_for_once, websocket_capture_enabled,
     DaemonProgramRuntime,
 };
-pub use reload::{record_config_reloaded, reload_marker_present, remove_reload_marker};
+pub use reload::{
+    record_config_reloaded, reload_marker_present, remove_reload_marker, InventoryP2RebuildStatus,
+};
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,

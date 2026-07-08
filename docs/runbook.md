@@ -234,6 +234,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `fallback_poll_interval_seconds`: recovery snapshot window used by websocket reconnect and `greenfloord --once` bounded capture
   - Loop and `--once` both build `InventoryP2Index` from enabled markets before WS subscribe/capture.
   - Config reload marker rebuilds that index and requests WS reconnect so `p2` filters stay current.
+    Audit event `config_reloaded` includes `inventory_p2_rebuild: ok|failed` (failed keeps prior filters).
   - Inventory HTTP polls may skip for up to 90s when freshness is clean (no relevant WS p2 activity).
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
