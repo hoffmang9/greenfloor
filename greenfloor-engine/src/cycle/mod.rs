@@ -49,8 +49,8 @@ pub use orchestration::{
 };
 pub use reconcile::{
     resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
-    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
-    ReconcileState,
+    resolve_watched_offer_transition_with_summary, unchanged_offer_transition,
+    unsupported_venue_offer_transition, CycleOfferTransition, ReconcileState,
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,

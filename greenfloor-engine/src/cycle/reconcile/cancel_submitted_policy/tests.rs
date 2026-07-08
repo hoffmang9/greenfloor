@@ -37,17 +37,12 @@ fn coinset_id(label: char) -> String {
     label.to_string().repeat(64)
 }
 
-fn dexie_signals(
+fn coinset_summary(
     tx_ids: &[String],
     confirmed: &[String],
     mempool: &[String],
-) -> DexieCoinsetSignals {
-    DexieCoinsetSignals {
-        tx_ids: tx_ids.to_vec(),
-        confirmed_tx_ids: confirmed.to_vec(),
-        mempool_tx_ids: mempool.to_vec(),
-        ..Default::default()
-    }
+) -> CoinsetSignalSummary {
+    CoinsetSignalSummary::from_tx_lists(tx_ids, confirmed, mempool)
 }
 
 fn stale_cancel_ctx(now: chrono::DateTime<Utc>) -> CancelSubmittedContext {
@@ -149,7 +144,7 @@ fn tracked_mempool_only_unconfirmed_unwedges_after_grace() {
     assert!(cancel_submit_stale_reset_eligible(&ctx, after_grace, &[]));
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         &[],
         &ctx,
         after_grace,
@@ -181,7 +176,7 @@ fn stale_reset_blocked_when_cancel_tx_in_confirmed_list() {
     ));
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         std::slice::from_ref(&cancel_tx_id),
         &ctx,
         after_grace,
@@ -282,7 +277,7 @@ fn cancel_tx_chain_confirmed_moves_to_cancelled() {
     };
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         &[],
         &ctx,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
@@ -310,7 +305,7 @@ fn cancel_tx_chain_confirmed_beats_dexie_linked_taker_confirm() {
     let taker_tx = "b".repeat(64);
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(
+        coinset_summary(
             std::slice::from_ref(&taker_tx),
             std::slice::from_ref(&taker_tx),
             &[],
@@ -337,7 +332,7 @@ fn taker_confirmed_while_cancel_in_flight_promotes_to_tx_block_confirmed() {
     };
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(
+        coinset_summary(
             std::slice::from_ref(&taker_tx),
             std::slice::from_ref(&taker_tx),
             &[],
@@ -367,7 +362,7 @@ fn cancel_tx_mempool_only_does_not_promote_to_mempool_observed() {
     };
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         &[],
         &ctx,
         submitted + chrono::Duration::seconds(60),
@@ -382,7 +377,7 @@ fn cancel_submitted_moves_to_cancelled_on_dexie_status_3() {
     let now = Utc::now();
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_CANCELLED),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         &[],
         &stale_cancel_ctx(now),
         now,
@@ -403,7 +398,7 @@ fn cancel_submitted_moves_to_mempool_observed_on_dexie_taker_mempool() {
     let taker_tx = coinset_id('x');
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(
+        coinset_summary(
             std::slice::from_ref(&taker_tx),
             &[],
             std::slice::from_ref(&coinset_id('m')),
@@ -433,7 +428,7 @@ fn cancel_submitted_moves_to_tx_block_confirmed_on_dexie_taker_confirm() {
     let confirmed = coinset_id('c');
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(
+        coinset_summary(
             std::slice::from_ref(&taker_tx),
             std::slice::from_ref(&confirmed),
             &[],
@@ -462,7 +457,7 @@ fn cancel_submitted_dexie_open_resets_to_open_for_cancel_retry() {
     let now = Utc::now();
     let transition = resolve_cancel_submitted_transition(
         Some(DEXIE_STATUS_OPEN),
-        &dexie_signals(&[], &[], &[]),
+        coinset_summary(&[], &[], &[]),
         &[],
         &stale_cancel_ctx(now),
         now,

@@ -12,7 +12,7 @@ use crate::storage::{OfferStateListRow, TxSignalStateRow};
 use super::builders::{
     cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status,
 };
-use super::coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
+use super::coinset_signals::CoinsetSignalSummary;
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
     REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
@@ -97,7 +97,7 @@ pub(crate) fn allowed_cancel_target_offer_ids(
 /// Resolve reconcile transition for an offer already in `cancel_submitted`.
 pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
-    dexie: &DexieCoinsetSignals,
+    summary: CoinsetSignalSummary,
     chain_confirmed_tx_ids: &[String],
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
@@ -109,15 +109,12 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    let taker_coinset = dexie.summary();
-    if let Some(taker) =
-        apply_coinset_taker_dispatch_if_present(taker_coinset, dexie_status, &current)
-    {
+    if let Some(taker) = apply_coinset_taker_dispatch_if_present(summary, dexie_status, &current) {
         return taker;
     }
     cancel_submitted_dexie_status_transition(
         dexie_status,
-        taker_coinset,
+        summary,
         ctx,
         now,
         chain_confirmed_tx_ids,

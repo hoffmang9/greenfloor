@@ -6,6 +6,7 @@ mod cancel_context;
 mod cancel_eligibility;
 mod persist;
 mod reconcile_watched_offers;
+mod signal_apply;
 mod status_cli;
 mod transition;
 mod ws_apply;
@@ -27,6 +28,7 @@ pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };
+pub use signal_apply::apply_watched_offer_signals;
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };

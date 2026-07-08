@@ -48,6 +48,12 @@ impl InventoryP2Index {
                     .entry(inner)
                     .or_default()
                     .insert(market.market_id.clone());
+            } else {
+                tracing::warn!(
+                    market_id = %market.market_id,
+                    puzzle_hash_len = inner.len(),
+                    "skipping non-64-char receive puzzle hash for inventory p2 index"
+                );
             }
 
             let base = market.base_asset.trim();
@@ -73,6 +79,12 @@ impl InventoryP2Index {
                     .entry(outer)
                     .or_default()
                     .insert(market.market_id.clone());
+            } else {
+                tracing::warn!(
+                    market_id = %market.market_id,
+                    puzzle_hash_len = outer.len(),
+                    "skipping non-64-char CAT outer puzzle hash for inventory p2 index"
+                );
             }
         }
         let p2s: Vec<String> = markets_by_p2.keys().cloned().collect();

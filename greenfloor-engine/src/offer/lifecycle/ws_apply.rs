@@ -1,42 +1,17 @@
 //! Apply Coinset WS offer / watch signals through canonical reconcile decision.
 
-use chrono::Utc;
-
+use crate::coinset::WsOfferEvent;
 use crate::cycle::reconcile::{
-    resolve_watched_offer_transition_from_signals, signals_from_ws_offer_status,
-    CancelSubmittedContext, CoinsetTxSignals,
+    signals_from_ws_offer_status, CancelSubmittedContext, CoinsetSignalSummary, CoinsetTxSignals,
 };
-use crate::daemon::WsOfferEvent;
 use crate::error::SignerResult;
 use crate::storage::{OfferStateListRow, SqliteStore};
 
 use super::cancel_context::{
     cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
 };
-use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
-
-fn persist_changed(
-    store: &SqliteStore,
-    market_id: &str,
-    offer_id: &str,
-    transition: &crate::cycle::CycleOfferTransition,
-) -> SignerResult<()> {
-    if !transition.changed {
-        return Ok(());
-    }
-    persist_offer_lifecycle_transition(
-        store,
-        market_id,
-        offer_id,
-        transition,
-        None,
-        &ReconcilePersistOptions {
-            action: "coinset_ws_lifecycle",
-            venue: Some("coinset"),
-            dexie_error: None,
-        },
-    )
-}
+use super::persist::ReconcilePersistOptions;
+use super::signal_apply::apply_watched_offer_signals;
 
 fn seed_offer_tx_signal(store: &SqliteStore, event: &WsOfferEvent) -> SignerResult<()> {
     let Some(tx_id) = event.tx_id.as_ref() else {
@@ -57,25 +32,12 @@ fn seed_offer_tx_signal(store: &SqliteStore, event: &WsOfferEvent) -> SignerResu
     Ok(())
 }
 
-fn apply_reconcile_signals(
-    store: &SqliteStore,
-    offer_id: &str,
-    market_id: &str,
-    current_state: &str,
-    status: Option<i64>,
-    signals: CoinsetTxSignals,
-    cancel_submitted: Option<&CancelSubmittedContext>,
-) -> SignerResult<()> {
-    let transition = resolve_watched_offer_transition_from_signals(
-        current_state,
-        status,
-        signals,
-        &[],
-        cancel_submitted,
-        Utc::now(),
-    )
-    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-    persist_changed(store, market_id, offer_id, &transition)
+fn ws_persist_options() -> ReconcilePersistOptions<'static> {
+    ReconcilePersistOptions {
+        action: "coinset_ws_lifecycle",
+        venue: Some("coinset"),
+        dexie_error: None,
+    }
 }
 
 /// Drive lifecycle from a Coinset WS `offer` event for a locally tracked offer.
@@ -96,14 +58,16 @@ pub fn apply_ws_offer_event(store: &SqliteStore, event: &WsOfferEvent) -> Signer
     };
     let cancel_submitted =
         cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, None)?;
-    apply_reconcile_signals(
+    apply_watched_offer_signals(
         store,
-        &row.offer_id,
         &row.market_id,
+        &row.offer_id,
         &row.state,
         status,
         signals,
+        None,
         cancel_submitted.as_ref(),
+        &ws_persist_options(),
     )
 }
 
@@ -118,14 +82,16 @@ fn apply_mempool_hit_for_row(
         &row.state,
         Some(cancel_by_offer),
     )?;
-    apply_reconcile_signals(
+    apply_watched_offer_signals(
         store,
-        &row.offer_id,
         &row.market_id,
+        &row.offer_id,
         &row.state,
         None,
-        CoinsetTxSignals::mempool_hit(),
+        CoinsetTxSignals::default(),
+        Some(CoinsetSignalSummary::mempool_hit()),
         cancel_submitted.as_ref(),
+        &ws_persist_options(),
     )
 }
 

@@ -1,4 +1,6 @@
 //! Coinset tx signal summary shared by reconcile dispatch paths.
+//!
+//! WS and Dexie share i64 status codes for dispatch; `DEXIE_STATUS_*` names are historical.
 
 use crate::offer::dexie_payload::{
     DEXIE_STATUS_CANCELLED, DEXIE_STATUS_CONFIRMED, DEXIE_STATUS_EXPIRED,
@@ -10,35 +12,16 @@ pub struct CoinsetTxSignals {
     pub tx_ids: Vec<String>,
     pub confirmed_tx_ids: Vec<String>,
     pub mempool_tx_ids: Vec<String>,
-    /// When true, treat as mempool-observed even with empty tx id lists (watch hit).
-    pub(crate) synthetic_mempool: bool,
 }
-
-/// Compatibility alias while call sites migrate off the Dexie-named type.
-pub type DexieCoinsetSignals = CoinsetTxSignals;
 
 impl CoinsetTxSignals {
     #[must_use]
     pub fn summary(&self) -> CoinsetSignalSummary {
-        let mut summary = CoinsetSignalSummary::from_tx_lists(
+        CoinsetSignalSummary::from_tx_lists(
             &self.tx_ids,
             &self.confirmed_tx_ids,
             &self.mempool_tx_ids,
-        );
-        if self.synthetic_mempool {
-            summary.has_tx_ids = true;
-            summary.has_mempool = true;
-        }
-        summary
-    }
-
-    /// Watch-hit / inventory signal with no concrete spend-bundle id yet.
-    #[must_use]
-    pub fn mempool_hit() -> Self {
-        Self {
-            synthetic_mempool: true,
-            ..Self::default()
-        }
+        )
     }
 }
 
@@ -91,7 +74,6 @@ pub fn signals_from_ws_offer_status(
                 tx_ids: tx.clone(),
                 confirmed_tx_ids: Vec::new(),
                 mempool_tx_ids: tx,
-                ..CoinsetTxSignals::default()
             },
         )),
         "confirmed" => Some((
@@ -100,7 +82,6 @@ pub fn signals_from_ws_offer_status(
                 tx_ids: tx.clone(),
                 confirmed_tx_ids: tx,
                 mempool_tx_ids: Vec::new(),
-                ..CoinsetTxSignals::default()
             },
         )),
         "expired" => Some((Some(DEXIE_STATUS_EXPIRED), CoinsetTxSignals::default())),
@@ -148,13 +129,10 @@ mod tests {
 
     #[test]
     fn mempool_hit_summary_is_synthetic_without_tx_ids() {
-        let hit = CoinsetTxSignals::mempool_hit();
-        assert!(hit.tx_ids.is_empty());
-        assert!(hit.mempool_tx_ids.is_empty());
-        let summary = hit.summary();
+        let summary = CoinsetSignalSummary::mempool_hit();
         assert!(summary.has_tx_ids);
         assert!(summary.has_mempool);
         assert!(!summary.has_confirmed);
-        assert_eq!(summary, CoinsetSignalSummary::mempool_hit());
+        assert!(!CoinsetTxSignals::default().summary().has_mempool);
     }
 }

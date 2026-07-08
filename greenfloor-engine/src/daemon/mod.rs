@@ -5,7 +5,6 @@ mod cli;
 mod coin_ops_execution;
 mod coin_ops_phase;
 mod coinset_spendable;
-mod coinset_tx;
 mod coinset_ws;
 mod cycle_entry;
 mod cycle_paths;
@@ -55,7 +54,6 @@ pub use cli::{
 pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecutionResult,
 };
-pub use coinset_tx::WsOfferEvent;
 pub use coinset_ws::{
     resolve_coinset_ws_url_with_p2s, start_coinset_websocket_loop, CoinsetProcessContext,
     CoinsetWebsocketLoopHandle, InventoryP2Index,

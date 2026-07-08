@@ -23,7 +23,7 @@ use crate::storage::SqliteStore;
 use super::cancel_context::{
     cancel_submitted_context_for_offer, chain_confirmed_tx_ids_for_transition,
 };
-use crate::cycle::reconcile::DexieCoinsetSignals;
+use crate::cycle::reconcile::CoinsetTxSignals;
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
 #[derive(Debug, Clone, Copy)]
@@ -99,21 +99,20 @@ pub fn transition_from_dexie_offer_payload(
     )?;
     let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
         coinset_signal_lists(store, &coinset_tx_ids)?;
-    let dexie = DexieCoinsetSignals {
+    let signals = CoinsetTxSignals {
         tx_ids: coinset_tx_ids,
         confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
         mempool_tx_ids: coinset_mempool_tx_ids,
-        ..Default::default()
     };
     let chain_confirmed_tx_ids = chain_confirmed_tx_ids_for_transition(
         store,
         cancel_submitted.as_ref(),
-        &dexie.confirmed_tx_ids,
+        &signals.confirmed_tx_ids,
     )?;
     resolve_watched_offer_transition_from_signals(
         current_state,
         status,
-        dexie,
+        signals,
         &chain_confirmed_tx_ids,
         cancel_submitted.as_ref(),
         env.now,

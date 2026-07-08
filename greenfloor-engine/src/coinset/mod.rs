@@ -22,6 +22,7 @@ mod spent_verify;
 pub(crate) mod test_support;
 mod vault_fetch;
 mod wallet_io;
+mod ws_event;
 mod xch;
 
 pub use api::{
@@ -67,6 +68,7 @@ pub use wallet_io::{
     list_wallet_unspent_coins_for_signer, puzzle_hash_hex_for_receive_address,
     spend_bundle_hash_from_hex, spend_bundle_hex, WalletUnspentCoin,
 };
+pub use ws_event::{parse_ws_event, WsEvent, WsOfferEvent, WsTransactionEvent};
 pub use xch::list_unspent_xch;
 
 pub use chia_sdk_coinset::CoinsetClient;

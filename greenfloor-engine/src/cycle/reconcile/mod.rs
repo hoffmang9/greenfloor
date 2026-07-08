@@ -23,9 +23,7 @@ pub(crate) use audit_preserve::PRESERVED_LIFECYCLE_TRANSITIONS;
 pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
 pub(crate) use cancel_submitted_policy::cancel_tx_chain_confirmed;
 pub use cancel_submitted_policy::CancelSubmittedContext;
-pub use coinset_signals::{
-    signals_from_ws_offer_status, CoinsetSignalSummary, CoinsetTxSignals, DexieCoinsetSignals,
-};
+pub use coinset_signals::{signals_from_ws_offer_status, CoinsetSignalSummary, CoinsetTxSignals};
 pub(crate) use metadata::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
@@ -78,6 +76,41 @@ pub fn resolve_missing_watched_offer_transition(
     Ok(decision.into_cycle_transition_no_coinset(old_state))
 }
 
+/// Resolve watched offer transition using an explicit signal summary.
+///
+/// `signals` supplies tx id lists for the resulting `CycleOfferTransition` only;
+/// dispatch uses `summary` (so watch hits can pass `CoinsetSignalSummary::mempool_hit()`
+/// with empty id lists).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn resolve_watched_offer_transition_with_summary(
+    current_state: &str,
+    status: Option<i64>,
+    summary: CoinsetSignalSummary,
+    signals: CoinsetTxSignals,
+    chain_confirmed_tx_ids: &[String],
+    cancel_submitted: Option<&CancelSubmittedContext>,
+    now: DateTime<Utc>,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    Ok(resolve_watched_offer_decision(
+        &old_state,
+        status,
+        summary,
+        chain_confirmed_tx_ids,
+        cancel_submitted,
+        now,
+    )
+    .into_cycle_transition(
+        old_state,
+        signals.tx_ids,
+        signals.confirmed_tx_ids,
+        signals.mempool_tx_ids,
+    ))
+}
+
 /// Resolve watched offer transition from signals.
 ///
 /// # Errors
@@ -91,19 +124,14 @@ pub fn resolve_watched_offer_transition_from_signals(
     cancel_submitted: Option<&CancelSubmittedContext>,
     now: DateTime<Utc>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
-    let old_state = ReconcileState::parse(current_state)?;
-    Ok(resolve_watched_offer_decision(
-        &old_state,
+    let summary = signals.summary();
+    resolve_watched_offer_transition_with_summary(
+        current_state,
         status,
-        &signals,
+        summary,
+        signals,
         chain_confirmed_tx_ids,
         cancel_submitted,
         now,
     )
-    .into_cycle_transition(
-        old_state,
-        signals.tx_ids,
-        signals.confirmed_tx_ids,
-        signals.mempool_tx_ids,
-    ))
 }

@@ -8,7 +8,7 @@ use crate::config::{
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
 
-use super::coinset_ws::{CoinsetProcessContext, InventoryP2Index};
+use super::coinset_ws::CoinsetProcessContext;
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
@@ -148,18 +148,8 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     )?;
     super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
     let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
-    let coinset = if request.coinset.inventory_p2s.p2s().is_empty() {
-        let inventory_p2s = InventoryP2Index::from_markets(
-            &request.markets_path,
-            request.testnet_markets_path.as_deref(),
-        )?;
-        CoinsetProcessContext::new(
-            inventory_p2s,
-            Arc::clone(&request.coinset.inventory_freshness),
-        )
-    } else {
-        Arc::clone(&request.coinset)
-    };
+    // Callers (daemon_loop / CLI) must populate InventoryP2Index; do not rebuild here.
+    let coinset = Arc::clone(&request.coinset);
     let ticker_index = operator_ticker_index_from_paths(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -244,7 +234,8 @@ mod tests {
     }
 
     #[test]
-    fn load_cycle_resources_rebuilds_empty_p2_index_preserving_freshness() {
+    fn load_cycle_resources_preserves_empty_p2_index_and_freshness_arc() {
+        use crate::daemon::coinset_ws::InventoryP2Index;
         use crate::daemon::inventory_freshness::InventoryFreshnessCache;
         use crate::daemon::run_once::{
             DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest,
@@ -306,11 +297,19 @@ mod tests {
         };
         let resources = load_cycle_resources(&request).expect("load");
         assert!(
+            Arc::ptr_eq(&resources.coinset, &request.coinset),
+            "coinset Arc must be preserved without rebuild"
+        );
+        assert!(
             Arc::ptr_eq(
                 &resources.coinset.inventory_freshness,
                 &request.coinset.inventory_freshness
             ),
-            "freshness Arc must be preserved across empty-index rebuild"
+            "freshness Arc must be preserved"
+        );
+        assert!(
+            resources.coinset.inventory_p2s.p2s().is_empty(),
+            "empty request index must stay empty"
         );
         assert!(!resources
             .coinset

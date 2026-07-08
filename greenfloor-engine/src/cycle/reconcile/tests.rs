@@ -14,7 +14,8 @@ use super::metadata::{
 use super::{
     decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CycleOfferTransition, DexieCoinsetSignals, ReconcileState,
+    unsupported_venue_offer_transition, CoinsetSignalSummary, CoinsetTxSignals,
+    CycleOfferTransition, ReconcileState,
 };
 use crate::cycle::reconcile::CancelSubmittedContext;
 
@@ -214,17 +215,16 @@ const DISPATCH_CASES: &[DispatchCase] = &[
 fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
     let current = state(case.current_state);
     let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = case.coinset.vecs();
-    let dexie = DexieCoinsetSignals {
+    let signals = CoinsetTxSignals {
         tx_ids: coinset_tx_ids,
         confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
         mempool_tx_ids: coinset_mempool_tx_ids,
-        ..Default::default()
     };
     let chain_confirmed = coinset_confirmed_tx_ids.clone();
     resolve_watched_offer_decision(
         &current,
         case.status,
-        &dexie,
+        signals.summary(),
         &chain_confirmed,
         None,
         Utc::now(),
@@ -288,11 +288,10 @@ fn resolve_watched_offer_transition_from_signals_matches_dispatch_matrix() {
         let transition = resolve_watched_offer_transition_from_signals(
             case.current_state,
             case.status,
-            DexieCoinsetSignals {
+            CoinsetTxSignals {
                 tx_ids: coinset_tx_ids,
                 confirmed_tx_ids: coinset_confirmed_tx_ids,
                 mempool_tx_ids: coinset_mempool_tx_ids,
-                ..Default::default()
             },
             &chain_confirmed,
             None,
@@ -491,12 +490,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,
         Some(0),
-        &DexieCoinsetSignals {
-            tx_ids: vec![],
-            confirmed_tx_ids: vec![],
-            mempool_tx_ids: vec![],
-            ..Default::default()
-        },
+        CoinsetSignalSummary::default(),
         &[],
         Some(&ctx),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
@@ -511,12 +505,7 @@ fn cancel_submitted_preserves_when_context_missing() {
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,
         Some(1),
-        &DexieCoinsetSignals {
-            tx_ids: vec![],
-            confirmed_tx_ids: vec![],
-            mempool_tx_ids: vec![],
-            ..Default::default()
-        },
+        CoinsetSignalSummary::default(),
         &[],
         None,
         Utc.with_ymd_and_hms(2020, 1, 1, 1, 0, 0).unwrap(),
@@ -535,7 +524,7 @@ fn unknown_reconcile_state_is_rejected() {
     let err = resolve_watched_offer_transition_from_signals(
         "not_a_real_state",
         None,
-        DexieCoinsetSignals::default(),
+        CoinsetTxSignals::default(),
         &[],
         None,
         Utc::now(),
