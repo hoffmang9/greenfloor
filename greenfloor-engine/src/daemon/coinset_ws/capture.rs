@@ -4,6 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use super::p2_filters::InventoryP2Index;
 use crate::config::ManagerProgramConfig;
 use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use crate::error::SignerResult;
@@ -20,7 +21,7 @@ pub async fn capture_coinset_websocket_once(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    inventory_p2s: &[String],
+    inventory_p2s: &InventoryP2Index,
     inventory_freshness: &InventoryFreshnessCache,
 ) -> SignerResult<()> {
     capture_coinset_websocket_once_with_timings(
@@ -38,12 +39,12 @@ pub async fn capture_coinset_websocket_once_with_timings(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    inventory_p2s: &[String],
+    inventory_p2s: &InventoryP2Index,
     inventory_freshness: &InventoryFreshnessCache,
     timings: OnceCaptureTimings,
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
-    let ws_url = resolve_coinset_ws_url_with_p2s(program, coinset_base_url, inventory_p2s);
+    let ws_url = resolve_coinset_ws_url_with_p2s(program, coinset_base_url, inventory_p2s.p2s());
     LogContext::COINSET.audit(
         store,
         COINSET_WS_ONCE_STARTED,
@@ -71,7 +72,7 @@ pub async fn capture_coinset_websocket_once_with_timings(
                     let wait_for = remaining.min(Duration::from_secs(1));
                     match tokio::time::timeout(wait_for, ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            handle_ws_text(store, inventory_freshness, &text).await?;
+                            handle_ws_text(store, inventory_p2s, inventory_freshness, &text)?;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;

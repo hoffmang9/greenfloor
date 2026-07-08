@@ -227,6 +227,53 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
 }
 
 #[tokio::test]
+async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watched() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bundle = minimal_program_bundle(&dir);
+    let mut market = sample_market("xch1test");
+    market.base_asset = test_coin_id('f');
+    let plans = vec![
+        sample_plan(CoinOpKind::Split),
+        sample_plan(CoinOpKind::Combine),
+    ];
+    let watched = HashSet::from([test_coin_id('a'), test_coin_id('b'), test_coin_id('c')]);
+
+    let empty_index = empty_cat_ticker_index();
+    let result = execute_managed_coin_op_plans_with_test_overrides(
+        sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
+        &plans,
+        &watched,
+        CoinOpTestOverrides::new(
+            Some(vec![
+                SpendableCoin {
+                    id: test_coin_id('a'),
+                    amount: 100_000,
+                },
+                SpendableCoin {
+                    id: test_coin_id('b'),
+                    amount: 10_000,
+                },
+                SpendableCoin {
+                    id: test_coin_id('c'),
+                    amount: 10_000,
+                },
+            ]),
+            Some("managed-op-test".to_string()),
+        ),
+    )
+    .await;
+
+    assert_eq!(result.executed_count, 0);
+    assert_eq!(result.items.len(), 2);
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "split" && item.reason == "no_spendable_split_coin_meets_required_amount"
+    }));
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
+    }));
+}
+
+#[tokio::test]
 async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
     let mut market = sample_market("xch1test");
     market.base_asset = "b".repeat(64);

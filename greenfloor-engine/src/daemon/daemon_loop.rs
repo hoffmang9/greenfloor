@@ -8,7 +8,7 @@ use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::resolve_state_db_path;
 
-use super::coinset_ws::{stable_inventory_p2s_from_markets, start_coinset_websocket_loop};
+use super::coinset_ws::{start_coinset_websocket_loop, InventoryP2Index};
 use super::cycle_entry::run_daemon_cycle_once;
 use super::inventory_freshness::InventoryFreshnessCache;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
@@ -67,7 +67,7 @@ async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
     inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<[String]>,
+    inventory_p2s: Arc<InventoryP2Index>,
     test_controls: DaemonCycleTestControls,
 ) -> SignerResult<i32> {
     let once_request = DaemonRunOnceRequest {
@@ -83,7 +83,7 @@ async fn run_one_loop_cycle(
         dispatch_state: dispatch_state.clone(),
         test_controls,
         inventory_freshness,
-        inventory_p2s: Some(inventory_p2s),
+        inventory_p2s,
     };
     let response = run_daemon_cycle_once(&once_request).await?;
     *dispatch_state = response.dispatch_state;
@@ -101,10 +101,10 @@ async fn run_daemon_loop_inner(
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let inventory_freshness = InventoryFreshnessCache::new();
-    let inventory_p2s: Arc<[String]> = Arc::from(stable_inventory_p2s_from_markets(
+    let inventory_p2s = InventoryP2Index::from_markets(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
-    )?);
+    )?;
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,

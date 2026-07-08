@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
@@ -9,7 +9,6 @@ use crate::error::SignerResult;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
-use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
 use super::split::execute_daemon_split_plan;
@@ -17,35 +16,6 @@ use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::config::GatedOperatorMarket;
-use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
-use crate::offer::dexie_payload::DexieOfferPayload;
-
-/// Watched coin ids from open offers.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn watched_coin_ids_from_open_offers(
-    store: &SqliteStore,
-    market_id: &str,
-    offers: &[Value],
-) -> SignerResult<HashSet<String>> {
-    let watch_offer_ids = watchlist_offer_ids(store, market_id)?;
-    let mut watched = HashSet::default();
-    for offer in offers {
-        let payload = DexieOfferPayload::new(offer.clone());
-        let Some(offer_id) = payload.id() else {
-            continue;
-        };
-        if !watch_offer_ids.contains(&offer_id) {
-            continue;
-        }
-        for coin_id in extract_coin_ids_from_offer_payload(payload.body()) {
-            watched.insert(coin_id);
-        }
-    }
-    Ok(watched)
-}
 
 fn skip_all_plans(
     program: &ManagerProgramConfig,

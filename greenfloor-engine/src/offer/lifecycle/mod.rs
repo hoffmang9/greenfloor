@@ -16,7 +16,7 @@ pub use cancel::{
 pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliRequest, OffersCancelCliResult,
 };
-pub use cancel_context::CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON;
+pub use cancel_context::{cancel_submitted_context_for_offer, CANCEL_SUBMIT_IN_FLIGHT_SKIP_REASON};
 pub(crate) use cancel_context::{
     defer_in_flight_cancel_offer_ids, preload_cancel_submitted_contexts,
 };

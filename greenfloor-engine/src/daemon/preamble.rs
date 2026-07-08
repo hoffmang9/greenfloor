@@ -11,7 +11,7 @@ use crate::operator_log::{
 };
 use crate::storage::SqliteStore;
 
-use super::coinset_ws::capture_coinset_websocket_once;
+use super::coinset_ws::{capture_coinset_websocket_once, InventoryP2Index};
 use super::inventory_freshness::InventoryFreshnessCache;
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
@@ -26,7 +26,7 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
-    inventory_p2s: &[String],
+    inventory_p2s: &InventoryP2Index,
     inventory_freshness: &InventoryFreshnessCache,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
@@ -220,7 +220,7 @@ mod tests {
             &sample_mainnet_program(),
             &store,
             "",
-            &[],
+            &InventoryP2Index::default(),
             &freshness,
             false,
             false,
@@ -247,7 +247,7 @@ mod tests {
             &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
-            &[],
+            &InventoryP2Index::default(),
             &freshness,
             true,
             false,

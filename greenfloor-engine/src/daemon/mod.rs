@@ -11,6 +11,7 @@ mod cycle_entry;
 mod cycle_paths;
 mod cycle_store;
 mod daemon_loop;
+mod dexie_size;
 mod disabled_markets;
 #[cfg(test)]
 mod dispatch_test_controls;
@@ -52,17 +53,16 @@ pub use cli::{
     run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
 };
 pub use coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
-    CoinOpExecutionResult,
+    execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecutionResult,
 };
-pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{
     resolve_coinset_ws_url_with_p2s, stable_inventory_p2s_from_markets,
-    start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
+    start_coinset_websocket_loop, CoinsetWebsocketLoopHandle, InventoryP2Index,
 };
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use cycle_paths::DaemonCyclePaths;
 pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
+pub use dexie_size::build_dexie_size_by_offer_id;
 pub use inventory_freshness::{InventoryFreshnessCache, INVENTORY_MAX_STALENESS};
 pub use inventory_phase::{assert_inventory_asset_resolution_matches_config, run_inventory_phase};
 pub use lock::DaemonInstanceLock;

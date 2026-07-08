@@ -6,6 +6,8 @@ use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use super::p2_filters::InventoryP2Index;
+
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -49,7 +51,7 @@ pub fn start_coinset_websocket_loop(
     program: ManagerProgramConfig,
     coinset_base_url: String,
     inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<[String]>,
+    inventory_p2s: Arc<InventoryP2Index>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -79,14 +81,13 @@ async fn run_coinset_websocket_loop(
     program: ManagerProgramConfig,
     coinset_base_url: String,
     inventory_freshness: Arc<InventoryFreshnessCache>,
-    inventory_p2s: Arc<[String]>,
+    inventory_p2s: Arc<InventoryP2Index>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let ws_url =
-        resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, inventory_p2s.as_ref());
+    let ws_url = resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, inventory_p2s.p2s());
     let reconnect =
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
@@ -109,7 +110,8 @@ async fn run_coinset_websocket_loop(
                 while !stop.load(Ordering::SeqCst) {
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            let _ = handle_ws_text(&store, &inventory_freshness, &text).await;
+                            let _ =
+                                handle_ws_text(&store, &inventory_p2s, &inventory_freshness, &text);
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;
@@ -183,7 +185,7 @@ mod tests {
             &store,
             &program,
             &server.url(),
-            &[],
+            &InventoryP2Index::default(),
             &InventoryFreshnessCache::new(),
             OnceCaptureTimings {
                 capture_window: Duration::from_millis(50),
@@ -217,7 +219,7 @@ mod tests {
             program,
             "https://example.test".to_string(),
             InventoryFreshnessCache::new(),
-            Arc::<[String]>::from(Vec::new()),
+            Arc::new(InventoryP2Index::default()),
         );
         handle.stop();
     }
@@ -232,7 +234,7 @@ mod tests {
             sample_program(),
             "https://example.test".to_string(),
             InventoryFreshnessCache::new(),
-            Arc::<[String]>::from(Vec::new()),
+            Arc::new(InventoryP2Index::default()),
             stop,
         )
         .await;
@@ -277,7 +279,7 @@ mod tests {
                 program,
                 coinset_base_url,
                 InventoryFreshnessCache::new(),
-                Arc::<[String]>::from(Vec::new()),
+                Arc::new(InventoryP2Index::default()),
                 stop_flag,
             ));
         });

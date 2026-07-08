@@ -68,7 +68,7 @@ pub fn test_cycle_context(
                 None,
             ),
             super::inventory_freshness::InventoryFreshnessCache::new(),
-            std::sync::Arc::<[String]>::from(Vec::new()),
+            std::sync::Arc::new(super::coinset_ws::InventoryP2Index::default()),
             empty_cat_ticker_index(),
         ),
         dispatch: MarketDispatchContext {

@@ -18,8 +18,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
-    CoinOpExecItem, CoinOpExecutionResult,
+    execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecItem, CoinOpExecutionResult,
 };
 use super::market_context::MarketCycleContext;
 
@@ -136,7 +135,8 @@ async fn execute_coin_ops_plans(
     offers: &[Value],
 ) -> SignerResult<CoinOpExecutionResult> {
     let operator_network = ctx.resources.network.as_str();
-    let watched_coin_ids = watched_coin_ids_from_open_offers(store, &market.market_id, offers)?;
+    let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
+    let _ = offers;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {
             dry_run: program.runtime_dry_run,

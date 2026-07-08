@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::daemon::coinset_ws::InventoryP2Index;
 use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 
 #[cfg(test)]
@@ -48,9 +49,8 @@ pub struct DaemonRunOnceRequest {
     pub test_controls: DaemonCycleTestControls,
     #[serde(skip, default = "default_inventory_freshness")]
     pub inventory_freshness: Arc<InventoryFreshnessCache>,
-    /// Stable inventory p2 filters; shared with WS loop when set by `daemon_loop`.
-    #[serde(skip, default)]
-    pub inventory_p2s: Option<Arc<[String]>>,
+    #[serde(skip, default = "default_inventory_p2_index")]
+    pub inventory_p2s: Arc<InventoryP2Index>,
 }
 
 fn default_poll_coinset_mempool() -> bool {
@@ -59,6 +59,10 @@ fn default_poll_coinset_mempool() -> bool {
 
 fn default_inventory_freshness() -> Arc<InventoryFreshnessCache> {
     InventoryFreshnessCache::new()
+}
+
+fn default_inventory_p2_index() -> Arc<InventoryP2Index> {
+    Arc::new(InventoryP2Index::default())
 }
 
 impl DaemonRunOnceRequest {

@@ -2,8 +2,9 @@ use serde_json::{json, Value};
 
 use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
-use crate::daemon::coinset_tx::{classify_ws_payload, ClassifiedWsPayload};
+use crate::daemon::coinset_tx::{parse_ws_event, WsEvent};
 use crate::daemon::coinset_ws::lifecycle::{apply_watch_hit_mempool, apply_ws_offer_event};
+use crate::daemon::coinset_ws::InventoryP2Index;
 use crate::daemon::inventory_freshness::InventoryFreshnessCache;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
@@ -99,20 +100,22 @@ fn record_ws_confirmed_tx_ids(
     )
 }
 
-fn record_ws_observed_p2s(
+fn record_observed_p2s(
     store: &SqliteStore,
+    inventory_p2s: &InventoryP2Index,
     inventory_freshness: &InventoryFreshnessCache,
     observed_p2s: &[String],
 ) -> SignerResult<()> {
-    let market_ids = store.list_market_ids_for_watched_keys(observed_p2s)?;
-    if market_ids.is_empty() {
-        return Ok(());
-    }
-    for market_id in &market_ids {
+    let inventory_markets = inventory_p2s.market_ids_for_p2s(observed_p2s);
+    for market_id in &inventory_markets {
         inventory_freshness.mark_stale(market_id);
     }
+    let watch_markets = store.list_market_ids_for_watched_keys(observed_p2s)?;
     for p2 in observed_p2s {
         apply_watch_hit_mempool(store, p2)?;
+    }
+    if inventory_markets.is_empty() && watch_markets.is_empty() {
+        return Ok(());
     }
     let mut sample: Vec<String> = observed_p2s
         .iter()
@@ -120,6 +123,10 @@ fn record_ws_observed_p2s(
         .collect();
     sample.sort();
     sample.truncate(10);
+    let mut market_ids = inventory_markets;
+    market_ids.extend(watch_markets);
+    market_ids.sort();
+    market_ids.dedup();
     LogContext::COINSET.audit(
         store,
         COIN_WATCH_HIT,
@@ -133,30 +140,53 @@ fn record_ws_observed_p2s(
     )
 }
 
-fn record_ws_offer_events(
+fn apply_ws_event(
     store: &SqliteStore,
-    classified: &ClassifiedWsPayload,
+    inventory_p2s: &InventoryP2Index,
+    inventory_freshness: &InventoryFreshnessCache,
+    event: WsEvent,
 ) -> SignerResult<()> {
-    for event in &classified.offer_events {
-        LogContext::COINSET.audit(
-            store,
-            "coinset_ws_offer_event",
-            &json!({
-                "offer_id": event.offer_id,
-                "status": event.status,
-                "tx_id": event.tx_id,
-                "p2_count": event.p2s.len(),
-                "source": "coinset_websocket",
-            }),
-            None,
-        )?;
-        apply_ws_offer_event(store, event)?;
+    match event {
+        WsEvent::Transaction(tx) => {
+            match tx.status.as_str() {
+                "pending" if !tx.tx_ids.is_empty() => {
+                    record_ws_mempool_tx_ids(store, &tx.tx_ids)?;
+                }
+                "confirmed" if !tx.tx_ids.is_empty() => {
+                    record_ws_confirmed_tx_ids(store, &tx.tx_ids)?;
+                }
+                _ => {}
+            }
+            if !tx.p2s.is_empty() {
+                record_observed_p2s(store, inventory_p2s, inventory_freshness, &tx.p2s)?;
+            }
+        }
+        WsEvent::Offer(offer) => {
+            LogContext::COINSET.audit(
+                store,
+                "coinset_ws_offer_event",
+                &json!({
+                    "offer_id": offer.offer_id,
+                    "status": offer.status,
+                    "tx_id": offer.tx_id,
+                    "p2_count": offer.p2s.len(),
+                    "source": "coinset_websocket",
+                }),
+                None,
+            )?;
+            let p2s = offer.p2s.clone();
+            apply_ws_offer_event(store, &offer)?;
+            if !p2s.is_empty() {
+                record_observed_p2s(store, inventory_p2s, inventory_freshness, &p2s)?;
+            }
+        }
     }
     Ok(())
 }
 
-pub async fn handle_ws_text(
+pub fn handle_ws_text(
     store: &SqliteStore,
+    inventory_p2s: &InventoryP2Index,
     inventory_freshness: &InventoryFreshnessCache,
     raw: &str,
 ) -> SignerResult<()> {
@@ -188,18 +218,10 @@ pub async fn handle_ws_text(
         )?;
         return Ok(());
     }
-    let classified = classify_ws_payload(&payload);
-    if !classified.mempool_tx_ids.is_empty() {
-        record_ws_mempool_tx_ids(store, &classified.mempool_tx_ids)?;
-    }
-    if !classified.confirmed_tx_ids.is_empty() {
-        record_ws_confirmed_tx_ids(store, &classified.confirmed_tx_ids)?;
-    }
-    record_ws_offer_events(store, &classified)?;
-    if !classified.observed_p2s.is_empty() {
-        record_ws_observed_p2s(store, inventory_freshness, &classified.observed_p2s)?;
-    }
-    Ok(())
+    let Some(event) = parse_ws_event(&payload) else {
+        return Ok(());
+    };
+    apply_ws_event(store, inventory_p2s, inventory_freshness, event)
 }
 
 pub fn ws_error(err: &tokio_tungstenite::tungstenite::Error) -> SignerError {
@@ -210,6 +232,7 @@ pub fn ws_error(err: &tokio_tungstenite::tungstenite::Error) -> SignerError {
 mod tests {
     use super::*;
     use crate::daemon::inventory_freshness::InventoryFreshnessCache;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     fn open_store() -> (tempfile::TempDir, SqliteStore) {
@@ -219,13 +242,18 @@ mod tests {
         (dir, store)
     }
 
-    #[tokio::test]
-    async fn handle_ws_text_routes_envelope_transaction() {
+    fn empty_index() -> Arc<InventoryP2Index> {
+        Arc::new(InventoryP2Index::default())
+    }
+
+    #[test]
+    fn handle_ws_text_routes_envelope_transaction() {
         let (_dir, store) = open_store();
         let freshness = InventoryFreshnessCache::new();
         let tx_id = "ab".repeat(32);
         handle_ws_text(
             &store,
+            &empty_index(),
             &freshness,
             &json!({
                 "message": {
@@ -235,7 +263,6 @@ mod tests {
             })
             .to_string(),
         )
-        .await
         .expect("envelope");
         let events = store
             .list_recent_audit_events(Some(&[COINSET_WS_MEMPOOL_EVENT]), None, 5)
@@ -243,8 +270,8 @@ mod tests {
         assert_eq!(events.len(), 1);
     }
 
-    #[tokio::test]
-    async fn handle_ws_text_offer_pending_drives_lifecycle() {
+    #[test]
+    fn handle_ws_text_offer_pending_drives_lifecycle() {
         let (_dir, store) = open_store();
         let freshness = InventoryFreshnessCache::new();
         let offer_id = "ab".repeat(32);
@@ -253,6 +280,7 @@ mod tests {
             .expect("upsert");
         handle_ws_text(
             &store,
+            &empty_index(),
             &freshness,
             &json!({
                 "message": {
@@ -266,7 +294,6 @@ mod tests {
             })
             .to_string(),
         )
-        .await
         .expect("offer");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
@@ -276,22 +303,30 @@ mod tests {
             .list_recent_audit_events(Some(&[COINSET_WS_MEMPOOL_EVENT]), None, 5)
             .expect("events");
         assert!(mempool.is_empty(), "offer frames must not seed tx buckets");
+        let tx_id = "cd".repeat(32);
+        let signals = store
+            .get_tx_signal_state(std::slice::from_ref(&tx_id))
+            .expect("tx signals");
+        assert!(
+            signals
+                .get(&tx_id)
+                .is_some_and(|row| row.mempool_observed_at.is_some()),
+            "offer pending must seed tx_signal_state for later cancel/reconcile"
+        );
     }
 
-    #[tokio::test]
-    async fn handle_ws_text_watch_hit_drives_mempool_observed() {
+    #[test]
+    fn handle_ws_text_inventory_p2_marks_stale_without_offer_watch() {
         let (_dir, store) = open_store();
         let freshness = InventoryFreshnessCache::new();
-        let offer_id = "ab".repeat(32);
+        freshness.mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
         let p2 = "ef".repeat(32);
-        store
-            .upsert_offer_state(&offer_id, "m1", "open", None)
-            .expect("upsert");
-        store
-            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&p2))
-            .expect("watch");
+        let mut markets_by_p2 = std::collections::HashMap::new();
+        markets_by_p2.insert(p2.clone(), vec!["m1".to_string()]);
+        let index = InventoryP2Index::from_markets_by_p2(markets_by_p2);
         handle_ws_text(
             &store,
+            &index,
             &freshness,
             &json!({
                 "message": {
@@ -305,40 +340,67 @@ mod tests {
             })
             .to_string(),
         )
-        .await
+        .expect("hit");
+        assert!(freshness.needs_refresh("m1", std::time::Duration::from_secs(90)));
+    }
+
+    #[test]
+    fn handle_ws_text_watch_hit_drives_mempool_observed() {
+        let (_dir, store) = open_store();
+        let freshness = InventoryFreshnessCache::new();
+        let offer_id = "ab".repeat(32);
+        let p2 = "ef".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&p2))
+            .expect("watch");
+        handle_ws_text(
+            &store,
+            &empty_index(),
+            &freshness,
+            &json!({
+                "message": {
+                    "type": "transaction",
+                    "data": {
+                        "status": "pending",
+                        "ids": ["cd".repeat(32)],
+                        "p2s": [p2]
+                    }
+                }
+            })
+            .to_string(),
+        )
         .expect("hit");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
         assert_eq!(rows[0].state, "mempool_observed");
-        assert!(freshness.needs_refresh("m1", std::time::Duration::from_secs(90)));
     }
 
-    #[tokio::test]
-    async fn handle_ws_text_emits_parse_error_for_invalid_json() {
+    #[test]
+    fn handle_ws_text_emits_parse_error_for_invalid_json() {
         let (_dir, store) = open_store();
         let freshness = InventoryFreshnessCache::new();
-        handle_ws_text(&store, &freshness, "{not-json")
-            .await
-            .expect("parse error audit");
+        handle_ws_text(&store, &empty_index(), &freshness, "{not-json").expect("parse error audit");
         let events = store
             .list_recent_audit_events(Some(&[COINSET_WS_PAYLOAD_PARSE_ERROR]), None, 5)
             .expect("events");
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event_type, COINSET_WS_PAYLOAD_PARSE_ERROR);
     }
 
-    #[tokio::test]
-    async fn non_envelope_payload_is_ignored_without_mempool_audit() {
+    #[test]
+    fn non_envelope_payload_is_ignored_without_mempool_audit() {
         let (_dir, store) = open_store();
         let freshness = InventoryFreshnessCache::new();
         let tx_id = "c".repeat(64);
         handle_ws_text(
             &store,
+            &empty_index(),
             &freshness,
             &json!({"event": "mempool_seen", "tx_id": tx_id}).to_string(),
         )
-        .await
         .expect("ignored");
         let events = store
             .list_recent_audit_events(Some(&[COINSET_WS_MEMPOOL_EVENT]), None, 5)

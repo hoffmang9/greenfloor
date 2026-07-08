@@ -24,22 +24,18 @@ pub(crate) use cancel_submitted_policy::allowed_cancel_target_offer_ids;
 pub(crate) use cancel_submitted_policy::cancel_tx_chain_confirmed;
 pub use cancel_submitted_policy::CancelSubmittedContext;
 pub use coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
-pub(crate) use metadata::{
-    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK, REASON_POTENTIAL_TAKE_SEEN,
-    REASON_TAKE_CONFIRMED_ON_TX_BLOCK, SIGNAL_SOURCE_COINSET_WEBSOCKET,
-    TAKER_COINSET_TX_BLOCK_WEBSOCKET, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
-    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
-};
+pub(crate) use metadata::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
-pub(crate) use builders::open_signal_transition;
 use builders::{
-    missing_watched_offer_expired, missing_watched_offer_preserved, unchanged, unsupported_venue,
+    missing_watched_offer_expired, missing_watched_offer_preserved, preserve_state, unchanged,
+    unsupported_venue,
 };
-pub(crate) use transition::ReconcileTransition;
-
+use cancel_submitted_policy::resolve_cancel_submitted_transition;
 use decision::resolve_watched_offer_decision;
+use dispatch::{apply_coinset_taker_dispatch_if_present, apply_watched_offer_dispatch};
+use metadata::REASON_CANCEL_SUBMIT_CONTEXT_MISSING;
 
 /// Unchanged offer transition.
 ///
@@ -112,4 +108,44 @@ pub fn resolve_watched_offer_transition_from_signals(
         dexie.confirmed_tx_ids,
         dexie.mempool_tx_ids,
     ))
+}
+
+/// Resolve a Coinset WS coin/p2 watch hit (mempool observed, no spend-bundle id).
+///
+/// # Errors
+///
+/// Returns an error if the current state string is unknown.
+pub fn resolve_coinset_mempool_hit_transition(
+    current_state: &str,
+    cancel_submitted: Option<&CancelSubmittedContext>,
+    now: DateTime<Utc>,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
+    let decision = if old_state.is_cancel_submitted() {
+        let Some(ctx) = cancel_submitted else {
+            return Ok(preserve_state(
+                &ReconcileState::CancelSubmitted,
+                REASON_CANCEL_SUBMIT_CONTEXT_MISSING,
+            )
+            .into_cycle_transition_no_coinset(old_state));
+        };
+        if let Some(taker) = apply_coinset_taker_dispatch_if_present(
+            CoinsetSignalSummary::mempool_hit(),
+            None,
+            &old_state,
+        ) {
+            taker
+        } else {
+            resolve_cancel_submitted_transition(
+                None,
+                &DexieCoinsetSignals::default(),
+                &[],
+                ctx,
+                now,
+            )
+        }
+    } else {
+        apply_watched_offer_dispatch(CoinsetSignalSummary::mempool_hit(), None, &old_state)
+    };
+    Ok(decision.into_cycle_transition_no_coinset(old_state))
 }

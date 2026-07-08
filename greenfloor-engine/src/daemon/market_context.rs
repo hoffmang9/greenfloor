@@ -8,6 +8,7 @@ use crate::config::{
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
 
+use super::coinset_ws::InventoryP2Index;
 use super::cycle_paths::DaemonCyclePaths;
 use super::inventory_freshness::InventoryFreshnessCache;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
@@ -24,8 +25,8 @@ pub struct DaemonCycleResources {
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
     pub inventory_freshness: Arc<InventoryFreshnessCache>,
-    /// Stable maker/inventory p2s for WS filters (computed once per daemon process when set).
-    pub inventory_p2s: Arc<[String]>,
+    /// Stable maker/inventory p2 index for WS filters and freshness.
+    pub inventory_p2s: Arc<InventoryP2Index>,
     pub ticker_index: CatTickerIndex,
 }
 
@@ -70,7 +71,7 @@ impl DaemonCycleResources {
         dexie: DexieClient,
         paths: DaemonCyclePaths,
         inventory_freshness: Arc<InventoryFreshnessCache>,
-        inventory_p2s: Arc<[String]>,
+        inventory_p2s: Arc<InventoryP2Index>,
         ticker_index: CatTickerIndex,
     ) -> Self {
         Self {
@@ -152,12 +153,13 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     super::disabled_markets::log_disabled_markets_startup_once(&loaded.markets);
     let dexie = DexieClient::new(loaded.program_config.program().dexie_api_base.clone());
     let inventory_freshness = request.inventory_freshness.clone();
-    let inventory_p2s = match &request.inventory_p2s {
-        Some(p2s) => p2s.clone(),
-        None => Arc::from(super::coinset_ws::stable_inventory_p2s_from_markets(
+    let inventory_p2s = if request.inventory_p2s.p2s().is_empty() {
+        InventoryP2Index::from_markets(
             &request.markets_path,
             request.testnet_markets_path.as_deref(),
-        )?),
+        )?
+    } else {
+        request.inventory_p2s.clone()
     };
     let ticker_index = operator_ticker_index_from_paths(
         &request.markets_path,
@@ -227,7 +229,7 @@ mod tests {
                 None,
             ),
             InventoryFreshnessCache::new(),
-            Arc::<[String]>::from(Vec::new()),
+            Arc::new(InventoryP2Index::default()),
             empty_cat_ticker_index(),
         )
     }

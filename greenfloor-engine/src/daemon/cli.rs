@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Args;
 use serde_json::Value;
@@ -83,7 +84,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
             inventory_freshness: crate::daemon::InventoryFreshnessCache::new(),
-            inventory_p2s: None,
+            inventory_p2s: Arc::new(crate::daemon::coinset_ws::InventoryP2Index::default()),
         };
         let response = run_daemon_cycle_once(&request).await?;
         return Ok(response.exit_code);

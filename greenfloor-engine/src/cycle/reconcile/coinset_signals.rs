@@ -38,4 +38,14 @@ impl CoinsetSignalSummary {
             has_mempool: !coinset_mempool_tx_ids.is_empty(),
         }
     }
+
+    /// Watch-hit / inventory signal with no concrete spend-bundle id yet.
+    #[must_use]
+    pub fn mempool_hit() -> Self {
+        Self {
+            has_tx_ids: true,
+            has_confirmed: false,
+            has_mempool: true,
+        }
+    }
 }

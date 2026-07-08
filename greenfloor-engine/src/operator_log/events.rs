@@ -34,7 +34,6 @@ pub const COINSET_WS_ONCE_DISCONNECTED: &str = "coinset_ws_once_disconnected";
 pub const COINSET_WS_CONNECTING: &str = "coinset_ws_connecting";
 pub const COINSET_WS_CONNECTED: &str = "coinset_ws_connected";
 pub const COINSET_WS_DISCONNECTED: &str = "coinset_ws_disconnected";
-pub const COIN_WATCHLIST_UPDATED: &str = "coin_watchlist_updated";
 
 pub const INVENTORY_BUCKET_SCAN: &str = "inventory_bucket_scan";
 pub const INVENTORY_BUCKET_SCAN_ERROR: &str = "inventory_bucket_scan_error";

@@ -57,20 +57,6 @@ pub fn recent_executed_offer_ids(
     Ok(metadata.into_keys().collect())
 }
 
-/// Watchlist offer ids for coin tracking.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn watchlist_offer_ids_for_coin_tracking(
-    store: &SqliteStore,
-    market_id: &str,
-) -> SignerResult<HashSet<String>> {
-    let mut offer_ids = watchlist_offer_ids(store, market_id)?;
-    offer_ids.extend(recent_executed_offer_ids(store, market_id)?);
-    Ok(offer_ids)
-}
-
 fn active_offer_state_summary(
     store: &SqliteStore,
     market_id: &str,

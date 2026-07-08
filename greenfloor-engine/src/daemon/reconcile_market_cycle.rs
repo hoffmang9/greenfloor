@@ -13,7 +13,7 @@ use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
-use super::coinset_tx::build_dexie_size_by_offer_id;
+use super::dexie_size::build_dexie_size_by_offer_id;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::watchlist::watchlist_offer_ids;
 use crate::offer::lifecycle::{
@@ -126,6 +126,7 @@ pub async fn run_reconcile_market_cycle(
 
     let our_offer_ids: HashSet<String> =
         watchlist_offer_ids(store, market_id)?.into_iter().collect();
+    let _ = store.backfill_offer_coin_watches_from_cancel_metadata(market_id)?;
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()
