@@ -186,8 +186,14 @@ pass `include_spent=true` when tracing coin history. Full catalog:
 - Default publish venue is Coinset `POST /push_offer` (`venues.offer_publish.provider: coinset`).
   Canonical offer id is the 64-hex spend-bundle hash (Dexie `trade_id`).
 - Daemon WS URL includes `events=transaction,offer&tx_status=pending,confirmed` plus stable
-  market `p2` filters (receive puzzle + CAT outer from cats ticker index). HTTP webhooks are
-  not used. Operator `websocket_url` query strings are replaced with these required filters.
+  market `p2` filters (receive puzzle + CAT outer from cats ticker index / `InventoryP2Index`).
+  HTTP webhooks are not used. Operator `websocket_url` query strings are replaced with these
+  required filters. Loop and `greenfloord --once` both build the index; config reload rebuilds
+  it and reconnects WS so filters stay current.
+- Durable `offer_coin_watches` (maker coins + known maker p2s) are registered at post and
+  cleared on terminal lifecycle. Transaction-frame watch hits drive `mempool_observed`;
+  offer-frame `p2s` must not. Inventory freshness skips blind HTTP polls within 90s when no
+  relevant WS activity.
 - Cancel remains `POST /push_tx` + WS watch; do not submit spends over WebSocket.
 - Mainnet frame shape: documented `WsEnvelope` (`message.type` + `message.data`). Non-envelope
   payloads are ignored.

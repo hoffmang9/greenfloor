@@ -61,9 +61,9 @@ back to extraction from the Dexie offer file.
      `cancel_submitted_context_for_offer`, `defer_in_flight_cancel_offer_ids`,
      `partition_defer_in_flight_cancel_targets`).
    - **Partitioned Dexie vs cancel tx signals.** Reconcile classifies only Dexie-linked tx ids
-     into mempool/confirmed buckets (`DexieCoinsetSignals`). Tracked cancel tx observation lives
-     in `CancelSubmittedContext` and `chain_confirmed_tx_ids`; cancel mempool/confirm never
-     flows through taker dispatch.
+     into mempool/confirmed buckets (`CoinsetTxSignals` / `CoinsetSignalSummary`). Tracked
+     cancel tx observation lives in `CancelSubmittedContext` and `chain_confirmed_tx_ids`;
+     cancel mempool/confirm never flows through taker dispatch.
    - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) anchors on
      `cancel_submitted_at`, not `updated_at`, so reconcile preserve upserts do not extend
      the grace window. When `cancel_submitted_at` is missing (legacy rows before migration),

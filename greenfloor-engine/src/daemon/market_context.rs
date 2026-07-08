@@ -308,7 +308,7 @@ mod tests {
             "freshness Arc must be preserved"
         );
         assert!(
-            resources.coinset.inventory_p2s.p2s().is_empty(),
+            resources.coinset.inventory_p2s().p2s().is_empty(),
             "empty request index must stay empty"
         );
         assert!(!resources

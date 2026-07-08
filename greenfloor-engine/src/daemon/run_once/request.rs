@@ -61,11 +61,18 @@ fn default_coinset_process_context() -> Arc<CoinsetProcessContext> {
 impl DaemonRunOnceRequest {
     /// From json value.
     ///
+    /// Builds `coinset` from markets paths (same contract as CLI `--once` / daemon loop).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the operation fails.
+    /// Returns an error if JSON parse fails or inventory p2s cannot be derived from markets.
     pub fn from_json_value(value: Value) -> crate::error::SignerResult<Self> {
-        serde_json::from_value(value)
-            .map_err(|err| crate::error::SignerError::Other(err.to_string()))
+        let mut request: Self = serde_json::from_value(value)
+            .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+        request.coinset = CoinsetProcessContext::from_markets(
+            &request.markets_path,
+            request.testnet_markets_path.as_deref(),
+        )?;
+        Ok(request)
     }
 }

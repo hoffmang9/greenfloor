@@ -32,3 +32,6 @@ never the operator transport.
 - Operators configure `venues.offer_publish.provider` and websocket URL only.
 - Webhook listen addresses and mempool_monitor YAML are removed.
 - Mainnet-first; testnet11 WS hardening deferred.
+- Daemon loop and CLI `--once` both build `InventoryP2Index` from markets before
+  WS capture/subscribe. Config reload rebuilds the index and reconnects WS so
+  p2 filters stay current without a process restart.

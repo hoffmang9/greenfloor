@@ -70,6 +70,10 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     if args.once {
         let use_websocket_capture = use_websocket_capture_for_once(&runtime);
+        let coinset = crate::daemon::CoinsetProcessContext::from_markets(
+            &args.markets_config,
+            testnet_markets_path.as_deref(),
+        )?;
         let request = DaemonRunOnceRequest {
             program_path: args.program_config,
             markets_path: args.markets_config,
@@ -82,7 +86,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
-            coinset: crate::daemon::CoinsetProcessContext::empty(),
+            coinset,
         };
         let response = run_daemon_cycle_once(&request).await?;
         return Ok(response.exit_code);
@@ -172,17 +176,23 @@ mod tests {
 
     #[test]
     fn parse_daemon_run_once_request_reads_testnet_markets_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let markets_path = dir.path().join("markets.yaml");
+        std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+        let testnet_path = dir.path().join("testnet-markets.yaml");
+        std::fs::write(&testnet_path, "markets: []\n").expect("write testnet markets");
         let value = json!({
-            "program_path": "config/program.yaml",
-            "markets_path": "config/markets.yaml",
-            "testnet_markets_path": "/tmp/testnet-markets.yaml",
+            "program_path": dir.path().join("program.yaml"),
+            "markets_path": markets_path,
+            "testnet_markets_path": &testnet_path,
             "coinset_base_url": "https://api.coinset.org",
-            "state_dir": "/tmp/state",
+            "state_dir": dir.path().join("state"),
         });
         let request = parse_daemon_run_once_request(value).expect("parse request");
         assert_eq!(
             request.testnet_markets_path.as_deref(),
-            Some(std::path::Path::new("/tmp/testnet-markets.yaml"))
+            Some(testnet_path.as_path())
         );
+        assert!(request.coinset.inventory_p2s().p2s().is_empty());
     }
 }

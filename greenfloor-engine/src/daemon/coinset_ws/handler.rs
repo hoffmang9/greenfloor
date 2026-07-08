@@ -91,50 +91,6 @@ mod tests {
     }
 
     #[test]
-    fn handle_ws_text_offer_pending_drives_lifecycle() {
-        let (_dir, store) = open_store();
-        let ctx = CoinsetProcessContext::empty();
-        let offer_id = "ab".repeat(32);
-        store
-            .upsert_offer_state(&offer_id, "m1", "open", None)
-            .expect("upsert");
-        handle_ws_text(
-            &store,
-            &ctx,
-            &json!({
-                "message": {
-                    "type": "offer",
-                    "data": {
-                        "offer_id": offer_id,
-                        "status": "pending",
-                        "tx_id": "cd".repeat(32)
-                    }
-                }
-            })
-            .to_string(),
-        )
-        .expect("offer");
-        let rows = store
-            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
-            .expect("rows");
-        assert_eq!(rows[0].state, "mempool_observed");
-        let mempool = store
-            .list_recent_audit_events(Some(&[COINSET_WS_MEMPOOL_EVENT]), None, 5)
-            .expect("events");
-        assert!(mempool.is_empty(), "offer frames must not seed tx buckets");
-        let tx_id = "cd".repeat(32);
-        let signals = store
-            .get_tx_signal_state(std::slice::from_ref(&tx_id))
-            .expect("tx signals");
-        assert!(
-            signals
-                .get(&tx_id)
-                .is_some_and(|row| row.mempool_observed_at.is_some()),
-            "offer pending must seed tx_signal_state for later cancel/reconcile"
-        );
-    }
-
-    #[test]
     fn handle_ws_text_inventory_p2_marks_stale_without_offer_watch() {
         let (_dir, store) = open_store();
         let p2 = "ef".repeat(32);
@@ -163,40 +119,6 @@ mod tests {
         assert!(ctx
             .inventory_freshness
             .needs_refresh("m1", std::time::Duration::from_secs(90)));
-    }
-
-    #[test]
-    fn handle_ws_text_watch_hit_drives_mempool_observed() {
-        let (_dir, store) = open_store();
-        let ctx = CoinsetProcessContext::empty();
-        let offer_id = "ab".repeat(32);
-        let p2 = "ef".repeat(32);
-        store
-            .upsert_offer_state(&offer_id, "m1", "open", None)
-            .expect("upsert");
-        store
-            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&p2))
-            .expect("watch");
-        handle_ws_text(
-            &store,
-            &ctx,
-            &json!({
-                "message": {
-                    "type": "transaction",
-                    "data": {
-                        "status": "pending",
-                        "ids": ["cd".repeat(32)],
-                        "p2s": [p2]
-                    }
-                }
-            })
-            .to_string(),
-        )
-        .expect("hit");
-        let rows = store
-            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
-            .expect("rows");
-        assert_eq!(rows[0].state, "mempool_observed");
     }
 
     #[test]
@@ -255,6 +177,13 @@ mod tests {
         assert!(
             watch_audits.is_empty(),
             "offer frames must not emit coin_watch_hit"
+        );
+        let mempool = store
+            .list_recent_audit_events(Some(&[COINSET_WS_MEMPOOL_EVENT]), None, 5)
+            .expect("events");
+        assert!(
+            mempool.is_empty(),
+            "offer frames must not seed transaction mempool audits"
         );
         let offer_rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))

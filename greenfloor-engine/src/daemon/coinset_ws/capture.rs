@@ -41,7 +41,7 @@ pub async fn capture_coinset_websocket_once_with_timings(
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
     let ws_url =
-        resolve_coinset_ws_url_with_p2s(program, coinset_base_url, ctx.inventory_p2s.p2s());
+        resolve_coinset_ws_url_with_p2s(program, coinset_base_url, ctx.inventory_p2s().p2s());
     LogContext::COINSET.audit(
         store,
         COINSET_WS_ONCE_STARTED,

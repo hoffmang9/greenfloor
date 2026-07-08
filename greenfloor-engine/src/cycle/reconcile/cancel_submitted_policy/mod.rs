@@ -112,7 +112,7 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if let Some(taker) = apply_coinset_taker_dispatch_if_present(summary, dexie_status, &current) {
         return taker;
     }
-    cancel_submitted_dexie_status_transition(
+    cancel_submitted_status_fallback_transition(
         dexie_status,
         summary,
         ctx,
@@ -121,15 +121,15 @@ pub(crate) fn resolve_cancel_submitted_transition(
     )
 }
 
-fn cancel_submitted_dexie_status_transition(
+fn cancel_submitted_status_fallback_transition(
     dexie_status: Option<i64>,
-    dexie: CoinsetSignalSummary,
+    summary: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
     chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
     match dexie_status {
-        None if dexie.has_tx_ids => {
+        None if summary.has_tx_ids => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),

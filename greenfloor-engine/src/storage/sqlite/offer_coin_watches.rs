@@ -38,9 +38,21 @@ impl SqliteStore {
         .map_err(|err| SignerError::Other(format!("offer_coin_watches delete: {err}")))?;
 
         let mut seen = HashSet::new();
+        let mut inserted = 0usize;
         for coin_id in coin_ids {
             let normalized = normalize_hex_id(coin_id);
-            if normalized.len() != 64 || !seen.insert(normalized.clone()) {
+            if normalized.len() != 64 {
+                tracing::warn!(
+                    offer_id = clean_offer,
+                    market_id = clean_market,
+                    kind = "coin",
+                    raw_len = coin_id.trim().len(),
+                    normalized_len = normalized.len(),
+                    "skipping non-64-char coin id for offer_coin_watches"
+                );
+                continue;
+            }
+            if !seen.insert(normalized.clone()) {
                 continue;
             }
             tx.execute(
@@ -51,10 +63,22 @@ impl SqliteStore {
                 params![normalized, clean_offer, clean_market, now],
             )
             .map_err(|err| SignerError::Other(format!("offer_coin_watches insert coin: {err}")))?;
+            inserted += 1;
         }
         for p2 in p2s {
             let normalized = normalize_hex_id(p2);
-            if normalized.len() != 64 || !seen.insert(normalized.clone()) {
+            if normalized.len() != 64 {
+                tracing::warn!(
+                    offer_id = clean_offer,
+                    market_id = clean_market,
+                    kind = "p2",
+                    raw_len = p2.trim().len(),
+                    normalized_len = normalized.len(),
+                    "skipping non-64-char p2 for offer_coin_watches"
+                );
+                continue;
+            }
+            if !seen.insert(normalized.clone()) {
                 continue;
             }
             tx.execute(
@@ -65,6 +89,14 @@ impl SqliteStore {
                 params![normalized, clean_offer, clean_market, now],
             )
             .map_err(|err| SignerError::Other(format!("offer_coin_watches insert p2: {err}")))?;
+            inserted += 1;
+        }
+        if inserted == 0 && (!coin_ids.is_empty() || !p2s.is_empty()) {
+            return Err(SignerError::Other(format!(
+                "offer_coin_watches for offer {clean_offer}: all {coin_count} coin ids and {p2_count} p2s were invalid or empty after normalize",
+                coin_count = coin_ids.len(),
+                p2_count = p2s.len(),
+            )));
         }
         tx.commit()
             .map_err(|err| SignerError::Other(format!("offer_coin_watches commit: {err}")))?;
@@ -288,6 +320,42 @@ mod tests {
             .list_market_ids_for_watched_keys(&[p2])
             .expect("markets");
         assert_eq!(markets, vec!["m1".to_string()]);
+    }
+
+    #[test]
+    fn replace_rejects_when_all_watch_keys_invalid() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let err = store
+            .replace_offer_coin_watches(
+                "offer1",
+                "m1",
+                &["short".to_string()],
+                &["also-bad".to_string()],
+            )
+            .expect_err("invalid keys");
+        assert!(err.to_string().contains("all"), "unexpected error: {err}");
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("list")
+            .is_empty());
+    }
+
+    #[test]
+    fn replace_with_empty_inputs_clears_watches() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let coin = "ab".repeat(32);
+        store
+            .replace_offer_coin_watches("offer1", "m1", std::slice::from_ref(&coin), &[])
+            .expect("seed");
+        store
+            .replace_offer_coin_watches("offer1", "m1", &[], &[])
+            .expect("clear via empty replace");
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("list")
+            .is_empty());
     }
 
     #[test]

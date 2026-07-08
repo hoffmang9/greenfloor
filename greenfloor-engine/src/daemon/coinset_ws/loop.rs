@@ -83,12 +83,16 @@ async fn run_coinset_websocket_loop(
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let ws_url =
-        resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, coinset.inventory_p2s.p2s());
     let reconnect =
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
     while !stop.load(Ordering::SeqCst) {
+        // Rebuild URL each connect so markets reload can refresh p2 filters.
+        let ws_url = resolve_coinset_ws_url_with_p2s(
+            &program,
+            &coinset_base_url,
+            coinset.inventory_p2s().p2s(),
+        );
         let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
         LogContext::COINSET.audit_best_effort(
             &store,
@@ -105,6 +109,12 @@ async fn run_coinset_websocket_loop(
                     None,
                 );
                 while !stop.load(Ordering::SeqCst) {
+                    if coinset.take_ws_reconnect_requested() {
+                        tracing::info!(
+                            "coinset websocket reconnect requested after inventory p2 reload"
+                        );
+                        break;
+                    }
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
                             if let Err(err) = handle_ws_text(&store, &coinset, &text) {

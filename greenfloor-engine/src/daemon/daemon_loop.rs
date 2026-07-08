@@ -8,9 +8,8 @@ use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::resolve_state_db_path;
 
-use super::coinset_ws::{start_coinset_websocket_loop, CoinsetProcessContext, InventoryP2Index};
+use super::coinset_ws::{start_coinset_websocket_loop, CoinsetProcessContext};
 use super::cycle_entry::run_daemon_cycle_once;
-use super::inventory_freshness::InventoryFreshnessCache;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, DaemonProgramRuntime};
 use super::reload::handle_reload_marker_if_present;
@@ -98,11 +97,10 @@ async fn run_daemon_loop_inner(
 
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
-    let inventory_p2s = InventoryP2Index::from_markets(
+    let coinset = CoinsetProcessContext::from_markets(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
-    let coinset = CoinsetProcessContext::new(inventory_p2s, InventoryFreshnessCache::new());
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,
@@ -133,6 +131,9 @@ async fn run_daemon_loop_inner(
         handle_reload_marker_if_present(
             &request.state_dir,
             &resolve_state_db_path(&runtime.home_dir, request.state_db_override.as_deref()),
+            Some(&coinset),
+            &request.markets_path,
+            request.testnet_markets_path.as_deref(),
         );
 
         cycles_completed += 1;

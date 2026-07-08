@@ -102,7 +102,7 @@ fn record_observed_p2s(
     ctx: &CoinsetProcessContext,
     observed_p2s: &[String],
 ) -> SignerResult<()> {
-    let inventory_markets = ctx.inventory_p2s.market_ids_for_p2s(observed_p2s);
+    let inventory_markets = ctx.inventory_p2s().market_ids_for_p2s(observed_p2s);
     for market_id in &inventory_markets {
         ctx.inventory_freshness.mark_stale(market_id);
     }
