@@ -254,7 +254,46 @@ async fn execute_managed_coin_op_plans_skips_when_spendable_matches_watched_p2()
 
     assert_eq!(result.executed_count, 0);
     assert!(result.items.iter().any(|item| {
-        item.op_type == "split" && item.reason == "no_spendable_split_coin_meets_required_amount"
+        item.op_type == "split" && item.reason == "no_spendable_split_coin_available"
+    }));
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
+    }));
+}
+
+#[tokio::test]
+async fn execute_managed_coin_op_plans_excludes_empty_puzzle_hash_when_p2_watches_exist() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bundle = minimal_program_bundle(&dir);
+    let mut market = sample_market("xch1test");
+    market.base_asset = test_coin_id('f');
+    let plans = vec![
+        sample_plan(CoinOpKind::Split),
+        sample_plan(CoinOpKind::Combine),
+    ];
+    let watched_p2s = HashSet::from(["ef".repeat(32)]);
+
+    let empty_index = empty_cat_ticker_index();
+    let result = execute_managed_coin_op_plans_with_test_overrides(
+        sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
+        &plans,
+        &HashSet::<String>::default(),
+        &watched_p2s,
+        CoinOpTestOverrides::new(
+            Some(vec![
+                // Empty puzzle_hash must fail closed when maker p2 watches exist.
+                SpendableCoin::new(test_coin_id('a'), 100_000),
+                SpendableCoin::new(test_coin_id('b'), 10_000),
+                SpendableCoin::new(test_coin_id('c'), 10_000),
+            ]),
+            Some("managed-op-test".to_string()),
+        ),
+    )
+    .await;
+
+    assert_eq!(result.executed_count, 0);
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "split" && item.reason == "no_spendable_split_coin_available"
     }));
     assert!(result.items.iter().any(|item| {
         item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
@@ -293,7 +332,7 @@ async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watche
     assert_eq!(result.executed_count, 0);
     assert_eq!(result.items.len(), 2);
     assert!(result.items.iter().any(|item| {
-        item.op_type == "split" && item.reason == "no_spendable_split_coin_meets_required_amount"
+        item.op_type == "split" && item.reason == "no_spendable_split_coin_available"
     }));
     assert!(result.items.iter().any(|item| {
         item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"

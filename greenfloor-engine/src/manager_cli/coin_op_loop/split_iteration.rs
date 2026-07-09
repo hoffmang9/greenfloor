@@ -53,6 +53,7 @@ pub(super) async fn run_split_iteration(
             CliSplitSelection::Coin(plan) => vec![plan.coin_id],
         }
     };
+    ctx.reject_watched_inputs(&selected_coin_ids)?;
 
     if let Some((code, payload)) = enforce_split_lockup_guardrail(
         &spendable,

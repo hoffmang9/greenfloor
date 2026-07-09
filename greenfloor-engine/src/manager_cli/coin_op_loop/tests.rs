@@ -509,3 +509,148 @@ async fn coin_split_executes_with_test_overrides() {
         row.get("signature_request_id") == Some(&serde_json::json!("split-op-test"))
     }));
 }
+
+#[tokio::test]
+async fn coin_split_auto_select_excludes_watched_maker_coins() {
+    use crate::coin_ops::SpendableCoin;
+    use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+    use crate::minimal_program_template::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+    use crate::storage::{resolve_state_db_path, SqliteStore};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    write_split_test_markets(&markets);
+    let maker_coin = "a".repeat(64);
+    let free_coin = "b".repeat(64);
+    let db_path = resolve_state_db_path(dir.path(), None);
+    std::fs::create_dir_all(db_path.parent().expect("parent")).expect("mkdir");
+    let store = SqliteStore::open(&db_path).expect("open");
+    store
+        .ensure_offer_coin_watches("offer1", "m1", std::slice::from_ref(&maker_coin), &[])
+        .expect("ensure watches");
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = run_coin_split_with_test_overrides(
+        CoinSplitRequest {
+            mgr: &harness.ctx,
+            network: "mainnet",
+            market_id: Some("m1"),
+            pair: None,
+            coin_ids: &[],
+            amount_per_coin: 100,
+            number_of_coins: 2,
+            behavior: CoinSplitBehavior {
+                wait: UntilReadyWaitMode {
+                    until_ready: false,
+                    no_wait: true,
+                },
+                gating: CoinSplitGating {
+                    allow_lock_all_spendable: true,
+                    force_split_when_ready: true,
+                },
+            },
+            size_base_units: None,
+            max_iterations: 1,
+        },
+        CoinOpTestOverrides::new(
+            Some(vec![
+                SpendableCoin::new(maker_coin.clone(), 1_000_000),
+                SpendableCoin::new(free_coin.clone(), 500_000),
+            ]),
+            Some("split-unwatched-only".to_string()),
+        ),
+    )
+    .await
+    .expect("coin-split");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
+    let operations = payload
+        .get("operations")
+        .and_then(|value| value.as_array())
+        .expect("operations");
+    let selected = operations[0]
+        .get("selected_coin_ids")
+        .and_then(|value| value.as_array())
+        .expect("selected");
+    assert_eq!(selected, &vec![serde_json::json!(free_coin)]);
+    assert!(!selected
+        .iter()
+        .any(|id| id == &serde_json::json!(maker_coin)));
+}
+
+#[tokio::test]
+async fn coin_split_explicit_watched_maker_is_rejected() {
+    use crate::coin_ops::SpendableCoin;
+    use crate::manager_cli::test_support::ManagerContextBuilder;
+    use crate::minimal_program_template::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+    use crate::storage::{resolve_state_db_path, SqliteStore};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    write_split_test_markets(&markets);
+    let maker_coin = "a".repeat(64);
+    let db_path = resolve_state_db_path(dir.path(), None);
+    std::fs::create_dir_all(db_path.parent().expect("parent")).expect("mkdir");
+    let store = SqliteStore::open(&db_path).expect("open");
+    store
+        .ensure_offer_coin_watches("offer1", "m1", std::slice::from_ref(&maker_coin), &[])
+        .expect("ensure watches");
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let err = run_coin_split_with_test_overrides(
+        CoinSplitRequest {
+            mgr: &harness.ctx,
+            network: "mainnet",
+            market_id: Some("m1"),
+            pair: None,
+            coin_ids: std::slice::from_ref(&maker_coin),
+            amount_per_coin: 100,
+            number_of_coins: 2,
+            behavior: CoinSplitBehavior {
+                wait: UntilReadyWaitMode {
+                    until_ready: false,
+                    no_wait: true,
+                },
+                gating: CoinSplitGating {
+                    allow_lock_all_spendable: true,
+                    force_split_when_ready: true,
+                },
+            },
+            size_base_units: None,
+            max_iterations: 1,
+        },
+        CoinOpTestOverrides::new(
+            Some(vec![SpendableCoin::new(maker_coin.clone(), 1_000_000)]),
+            Some("should-not-run".to_string()),
+        ),
+    )
+    .await
+    .expect_err("watched maker must be rejected");
+    assert!(
+        err.to_string()
+            .contains("coin_op_watched_maker_inputs_forbidden"),
+        "unexpected error: {err}"
+    );
+}

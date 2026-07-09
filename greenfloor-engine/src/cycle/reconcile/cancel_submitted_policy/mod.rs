@@ -133,22 +133,24 @@ fn cancel_submitted_status_fallback_transition(
     now: DateTime<Utc>,
     chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
-    if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids)
-        && matches!(dexie_status, None | Some(DEXIE_STATUS_OPEN))
-    {
-        // Dexie open or Coinset/splash (no status): cancel never confirmed → retry.
-        return ReconcileTransition::new(
-            ReconcileState::Lifecycle(OfferLifecycleState::Open),
-            REASON_CANCEL_SUBMIT_STALE_ORPHAN,
-            SIGNAL_SOURCE_NONE,
-            None,
-            TAKER_NONE,
-            TAKER_NONE,
-        );
-    }
     match dexie_status {
+        // Partial Coinset activity (tx ids without mempool/confirmed dispatch) must
+        // preserve before stale-orphan reset — do not unwedge while signals are incomplete.
         None if summary.has_coinset_activity() => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
+        }
+        None | Some(DEXIE_STATUS_OPEN)
+            if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids) =>
+        {
+            // Dexie open or Coinset/splash (no status): cancel never confirmed → retry.
+            ReconcileTransition::new(
+                ReconcileState::Lifecycle(OfferLifecycleState::Open),
+                REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+                SIGNAL_SOURCE_NONE,
+                None,
+                TAKER_NONE,
+                TAKER_NONE,
+            )
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
         Some(status) => transition_from_dexie_status(status, ReconcileState::CancelSubmitted),

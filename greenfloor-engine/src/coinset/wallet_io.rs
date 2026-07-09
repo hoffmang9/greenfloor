@@ -212,6 +212,41 @@ pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<V
     Ok(hints)
 }
 
+/// Maker coin ids and on-chain puzzle hashes from cancellable offer inputs.
+///
+/// Used to heal durable watches from a Dexie `offer1…` payload without inventing
+/// delegated CONDITIONS hashes.
+///
+/// # Errors
+///
+/// Returns an error if offer decode/parse fails.
+pub fn extract_maker_watch_keys_from_offer_text(
+    offer_text: &str,
+) -> SignerResult<(Vec<String>, Vec<String>)> {
+    use chia_sdk_driver::Offer;
+    use clvmr::Allocator;
+
+    let spend_bundle = decode_offer(offer_text)?;
+    let mut allocator = Allocator::new();
+    let offer = Offer::from_spend_bundle(&mut allocator, &spend_bundle)?;
+    let cancellable = offer.cancellable_coin_spends().map_err(SignerError::from)?;
+    let mut coins = Vec::new();
+    let mut p2s = Vec::new();
+    let mut seen_coins = HashSet::new();
+    let mut seen_p2s = HashSet::new();
+    for coin_spend in &cancellable {
+        let coin_id = normalize_hex_id(&hex::encode(coin_spend.coin.coin_id()));
+        if coin_id.len() == 64 && seen_coins.insert(coin_id.clone()) {
+            coins.push(coin_id);
+        }
+        let p2 = normalize_hex_id(&hex::encode(coin_spend.coin.puzzle_hash));
+        if p2.len() == 64 && seen_p2s.insert(p2.clone()) {
+            p2s.push(p2);
+        }
+    }
+    Ok((coins, p2s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +260,13 @@ mod tests {
     #[test]
     fn extract_coin_id_hints_from_offer_text_rejects_garbage() {
         let err = extract_coin_id_hints_from_offer_text("not-an-offer").expect_err("invalid offer");
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn extract_maker_watch_keys_from_offer_text_rejects_garbage() {
+        let err =
+            extract_maker_watch_keys_from_offer_text("not-an-offer").expect_err("invalid offer");
         assert!(!err.to_string().is_empty());
     }
 }

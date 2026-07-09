@@ -13,8 +13,7 @@ use super::items::{
     skip_item_for_plan, skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult, PlanSkip,
 };
 use super::prep::{
-    list_spendable_coins_for_plan, skip_if_spendable_empty, unwatched_spendable,
-    validate_plan_target_amount,
+    list_spendable_coins_for_plan, skip_if_spendable_empty, validate_plan_target_amount,
 };
 use super::COIN_OP_ERROR_PREFIX;
 
@@ -126,14 +125,11 @@ async fn split_candidate_spendable(
     {
         prefetched.to_vec()
     } else {
-        unwatched_spendable(
-            ctx,
-            skip_if_spendable_empty(
-                plan,
-                list_spendable_coins_for_plan(ctx, plan).await?,
-                "no_spendable_split_coin_available",
-            )?,
-        )
+        skip_if_spendable_empty(
+            plan,
+            list_spendable_coins_for_plan(ctx, plan).await?,
+            "no_spendable_split_coin_available",
+        )?
     };
     Ok(fresh
         .into_iter()
@@ -229,14 +225,11 @@ async fn execute_daemon_split_plan_inner(
     let amount_per_coin_mojos =
         validate_plan_target_amount(ctx, plan, "split_amount_below_coin_op_minimum")?;
     let required_amount = amount_per_coin_mojos.saturating_mul(plan.op_count);
-    let spendable = unwatched_spendable(
-        ctx,
-        skip_if_spendable_empty(
-            plan,
-            list_spendable_coins_for_plan(ctx, plan).await?,
-            "no_spendable_split_coin_available",
-        )?,
-    );
+    let spendable = skip_if_spendable_empty(
+        plan,
+        list_spendable_coins_for_plan(ctx, plan).await?,
+        "no_spendable_split_coin_available",
+    )?;
     if defer_low_watermark_split_from_spendable(plan, &spendable, ctx.base_unit_mojo_multiplier) {
         return Err(plan_skip(plan, "bootstrap_primary_shape_deferred"));
     }

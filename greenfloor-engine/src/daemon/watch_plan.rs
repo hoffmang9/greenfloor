@@ -6,10 +6,11 @@ use serde_json::Value;
 use tracing::Level;
 
 use crate::adapters::DexieClient;
+use crate::coinset::extract_maker_watch_keys_from_offer_text;
 use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
-use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
+use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOfferPayload};
 use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
@@ -109,9 +110,67 @@ pub fn classify_and_heal_local(
     Ok(plan)
 }
 
-/// Fetch Dexie payloads for heal-only ids and ensure coin watches. No lifecycle.
+/// Maker coin ids + on-chain p2s for durable watch heal from a Dexie payload.
 ///
-/// Uses the market list when present; otherwise `get_offer` per id.
+/// Prefers decoding the `offer1…` file (cancellable inputs). Falls back to JSON
+/// coin-id walk when the offer string is absent or undecodable.
+#[must_use]
+fn maker_watch_keys_from_dexie_payload(raw: &Value) -> (Vec<String>, Vec<String>) {
+    let payload = DexieOfferPayload::new(raw.clone());
+    if let Some(text) = payload.offer_file_text() {
+        if let Ok((coins, p2s)) = extract_maker_watch_keys_from_offer_text(text) {
+            if !coins.is_empty() || !p2s.is_empty() {
+                return (coins, p2s);
+            }
+        }
+    }
+    (extract_coin_ids_from_offer_payload(raw), Vec::new())
+}
+
+#[must_use]
+fn maker_p2s_present(raw: &Value) -> bool {
+    !maker_watch_keys_from_dexie_payload(raw).1.is_empty()
+}
+
+async fn fetch_dexie_offer_body(
+    dexie: &DexieClient,
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<Option<Value>> {
+    match dexie.get_offer(offer_id).await {
+        Ok(response) => {
+            if let Some(single) = response.body().get("offer") {
+                if offer_matches_local_id(single, offer_id) {
+                    return Ok(Some(single.clone()));
+                }
+            }
+            Ok(None)
+        }
+        Err(err) => {
+            metrics.cycle_errors += 1;
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::WARN,
+                "dexie watch heal fetch failed",
+                DEXIE_WATCHLIST_AUGMENT_ERROR,
+                &serde_json::json!({
+                    "market_id": market_id,
+                    "offer_id": offer_id,
+                    "error": err.to_string(),
+                }),
+                Some(market_id),
+            )?;
+            Ok(None)
+        }
+    }
+}
+
+/// Fetch Dexie payloads for heal-only ids and ensure coin + maker p2 watches. No lifecycle.
+///
+/// Uses the market list when present. When a list row lacks maker p2s (no
+/// decodable `offer1…`), calls `get_offer` so heal is not stuck coin-only.
 ///
 /// # Errors
 ///
@@ -139,41 +198,25 @@ pub async fn fetch_and_ensure_watches(
         }
     }
     for offer_id in heal_only {
-        if by_local_id.contains_key(offer_id) {
-            continue;
-        }
-        match dexie.get_offer(offer_id).await {
-            Ok(response) => {
-                if let Some(single) = response.body().get("offer") {
-                    if offer_matches_local_id(single, offer_id) {
-                        by_local_id.insert(offer_id.clone(), single.clone());
-                    }
-                }
-            }
-            Err(err) => {
-                metrics.cycle_errors += 1;
-                LogContext::MARKET_CYCLE.dual_audit(
-                    store,
-                    Level::WARN,
-                    "dexie watch heal fetch failed",
-                    DEXIE_WATCHLIST_AUGMENT_ERROR,
-                    &serde_json::json!({
-                        "market_id": market_id,
-                        "offer_id": offer_id,
-                        "error": err.to_string(),
-                    }),
-                    Some(market_id),
-                )?;
-            }
-        }
-    }
-    for (offer_id, raw) in &by_local_id {
         if store.offer_has_coin_watches(offer_id)? {
             continue;
         }
-        let coin_ids = extract_coin_ids_from_offer_payload(raw);
-        if !coin_ids.is_empty() {
-            store.ensure_offer_coin_watches(offer_id, market_id, &coin_ids, &[])?;
+        let list_raw = by_local_id.get(offer_id).cloned();
+        let needs_offer_file = list_raw.as_ref().is_none_or(|raw| !maker_p2s_present(raw));
+        let raw = if needs_offer_file {
+            match fetch_dexie_offer_body(dexie, store, market_id, offer_id, metrics).await? {
+                Some(single) => Some(single),
+                None => list_raw,
+            }
+        } else {
+            list_raw
+        };
+        let Some(raw) = raw else {
+            continue;
+        };
+        let (coin_ids, p2s) = maker_watch_keys_from_dexie_payload(&raw);
+        if !coin_ids.is_empty() || !p2s.is_empty() {
+            store.ensure_offer_coin_watches(offer_id, market_id, &coin_ids, &p2s)?;
         }
     }
     Ok(())
@@ -221,6 +264,10 @@ mod tests {
             .list_watched_coin_ids_for_market("m1")
             .expect("coins")
             .contains(&coin));
+        assert!(store
+            .list_watched_p2s_for_market("m1")
+            .expect("p2s")
+            .contains(&"ef".repeat(32)));
     }
 
     #[test]
@@ -269,5 +316,21 @@ mod tests {
         let plan = classify_and_heal_local(&store, "m1").expect("plan");
         assert!(plan.authoritative.is_empty());
         assert_eq!(plan.heal_only, HashSet::from([offer_id]));
+    }
+
+    #[test]
+    fn maker_watch_keys_from_dexie_payload_falls_back_to_json_coin_ids() {
+        let coin = "b".repeat(64);
+        let payload = serde_json::json!({"offer": {"coin_id": coin}});
+        let (coins, p2s) = maker_watch_keys_from_dexie_payload(&payload);
+        assert_eq!(coins, vec![coin]);
+        assert!(p2s.is_empty());
+        assert!(!maker_p2s_present(&payload));
+    }
+
+    #[test]
+    fn maker_p2s_present_false_without_offer_file() {
+        let payload = serde_json::json!({"id": "ab".repeat(32), "coin_id": "cd".repeat(32)});
+        assert!(!maker_p2s_present(&payload));
     }
 }
