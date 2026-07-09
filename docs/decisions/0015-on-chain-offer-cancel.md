@@ -50,15 +50,16 @@ offer-file fetch.
      offer input is already spent.
 
 5. **Optimistic operator state is `cancel_submitted`, not `cancelled`.**
-   Successful cancel **submit** atomically records:
+   Successful cancel **submit** atomically records (before `push_tx`):
    - `offer_state.state = cancel_submitted`
-   - `cancel_submitted_tx_id` (canonical hex)
+   - `cancel_submitted_tx_id` (canonical spend-bundle hash)
    - `cancel_submitted_at` (submit timestamp; preserved across reconcile preserves)
+   - clears `offer_coin_watches` for the offer
    - `tx_signal_state` mempool observation for the cancel tx id
 
    Reconcile promotes to `cancelled` when Dexie status is `3`, cancel tx chain-confirms, or
-   other canonical reconcile signals apply. Failed submit does **not** mark the offer
-   cancelled.
+   other canonical reconcile signals apply. Failed broadcast rolls state back; failed
+   persist before broadcast never submits.
 
 6. **`cancel_submitted` reconcile and defer policy.**
    - Pure policy: `cycle/reconcile/cancel_submitted_policy/` (`CancelSubmittedContext`,
@@ -96,10 +97,11 @@ offer-file fetch.
      context cannot be loaded (no row, lookup failure surfaced as absent context), reconcile
      preserves `cancel_submitted` (`REASON_CANCEL_SUBMIT_CONTEXT_MISSING`) rather than
      applying stale-unwedge with empty defaults.
-   - **Broadcast vs persist on submit.** Successful Coinset broadcast with a failed SQLite
-     upsert records per-item `success: false` with `operation_id` and error text; the batch
-     continues. Operator state may lag until a later reconcile or retry — broadcast success
-     alone does not imply `cancel_submitted` in SQLite.
+   - **Persist before broadcast.** Tracked cancels write `cancel_submitted`, clear
+     `offer_coin_watches`, and observe the cancel tx id (spend-bundle hash) **before**
+     `push_tx`. Broadcast failure rolls state back to the prior lifecycle state and
+     restores watches from stored cancel metadata when present. Persist failure before
+     broadcast never submits.
 
 7. **CLI and audit naming reflects submit semantics.**
    - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item

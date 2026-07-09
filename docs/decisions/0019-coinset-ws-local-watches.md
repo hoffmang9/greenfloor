@@ -26,6 +26,9 @@ never the operator transport.
    per-offer watches; `InventoryP2Index` still drives WS filters and inventory
    freshness. Optional coin-id fields on transaction frames are matched when present.
    WS offer events and watch hits drive lifecycle transitions directly.
+   Cancel submit clears `offer_coin_watches` (cancel spend reuses maker coin/p2
+   keys); promotion to `cancelled` waits on cancel-tx confirmation, not watch hits.
+   Watch/venue backfill from cancel metadata runs once via `schema_meta`.
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
    `publish_venue=dexie`). Schema migration backfills legacy `NULL` venues from
    offer-id shape once; authority checks no longer infer from id shape at runtime.
@@ -39,9 +42,9 @@ never the operator transport.
    fetch is optional fallback only. Do not submit spends over WebSocket.
 6. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
    90s max-staleness and reuse last bucket counts when fresh. Durable watches are
-   registered atomically at post and backfilled/healed once on schema open
-   (`INSERT OR IGNORE` for missing coin and p2 rows); coin-ops only reads the
-   watch table for do-not-touch.
+   registered atomically at post and backfilled/healed once on schema open via
+   `schema_meta` (`watch_venue_backfill_v1`); coin-ops only reads the watch table
+   for do-not-touch.
 
 ## Consequences
 

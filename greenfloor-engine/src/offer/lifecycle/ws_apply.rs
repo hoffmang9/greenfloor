@@ -1,15 +1,11 @@
 //! Apply Coinset WS offer / watch signals through canonical reconcile decision.
 
 use crate::coinset::WsOfferEvent;
-use crate::cycle::reconcile::{
-    signals_from_ws_offer_status, CancelSubmittedContext, CoinsetSignalSummary, CoinsetTxSignals,
-};
+use crate::cycle::reconcile::{signals_from_ws_offer_status, CoinsetTxSignals};
 use crate::error::SignerResult;
 use crate::storage::{OfferStateListRow, SqliteStore};
 
-use super::cancel_context::{
-    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
-};
+use super::cancel_context::cancel_submitted_context_for_offer;
 use super::persist::ReconcilePersistOptions;
 use super::signal_apply::apply_watched_offer_signals;
 
@@ -65,37 +61,27 @@ pub fn apply_ws_offer_event(store: &SqliteStore, event: &WsOfferEvent) -> Signer
         &row.state,
         status,
         signals,
-        None,
         cancel_submitted.as_ref(),
         &ws_persist_options(),
     )
 }
 
-fn apply_mempool_hit_for_row(
-    store: &SqliteStore,
-    row: &OfferStateListRow,
-    cancel_by_offer: &std::collections::HashMap<String, CancelSubmittedContext>,
-) -> SignerResult<()> {
-    let cancel_submitted = cancel_submitted_context_for_offer(
-        store,
-        &row.offer_id,
-        &row.state,
-        Some(cancel_by_offer),
-    )?;
+fn apply_watch_hit_for_row(store: &SqliteStore, row: &OfferStateListRow) -> SignerResult<()> {
     apply_watched_offer_signals(
         store,
         &row.market_id,
         &row.offer_id,
         &row.state,
         None,
-        CoinsetTxSignals::default(),
-        Some(CoinsetSignalSummary::mempool_hit()),
-        cancel_submitted.as_ref(),
+        CoinsetTxSignals::watch_hit(),
+        None,
         &ws_persist_options(),
     )
 }
 
 /// On durable coin/p2 watch hits, mark `mempool_observed` via reconcile dispatch (batched).
+///
+/// Offers in `cancel_submitted` have watches cleared at submit, so they do not appear here.
 ///
 /// # Errors
 ///
@@ -108,10 +94,9 @@ pub fn apply_watch_hits_batch(store: &SqliteStore, watched_keys: &[String]) -> S
     if rows.is_empty() {
         return Ok(());
     }
-    let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
     store.unchecked_transaction_scope("watch_hits_batch", |store| {
         for row in &rows {
-            apply_mempool_hit_for_row(store, row, &cancel_by_offer)?;
+            apply_watch_hit_for_row(store, row)?;
         }
         Ok(())
     })
@@ -264,30 +249,29 @@ mod tests {
     }
 
     #[test]
-    fn watch_hit_during_cancel_submitted_uses_preloaded_context() {
+    fn cancel_submitted_clears_watches_so_hits_are_noops() {
         let (_dir, store) = open_store();
         let offer_id = "ab".repeat(32);
         let coin = "ef".repeat(32);
         let cancel_tx = "cd".repeat(32);
         store
-            .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
-            .expect("cancel_submitted");
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
         store
             .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
             .expect("watch");
+        store
+            .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("cancel_submitted");
+        assert!(store
+            .list_offer_ids_for_watched_coin(&coin)
+            .expect("cleared")
+            .is_empty());
         apply_watch_hits_batch(&store, std::slice::from_ref(&coin)).expect("hit");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
-        // Synthetic mempool hit with cancel context: taker mempool path or preserve.
-        assert!(
-            matches!(
-                rows[0].state.as_str(),
-                "cancel_submitted" | "mempool_observed"
-            ),
-            "unexpected state {}",
-            rows[0].state
-        );
+        assert_eq!(rows[0].state, "cancel_submitted");
     }
 
     #[test]

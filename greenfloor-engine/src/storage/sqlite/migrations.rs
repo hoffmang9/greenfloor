@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{SignerError, SignerResult};
 use crate::hex::canonical_tx_id;
@@ -40,6 +40,8 @@ fn add_column_if_missing(
     Ok(())
 }
 
+const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v1";
+
 /// Apply additive schema migrations after base `CREATE TABLE IF NOT EXISTS` bootstrap.
 ///
 /// # Errors
@@ -58,13 +60,58 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     add_column_if_missing(conn, "offer_state", "cancel_submitted_at", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "publish_venue", "TEXT NULL")?;
     ensure_offer_coin_watches_table(conn)?;
+    ensure_schema_meta_table(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
-    // One-shot upgrade: seed/heal watches from cancel metadata for watched offers
-    // that predate durable offer_coin_watches or have partial (coin-only) rows.
-    // Post path is atomic; hot paths stay read-only.
+    // One-shot upgrade: seed/heal watches + venue for pre-upgrade rows only.
+    run_watch_venue_backfill_once(conn)?;
+    Ok(())
+}
+
+fn ensure_schema_meta_table(conn: &Connection) -> SignerResult<()> {
+    conn.execute_batch(
+        r"
+        CREATE TABLE IF NOT EXISTS schema_meta (
+          key TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
+        ",
+    )
+    .map_err(|err| SignerError::Other(format!("schema_meta migrate: {err}")))?;
+    Ok(())
+}
+
+fn schema_meta_applied(conn: &Connection, key: &str) -> SignerResult<bool> {
+    let found: Option<String> = conn
+        .query_row(
+            "SELECT key FROM schema_meta WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| {
+            SignerError::Other(format!("failed to read schema_meta key {key}: {err}"))
+        })?;
+    Ok(found.is_some())
+}
+
+fn mark_schema_meta_applied(conn: &Connection, key: &str) -> SignerResult<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_meta (key, applied_at) VALUES (?1, ?2)",
+        params![key, now],
+    )
+    .map_err(|err| SignerError::Other(format!("failed to mark schema_meta key {key}: {err}")))?;
+    Ok(())
+}
+
+fn run_watch_venue_backfill_once(conn: &Connection) -> SignerResult<()> {
+    if schema_meta_applied(conn, SCHEMA_META_WATCH_VENUE_BACKFILL)? {
+        return Ok(());
+    }
     backfill_missing_offer_coin_watches(conn)?;
     backfill_offer_publish_venue(conn)?;
+    mark_schema_meta_applied(conn, SCHEMA_META_WATCH_VENUE_BACKFILL)?;
     Ok(())
 }
 

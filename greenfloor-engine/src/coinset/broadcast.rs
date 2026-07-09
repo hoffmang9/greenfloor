@@ -12,6 +12,19 @@ pub struct BroadcastSpendBundleResult {
     pub operation_id: String,
 }
 
+/// Canonical operation id (spend-bundle hash) for a cancel/broadcast spend.
+///
+/// # Errors
+///
+/// Returns an error if the hash is not a valid 64-hex tx id.
+pub fn spend_bundle_operation_id(spend_bundle: &SpendBundle) -> SignerResult<String> {
+    canonical_tx_id(&hex::encode(spend_bundle.hash())).ok_or_else(|| {
+        crate::error::SignerError::Other(
+            "spend bundle hash did not produce a valid tx id".to_string(),
+        )
+    })
+}
+
 /// Broadcast spend bundle.
 ///
 /// # Errors
@@ -21,11 +34,7 @@ pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
 ) -> SignerResult<BroadcastSpendBundleResult> {
-    let operation_id = canonical_tx_id(&hex::encode(spend_bundle.hash())).ok_or_else(|| {
-        crate::error::SignerError::Other(
-            "spend bundle hash did not produce a valid tx id".to_string(),
-        )
-    })?;
+    let operation_id = spend_bundle_operation_id(&spend_bundle)?;
     // Coinset RPC expects structured SpendBundle JSON (not a hex string).
     let response = client
         .push_tx(spend_bundle)

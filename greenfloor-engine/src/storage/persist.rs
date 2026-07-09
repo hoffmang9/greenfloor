@@ -2,6 +2,32 @@ use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 
+fn write_offer_post_record(
+    store: &SqliteStore,
+    record: &OfferPostPersistRecord,
+) -> SignerResult<()> {
+    store.upsert_offer_state_with_metadata_at(
+        &record.offer_id,
+        &record.market_id,
+        OfferLifecycleState::Open.as_str(),
+        None,
+        &super::sqlite::utcnow_iso(),
+        super::sqlite::OfferCancelWrite {
+            fields: Some(&record.cancel_fields),
+            execution_mode: record.execution_mode,
+            publish_venue: Some(record.publish_venue.as_str()),
+            ..Default::default()
+        },
+    )?;
+    store.replace_offer_coin_watches_no_txn(
+        &record.offer_id,
+        &record.market_id,
+        &record.watched_coin_ids,
+        &record.watched_p2s,
+    )?;
+    Ok(())
+}
+
 /// Upsert offer lifecycle state for one posted offer record.
 ///
 /// State metadata and durable watches are written in one `SQLite` transaction so a
@@ -15,30 +41,14 @@ pub fn upsert_offer_post_record(
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
     store.unchecked_transaction_scope("offer_post_record", |store| {
-        store.upsert_offer_state_with_metadata_at(
-            &record.offer_id,
-            &record.market_id,
-            OfferLifecycleState::Open.as_str(),
-            None,
-            &super::sqlite::utcnow_iso(),
-            super::sqlite::OfferCancelWrite {
-                fields: Some(&record.cancel_fields),
-                execution_mode: record.execution_mode,
-                publish_venue: Some(record.publish_venue.as_str()),
-                ..Default::default()
-            },
-        )?;
-        store.replace_offer_coin_watches(
-            &record.offer_id,
-            &record.market_id,
-            &record.watched_coin_ids,
-            &record.watched_p2s,
-        )?;
-        Ok(())
+        write_offer_post_record(store, record)
     })
 }
 
 /// Persist offer post records (`SQLite` offer state only; tracing lives in dispatch layer).
+///
+/// The whole batch commits in one transaction so a mid-batch failure cannot leave
+/// some offers with state but no watches (or the reverse).
 ///
 /// # Errors
 ///
@@ -47,10 +57,15 @@ pub fn persist_offer_post_records(
     store: &SqliteStore,
     records: &[OfferPostPersistRecord],
 ) -> SignerResult<()> {
-    for record in records {
-        upsert_offer_post_record(store, record)?;
+    if records.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    store.unchecked_transaction_scope("offer_post_records", |store| {
+        for record in records {
+            write_offer_post_record(store, record)?;
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]

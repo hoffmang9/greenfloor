@@ -3,8 +3,7 @@
 use chrono::Utc;
 
 use crate::cycle::reconcile::{
-    resolve_watched_offer_transition_with_summary, CancelSubmittedContext, CoinsetSignalSummary,
-    CoinsetTxSignals,
+    resolve_watched_offer_transition_from_signals, CancelSubmittedContext, CoinsetTxSignals,
 };
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
@@ -24,15 +23,12 @@ pub fn apply_watched_offer_signals(
     current_state: &str,
     status: Option<i64>,
     signals: CoinsetTxSignals,
-    summary_override: Option<CoinsetSignalSummary>,
     cancel_submitted: Option<&CancelSubmittedContext>,
     options: &ReconcilePersistOptions<'_>,
 ) -> SignerResult<()> {
-    let summary = summary_override.unwrap_or_else(|| signals.summary());
-    let transition = resolve_watched_offer_transition_with_summary(
+    let transition = resolve_watched_offer_transition_from_signals(
         current_state,
         status,
-        summary,
         signals,
         &[],
         cancel_submitted,

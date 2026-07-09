@@ -103,6 +103,7 @@ pub fn transition_from_dexie_offer_payload(
         tx_ids: coinset_tx_ids,
         confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
         mempool_tx_ids: coinset_mempool_tx_ids,
+        ..Default::default()
     };
     let chain_confirmed_tx_ids = chain_confirmed_tx_ids_for_transition(
         store,

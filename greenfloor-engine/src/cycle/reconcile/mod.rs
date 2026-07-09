@@ -76,25 +76,23 @@ pub fn resolve_missing_watched_offer_transition(
     Ok(decision.into_cycle_transition_no_coinset(old_state))
 }
 
-/// Resolve watched offer transition using an explicit signal summary.
+/// Resolve watched offer transition from signals.
 ///
-/// `signals` supplies tx id lists for the resulting `CycleOfferTransition` only;
-/// dispatch uses `summary` (so watch hits can pass `CoinsetSignalSummary::mempool_hit()`
-/// with empty id lists).
+/// Dispatch uses `signals.summary()` (including `CoinsetTxSignals::watch_hit()`).
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub fn resolve_watched_offer_transition_with_summary(
+pub fn resolve_watched_offer_transition_from_signals(
     current_state: &str,
     status: Option<i64>,
-    summary: CoinsetSignalSummary,
     signals: CoinsetTxSignals,
     chain_confirmed_tx_ids: &[String],
     cancel_submitted: Option<&CancelSubmittedContext>,
     now: DateTime<Utc>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
+    let summary = signals.summary();
     Ok(resolve_watched_offer_decision(
         &old_state,
         status,
@@ -109,29 +107,4 @@ pub fn resolve_watched_offer_transition_with_summary(
         signals.confirmed_tx_ids,
         signals.mempool_tx_ids,
     ))
-}
-
-/// Resolve watched offer transition from signals.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn resolve_watched_offer_transition_from_signals(
-    current_state: &str,
-    status: Option<i64>,
-    signals: CoinsetTxSignals,
-    chain_confirmed_tx_ids: &[String],
-    cancel_submitted: Option<&CancelSubmittedContext>,
-    now: DateTime<Utc>,
-) -> Result<CycleOfferTransition, ReconcileStateError> {
-    let summary = signals.summary();
-    resolve_watched_offer_transition_with_summary(
-        current_state,
-        status,
-        summary,
-        signals,
-        chain_confirmed_tx_ids,
-        cancel_submitted,
-        now,
-    )
 }

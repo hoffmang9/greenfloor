@@ -1,11 +1,96 @@
 //! Durable offer coin / p2 watches for Coinset WS lifecycle matching.
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use std::collections::HashSet;
 
 use super::{utcnow_iso, SqliteStore};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
+
+fn replace_offer_coin_watches_on_conn(
+    conn: &Connection,
+    offer_id: &str,
+    market_id: &str,
+    coin_ids: &[String],
+    p2s: &[String],
+) -> SignerResult<()> {
+    let clean_offer = offer_id.trim();
+    let clean_market = market_id.trim();
+    if clean_offer.is_empty() || clean_market.is_empty() {
+        return Err(SignerError::Other(
+            "offer_id and market_id are required for offer_coin_watches".to_string(),
+        ));
+    }
+    let now = utcnow_iso();
+    conn.execute(
+        "DELETE FROM offer_coin_watches WHERE offer_id = ?1",
+        params![clean_offer],
+    )
+    .map_err(|err| SignerError::Other(format!("offer_coin_watches delete: {err}")))?;
+
+    let mut seen = HashSet::new();
+    let mut inserted = 0usize;
+    for coin_id in coin_ids {
+        let normalized = normalize_hex_id(coin_id);
+        if normalized.len() != 64 {
+            tracing::warn!(
+                offer_id = clean_offer,
+                market_id = clean_market,
+                kind = "coin",
+                raw_len = coin_id.trim().len(),
+                normalized_len = normalized.len(),
+                "skipping non-64-char coin id for offer_coin_watches"
+            );
+            continue;
+        }
+        if !seen.insert(normalized.clone()) {
+            continue;
+        }
+        conn.execute(
+            r"
+            INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+            VALUES (?1, ?2, ?3, 'coin', ?4)
+            ",
+            params![normalized, clean_offer, clean_market, now],
+        )
+        .map_err(|err| SignerError::Other(format!("offer_coin_watches insert coin: {err}")))?;
+        inserted += 1;
+    }
+    for p2 in p2s {
+        let normalized = normalize_hex_id(p2);
+        if normalized.len() != 64 {
+            tracing::warn!(
+                offer_id = clean_offer,
+                market_id = clean_market,
+                kind = "p2",
+                raw_len = p2.trim().len(),
+                normalized_len = normalized.len(),
+                "skipping non-64-char p2 for offer_coin_watches"
+            );
+            continue;
+        }
+        if !seen.insert(normalized.clone()) {
+            continue;
+        }
+        conn.execute(
+            r"
+            INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+            VALUES (?1, ?2, ?3, 'p2', ?4)
+            ",
+            params![normalized, clean_offer, clean_market, now],
+        )
+        .map_err(|err| SignerError::Other(format!("offer_coin_watches insert p2: {err}")))?;
+        inserted += 1;
+    }
+    if inserted == 0 && (!coin_ids.is_empty() || !p2s.is_empty()) {
+        return Err(SignerError::Other(format!(
+            "offer_coin_watches for offer {clean_offer}: all {coin_count} coin ids and {p2_count} p2s were invalid or empty after normalize",
+            coin_count = coin_ids.len(),
+            p2_count = p2s.len(),
+        )));
+    }
+    Ok(())
+}
 
 impl SqliteStore {
     /// Replace all watches for one offer with the provided coin ids / p2s.
@@ -20,90 +105,23 @@ impl SqliteStore {
         coin_ids: &[String],
         p2s: &[String],
     ) -> SignerResult<()> {
-        let clean_offer = offer_id.trim();
-        let clean_market = market_id.trim();
-        if clean_offer.is_empty() || clean_market.is_empty() {
-            return Err(SignerError::Other(
-                "offer_id and market_id are required for offer_coin_watches".to_string(),
-            ));
-        }
-        let now = utcnow_iso();
-        let tx = self.conn.unchecked_transaction().map_err(|err| {
-            SignerError::Other(format!("offer_coin_watches begin transaction: {err}"))
-        })?;
-        tx.execute(
-            "DELETE FROM offer_coin_watches WHERE offer_id = ?1",
-            params![clean_offer],
-        )
-        .map_err(|err| SignerError::Other(format!("offer_coin_watches delete: {err}")))?;
-
-        let mut seen = HashSet::new();
-        let mut inserted = 0usize;
-        for coin_id in coin_ids {
-            let normalized = normalize_hex_id(coin_id);
-            if normalized.len() != 64 {
-                tracing::warn!(
-                    offer_id = clean_offer,
-                    market_id = clean_market,
-                    kind = "coin",
-                    raw_len = coin_id.trim().len(),
-                    normalized_len = normalized.len(),
-                    "skipping non-64-char coin id for offer_coin_watches"
-                );
-                continue;
-            }
-            if !seen.insert(normalized.clone()) {
-                continue;
-            }
-            tx.execute(
-                r"
-                INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                VALUES (?1, ?2, ?3, 'coin', ?4)
-                ",
-                params![normalized, clean_offer, clean_market, now],
-            )
-            .map_err(|err| SignerError::Other(format!("offer_coin_watches insert coin: {err}")))?;
-            inserted += 1;
-        }
-        for p2 in p2s {
-            let normalized = normalize_hex_id(p2);
-            if normalized.len() != 64 {
-                tracing::warn!(
-                    offer_id = clean_offer,
-                    market_id = clean_market,
-                    kind = "p2",
-                    raw_len = p2.trim().len(),
-                    normalized_len = normalized.len(),
-                    "skipping non-64-char p2 for offer_coin_watches"
-                );
-                continue;
-            }
-            if !seen.insert(normalized.clone()) {
-                continue;
-            }
-            tx.execute(
-                r"
-                INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                VALUES (?1, ?2, ?3, 'p2', ?4)
-                ",
-                params![normalized, clean_offer, clean_market, now],
-            )
-            .map_err(|err| SignerError::Other(format!("offer_coin_watches insert p2: {err}")))?;
-            inserted += 1;
-        }
-        if inserted == 0 && (!coin_ids.is_empty() || !p2s.is_empty()) {
-            return Err(SignerError::Other(format!(
-                "offer_coin_watches for offer {clean_offer}: all {coin_count} coin ids and {p2_count} p2s were invalid or empty after normalize",
-                coin_count = coin_ids.len(),
-                p2_count = p2s.len(),
-            )));
-        }
-        tx.commit()
-            .map_err(|err| SignerError::Other(format!("offer_coin_watches commit: {err}")))?;
-        Ok(())
+        self.unchecked_transaction_scope("offer_coin_watches", |store| {
+            store.replace_offer_coin_watches_no_txn(offer_id, market_id, coin_ids, p2s)
+        })
     }
 
-    /// Clear watches for one offer (terminal lifecycle).
+    /// Replace watches without opening a transaction (caller must hold one).
+    pub(crate) fn replace_offer_coin_watches_no_txn(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        coin_ids: &[String],
+        p2s: &[String],
+    ) -> SignerResult<()> {
+        replace_offer_coin_watches_on_conn(&self.conn, offer_id, market_id, coin_ids, p2s)
+    }
+
+    /// Clear watches for one offer (terminal lifecycle / cancel submit).
     ///
     /// # Errors
     ///
@@ -407,8 +425,16 @@ mod tests {
                 .list_offer_ids_for_watched_coin(&meta_p2)
                 .expect("no p2 yet")
                 .is_empty());
+            // Clear one-shot flag so reopen re-runs watch/venue backfill.
+            store
+                .conn
+                .execute(
+                    "DELETE FROM schema_meta WHERE key = 'watch_venue_backfill_v1'",
+                    [],
+                )
+                .expect("clear schema_meta");
         }
-        // Re-open re-runs migrations; INSERT OR IGNORE heals missing p2.
+        // Re-open re-runs one-shot backfill; INSERT OR IGNORE heals missing p2.
         let store = SqliteStore::open(&db_path).expect("reopen");
         assert_eq!(
             store
@@ -457,6 +483,13 @@ mod tests {
                 .list_watched_coin_ids_for_market("m1")
                 .expect("empty")
                 .is_empty());
+            store
+                .conn
+                .execute(
+                    "DELETE FROM schema_meta WHERE key = 'watch_venue_backfill_v1'",
+                    [],
+                )
+                .expect("clear schema_meta");
         }
         let store = SqliteStore::open(&db_path).expect("reopen");
         let watched = store.list_watched_coin_ids_for_market("m1").expect("coins");

@@ -313,6 +313,9 @@ impl SqliteStore {
                     ..OfferCancelWrite::default()
                 },
             )?;
+            // Cancel spend reuses maker coin/p2 keys; drop watches so WS hits cannot
+            // look like taker mempool activity while cancel_submitted is in flight.
+            store.clear_offer_coin_watches(offer_id)?;
             store.observe_mempool_tx_ids(std::slice::from_ref(&stored_cancel_tx_id))?;
             Ok(())
         })

@@ -12,16 +12,27 @@ pub struct CoinsetTxSignals {
     pub tx_ids: Vec<String>,
     pub confirmed_tx_ids: Vec<String>,
     pub mempool_tx_ids: Vec<String>,
+    /// Maker coin/p2 watch hit without a concrete spend-bundle id yet.
+    pub watch_hit: bool,
 }
 
 impl CoinsetTxSignals {
+    /// Synthetic mempool observation from a durable coin/p2 watch hit.
+    #[must_use]
+    pub fn watch_hit() -> Self {
+        Self {
+            watch_hit: true,
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub fn summary(&self) -> CoinsetSignalSummary {
-        CoinsetSignalSummary::from_tx_lists(
-            &self.tx_ids,
-            &self.confirmed_tx_ids,
-            &self.mempool_tx_ids,
-        )
+        CoinsetSignalSummary {
+            has_tx_ids: !self.tx_ids.is_empty(),
+            has_confirmed: !self.confirmed_tx_ids.is_empty(),
+            has_mempool: !self.mempool_tx_ids.is_empty() || self.watch_hit,
+        }
     }
 }
 
@@ -43,18 +54,6 @@ impl CoinsetSignalSummary {
             has_tx_ids: !coinset_tx_ids.is_empty(),
             has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
             has_mempool: !coinset_mempool_tx_ids.is_empty(),
-        }
-    }
-
-    /// Watch-hit signal: maker coin/p2 observed without a concrete spend-bundle id yet.
-    ///
-    /// Sets `has_mempool` only — do not fabricate `has_tx_ids`.
-    #[must_use]
-    pub fn mempool_hit() -> Self {
-        Self {
-            has_tx_ids: false,
-            has_confirmed: false,
-            has_mempool: true,
         }
     }
 
@@ -82,6 +81,7 @@ pub fn signals_from_ws_offer_status(
                 tx_ids: tx.clone(),
                 confirmed_tx_ids: Vec::new(),
                 mempool_tx_ids: tx,
+                ..Default::default()
             },
         )),
         "confirmed" => Some((
@@ -90,6 +90,7 @@ pub fn signals_from_ws_offer_status(
                 tx_ids: tx.clone(),
                 confirmed_tx_ids: tx,
                 mempool_tx_ids: Vec::new(),
+                ..Default::default()
             },
         )),
         "expired" => Some((Some(DEXIE_STATUS_EXPIRED), CoinsetTxSignals::default())),
@@ -136,12 +137,15 @@ mod tests {
     }
 
     #[test]
-    fn mempool_hit_summary_is_mempool_without_fabricated_tx_ids() {
-        let summary = CoinsetSignalSummary::mempool_hit();
+    fn watch_hit_summary_is_mempool_without_fabricated_tx_ids() {
+        let signals = CoinsetTxSignals::watch_hit();
+        let summary = signals.summary();
         assert!(!summary.has_tx_ids);
         assert!(summary.has_mempool);
         assert!(!summary.has_confirmed);
         assert!(summary.has_coinset_activity());
+        assert!(signals.tx_ids.is_empty());
+        assert!(signals.mempool_tx_ids.is_empty());
         assert!(!CoinsetTxSignals::default().summary().has_mempool);
     }
 }
