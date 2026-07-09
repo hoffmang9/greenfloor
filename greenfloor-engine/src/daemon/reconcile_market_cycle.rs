@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::Level;
 
 use crate::adapters::DexieClient;
@@ -13,7 +13,9 @@ use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::{build_dexie_size_by_offer_id, dexie_offer_lookup_keys};
+use super::dexie_size::{
+    build_dexie_size_by_offer_id, dexie_offer_lookup_keys, dexie_status_index,
+};
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
@@ -29,8 +31,10 @@ pub struct ReconcileMarketCycleMetrics {
 
 #[derive(Debug, Clone)]
 pub struct ReconcileMarketCycleResult {
-    pub offers: Vec<Value>,
     pub dexie_size_by_offer_id: HashMap<String, i64>,
+    /// Dexie status keyed by every list lookup key (`trade_id` ∪ bech32 `id`).
+    /// Built once in reconcile; cancel consumes this map (no re-walk of JSON).
+    pub dexie_status_by_lookup_key: HashMap<String, i64>,
     pub dexie_fetch_error: Option<String>,
     pub metrics: ReconcileMarketCycleMetrics,
 }
@@ -107,8 +111,8 @@ pub async fn run_reconcile_market_cycle(
         .collect();
     if dexie_offer_ids.is_empty() {
         return Ok(ReconcileMarketCycleResult {
-            offers: Vec::new(),
             dexie_size_by_offer_id: HashMap::default(),
+            dexie_status_by_lookup_key: HashMap::default(),
             dexie_fetch_error: None,
             metrics,
         });
@@ -132,8 +136,8 @@ pub async fn run_reconcile_market_cycle(
                 Some(market_id),
             )?;
             return Ok(ReconcileMarketCycleResult {
-                offers: Vec::new(),
                 dexie_size_by_offer_id: HashMap::default(),
+                dexie_status_by_lookup_key: HashMap::default(),
                 dexie_fetch_error: Some(err.to_string()),
                 metrics,
             });
@@ -159,6 +163,7 @@ pub async fn run_reconcile_market_cycle(
     let augmented_offers = augmented.offers;
     let dexie_size_by_offer_id =
         build_dexie_size_by_offer_id(&augmented_offers, &market.base_asset);
+    let dexie_status_by_lookup_key = dexie_status_index(&augmented_offers);
 
     let offer_rows = store.list_offer_states(Some(market_id), 5000)?;
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(store, &offer_rows)?;
@@ -194,8 +199,8 @@ pub async fn run_reconcile_market_cycle(
     }
 
     Ok(ReconcileMarketCycleResult {
-        offers: augmented_offers,
         dexie_size_by_offer_id,
+        dexie_status_by_lookup_key,
         dexie_fetch_error: None,
         metrics,
     })
@@ -389,7 +394,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-confirmed", "m1", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-confirmed",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = mockito::Server::new_async().await;
@@ -462,7 +477,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-open", "m1", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-open",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = mockito::Server::new_async().await;

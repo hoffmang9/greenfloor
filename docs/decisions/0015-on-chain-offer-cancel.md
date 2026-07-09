@@ -15,16 +15,21 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
 
 ## Decision
 
-1. **Cancel is on-chain only.** Dexie is used to fetch the offer file (`GET /v1/offers/:id`).
-   Direct Coinset HTTP API submits the cancel spend bundle (`push_tx` / broadcast helpers in
-   `greenfloor-engine/src/coinset/`).
+1. **Cancel is on-chain only.** Prefer order for maker-input resolution:
+   local `offer1…` text → Coinset coin lookup + stored cancel metadata → optional Dexie
+   offer-file fetch (`GET /v1/offers/:id`) for legacy / Dexie-posted rows. Coinset
+   `get_offer` intentionally omits the raw offer blob, so it is not used for cancel
+   spend construction. Direct Coinset HTTP API submits the cancel spend bundle
+   (`push_tx` / broadcast helpers in `greenfloor-engine/src/coinset/`).
 
 2. **Shared spend construction lives in `offer/reclaim.rs`.**
    - `build_offer_cancel_spend_bundle` — decode offer → spend each cancellable maker input
      (vault XCH p2 or presplit CAT) → one vault singleton fast-forward.
+   - `build_offer_cancel_spend_bundle_from_metadata` — Coinset coin + stored cancel
+     metadata (no offer blob).
    - `build_vault_cat_reclaim_spend_bundle` — direct vault vs presplit-offer inner spend modes.
-   - Lifecycle orchestration (`offer/lifecycle/cancel.rs`) handles Dexie fetch, Coinset
-     broadcast, DB updates, and mempool tx observation.
+   - Lifecycle orchestration (`offer/lifecycle/cancel.rs`) handles Coinset-primary cancel,
+     optional Dexie offer-file fallback, broadcast, DB updates, and mempool tx observation.
 
 3. **Presplit cancel binding is extracted from the offer input spend**, not replanned.
    `PresplitOfferBinding::from_presplit_input_spend` parses the maker input coin spend in
@@ -34,8 +39,9 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
 
 3a. **Presplit cancel metadata is persisted at post time** in `offer_state`:
 `presplit_input_coin_id`, `fixed_delegated_puzzle_hash`, and `execution_mode`. Cancel
-prefers stored metadata; when absent (legacy rows, DB loss, manual posts), cancel falls
-back to extraction from the Dexie offer file.
+prefers Coinset + stored metadata (no offer file). When metadata is absent (legacy rows,
+DB loss, manual posts), cancel may fall back to a local `--offer-file` or optional Dexie
+offer-file fetch.
 
 4. **Input CAT resolution is coin-id authoritative.** Cancel resolves the offered input
    via stored `presplit_input_coin_id` when present, then scans coin ids from the decoded

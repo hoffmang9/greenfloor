@@ -88,6 +88,23 @@ pub(crate) fn stored_presplit_fields(
     }
 }
 
+/// Whether stored cancel metadata can drive Coinset-primary cancel without an offer file.
+#[must_use]
+pub fn metadata_sufficient_for_coinset_cancel(
+    metadata: Option<&StoredOfferCancelMetadata>,
+) -> bool {
+    let Some(metadata) = metadata else {
+        return false;
+    };
+    let has_coin = metadata
+        .fields
+        .input_coin_id
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    has_coin || stored_presplit_fields(Some(metadata)).is_some()
+}
+
 fn coin_id_candidates_for_cat_resolution(
     coin: Coin,
     spend_bundle: &SpendBundle,
@@ -144,19 +161,69 @@ fn presplit_hash_from_stored_fields(
     Ok(hash)
 }
 
+/// Shared direct/presplit decision for a known on-chain coin (+ optional CAT).
+fn classify_coin_and_cat(
+    vault_ctx: &mut VaultSpendContext,
+    coin: Coin,
+    cat: Option<Cat>,
+    metadata: Option<&StoredOfferCancelMetadata>,
+    offer_bundle: Option<&SpendBundle>,
+) -> SignerResult<CancellableMakerInput> {
+    if let Some(nonce) = vault_ctx.infer_nonce_for_p2_hash(coin.puzzle_hash) {
+        return Ok(CancellableMakerInput::DirectVaultP2 { coin, nonce });
+    }
+
+    if let Some(cat) = cat {
+        if metadata
+            .and_then(|value| value.execution_mode)
+            .is_some_and(|mode| mode == OfferExecutionMode::Direct)
+        {
+            return Ok(CancellableMakerInput::VaultCatDirect { cat });
+        }
+        let presplit_by_mode = metadata.is_some_and(|value| {
+            value.execution_mode.is_some_and(|mode| {
+                matches!(
+                    mode,
+                    OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting
+                )
+            })
+        });
+        let direct_by_nonce = vault_ctx
+            .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
+            .is_some();
+        if !presplit_by_mode && direct_by_nonce {
+            return Ok(CancellableMakerInput::VaultCatDirect { cat });
+        }
+        return resolve_presplit_maker(
+            vault_ctx.launcher_id,
+            coin,
+            Some(cat),
+            metadata,
+            offer_bundle,
+        )?
+        .ok_or(SignerError::OfferCancelNoSpendableInput);
+    }
+
+    resolve_presplit_maker(vault_ctx.launcher_id, coin, None, metadata, offer_bundle)?
+        .ok_or_else(|| offer_cancel_input_not_vault_owned(coin, vault_ctx.launcher_id))
+}
+
 fn resolve_presplit_maker(
     launcher_id: Bytes32,
     coin: Coin,
     coinset_cat: Option<Cat>,
     metadata: Option<&StoredOfferCancelMetadata>,
-    spend_bundle: &SpendBundle,
+    offer_bundle: Option<&SpendBundle>,
 ) -> SignerResult<Option<CancellableMakerInput>> {
     if let Some(fields) = stored_presplit_fields(metadata) {
         return match presplit_hash_from_stored_fields(launcher_id, coin, coinset_cat, fields) {
             Ok(fixed_conditions_tree_hash) => {
                 let cat = match coinset_cat {
                     Some(cat) => Some(cat),
-                    None => offer_maker_cat_from_coin_input(coin, spend_bundle)?,
+                    None => match offer_bundle {
+                        Some(bundle) => offer_maker_cat_from_coin_input(coin, bundle)?,
+                        None => None,
+                    },
                 };
                 Ok(Some(CancellableMakerInput::PresplitMaker {
                     coin,
@@ -170,7 +237,10 @@ fn resolve_presplit_maker(
             Err(err) => Err(err),
         };
     }
-    match presplit_binding_from_coin_input(launcher_id, coin, spend_bundle) {
+    let Some(bundle) = offer_bundle else {
+        return Ok(None);
+    };
+    match presplit_binding_from_coin_input(launcher_id, coin, bundle) {
         Ok(PresplitBindingLookup::Found(binding)) => {
             Ok(Some(CancellableMakerInput::PresplitMaker {
                 coin,
@@ -184,43 +254,6 @@ fn resolve_presplit_maker(
         }
         Err(err) => Err(err),
     }
-}
-
-fn classify_coinset_cat(
-    vault_ctx: &mut VaultSpendContext,
-    coin: Coin,
-    cat: Cat,
-    metadata: Option<&StoredOfferCancelMetadata>,
-    spend_bundle: &SpendBundle,
-) -> SignerResult<CancellableMakerInput> {
-    if metadata
-        .and_then(|value| value.execution_mode)
-        .is_some_and(|mode| mode == OfferExecutionMode::Direct)
-    {
-        return Ok(CancellableMakerInput::VaultCatDirect { cat });
-    }
-    let presplit_by_mode = metadata.is_some_and(|value| {
-        value.execution_mode.is_some_and(|mode| {
-            matches!(
-                mode,
-                OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting
-            )
-        })
-    });
-    let direct_by_nonce = vault_ctx
-        .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-        .is_some();
-    if presplit_by_mode || !direct_by_nonce {
-        return resolve_presplit_maker(
-            vault_ctx.launcher_id,
-            coin,
-            Some(cat),
-            metadata,
-            spend_bundle,
-        )?
-        .ok_or(SignerError::OfferCancelNoSpendableInput);
-    }
-    Ok(CancellableMakerInput::VaultCatDirect { cat })
 }
 
 fn offer_cancel_input_not_vault_owned(coin: Coin, launcher_id: Bytes32) -> SignerError {
@@ -261,7 +294,7 @@ fn direct_vault_cat_missing_on_coinset(
         .is_some())
 }
 
-/// Classify a cancellable maker coin as a vault-owned reclaim input.
+/// Classify a cancellable maker coin from an offer spend bundle.
 ///
 /// Presplit hash resolution prefers persisted cancel metadata, then offer-file binding parse.
 ///
@@ -284,12 +317,16 @@ pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
 
     if let Some(cat) = resolve_cancellable_cat(backend, spend_bundle, coin, metadata).await? {
         ensure_offer_input_unspent(backend, cat.coin.coin_id()).await?;
-        return classify_coinset_cat(vault_ctx, coin, cat, metadata, spend_bundle);
+        return classify_coin_and_cat(vault_ctx, coin, Some(cat), metadata, Some(spend_bundle));
     }
 
-    if let Some(input) =
-        resolve_presplit_maker(vault_ctx.launcher_id, coin, None, metadata, spend_bundle)?
-    {
+    if let Some(input) = resolve_presplit_maker(
+        vault_ctx.launcher_id,
+        coin,
+        None,
+        metadata,
+        Some(spend_bundle),
+    )? {
         ensure_offer_input_unspent(backend, coin.coin_id()).await?;
         return Ok(input);
     }
@@ -302,4 +339,35 @@ pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
         coin,
         vault_ctx.launcher_id,
     ))
+}
+
+/// Classify a maker input from Coinset coin state + stored cancel metadata (no offer file).
+///
+/// # Errors
+///
+/// Returns an error when the stored coin id is missing/spent or cannot be classified as
+/// a vault-owned reclaim input.
+pub(crate) async fn classify_maker_input_from_stored_metadata<C: OfferCoinsetBackend>(
+    vault_ctx: &mut VaultSpendContext,
+    backend: &C,
+    metadata: &StoredOfferCancelMetadata,
+) -> SignerResult<CancellableMakerInput> {
+    let coin_id = stored_input_coin_id(Some(metadata))?.ok_or_else(|| {
+        SignerError::Other(
+            "offer cancel requires stored presplit_input_coin_id when offer file is unavailable"
+                .to_string(),
+        )
+    })?;
+    ensure_offer_input_unspent(backend, coin_id).await?;
+
+    match backend.fetch_offer_input_cat(coin_id).await {
+        Ok(cat) => {
+            return classify_coin_and_cat(vault_ctx, cat.coin, Some(cat), Some(metadata), None);
+        }
+        Err(SignerError::PresplitCoinNotFound) => {}
+        Err(err) => return Err(err),
+    }
+
+    let coin = backend.fetch_unspent_offer_input_coin(coin_id).await?;
+    classify_coin_and_cat(vault_ctx, coin, None, Some(metadata), None)
 }

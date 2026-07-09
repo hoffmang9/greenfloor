@@ -18,7 +18,8 @@ use crate::offer::presplit::{
     PresplitPaymentContext,
 };
 use crate::offer::reclaim::{
-    build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
+    build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
+    build_vault_cat_reclaim_spend_bundle, OfferReclaimMode,
 };
 use crate::offer::types::{OfferInput, StoredOfferCancelMetadata};
 use crate::vault::materialize::{
@@ -283,6 +284,44 @@ async fn classify_presplit_cat_without_coinset_uses_stored_metadata() {
     )
     .await
     .expect("stored metadata must classify presplit cat without coinset registration");
+}
+
+#[tokio::test]
+async fn build_offer_cancel_from_stored_metadata_without_offer_file() {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
+    let result = build_offer_from_setup(&mut setup)
+        .await
+        .expect("presplit-existing offer");
+    let presplit_cat = setup.presplit_cat.expect("presplit cat");
+    let presplit_coin_id = presplit_cat.coin.coin_id();
+    let coinset = SimulatorOfferCoinset::new(&setup.harness.chain);
+    coinset.register_cat(presplit_cat);
+    let metadata = stored_cancel_metadata(&result);
+    let cancel_bundle = build_offer_cancel_spend_bundle_from_metadata(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        &metadata,
+    )
+    .await
+    .expect("cancel from stored metadata");
+    setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .spend_coins(cancel_bundle.coin_spends, &[])
+        .expect("metadata cancel accepted");
+    assert!(setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .coin_state(presplit_coin_id)
+        .expect("presplit coin")
+        .spent_height
+        .is_some());
 }
 
 #[tokio::test]

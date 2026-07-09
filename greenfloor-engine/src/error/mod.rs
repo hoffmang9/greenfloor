@@ -164,8 +164,8 @@ pub enum SignerError {
     #[error("offer_duplicate_spent_coin_ids")]
     OfferDuplicateSpentCoinIds,
 
-    #[error("offer_cancel_dexie_offer_not_found")]
-    OfferCancelDexieOfferNotFound,
+    #[error("offer_cancel_offer_file_not_found")]
+    OfferCancelOfferFileNotFound,
 
     #[error("offer_cancel_offer_file_missing")]
     OfferCancelOfferFileMissing,

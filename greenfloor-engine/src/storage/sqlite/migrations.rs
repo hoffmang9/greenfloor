@@ -60,24 +60,65 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     ensure_offer_coin_watches_table(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
-    // One-shot upgrade: seed missing watches from cancel metadata for open offers
-    // that predate durable offer_coin_watches. Post path is now atomic, so this is
-    // not needed on the reconcile hot path.
+    // One-shot upgrade: seed/heal watches from cancel metadata for watched offers
+    // that predate durable offer_coin_watches or have partial (coin-only) rows.
+    // Post path is atomic; hot paths stay read-only.
     backfill_missing_offer_coin_watches(conn)?;
+    backfill_offer_publish_venue(conn)?;
+    Ok(())
+}
+
+fn backfill_offer_publish_venue(conn: &Connection) -> SignerResult<()> {
+    let mut stmt = conn
+        .prepare(
+            r"
+            SELECT offer_id
+            FROM offer_state
+            WHERE publish_venue IS NULL OR length(trim(publish_venue)) = 0
+            ",
+        )
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to prepare publish_venue backfill query: {err}"
+            ))
+        })?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to query publish_venue backfill rows: {err}"
+            ))
+        })?;
+    for row in rows {
+        let offer_id = row.map_err(|err| {
+            SignerError::Other(format!("failed to read publish_venue backfill row: {err}"))
+        })?;
+        let venue = if crate::hex::normalize_hex_id(&offer_id).len() == 64 {
+            "coinset"
+        } else {
+            "dexie"
+        };
+        conn.execute(
+            "UPDATE offer_state SET publish_venue = ?1 WHERE offer_id = ?2",
+            params![venue, offer_id],
+        )
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to backfill publish_venue for {offer_id}: {err}"
+            ))
+        })?;
+    }
     Ok(())
 }
 
 fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
-    // Watched lifecycle states that should have durable watches when cancel metadata exists.
+    // INSERT OR IGNORE heals both fully-missing and partial (coin-without-p2) rows.
     let mut stmt = conn
         .prepare(
             r"
             SELECT offer_id, market_id, presplit_input_coin_id, fixed_delegated_puzzle_hash
             FROM offer_state
             WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility', 'cancel_submitted')
-              AND NOT EXISTS (
-                SELECT 1 FROM offer_coin_watches w WHERE w.offer_id = offer_state.offer_id
-              )
               AND (
                 (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
                 OR (fixed_delegated_puzzle_hash IS NOT NULL AND length(trim(fixed_delegated_puzzle_hash)) > 0)

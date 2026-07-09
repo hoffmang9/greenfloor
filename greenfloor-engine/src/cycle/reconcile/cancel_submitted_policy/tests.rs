@@ -30,6 +30,7 @@ fn row(
         updated_at: updated_at.to_string(),
         cancel_submitted_tx_id: cancel_tx_id.map(str::to_string),
         cancel_submitted_at: cancel_submitted_at.map(str::to_string),
+        publish_venue: None,
     }
 }
 

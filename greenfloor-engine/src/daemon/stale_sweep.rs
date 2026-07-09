@@ -117,7 +117,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-expired", "m1", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-expired",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = Server::new_async().await;
@@ -143,7 +153,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-missing", "m2", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-missing",
+                "m2",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = Server::new_async().await;

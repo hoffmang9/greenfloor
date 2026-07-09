@@ -12,8 +12,8 @@ mod transition;
 mod ws_apply;
 
 pub use cancel::{
-    cancel_offer_on_chain, cancel_offers_on_chain, CancelOfferOnChainParams,
-    CancelOfferOnChainResult, CancelOfferOutcome, CancelOfferTarget,
+    cancel_offer_on_chain, cancel_offers_on_chain, cancel_targets_need_dexie_fallback,
+    CancelOfferOnChainParams, CancelOfferOnChainResult, CancelOfferOutcome, CancelOfferTarget,
 };
 pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliRequest, OffersCancelCliResult,
@@ -22,7 +22,9 @@ pub use cancel_context::{cancel_submitted_context_for_offer, CANCEL_SUBMIT_IN_FL
 pub(crate) use cancel_context::{
     defer_in_flight_cancel_offer_ids, preload_cancel_submitted_contexts,
 };
-pub use cancel_eligibility::{collect_dexie_open_offer_ids, row_cancel_eligible};
+pub use cancel_eligibility::{
+    collect_market_cancel_target_offer_ids, filter_cancel_target_offer_ids, row_cancel_eligible,
+};
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

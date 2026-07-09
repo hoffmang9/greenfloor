@@ -134,6 +134,8 @@ async fn execute_coin_ops_plans(
     planning: &CoinOpsPlanningResult,
 ) -> SignerResult<CoinOpExecutionResult> {
     let operator_network = ctx.resources.network.as_str();
+    // Durable watches are registered atomically at post and backfilled once on
+    // schema open (migrations). Coin-ops only reads the watch table.
     let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {

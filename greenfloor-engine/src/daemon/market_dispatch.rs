@@ -81,8 +81,8 @@ mod tests {
         SingleMarketCycleOutput {
             market_id: "m1".to_string(),
             reconcile: ReconcileMarketCycleResult {
-                offers: Vec::new(),
                 dexie_size_by_offer_id: std::collections::HashMap::default(),
+                dexie_status_by_lookup_key: std::collections::HashMap::default(),
                 dexie_fetch_error: None,
                 metrics: ReconcileMarketCycleMetrics::default(),
             },

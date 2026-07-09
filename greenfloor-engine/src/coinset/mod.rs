@@ -52,7 +52,7 @@ pub use parse::{
     coin_from_record, coin_id_from_record, coin_records_from_payload,
     coin_spend_from_solution_payload, record_from_payload,
 };
-pub use presplit::{fetch_offer_input_cat, wait_for_unspent_cat};
+pub use presplit::{fetch_offer_input_cat, fetch_unspent_offer_input_coin, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{
     with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,

@@ -138,21 +138,14 @@ impl SqliteStore {
 
     /// Whether Dexie is authoritative for missing-offer / 404 lifecycle decisions.
     ///
-    /// - Explicit `dexie` → yes
-    /// - Explicit `coinset` / `splash` → no
-    /// - Legacy `NULL` venue: treat 64-hex offer ids as Coinset trade ids (not Dexie);
-    ///   other ids (historical Dexie bech32) remain Dexie-authoritative.
+    /// Explicit `dexie` → yes; anything else (including legacy `NULL` after venue
+    /// backfill) → no. Prefer persisted `publish_venue` over id-shape heuristics.
     #[must_use]
-    pub fn is_dexie_authoritative_for_offer(offer_id: &str, publish_venue: Option<&str>) -> bool {
-        if let Some(venue) = publish_venue
+    pub fn is_dexie_authoritative_for_offer(_offer_id: &str, publish_venue: Option<&str>) -> bool {
+        publish_venue
             .map(str::trim)
             .filter(|value| !value.is_empty())
-        {
-            venue.eq_ignore_ascii_case("dexie")
-        } else {
-            let normalized = crate::hex::normalize_hex_id(offer_id);
-            normalized.len() != 64
-        }
+            .is_some_and(|venue| venue.eq_ignore_ascii_case("dexie"))
     }
 
     /// Publish venue recorded at post time (`coinset` / `dexie` / `splash`).
@@ -217,7 +210,7 @@ impl SqliteStore {
             if !state.is_watched_for_reconcile() {
                 continue;
             }
-            if self.is_dexie_authoritative_offer(&row.offer_id)? {
+            if Self::is_dexie_authoritative_for_offer(&row.offer_id, row.publish_venue.as_deref()) {
                 out.push(row.offer_id);
             }
         }
@@ -331,7 +324,7 @@ mod venue_authority_tests {
     use super::SqliteStore;
 
     #[test]
-    fn dexie_authority_uses_explicit_venue_and_legacy_id_shape() {
+    fn dexie_authority_uses_explicit_venue_only() {
         assert!(SqliteStore::is_dexie_authoritative_for_offer(
             "offer-bech32-like",
             Some("dexie")
@@ -344,9 +337,13 @@ mod venue_authority_tests {
             &"ab".repeat(32),
             None
         ));
-        assert!(SqliteStore::is_dexie_authoritative_for_offer(
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
             "legacy-dexie-id",
             None
+        ));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
+            "legacy-dexie-id",
+            Some("splash")
         ));
     }
 }

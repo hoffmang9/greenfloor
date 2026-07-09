@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use chia_protocol::{Bytes32, SpendBundle};
+use chia_protocol::{Bytes32, Coin, SpendBundle};
 use clvm_utils::TreeHash;
 
 use super::harness::{
@@ -106,6 +106,14 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
                 Err(SignerError::PresplitCoinNotFound)
             }
             Err(err) => Err(err),
+        }
+    }
+
+    async fn fetch_unspent_offer_input_coin(&self, coin_id: Bytes32) -> SignerResult<Coin> {
+        let sim = self.chain.sim.lock().expect("sim lock");
+        match sim.coin_state(coin_id) {
+            Some(state) if state.spent_height.is_none() => Ok(state.coin),
+            _ => Err(SignerError::PresplitCoinNotFound),
         }
     }
 

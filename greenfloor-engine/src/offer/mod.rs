@@ -40,7 +40,7 @@ pub use build_context::{
 };
 #[cfg(test)]
 pub(crate) use cancel_input::classify_cancellable_maker_input;
-pub use cancel_input::OfferReclaimMode;
+pub use cancel_input::{metadata_sufficient_for_coinset_cancel, OfferReclaimMode};
 pub use codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
@@ -51,7 +51,10 @@ pub use publish::{
     expected_publish_asset_fields, post_offer_phase_dexie, ExpectedPublishAssetFields,
     PostOfferPhaseDexieParams, PublishAssetSide,
 };
-pub use reclaim::{build_offer_cancel_spend_bundle, build_vault_cat_reclaim_spend_bundle};
+pub use reclaim::{
+    build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
+    build_vault_cat_reclaim_spend_bundle,
+};
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     signer_split_asset_id, SignerOfferLegAmounts,

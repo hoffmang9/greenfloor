@@ -98,8 +98,8 @@ pub fn test_cycle_context(
             test_controls: DaemonCycleTestControls::default(),
         },
         reconcile: ReconcileMarketCycleResult {
-            offers: Vec::new(),
             dexie_size_by_offer_id: HashMap::default(),
+            dexie_status_by_lookup_key: HashMap::default(),
             dexie_fetch_error: None,
             metrics: ReconcileMarketCycleMetrics::default(),
         },

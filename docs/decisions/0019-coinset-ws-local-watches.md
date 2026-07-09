@@ -27,12 +27,21 @@ never the operator transport.
    freshness. Optional coin-id fields on transaction frames are matched when present.
    WS offer events and watch hits drive lifecycle transitions directly.
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
-   `publish_venue=dexie`, or legacy non-hex ids). Coinset/splash offers skip Dexie
-   HTTP entirely. Dexie list matching uses `trade_id` ∪ bech32 `id`.
-5. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Do not submit
-   spends over WebSocket.
+   `publish_venue=dexie`). Schema migration backfills legacy `NULL` venues from
+   offer-id shape once; authority checks no longer infer from id shape at runtime.
+   Coinset/splash offers skip Dexie HTTP entirely. Dexie list matching uses
+   `trade_id` ∪ bech32 `id`.
+5. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Cancel targets
+   come from local cancel-eligible offer state (Coinset/splash included). Dexie
+   venue offers additionally require Dexie list status open (status index built
+   once in reconcile from `trade_id` ∪ bech32 `id`). Cancel spend construction
+   prefers local offer file or Coinset + stored cancel metadata; Dexie offer-file
+   fetch is optional fallback only. Do not submit spends over WebSocket.
 6. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
-   90s max-staleness and reuse last bucket counts when fresh.
+   90s max-staleness and reuse last bucket counts when fresh. Durable watches are
+   registered atomically at post and backfilled/healed once on schema open
+   (`INSERT OR IGNORE` for missing coin and p2 rows); coin-ops only reads the
+   watch table for do-not-touch.
 
 ## Consequences
 

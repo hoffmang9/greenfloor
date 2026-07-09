@@ -1,10 +1,11 @@
-//! Dexie list helpers used by daemon reconcile (offer size bucketing).
+//! Dexie list helpers used by daemon reconcile (offer size / status indexing).
 
 use std::collections::HashMap;
 
 use serde_json::Value;
 
 use crate::hex::normalize_hex_id;
+use crate::offer::dexie_payload::dexie_offer_status;
 
 /// Lookup keys for matching a Dexie offer payload to local `offer_state.offer_id`.
 ///
@@ -36,6 +37,27 @@ pub fn dexie_offer_lookup_keys(offer_obj: &serde_json::Map<String, Value>) -> Ve
         }
     }
     keys
+}
+
+/// Index Dexie list/augment payloads by every lookup key (`trade_id` ∪ bech32 `id`).
+///
+/// Used by cancel targeting and any path that must resolve local `offer_id` to Dexie
+/// status without re-walking JSON.
+#[must_use]
+pub fn dexie_status_index(offers: &[Value]) -> HashMap<String, i64> {
+    let mut by_key = HashMap::new();
+    for offer in offers {
+        let Some(obj) = offer.as_object() else {
+            continue;
+        };
+        let Some(status) = dexie_offer_status(offer) else {
+            continue;
+        };
+        for key in dexie_offer_lookup_keys(obj) {
+            by_key.insert(key, status);
+        }
+    }
+    by_key
 }
 
 /// Build offered-base size by offer id for strategy / pending-visibility lookups.
@@ -109,5 +131,19 @@ mod tests {
         })];
         let sizes = build_dexie_size_by_offer_id(&offers, "asset1");
         assert_eq!(sizes.get("offer-1").copied(), Some(5));
+    }
+
+    #[test]
+    fn dexie_status_index_keys_trade_id_and_bech32_id() {
+        let trade_id = "ab".repeat(32);
+        let bech32_id = "7hj4tAYZEm9xTTniZiEVsPZ3mAnWvdposXizL3kDcjvo";
+        let offers = vec![json!({
+            "id": bech32_id,
+            "trade_id": format!("0x{trade_id}"),
+            "status": 0,
+        })];
+        let index = dexie_status_index(&offers);
+        assert_eq!(index.get(&trade_id).copied(), Some(0));
+        assert_eq!(index.get(bech32_id).copied(), Some(0));
     }
 }

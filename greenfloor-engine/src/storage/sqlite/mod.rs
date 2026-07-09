@@ -100,6 +100,8 @@ pub struct OfferStateListRow {
     pub updated_at: String,
     pub cancel_submitted_tx_id: Option<String>,
     pub cancel_submitted_at: Option<String>,
+    /// Publish venue at post time (`coinset` / `dexie` / `splash`); `None` for legacy rows.
+    pub publish_venue: Option<String>,
 }
 
 #[derive(Debug, Clone)]
