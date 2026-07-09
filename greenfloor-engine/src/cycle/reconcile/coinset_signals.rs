@@ -14,6 +14,8 @@ pub struct CoinsetTxSignals {
     pub mempool_tx_ids: Vec<String>,
     /// Maker coin/p2 watch hit without a concrete spend-bundle id yet.
     pub watch_hit: bool,
+    /// Offer-frame `pending` without a concrete tx id (venue mempool, not a maker watch).
+    pub anonymous_mempool: bool,
 }
 
 impl CoinsetTxSignals {
@@ -26,12 +28,23 @@ impl CoinsetTxSignals {
         }
     }
 
+    /// Offer WS `pending` with no `tx_id` — mempool activity without fabricating a spend-bundle id.
+    #[must_use]
+    pub fn offer_pending() -> Self {
+        Self {
+            anonymous_mempool: true,
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub fn summary(&self) -> CoinsetSignalSummary {
         CoinsetSignalSummary {
             has_tx_ids: !self.tx_ids.is_empty(),
             has_confirmed: !self.confirmed_tx_ids.is_empty(),
-            has_mempool: !self.mempool_tx_ids.is_empty() || self.watch_hit,
+            has_mempool: !self.mempool_tx_ids.is_empty()
+                || self.watch_hit
+                || self.anonymous_mempool,
             watch_hit: self.watch_hit,
         }
     }
@@ -86,15 +99,21 @@ pub fn signals_from_ws_offer_status(
 ) -> Option<(Option<i64>, CoinsetTxSignals)> {
     let tx = tx_id.map(str::to_string).into_iter().collect::<Vec<_>>();
     match status {
-        "pending" => Some((
-            None,
-            CoinsetTxSignals {
-                tx_ids: tx.clone(),
-                confirmed_tx_ids: Vec::new(),
-                mempool_tx_ids: tx,
-                ..Default::default()
-            },
-        )),
+        // Coinset documents `tx_id` as optional on offer frames. Pending without a
+        // concrete tx is still venue mempool activity — not a maker coin/p2 watch hit.
+        "pending" => {
+            let signals = if tx.is_empty() {
+                CoinsetTxSignals::offer_pending()
+            } else {
+                CoinsetTxSignals {
+                    tx_ids: tx.clone(),
+                    confirmed_tx_ids: Vec::new(),
+                    mempool_tx_ids: tx,
+                    ..Default::default()
+                }
+            };
+            Some((None, signals))
+        }
         "confirmed" => Some((
             Some(DEXIE_STATUS_CONFIRMED),
             CoinsetTxSignals {
@@ -121,6 +140,15 @@ mod tests {
         assert_eq!(pending.0, None);
         assert_eq!(pending.1.mempool_tx_ids, vec![tx.clone()]);
         assert!(pending.1.summary().has_mempool);
+        assert!(!pending.1.summary().watch_hit);
+
+        let pending_no_tx = signals_from_ws_offer_status("pending", None).expect("pending");
+        assert_eq!(pending_no_tx.0, None);
+        assert!(pending_no_tx.1.mempool_tx_ids.is_empty());
+        assert!(pending_no_tx.1.anonymous_mempool);
+        assert!(pending_no_tx.1.summary().has_mempool);
+        assert!(!pending_no_tx.1.summary().watch_hit);
+        assert!(!pending_no_tx.1.summary().is_pure_watch_hit());
 
         let confirmed = signals_from_ws_offer_status("confirmed", Some(&tx)).expect("confirmed");
         assert_eq!(confirmed.0, Some(DEXIE_STATUS_CONFIRMED));
@@ -159,6 +187,21 @@ mod tests {
         assert!(summary.has_coinset_activity());
         assert!(signals.tx_ids.is_empty());
         assert!(signals.mempool_tx_ids.is_empty());
+        assert!(!signals.anonymous_mempool);
         assert!(!CoinsetTxSignals::default().summary().has_mempool);
+    }
+
+    #[test]
+    fn offer_pending_is_mempool_without_watch_hit() {
+        let signals = CoinsetTxSignals::offer_pending();
+        let summary = signals.summary();
+        assert!(!summary.has_tx_ids);
+        assert!(summary.has_mempool);
+        assert!(!summary.has_confirmed);
+        assert!(!summary.watch_hit);
+        assert!(!summary.is_pure_watch_hit());
+        assert!(summary.has_coinset_activity());
+        assert!(signals.anonymous_mempool);
+        assert!(signals.mempool_tx_ids.is_empty());
     }
 }

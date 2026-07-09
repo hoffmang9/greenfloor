@@ -37,6 +37,53 @@ fn offer_pending_moves_open_to_mempool_observed() {
 }
 
 #[test]
+fn offer_pending_without_tx_id_still_moves_open_to_mempool_observed() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    store
+        .upsert_offer_state(&offer_id, "m1", "open", None)
+        .expect("upsert");
+    apply_ws_offer_event(
+        &store,
+        &WsOfferEvent {
+            offer_id: offer_id.clone(),
+            status: "pending".to_string(),
+            tx_id: None,
+            p2s: Vec::new(),
+        },
+    )
+    .expect("apply");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(rows[0].state, "mempool_observed");
+}
+
+#[test]
+fn offer_pending_without_tx_id_moves_cancel_submitted_to_mempool_observed() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    let cancel_tx = "cd".repeat(32);
+    store
+        .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+        .expect("cancel_submitted");
+    apply_ws_offer_event(
+        &store,
+        &WsOfferEvent {
+            offer_id: offer_id.clone(),
+            status: "pending".to_string(),
+            tx_id: None,
+            p2s: Vec::new(),
+        },
+    )
+    .expect("apply");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(rows[0].state, "mempool_observed");
+}
+
+#[test]
 fn offer_confirmed_moves_to_tx_block_confirmed() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);
