@@ -39,6 +39,16 @@ pub fn dexie_offer_lookup_keys(offer_obj: &serde_json::Map<String, Value>) -> Ve
     keys
 }
 
+/// True when any Dexie lookup key on `offer` equals `local_offer_id`.
+#[must_use]
+pub fn offer_matches_local_id(offer: &Value, local_offer_id: &str) -> bool {
+    offer.as_object().is_some_and(|obj| {
+        dexie_offer_lookup_keys(obj)
+            .iter()
+            .any(|key| key == local_offer_id)
+    })
+}
+
 /// Index Dexie list/augment payloads by every lookup key (`trade_id` ∪ bech32 `id`).
 ///
 /// Used by cancel targeting and any path that must resolve local `offer_id` to Dexie

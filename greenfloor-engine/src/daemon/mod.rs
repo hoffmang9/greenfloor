@@ -30,6 +30,7 @@ mod preamble;
 mod program_runtime;
 mod reconcile_augment;
 mod reconcile_market_cycle;
+mod reconcile_transition;
 mod reload;
 mod run_once;
 mod stale_sweep;
@@ -37,7 +38,7 @@ mod strategy_phase;
 mod strategy_support;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod watch_heal;
+mod watch_plan;
 #[cfg(test)]
 pub use coin_ops_phase::harness::CoinOpsPhaseHarness;
 pub mod watchlist;

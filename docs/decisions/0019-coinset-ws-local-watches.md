@@ -27,18 +27,23 @@ never the operator transport.
    freshness. Optional coin-id fields on transaction frames are matched when present.
    WS offer events and watch hits drive lifecycle transitions directly.
    Cancel submit prepares `cancel_submitted` before broadcast (watches kept), then
-   finalizes by clearing watches after successful `push_tx`. Pure watch hits while
-   `cancel_submitted` are ignored by cancel policy. Watch backfill skips
-   `cancel_submitted` rows. Venue backfill never labels 64-hex ids as `coinset`
+   observes the cancel tx after successful `push_tx` (watches kept until terminal
+   persist). Pure watch hits while `cancel_submitted` are ignored by cancel
+   policy, so cancel-spend reuse of maker keys cannot look like taker activity.
+   Watch backfill skips `cancel_submitted` rows. Venue backfill never labels
+   64-hex ids as `coinset`
    (Dexie `trade_id` shares that shape) and never mass-clears explicit
    `publish_venue=coinset`; it only sets `dexie` for unambiguous non-64-hex
    legacy NULL ids (via `schema_meta` `watch_venue_backfill_v2`). Missing watches
-   for Dexie-listed open offers are healed each reconcile cycle
-   (`heal_missing_watches_from_dexie_offers`).
+   are healed each reconcile via a single `MarketWatchPlan` scan: cancel metadata
+   first (all venues), then Dexie payloads for heal-only NULL/`dexie` gaps
+   (`fetch_and_ensure_watches`; no Dexie lifecycle). Dexie lifecycle remains
+   `publish_venue=dexie` only.
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
    `publish_venue=dexie`). Authority checks use persisted venue only (no id-shape
-   heuristics at runtime). Coinset/splash / NULL venues skip Dexie HTTP entirely.
-   Dexie list matching uses `trade_id` ∪ bech32 `id`.
+   heuristics at runtime). Coinset/splash / NULL venues skip Dexie lifecycle
+   transitions. Dexie list matching uses `trade_id` ∪ bech32 `id`. Size/status
+   indexes are built from authoritative payloads only.
 5. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Cancel targets
    come from local cancel-eligible offer state (Coinset/splash included). Dexie
    venue offers additionally require Dexie list status open (status index built
@@ -51,8 +56,9 @@ never the operator transport.
 6. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
    90s max-staleness and reuse last bucket counts when fresh. Durable watches are
    registered atomically at post, backfilled once on schema open via
-   `schema_meta` (`watch_venue_backfill_v2`), and healed from Dexie at reconcile
-   when missing. Coin-ops reads watched coin ids from the watch table only.
+   `schema_meta` (`watch_venue_backfill_v2`), and healed each reconcile via
+   `classify_and_heal_local` + heal-only Dexie fetch. Coin-ops reads watched
+   coin ids from the watch table only.
 
 ## Consequences
 

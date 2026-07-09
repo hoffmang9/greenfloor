@@ -1,6 +1,6 @@
 //! Per-market daemon-cycle reconcile: Dexie list fetch and lifecycle transitions.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use chrono::Utc;
 use serde_json::json;
@@ -8,27 +8,20 @@ use tracing::Level;
 
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
-use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::{
-    build_dexie_size_by_offer_id, dexie_offer_lookup_keys, dexie_status_index,
-};
+use super::dexie_size::{build_dexie_size_by_offer_id, dexie_status_index};
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::watch_heal::heal_missing_watches_from_dexie_offers;
+use super::reconcile_transition::{apply_reconcile_transition, ReconcileTransitionParams};
+use super::watch_plan::{classify_and_heal_local, fetch_and_ensure_watches};
 use crate::offer::lifecycle::{
-    persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
-    transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
+    preload_cancel_submitted_contexts, transition_from_list_offer_payload,
+    WatchedOfferTransitionEnv,
 };
 
-#[derive(Debug, Clone, Default)]
-pub struct ReconcileMarketCycleMetrics {
-    pub cycle_errors: u64,
-    pub immediate_requeue_requested: bool,
-    pub immediate_requeue_signals: Vec<String>,
-}
+pub use super::reconcile_transition::ReconcileMarketCycleMetrics;
 
 #[derive(Debug, Clone)]
 pub struct ReconcileMarketCycleResult {
@@ -40,61 +33,6 @@ pub struct ReconcileMarketCycleResult {
     pub metrics: ReconcileMarketCycleMetrics,
 }
 
-pub(crate) struct ReconcileTransitionParams<'a> {
-    pub store: &'a SqliteStore,
-    pub market_id: &'a str,
-    pub offer_id: &'a str,
-    pub transition: &'a CycleOfferTransition,
-    pub metrics: &'a mut ReconcileMarketCycleMetrics,
-    pub state_by_offer_id: &'a mut HashMap<String, String>,
-    pub last_seen_status: Option<i64>,
-    pub dexie_error: Option<&'a str>,
-}
-
-pub(crate) fn apply_reconcile_transition(
-    params: ReconcileTransitionParams<'_>,
-) -> SignerResult<()> {
-    let ReconcileTransitionParams {
-        store,
-        market_id,
-        offer_id,
-        transition,
-        metrics,
-        state_by_offer_id,
-        last_seen_status,
-        dexie_error,
-    } = params;
-    if transition.changed || last_seen_status.is_some() {
-        persist_offer_lifecycle_transition(
-            store,
-            market_id,
-            offer_id,
-            transition,
-            last_seen_status,
-            &ReconcilePersistOptions {
-                action: "reconcile_coins_and_offers",
-                venue: Some("dexie"),
-                dexie_error,
-            },
-        )?;
-    }
-    if transition.changed {
-        state_by_offer_id.insert(
-            offer_id.to_string(),
-            transition.new_state.as_str().into_owned(),
-        );
-    }
-    if transition.immediate_requeue {
-        metrics.immediate_requeue_requested = true;
-        if let Some(signal) = transition.signal {
-            metrics
-                .immediate_requeue_signals
-                .push(signal.as_str().to_string());
-        }
-    }
-    Ok(())
-}
-
 pub async fn run_reconcile_market_cycle(
     store: &SqliteStore,
     dexie: &DexieClient,
@@ -104,13 +42,9 @@ pub async fn run_reconcile_market_cycle(
     let market_id = market.market_id.as_str();
     let mut metrics = ReconcileMarketCycleMetrics::default();
 
-    // Coinset/splash offers are lifecycle-driven by WS + local watches. Dexie HTTP
-    // reconcile is only for Dexie-authoritative watched offers.
-    let dexie_offer_ids: HashSet<String> = store
-        .list_dexie_authoritative_watched_offer_ids(market_id)?
-        .into_iter()
-        .collect();
-    if dexie_offer_ids.is_empty() {
+    // One scan: local cancel-metadata heal + classify Dexie roles.
+    let plan = classify_and_heal_local(store, market_id)?;
+    if !plan.needs_dexie_http() {
         return Ok(ReconcileMarketCycleResult {
             dexie_size_by_offer_id: HashMap::default(),
             dexie_status_by_lookup_key: HashMap::default(),
@@ -121,7 +55,7 @@ pub async fn run_reconcile_market_cycle(
 
     let dexie_offered_asset = resolve_trade_asset_for_network(&market.base_asset, network);
     let dexie_requested_asset = resolve_quote_asset_for_offer(&market.quote_asset, network);
-    let offers = match dexie
+    let list_offers = match dexie
         .get_offers(&dexie_offered_asset, &dexie_requested_asset)
         .await
     {
@@ -145,6 +79,26 @@ pub async fn run_reconcile_market_cycle(
         }
     };
 
+    // Heal-only: Dexie payloads → watches. No lifecycle.
+    fetch_and_ensure_watches(
+        dexie,
+        store,
+        market_id,
+        &plan.heal_only,
+        &list_offers,
+        &mut metrics,
+    )
+    .await?;
+
+    if plan.authoritative.is_empty() {
+        return Ok(ReconcileMarketCycleResult {
+            dexie_size_by_offer_id: HashMap::default(),
+            dexie_status_by_lookup_key: HashMap::default(),
+            dexie_fetch_error: None,
+            metrics,
+        });
+    }
+
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()
@@ -155,36 +109,36 @@ pub async fn run_reconcile_market_cycle(
         dexie,
         store,
         market_id,
-        &offers,
-        &dexie_offer_ids,
+        &list_offers,
+        &plan.authoritative,
         &mut state_by_offer_id,
         &mut metrics,
     )
     .await?;
-    // Heal durable watches from Dexie payloads so coin-ops never scrapes JSON.
-    heal_missing_watches_from_dexie_offers(store, market_id, &dexie_offer_ids, &augmented.offers)?;
-    apply_dexie_list_transitions(
+    apply_dexie_lifecycle_transitions(
         store,
         market_id,
-        &dexie_offer_ids,
-        &augmented.offers,
+        &augmented.by_local_id,
         &mut state_by_offer_id,
         &mut metrics,
     )?;
+    let authoritative_offers: Vec<_> = augmented.by_local_id.into_values().collect();
 
     Ok(ReconcileMarketCycleResult {
-        dexie_size_by_offer_id: build_dexie_size_by_offer_id(&augmented.offers, &market.base_asset),
-        dexie_status_by_lookup_key: dexie_status_index(&augmented.offers),
+        dexie_size_by_offer_id: build_dexie_size_by_offer_id(
+            &authoritative_offers,
+            &market.base_asset,
+        ),
+        dexie_status_by_lookup_key: dexie_status_index(&authoritative_offers),
         dexie_fetch_error: None,
         metrics,
     })
 }
 
-fn apply_dexie_list_transitions(
+fn apply_dexie_lifecycle_transitions(
     store: &SqliteStore,
     market_id: &str,
-    dexie_offer_ids: &HashSet<String>,
-    offers: &[serde_json::Value],
+    by_local_id: &HashMap<String, serde_json::Value>,
     state_by_offer_id: &mut HashMap<String, String>,
     metrics: &mut ReconcileMarketCycleMetrics,
 ) -> SignerResult<()> {
@@ -192,27 +146,16 @@ fn apply_dexie_list_transitions(
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(store, &offer_rows)?;
     let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
 
-    for raw in offers {
-        let Some(offer_obj) = raw.as_object() else {
-            continue;
-        };
-        let lookup_keys = dexie_offer_lookup_keys(offer_obj);
-        let Some(local_offer_id) = lookup_keys
-            .iter()
-            .find(|key| dexie_offer_ids.contains(key.as_str()))
-            .cloned()
-        else {
-            continue;
-        };
+    for (local_offer_id, raw) in by_local_id {
         let current_state = state_by_offer_id
-            .get(&local_offer_id)
+            .get(local_offer_id)
             .map_or("open", String::as_str);
         let (transition, status) =
-            transition_from_list_offer_payload(store, &local_offer_id, current_state, raw, env)?;
+            transition_from_list_offer_payload(store, local_offer_id, current_state, raw, env)?;
         apply_reconcile_transition(ReconcileTransitionParams {
             store,
             market_id,
-            offer_id: &local_offer_id,
+            offer_id: local_offer_id,
             transition: &transition,
             metrics,
             state_by_offer_id,
@@ -356,6 +299,61 @@ mod tests {
             .find(|entry| entry.offer_id == offer_id)
             .expect("offer row");
         assert_eq!(row.state, "open");
+        assert!(!result.metrics.immediate_requeue_requested);
+    }
+
+    #[tokio::test]
+    async fn reconcile_null_venue_heals_watches_from_dexie_without_lifecycle() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        // Legacy NULL venue, no cancel metadata, no watches.
+        store
+            .upsert_offer_state_with_metadata_at(
+                &offer_id,
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: None,
+                    ..Default::default()
+                },
+            )
+            .expect("seed");
+        assert!(!store.offer_has_coin_watches(&offer_id).expect("none"));
+
+        let mut server = mockito::Server::new_async().await;
+        let body = format!(
+            r#"{{"success":true,"offers":[{{"id":"{offer_id}","trade_id":"0x{offer_id}","status":0,"coins":[{{"coin_id":"0x{coin}"}}],"offered":[{{"asset_id":"asset1","amount":50000}}],"requested":[{{"asset_id":"xch","amount":1000}}]}}]}}"#
+        );
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(body)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let result =
+            run_reconcile_market_cycle(&store, &dexie, &sample_market("asset1", "xch"), "mainnet")
+                .await
+                .expect("reconcile");
+
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == offer_id)
+            .expect("offer row");
+        // Heal-only: watches seeded, lifecycle stays open (not Dexie-authoritative).
+        assert_eq!(row.state, "open");
+        assert!(store.offer_has_coin_watches(&offer_id).expect("healed"));
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("coins")
+            .contains(&coin));
+        assert!(result.dexie_size_by_offer_id.is_empty());
+        assert!(result.dexie_status_by_lookup_key.is_empty());
         assert!(!result.metrics.immediate_requeue_requested);
     }
 

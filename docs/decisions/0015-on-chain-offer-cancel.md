@@ -53,14 +53,17 @@ offer-file fetch.
    Tracked cancel submit is prepare → broadcast → finalize:
    - **Prepare** (before `push_tx`): `state = cancel_submitted`, `cancel_submitted_tx_id`
      (spend-bundle hash), `cancel_submitted_at`. Watches stay registered.
-   - **Finalize** (after successful `push_tx`): clear `offer_coin_watches`, observe cancel
-     tx in `tx_signal_state`.
+   - **Finalize** (after successful `push_tx`): observe cancel tx in `tx_signal_state`
+     via mempool ingress. Watches stay registered so stale unwedge
+     (`cancel_submitted` → `open`) keeps coin-ops protection if the cancel never
+     confirms.
    - **Rollback** (broadcast failure): restore prior lifecycle state only (watches were
      never cleared; cancel tx was never observed).
 
    Reconcile promotes to `cancelled` when Dexie status is `3`, cancel tx chain-confirms, or
-   other canonical reconcile signals apply. Watch hits while `cancel_submitted` are ignored
-   so the cancel spend cannot look like taker mempool activity during the prepare window.
+   other canonical reconcile signals apply. Terminal persist clears watches. Watch hits
+   while `cancel_submitted` are ignored so the cancel spend cannot look like taker
+   mempool activity.
 
 6. **`cancel_submitted` reconcile and defer policy.**
    - Pure policy: `cycle/reconcile/cancel_submitted_policy/` (`CancelSubmittedContext`,
@@ -99,10 +102,9 @@ offer-file fetch.
      preserves `cancel_submitted` (`REASON_CANCEL_SUBMIT_CONTEXT_MISSING`) rather than
      applying stale-unwedge with empty defaults.
    - **Persist before broadcast.** Tracked cancels **prepare** `cancel_submitted` (state +
-     cancel tx id) before `push_tx`, keeping watches. On success, **finalize** clears
-     watches and observes the cancel tx. On broadcast failure, roll state back only
-     (no orphan tx signals, no watch restore). Persist failure before broadcast never
-     submits.
+     cancel tx id) before `push_tx`, keeping watches. On success, observe the cancel
+     tx (watches kept until terminal). On broadcast failure, roll state back only
+     (no orphan tx signals). Persist failure before broadcast never submits.
 
 7. **CLI and audit naming reflects submit semantics.**
    - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item

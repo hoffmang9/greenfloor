@@ -8,7 +8,7 @@ use crate::offer::reclaim::{
     build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
 };
 use crate::offer::types::StoredOfferCancelMetadata;
-use crate::storage::SqliteStore;
+use crate::storage::{SqliteStore, TxSignalIngress};
 use crate::vault::session::resolve_vault_spend_context;
 use chia_protocol::SpendBundle;
 
@@ -73,7 +73,7 @@ pub struct CancelOfferOutcome {
     pub operation_id: String,
     /// Hard failure (build/broadcast/rollback). Empty on success.
     pub error: String,
-    /// Soft failure after successful broadcast (e.g. finalize observe/clear).
+    /// Soft failure after successful broadcast (e.g. observe cancel tx failed).
     pub warning: String,
 }
 
@@ -220,8 +220,11 @@ async fn broadcast_and_settle_tracked_cancel(
 ) -> CancelOfferOutcome {
     match coinset::broadcast_spend_bundle(coinset_client, spend_bundle).await {
         Ok(result) => {
-            match store.finalize_offer_cancel_submitted(target.offer_id(), &result.operation_id) {
-                Ok(()) => outcome(
+            match store.ingest_tx_signals(
+                std::slice::from_ref(&result.operation_id),
+                TxSignalIngress::Mempool,
+            ) {
+                Ok(_) => outcome(
                     target,
                     market_id.to_string(),
                     true,
@@ -232,9 +235,7 @@ async fn broadcast_and_settle_tracked_cancel(
                     target,
                     market_id.to_string(),
                     result.operation_id,
-                    format!(
-                        "cancel broadcast succeeded; finalize (observe tx / clear watches) failed: {err}"
-                    ),
+                    format!("cancel broadcast succeeded; observe cancel tx failed: {err}"),
                 ),
             }
         }
@@ -391,7 +392,7 @@ async fn cancel_one_offer(
 /// Cancel offers on-chain (spend an offered input coin back to vault change).
 ///
 /// Tracked cancels: prepare `cancel_submitted` (state + tx id, watches kept) →
-/// `push_tx` → finalize (clear watches + observe cancel tx) on success, or roll
+/// `push_tx` → observe cancel tx (watches kept until terminal) on success, or roll
 /// state back on broadcast failure.
 ///
 /// # Errors
@@ -463,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_keeps_watches_finalize_clears_them() {
+    fn prepare_keeps_watches_and_observe_does_not_clear() {
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let offer_id = "ab".repeat(32);
@@ -490,12 +491,14 @@ mod tests {
         assert_eq!(coins, vec![coin.clone()]);
         assert_eq!(p2s, vec![p2]);
         store
-            .finalize_offer_cancel_submitted(&offer_id, &cancel_tx)
-            .expect("finalize");
-        assert!(store
-            .list_offer_ids_for_watched_coin(&coin)
-            .expect("cleared")
-            .is_empty());
+            .ingest_tx_signals(std::slice::from_ref(&cancel_tx), TxSignalIngress::Mempool)
+            .expect("observe");
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&coin)
+                .expect("watches kept after observe"),
+            vec![offer_id.clone()]
+        );
         let signals = store
             .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
             .expect("tx");

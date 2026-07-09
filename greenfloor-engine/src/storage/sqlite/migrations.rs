@@ -418,3 +418,124 @@ fn normalize_offer_cancel_submitted_tx_ids(conn: &Connection) -> SignerResult<()
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+    use crate::storage::sqlite::{OfferCancelWrite, SqliteStore};
+
+    use super::super::utcnow_iso;
+
+    #[test]
+    fn migration_heals_partial_coin_watch_with_missing_p2() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let meta_p2 = "ef".repeat(32);
+        {
+            let store = SqliteStore::open(&db_path).expect("open");
+            let fields = PresplitCancelFields {
+                input_coin_id: Some(coin.clone()),
+                fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
+            };
+            store
+                .upsert_offer_state_with_metadata_at(
+                    &offer_id,
+                    "m1",
+                    "open",
+                    None,
+                    &utcnow_iso(),
+                    OfferCancelWrite {
+                        fields: Some(&fields),
+                        execution_mode: Some(OfferExecutionMode::PresplitExisting),
+                        publish_venue: Some("coinset"),
+                        ..OfferCancelWrite::default()
+                    },
+                )
+                .expect("upsert metadata");
+            // Coin-only watch (pre-upgrade partial row).
+            store
+                .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+                .expect("coin watch");
+            assert!(store
+                .list_offer_ids_for_watched_coin(&meta_p2)
+                .expect("no p2 yet")
+                .is_empty());
+            // Clear one-shot flag so reopen re-runs watch/venue backfill.
+            store
+                .conn
+                .execute(
+                    "DELETE FROM schema_meta WHERE key IN ('watch_venue_backfill_v1', 'watch_venue_backfill_v2')",
+                    [],
+                )
+                .expect("clear schema_meta");
+        }
+        // Re-open re-runs one-shot backfill; INSERT OR IGNORE heals missing p2.
+        let store = SqliteStore::open(&db_path).expect("reopen");
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&meta_p2)
+                .expect("healed p2"),
+            vec![offer_id.clone()]
+        );
+        assert_eq!(
+            store.list_offer_ids_for_watched_coin(&coin).expect("coin"),
+            vec![offer_id]
+        );
+    }
+
+    #[test]
+    fn migration_seeds_watches_from_cancel_metadata_when_absent() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let meta_p2 = "ef".repeat(32);
+        {
+            let store = SqliteStore::open(&db_path).expect("open");
+            let fields = PresplitCancelFields {
+                input_coin_id: Some(coin.clone()),
+                fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
+            };
+            store
+                .upsert_offer_state_with_metadata_at(
+                    &offer_id,
+                    "m1",
+                    "open",
+                    None,
+                    &utcnow_iso(),
+                    OfferCancelWrite {
+                        fields: Some(&fields),
+                        execution_mode: Some(OfferExecutionMode::PresplitExisting),
+                        publish_venue: Some("coinset"),
+                        ..OfferCancelWrite::default()
+                    },
+                )
+                .expect("upsert metadata");
+            assert!(store
+                .list_watched_coin_ids_for_market("m1")
+                .expect("empty")
+                .is_empty());
+            store
+                .conn
+                .execute(
+                    "DELETE FROM schema_meta WHERE key IN ('watch_venue_backfill_v1', 'watch_venue_backfill_v2')",
+                    [],
+                )
+                .expect("clear schema_meta");
+        }
+        let store = SqliteStore::open(&db_path).expect("reopen");
+        let watched = store.list_watched_coin_ids_for_market("m1").expect("coins");
+        assert!(watched.contains(&coin));
+        assert!(!watched.contains(&meta_p2));
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&meta_p2)
+                .expect("meta p2"),
+            vec![offer_id]
+        );
+    }
+}

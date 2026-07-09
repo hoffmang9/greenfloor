@@ -188,36 +188,6 @@ impl SqliteStore {
         ))
     }
 
-    /// Watched lifecycle offer ids for one market that are Dexie-authoritative.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `SQLite` reads fail.
-    pub fn list_dexie_authoritative_watched_offer_ids(
-        &self,
-        market_id: &str,
-    ) -> SignerResult<Vec<String>> {
-        let clean_market = market_id.trim();
-        if clean_market.is_empty() {
-            return Ok(Vec::new());
-        }
-        let rows = self.list_offer_states(Some(clean_market), 5000)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let Ok(state) = crate::cycle::ReconcileState::parse(&row.state) else {
-                continue;
-            };
-            if !state.is_watched_for_reconcile() {
-                continue;
-            }
-            if Self::is_dexie_authoritative_for_offer(&row.offer_id, row.publish_venue.as_deref()) {
-                out.push(row.offer_id);
-            }
-        }
-        out.sort();
-        Ok(out)
-    }
-
     /// Load cancel metadata persisted at offer post time.
     ///
     /// Returns `None` when the offer id is absent from `offer_state`.
@@ -269,9 +239,10 @@ impl SqliteStore {
         }))
     }
 
-    /// Persist `cancel_submitted` and the cancel tx id **without** clearing watches or
-    /// observing the cancel tx. Call [`Self::finalize_offer_cancel_submitted`] after a
-    /// successful broadcast.
+    /// Persist `cancel_submitted` and the cancel tx id **without** observing the cancel
+    /// tx. Watches stay registered so stale unwedge back to `open` keeps coin-ops
+    /// protection; terminal persist clears them. After successful broadcast, observe the
+    /// cancel tx via [`crate::storage::TxSignalIngress::Mempool`].
     ///
     /// # Errors
     ///
@@ -319,34 +290,8 @@ impl SqliteStore {
         })
     }
 
-    /// After successful cancel broadcast: observe the cancel tx, then clear maker watches.
-    ///
-    /// Observe runs first so a clear failure still leaves cancel-tx confirmation workable.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the operation fails.
-    pub fn finalize_offer_cancel_submitted(
-        &self,
-        offer_id: &str,
-        cancel_tx_id: &str,
-    ) -> SignerResult<()> {
-        let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id)
-            .ok_or_else(|| SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}")))?;
-        self.immediate_transaction("cancel_submitted_finalize", |store| {
-            store.ingest_tx_signals(
-                std::slice::from_ref(&stored_cancel_tx_id),
-                crate::storage::TxSignalIngress::Mempool,
-            )?;
-            // Cancel spend reuses maker coin/p2 keys; drop watches so WS hits cannot
-            // look like taker mempool activity while cancel_submitted is in flight.
-            store.clear_offer_coin_watches(offer_id)?;
-            Ok(())
-        })
-    }
-
     /// Roll back a prepared (pre-broadcast) cancel submit to `prior_state`.
-    /// Watches are left intact because prepare never clears them.
+    /// Watches are left intact (prepare never clears them).
     ///
     /// # Errors
     ///
@@ -360,7 +305,7 @@ impl SqliteStore {
         self.upsert_offer_state(offer_id, market_id, prior_state, None)
     }
 
-    /// Persist committed `cancel_submitted` (prepare + finalize) for tests and heal paths.
+    /// Persist committed `cancel_submitted` (prepare + observe cancel tx) for tests.
     ///
     /// # Errors
     ///
@@ -373,7 +318,13 @@ impl SqliteStore {
         last_seen_status: Option<i64>,
     ) -> SignerResult<()> {
         self.prepare_offer_cancel_submitted(offer_id, market_id, cancel_tx_id, last_seen_status)?;
-        self.finalize_offer_cancel_submitted(offer_id, cancel_tx_id)
+        let stored_cancel_tx_id = canonical_tx_id(cancel_tx_id)
+            .ok_or_else(|| SignerError::Other(format!("invalid cancel tx id: {cancel_tx_id}")))?;
+        self.ingest_tx_signals(
+            std::slice::from_ref(&stored_cancel_tx_id),
+            crate::storage::TxSignalIngress::Mempool,
+        )?;
+        Ok(())
     }
 }
 

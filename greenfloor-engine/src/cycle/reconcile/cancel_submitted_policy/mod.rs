@@ -109,8 +109,8 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    // Prepare→finalize may leave watches registered; a pure watch hit must not look
-    // like taker mempool activity while cancel_submitted is in flight.
+    // Watches stay registered through prepare/finalize; a pure watch hit must not
+    // look like taker mempool activity while cancel_submitted is in flight.
     if summary.is_pure_watch_hit() {
         return preserve_state(&current, REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED);
     }

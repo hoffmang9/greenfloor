@@ -134,7 +134,7 @@ async fn execute_coin_ops_plans(
     planning: &CoinOpsPlanningResult,
 ) -> SignerResult<CoinOpExecutionResult> {
     let operator_network = ctx.resources.network.as_str();
-    // Durable watches only (healed from Dexie at reconcile when missing).
+    // Durable watches only (healed from cancel metadata + Dexie at reconcile).
     let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {
