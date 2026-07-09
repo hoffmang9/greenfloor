@@ -54,11 +54,13 @@ pub fn execute_managed_coin_op_plans<'a>(
     gated: GatedOperatorMarket,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
+    watched_p2s: &'a HashSet<String>,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
         gated,
         plans,
         watched_coin_ids,
+        watched_p2s,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     ))
@@ -71,12 +73,14 @@ pub fn execute_managed_coin_op_plans_with_test_overrides<'a>(
     gated: GatedOperatorMarket,
     plans: &'a [CoinOpPlan],
     watched_coin_ids: &'a HashSet<String>,
+    watched_p2s: &'a HashSet<String>,
     test_overrides: CoinOpTestOverrides,
 ) -> ManagedCoinOpPlansFuture<'a> {
     Box::pin(execute_managed_coin_op_plans_async(
         gated,
         plans,
         watched_coin_ids,
+        watched_p2s,
         test_overrides,
     ))
 }
@@ -85,6 +89,7 @@ async fn execute_managed_coin_op_plans_async(
     gated: GatedOperatorMarket,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
+    watched_p2s: &HashSet<String>,
     #[cfg(test)] test_overrides: CoinOpTestOverrides,
 ) -> CoinOpExecutionResult {
     if gated.market_row.receive_address.trim().is_empty() {
@@ -105,6 +110,7 @@ async fn execute_managed_coin_op_plans_async(
         gated,
         None,
         watched_coin_ids.iter().cloned().collect(),
+        watched_p2s.iter().cloned().collect(),
         #[cfg(test)]
         test_overrides,
     )

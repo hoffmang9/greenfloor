@@ -79,9 +79,8 @@ fn combine_context() -> BootstrapCombineContext {
 
 fn spendable_mojos(rows: &[(String, i64)]) -> Vec<SpendableCoin> {
     rows.iter()
-        .map(|(id, amount)| SpendableCoin {
-            id: id.clone(),
-            amount: amount.saturating_mul(ECO181_MOJO_MULTIPLIER),
+        .map(|(id, amount)| {
+            SpendableCoin::new(id.clone(), amount.saturating_mul(ECO181_MOJO_MULTIPLIER))
         })
         .collect()
 }

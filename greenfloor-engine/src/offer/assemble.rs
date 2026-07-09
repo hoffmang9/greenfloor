@@ -100,6 +100,7 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
     let cancel_fields = Some(PresplitCancelFields::from_presplit_build(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
+        hex::encode(presplit_cat.coin.puzzle_hash),
     ));
     let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
     let (offer, spend_bundle_hex, offer_nonce_hex) =
@@ -157,6 +158,7 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
     let cancel_fields = Some(PresplitCancelFields::from_presplit_build(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
+        hex::encode(presplit_cat.coin.puzzle_hash),
     ));
     let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
     let (offer, spend_bundle_hex, offer_nonce_hex) =

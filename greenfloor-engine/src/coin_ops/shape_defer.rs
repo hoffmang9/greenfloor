@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn spendable_amounts_in_base_units_divides_by_multiplier() {
-        let spendable = vec![SpendableCoin {
-            id: "a".to_string(),
-            amount: 65_000,
-        }];
+        let spendable = vec![SpendableCoin::new("a".to_string(), 65_000)];
         assert_eq!(spendable_amounts_in_base_units(&spendable, 1_000), vec![65]);
     }
 
@@ -118,14 +115,8 @@ mod tests {
             reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
         };
         let spendable = vec![
-            SpendableCoin {
-                id: "a".to_string(),
-                amount: 65_000,
-            },
-            SpendableCoin {
-                id: "b".to_string(),
-                amount: 35_000,
-            },
+            SpendableCoin::new("a".to_string(), 65_000),
+            SpendableCoin::new("b".to_string(), 35_000),
         ];
         assert!(defer_low_watermark_split_from_spendable(
             &plan, &spendable, 1_000

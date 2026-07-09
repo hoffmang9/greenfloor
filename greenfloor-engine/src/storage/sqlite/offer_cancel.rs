@@ -18,16 +18,17 @@ pub struct OfferCancelWrite<'a> {
 
 pub(crate) fn cancel_metadata_params(
     cancel: OfferCancelWrite<'_>,
-) -> (Option<&str>, Option<&str>, Option<String>) {
+) -> (Option<&str>, Option<&str>, Option<&str>, Option<String>) {
     let execution_mode_str = cancel.execution_mode.map(|mode| mode.to_string());
     if let Some(fields) = cancel.fields {
         (
             fields.input_coin_id.as_deref(),
             fields.fixed_delegated_puzzle_hash.as_deref(),
+            fields.maker_puzzle_hash.as_deref(),
             execution_mode_str,
         )
     } else {
-        (None, None, execution_mode_str)
+        (None, None, None, execution_mode_str)
     }
 }
 
@@ -73,8 +74,12 @@ impl SqliteStore {
         updated_at: &str,
         cancel: OfferCancelWrite<'_>,
     ) -> SignerResult<()> {
-        let (presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode_str) =
-            cancel_metadata_params(cancel);
+        let (
+            presplit_input_coin_id,
+            fixed_delegated_puzzle_hash,
+            maker_puzzle_hash,
+            execution_mode_str,
+        ) = cancel_metadata_params(cancel);
         let cancel_submitted_at = resolve_cancel_submitted_at_for_upsert(
             &self.conn,
             offer_id,
@@ -92,12 +97,13 @@ impl SqliteStore {
                   updated_at,
                   presplit_input_coin_id,
                   fixed_delegated_puzzle_hash,
+                  maker_puzzle_hash,
                   execution_mode,
                   cancel_submitted_tx_id,
                   cancel_submitted_at,
                   publish_venue
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
@@ -105,6 +111,7 @@ impl SqliteStore {
                   updated_at = excluded.updated_at,
                   presplit_input_coin_id = COALESCE(excluded.presplit_input_coin_id, offer_state.presplit_input_coin_id),
                   fixed_delegated_puzzle_hash = COALESCE(excluded.fixed_delegated_puzzle_hash, offer_state.fixed_delegated_puzzle_hash),
+                  maker_puzzle_hash = COALESCE(excluded.maker_puzzle_hash, offer_state.maker_puzzle_hash),
                   execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode),
                   cancel_submitted_tx_id = CASE
                     WHEN excluded.state = 'cancel_submitted'
@@ -126,6 +133,7 @@ impl SqliteStore {
                     updated_at,
                     presplit_input_coin_id,
                     fixed_delegated_puzzle_hash,
+                    maker_puzzle_hash,
                     execution_mode_str.as_deref(),
                     cancel.cancel_submitted_tx_id,
                     cancel_submitted_at,
@@ -207,7 +215,7 @@ impl SqliteStore {
             .conn
             .prepare(
                 r"
-                SELECT presplit_input_coin_id, fixed_delegated_puzzle_hash, execution_mode
+                SELECT presplit_input_coin_id, fixed_delegated_puzzle_hash, maker_puzzle_hash, execution_mode
                 FROM offer_state
                 WHERE offer_id = ?1
                 ",
@@ -230,9 +238,10 @@ impl SqliteStore {
             fields: PresplitCancelFields {
                 input_coin_id: row.get(0).ok(),
                 fixed_delegated_puzzle_hash: row.get(1).ok(),
+                maker_puzzle_hash: row.get(2).ok(),
             },
             execution_mode: row
-                .get::<_, Option<String>>(2)
+                .get::<_, Option<String>>(3)
                 .ok()
                 .flatten()
                 .and_then(|value| OfferExecutionMode::parse_db(&value)),

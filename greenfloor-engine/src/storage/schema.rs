@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS offer_state (
   updated_at TEXT NOT NULL,
   presplit_input_coin_id TEXT NULL,
   fixed_delegated_puzzle_hash TEXT NULL,
+  maker_puzzle_hash TEXT NULL,
   execution_mode TEXT NULL,
   cancel_submitted_tx_id TEXT NULL,
   cancel_submitted_at TEXT NULL,

@@ -180,15 +180,23 @@ impl OfferExecutionMode {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct PresplitCancelFields {
     pub input_coin_id: Option<String>,
+    /// Fixed CONDITIONS tree hash (cancel/reclaim verification). Not an on-chain coin p2.
     pub fixed_delegated_puzzle_hash: Option<String>,
+    /// On-chain maker coin puzzle hash (CAT outer or XCH p2) for WS / coin-ops watches.
+    pub maker_puzzle_hash: Option<String>,
 }
 
 impl PresplitCancelFields {
     #[must_use]
-    pub fn from_presplit_build(input_coin_id: String, fixed_delegated_puzzle_hash: String) -> Self {
+    pub fn from_presplit_build(
+        input_coin_id: String,
+        fixed_delegated_puzzle_hash: String,
+        maker_puzzle_hash: String,
+    ) -> Self {
         Self {
             input_coin_id: Some(input_coin_id),
             fixed_delegated_puzzle_hash: Some(fixed_delegated_puzzle_hash),
+            maker_puzzle_hash: Some(maker_puzzle_hash),
         }
     }
 }
@@ -315,8 +323,11 @@ mod tests {
 
     #[test]
     fn create_offer_result_assembled_carries_presplit_fields() {
-        let cancel =
-            PresplitCancelFields::from_presplit_build("coin".to_string(), "puzzle".to_string());
+        let cancel = PresplitCancelFields::from_presplit_build(
+            "coin".to_string(),
+            "delegated".to_string(),
+            "makerp2".to_string(),
+        );
         let result = CreateOfferResult::assembled(
             OfferExecutionMode::PresplitExisting,
             OfferArtifacts {

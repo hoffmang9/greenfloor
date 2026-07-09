@@ -134,8 +134,6 @@ async fn execute_coin_ops_plans(
     planning: &CoinOpsPlanningResult,
 ) -> SignerResult<CoinOpExecutionResult> {
     let operator_network = ctx.resources.network.as_str();
-    // Durable watches only (healed from cancel metadata + Dexie at reconcile).
-    let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {
             dry_run: program.runtime_dry_run,
@@ -151,13 +149,18 @@ async fn execute_coin_ops_plans(
         });
     }
 
+    // Durable watches: coin ids + on-chain maker puzzle hashes (local exclude).
+    let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
+    let watched_p2s = store.list_watched_p2s_for_market(&market.market_id)?;
+
     match ctx.gated_market(market) {
-        Ok(gated) => {
-            Ok(
-                execute_managed_coin_op_plans(gated, &planning.executable_plans, &watched_coin_ids)
-                    .await,
-            )
-        }
+        Ok(gated) => Ok(execute_managed_coin_op_plans(
+            gated,
+            &planning.executable_plans,
+            &watched_coin_ids,
+            &watched_p2s,
+        )
+        .await),
         Err(err) => Ok(skipped_coin_ops_result(
             program,
             market,

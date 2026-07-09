@@ -57,8 +57,9 @@ never the operator transport.
    90s max-staleness and reuse last bucket counts when fresh. Durable watches are
    registered atomically at post, backfilled once on schema open via
    `schema_meta` (`watch_venue_backfill_v2`), and healed each reconcile via
-   `classify_and_heal_local` + heal-only Dexie fetch. Coin-ops reads watched
-   coin ids from the watch table only.
+   `classify_and_heal_local` + heal-only Dexie fetch. Coin-ops excludes durable
+   `kind='coin'` watch ids and durable `kind='p2'` maker puzzle hashes locally
+   against each spendable coin's on-chain `puzzle_hash` (no network expand).
 
 ## Consequences
 

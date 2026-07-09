@@ -24,6 +24,8 @@ pub struct CoinOpExecContext {
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
+    /// Durable maker puzzle hashes (`kind='p2'` watches) for local spend exclusion.
+    pub watched_p2s: HashSet<String>,
     #[cfg(test)]
     pub test_overrides: CoinOpTestOverrides,
 }
@@ -38,6 +40,7 @@ impl CoinOpExecContext {
         gated: GatedOperatorMarket,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
+        watched_p2s: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
         let resolver = gated.asset_resolver();
@@ -47,6 +50,7 @@ impl CoinOpExecContext {
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
+            watched_p2s,
             #[cfg(test)]
             test_overrides,
         ))
@@ -151,6 +155,7 @@ impl CoinOpExecContext {
         gated: GatedOperatorMarket,
         resolved_base_asset_id: String,
         watched_coin_ids: HashSet<String>,
+        watched_p2s: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> Self {
         Self {
@@ -161,6 +166,7 @@ impl CoinOpExecContext {
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
+            watched_p2s,
             #[cfg(test)]
             test_overrides,
         }

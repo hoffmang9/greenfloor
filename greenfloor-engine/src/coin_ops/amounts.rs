@@ -51,14 +51,8 @@ mod tests {
     #[test]
     fn operator_combine_merges_selected_inputs_to_single_output() {
         let spendable = vec![
-            SpendableCoin {
-                id: "aa".to_string(),
-                amount: 10_000,
-            },
-            SpendableCoin {
-                id: "bb".to_string(),
-                amount: 15_000,
-            },
+            SpendableCoin::new("aa".to_string(), 10_000),
+            SpendableCoin::new("bb".to_string(), 15_000),
         ];
         let total = total_for_coin_ids(&spendable, &["aa".to_string(), "bb".to_string()]);
         assert_eq!(total, 25_000);
@@ -79,14 +73,8 @@ mod tests {
     #[test]
     fn total_for_coin_ids_is_case_insensitive() {
         let spendable = vec![
-            SpendableCoin {
-                id: "Ab".to_string(),
-                amount: 5,
-            },
-            SpendableCoin {
-                id: "cd".to_string(),
-                amount: 7,
-            },
+            SpendableCoin::new("Ab".to_string(), 5),
+            SpendableCoin::new("cd".to_string(), 7),
         ];
         assert_eq!(total_for_coin_ids(&spendable, &["ab".to_string()]), 5);
         assert_eq!(

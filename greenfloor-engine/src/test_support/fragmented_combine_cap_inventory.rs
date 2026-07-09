@@ -24,6 +24,6 @@ pub fn fragmented_combine_cap_inventory_rows() -> Vec<(String, i64)> {
 pub fn fragmented_combine_cap_spendable_coins() -> Vec<SpendableCoin> {
     fragmented_combine_cap_inventory_rows()
         .into_iter()
-        .map(|(id, amount)| SpendableCoin { id, amount })
+        .map(|(id, amount)| SpendableCoin::new(id, amount))
         .collect()
 }

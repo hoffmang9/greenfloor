@@ -155,6 +155,7 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         split_broadcast_status: None,
         presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
             input_coin.clone(),
+            "aa".repeat(32),
             p2.clone(),
         )),
     };

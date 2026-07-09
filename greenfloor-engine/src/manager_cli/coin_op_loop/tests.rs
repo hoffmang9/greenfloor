@@ -11,14 +11,8 @@ use crate::manager_cli::test_support::ManagerContextBuilder;
 #[test]
 fn lockup_guardrail_blocks_when_all_spendable_selected() {
     let spendable = vec![
-        SpendableCoin {
-            id: "coin-a".to_string(),
-            amount: 100,
-        },
-        SpendableCoin {
-            id: "coin-b".to_string(),
-            amount: 200,
-        },
+        SpendableCoin::new("coin-a".to_string(), 100),
+        SpendableCoin::new("coin-b".to_string(), 200),
     ];
     let guardrail = enforce_split_lockup_guardrail(
         &spendable,
@@ -33,14 +27,8 @@ fn lockup_guardrail_blocks_when_all_spendable_selected() {
 #[test]
 fn lockup_guardrail_allows_partial_selection() {
     let spendable = vec![
-        SpendableCoin {
-            id: "coin-a".to_string(),
-            amount: 100,
-        },
-        SpendableCoin {
-            id: "coin-b".to_string(),
-            amount: 200,
-        },
+        SpendableCoin::new("coin-a".to_string(), 100),
+        SpendableCoin::new("coin-b".to_string(), 200),
     ];
     let exit =
         enforce_split_lockup_guardrail(&spendable, &["coin-a".to_string()], false, "asset-1");
@@ -50,14 +38,8 @@ fn lockup_guardrail_allows_partial_selection() {
 #[test]
 fn lockup_guardrail_allows_override_when_flag_set() {
     let spendable = vec![
-        SpendableCoin {
-            id: "coin-a".to_string(),
-            amount: 100,
-        },
-        SpendableCoin {
-            id: "coin-b".to_string(),
-            amount: 200,
-        },
+        SpendableCoin::new("coin-a".to_string(), 100),
+        SpendableCoin::new("coin-b".to_string(), 200),
     ];
     let exit = enforce_split_lockup_guardrail(
         &spendable,
@@ -71,18 +53,9 @@ fn lockup_guardrail_allows_override_when_flag_set() {
 #[test]
 fn split_gate_ready_skips_execution_path() {
     let spendable = vec![
-        SpendableCoin {
-            id: "a".to_string(),
-            amount: 100,
-        },
-        SpendableCoin {
-            id: "b".to_string(),
-            amount: 100,
-        },
-        SpendableCoin {
-            id: "c".to_string(),
-            amount: 200,
-        },
+        SpendableCoin::new("a".to_string(), 100),
+        SpendableCoin::new("b".to_string(), 100),
+        SpendableCoin::new("c".to_string(), 200),
     ];
     let gate = evaluate_coin_split_gate(&spendable_coins_for_gate(&spendable), "asset", 100, 2);
     assert!(gate.ready);
@@ -519,10 +492,7 @@ async fn coin_split_executes_with_test_overrides() {
             max_iterations: 1,
         },
         CoinOpTestOverrides::new(
-            Some(vec![SpendableCoin {
-                id: coin_id.clone(),
-                amount: 1_000_000,
-            }]),
+            Some(vec![SpendableCoin::new(coin_id.clone(), 1_000_000)]),
             Some("split-op-test".to_string()),
         ),
     )

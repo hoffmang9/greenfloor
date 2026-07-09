@@ -119,7 +119,8 @@ pub(super) fn offer_post_persist_record(
     watched_coin_ids.sort();
     watched_coin_ids.dedup();
     let mut watched_p2s = Vec::new();
-    if let Some(p2) = cancel_fields.fixed_delegated_puzzle_hash.clone() {
+    // On-chain maker puzzle hash only (not fixed_delegated CONDITIONS hash).
+    if let Some(p2) = cancel_fields.maker_puzzle_hash.clone() {
         watched_p2s.push(p2);
     }
     // Do not seed shared market inventory receive/CAT outer p2s into per-offer

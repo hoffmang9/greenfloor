@@ -13,6 +13,7 @@ pub(crate) fn wallet_coins_to_spendable(
             (amount >= min_amount).then_some(SpendableCoin {
                 id: coin.id.clone(),
                 amount,
+                puzzle_hash: coin.puzzle_hash.clone(),
             })
         })
         .collect()
@@ -31,12 +32,14 @@ mod tests {
                 name: "dust".to_string(),
                 amount: 500,
                 state: "SETTLED".to_string(),
+                puzzle_hash: String::new(),
             },
             WalletUnspentCoin {
                 id: "coin_a".to_string(),
                 name: "coin_a".to_string(),
                 amount: 1000,
                 state: "SETTLED".to_string(),
+                puzzle_hash: String::new(),
             },
         ];
         let spendable = wallet_coins_to_spendable(&coins, cat_id);

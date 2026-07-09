@@ -261,7 +261,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// List distinct watched coin/p2 ids for a market.
+    /// List distinct watched maker coin ids for a market (`kind = 'coin'` only).
     ///
     /// # Errors
     ///
@@ -270,13 +270,32 @@ impl SqliteStore {
         &self,
         market_id: &str,
     ) -> SignerResult<HashSet<String>> {
+        self.list_watched_keys_for_market(market_id, "coin")
+    }
+
+    /// List distinct watched maker p2 hashes for a market (`kind = 'p2'` only).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_watched_p2s_for_market(&self, market_id: &str) -> SignerResult<HashSet<String>> {
+        self.list_watched_keys_for_market(market_id, "p2")
+    }
+
+    fn list_watched_keys_for_market(
+        &self,
+        market_id: &str,
+        kind: &str,
+    ) -> SignerResult<HashSet<String>> {
         let clean_market = market_id.trim();
         let mut stmt = self
             .conn
-            .prepare("SELECT DISTINCT coin_id FROM offer_coin_watches WHERE market_id = ?1 AND kind = 'coin'")
+            .prepare(
+                "SELECT DISTINCT coin_id FROM offer_coin_watches WHERE market_id = ?1 AND kind = ?2",
+            )
             .map_err(|err| SignerError::Other(format!("offer_coin_watches prepare: {err}")))?;
         let rows = stmt
-            .query_map(params![clean_market], |row| row.get::<_, String>(0))
+            .query_map(params![clean_market, kind], |row| row.get::<_, String>(0))
             .map_err(|err| SignerError::Other(format!("offer_coin_watches query: {err}")))?;
         let mut out = HashSet::default();
         for row in rows {
@@ -409,6 +428,9 @@ mod tests {
         let watched = store.list_watched_coin_ids_for_market("m1").expect("list");
         assert!(watched.contains(&coin));
         assert!(!watched.contains(&p2));
+        let watched_p2s = store.list_watched_p2s_for_market("m1").expect("p2s");
+        assert!(watched_p2s.contains(&p2));
+        assert!(!watched_p2s.contains(&coin));
         let offers = store
             .list_offer_ids_for_watched_coin(&coin)
             .expect("offers");
@@ -422,6 +444,10 @@ mod tests {
         assert!(store
             .list_watched_coin_ids_for_market("m1")
             .expect("list")
+            .is_empty());
+        assert!(store
+            .list_watched_p2s_for_market("m1")
+            .expect("p2s")
             .is_empty());
     }
 

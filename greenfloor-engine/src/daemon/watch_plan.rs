@@ -80,7 +80,7 @@ pub fn classify_and_heal_local(
                 }
                 if let Some(p2) = meta
                     .fields
-                    .fixed_delegated_puzzle_hash
+                    .maker_puzzle_hash
                     .as_deref()
                     .map(normalize_hex_id)
                     .filter(|value| value.len() == 64)
@@ -195,7 +195,8 @@ mod tests {
         let p2 = "ef".repeat(32);
         let fields = PresplitCancelFields {
             input_coin_id: Some(coin.clone()),
-            fixed_delegated_puzzle_hash: Some(p2),
+            fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
+            maker_puzzle_hash: Some(p2),
         };
         store
             .upsert_offer_state_with_metadata_at(

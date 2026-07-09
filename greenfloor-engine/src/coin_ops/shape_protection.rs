@@ -331,14 +331,8 @@ mod tests {
     fn spendable_selector_picks_smallest_non_cannibalizing_coin() {
         let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[100, 50]);
         let spendable = vec![
-            SpendableCoin {
-                id: "combined".to_string(),
-                amount: 100_000,
-            },
-            SpendableCoin {
-                id: "spare".to_string(),
-                amount: 50_000,
-            },
+            SpendableCoin::new("combined".to_string(), 100_000),
+            SpendableCoin::new("spare".to_string(), 50_000),
         ];
         let selected = select_smallest_non_cannibalizing_spendable(
             &spendable,

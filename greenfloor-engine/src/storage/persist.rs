@@ -144,6 +144,7 @@ mod tests {
                 cancel_fields: PresplitCancelFields {
                     input_coin_id: Some("c".repeat(64)),
                     fixed_delegated_puzzle_hash: Some("d".repeat(64)),
+                    maker_puzzle_hash: Some("e".repeat(64)),
                 },
                 execution_mode: Some(OfferExecutionMode::PresplitExisting),
                 watched_coin_ids: Vec::new(),
@@ -163,6 +164,10 @@ mod tests {
         assert_eq!(
             metadata.fields.fixed_delegated_puzzle_hash.as_deref(),
             Some("d".repeat(64).as_str())
+        );
+        assert_eq!(
+            metadata.fields.maker_puzzle_hash.as_deref(),
+            Some("e".repeat(64).as_str())
         );
         assert_eq!(
             metadata.execution_mode,

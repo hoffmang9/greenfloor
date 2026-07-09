@@ -5,10 +5,7 @@ use crate::coin_ops::selection::SpendableCoin;
 
 fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
     rows.iter()
-        .map(|(id, amount)| SpendableCoin {
-            id: (*id).to_string(),
-            amount: *amount,
-        })
+        .map(|(id, amount)| SpendableCoin::new((*id).to_string(), *amount))
         .collect()
 }
 

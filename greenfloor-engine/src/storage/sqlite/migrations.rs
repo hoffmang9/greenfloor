@@ -55,6 +55,7 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
         "fixed_delegated_puzzle_hash",
         "TEXT NULL",
     )?;
+    add_column_if_missing(conn, "offer_state", "maker_puzzle_hash", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "execution_mode", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_tx_id", "TEXT NULL")?;
     add_column_if_missing(conn, "offer_state", "cancel_submitted_at", "TEXT NULL")?;
@@ -165,12 +166,12 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
     let mut stmt = conn
         .prepare(
             r"
-            SELECT offer_id, market_id, presplit_input_coin_id, fixed_delegated_puzzle_hash
+            SELECT offer_id, market_id, presplit_input_coin_id, maker_puzzle_hash
             FROM offer_state
             WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility')
               AND (
                 (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
-                OR (fixed_delegated_puzzle_hash IS NOT NULL AND length(trim(fixed_delegated_puzzle_hash)) > 0)
+                OR (maker_puzzle_hash IS NOT NULL AND length(trim(maker_puzzle_hash)) > 0)
               )
             ",
         )
@@ -195,7 +196,7 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
         })?;
     let now = chrono::Utc::now().to_rfc3339();
     for row in rows {
-        let (offer_id, market_id, input_coin, delegated_p2) = row.map_err(|err| {
+        let (offer_id, market_id, input_coin, maker_p2) = row.map_err(|err| {
             SignerError::Other(format!(
                 "failed to read offer_coin_watches backfill row: {err}"
             ))
@@ -218,7 +219,7 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
                 ))
             })?;
         }
-        if let Some(p2_id) = delegated_p2
+        if let Some(p2_id) = maker_p2
             .as_deref()
             .map(crate::hex::normalize_hex_id)
             .filter(|value| value.len() == 64)
@@ -439,7 +440,8 @@ mod tests {
             let store = SqliteStore::open(&db_path).expect("open");
             let fields = PresplitCancelFields {
                 input_coin_id: Some(coin.clone()),
-                fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
+                fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
+                maker_puzzle_hash: Some(meta_p2.clone()),
             };
             store
                 .upsert_offer_state_with_metadata_at(
@@ -498,7 +500,8 @@ mod tests {
             let store = SqliteStore::open(&db_path).expect("open");
             let fields = PresplitCancelFields {
                 input_coin_id: Some(coin.clone()),
-                fixed_delegated_puzzle_hash: Some(meta_p2.clone()),
+                fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
+                maker_puzzle_hash: Some(meta_p2.clone()),
             };
             store
                 .upsert_offer_state_with_metadata_at(

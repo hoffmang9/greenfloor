@@ -160,12 +160,14 @@ mod tests {
                 name: "a".repeat(64),
                 amount: 5_000,
                 state: "CONFIRMED".to_string(),
+                puzzle_hash: String::new(),
             },
             WalletUnspentCoin {
                 id: "b".repeat(64),
                 name: "b".repeat(64),
                 amount: 500,
                 state: "CONFIRMED".to_string(),
+                puzzle_hash: String::new(),
             },
         ];
         let base = bootstrap_coins_in_base_units(&coins, 1_000);
@@ -180,12 +182,14 @@ mod tests {
             name: "a".repeat(64),
             amount: 1,
             state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
         };
         let pending = WalletUnspentCoin {
             id: "b".repeat(64),
             name: "b".repeat(64),
             amount: 1,
             state: "PENDING".to_string(),
+            puzzle_hash: String::new(),
         };
         assert!(wallet_coin_spendable(&confirmed));
         assert!(!wallet_coin_spendable(&pending));

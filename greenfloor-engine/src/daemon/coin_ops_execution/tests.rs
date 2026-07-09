@@ -68,6 +68,7 @@ fn test_exec_context(
         base_unit_mojo_multiplier: 1_000,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::new(),
+        watched_p2s: HashSet::new(),
         test_overrides: CoinOpTestOverrides::new(
             Some(spendable),
             mixed_split_operation_id.map(str::to_string),
@@ -111,6 +112,7 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
+        &HashSet::<String>::default(),
     )
     .await;
 
@@ -140,6 +142,7 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
+        &HashSet::<String>::default(),
     )
     .await;
 
@@ -166,6 +169,7 @@ async fn execute_managed_coin_op_plans_skips_invalid_plans() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
+        &HashSet::<String>::default(),
     )
     .await;
 
@@ -190,20 +194,12 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
+        &HashSet::<String>::default(),
         CoinOpTestOverrides::new(
             Some(vec![
-                SpendableCoin {
-                    id: test_coin_id('a'),
-                    amount: 100_000,
-                },
-                SpendableCoin {
-                    id: test_coin_id('b'),
-                    amount: 10_000,
-                },
-                SpendableCoin {
-                    id: test_coin_id('c'),
-                    amount: 10_000,
-                },
+                SpendableCoin::new(test_coin_id('a'), 100_000),
+                SpendableCoin::new(test_coin_id('b'), 10_000),
+                SpendableCoin::new(test_coin_id('c'), 10_000),
             ]),
             Some("managed-op-test".to_string()),
         ),
@@ -227,6 +223,45 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
 }
 
 #[tokio::test]
+async fn execute_managed_coin_op_plans_skips_when_spendable_matches_watched_p2() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bundle = minimal_program_bundle(&dir);
+    let mut market = sample_market("xch1test");
+    market.base_asset = test_coin_id('f');
+    let plans = vec![
+        sample_plan(CoinOpKind::Split),
+        sample_plan(CoinOpKind::Combine),
+    ];
+    let maker_p2 = "ef".repeat(32);
+    let watched_p2s = HashSet::from([maker_p2.clone()]);
+
+    let empty_index = empty_cat_ticker_index();
+    let result = execute_managed_coin_op_plans_with_test_overrides(
+        sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
+        &plans,
+        &HashSet::<String>::default(),
+        &watched_p2s,
+        CoinOpTestOverrides::new(
+            Some(vec![
+                SpendableCoin::with_puzzle_hash(test_coin_id('a'), 100_000, maker_p2.clone()),
+                SpendableCoin::with_puzzle_hash(test_coin_id('b'), 10_000, maker_p2.clone()),
+                SpendableCoin::with_puzzle_hash(test_coin_id('c'), 10_000, maker_p2),
+            ]),
+            Some("managed-op-test".to_string()),
+        ),
+    )
+    .await;
+
+    assert_eq!(result.executed_count, 0);
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "split" && item.reason == "no_spendable_split_coin_meets_required_amount"
+    }));
+    assert!(result.items.iter().any(|item| {
+        item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
+    }));
+}
+
+#[tokio::test]
 async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watched() {
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = minimal_program_bundle(&dir);
@@ -243,20 +278,12 @@ async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watche
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &watched,
+        &HashSet::<String>::default(),
         CoinOpTestOverrides::new(
             Some(vec![
-                SpendableCoin {
-                    id: test_coin_id('a'),
-                    amount: 100_000,
-                },
-                SpendableCoin {
-                    id: test_coin_id('b'),
-                    amount: 10_000,
-                },
-                SpendableCoin {
-                    id: test_coin_id('c'),
-                    amount: 10_000,
-                },
+                SpendableCoin::new(test_coin_id('a'), 100_000),
+                SpendableCoin::new(test_coin_id('b'), 10_000),
+                SpendableCoin::new(test_coin_id('c'), 10_000),
             ]),
             Some("managed-op-test".to_string()),
         ),
@@ -280,22 +307,10 @@ async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
     let ctx = test_exec_context(
         market,
         vec![
-            SpendableCoin {
-                id: test_coin_id('a'),
-                amount: 65_000,
-            },
-            SpendableCoin {
-                id: test_coin_id('b'),
-                amount: 20_000,
-            },
-            SpendableCoin {
-                id: test_coin_id('c'),
-                amount: 11_000,
-            },
-            SpendableCoin {
-                id: test_coin_id('d'),
-                amount: 4_000,
-            },
+            SpendableCoin::new(test_coin_id('a'), 65_000),
+            SpendableCoin::new(test_coin_id('b'), 20_000),
+            SpendableCoin::new(test_coin_id('c'), 11_000),
+            SpendableCoin::new(test_coin_id('d'), 4_000),
         ],
         None,
     );
@@ -323,10 +338,7 @@ async fn run_daemon_split_plan_uses_ninety_bu_remnant_for_john_deere_buffer_defi
     market.base_asset = "b".repeat(64);
     let spendable: Vec<SpendableCoin> = john_deere_after_combine_inventory_rows()
         .into_iter()
-        .map(|(id, amount)| SpendableCoin {
-            id,
-            amount: amount.saturating_mul(MULTIPLIER),
-        })
+        .map(|(id, amount)| SpendableCoin::new(id, amount.saturating_mul(MULTIPLIER)))
         .collect();
     let ctx = test_exec_context(market, spendable, Some("split-op-test"));
     let plan = CoinOpPlan {
@@ -347,10 +359,7 @@ async fn run_daemon_low_watermark_split_skips_protection_when_sell_ladder_empty(
     use crate::test_support::ladder::empty_ladders_market;
 
     let market = empty_ladders_market("xch1test");
-    let spendable = vec![SpendableCoin {
-        id: test_coin_id('a'),
-        amount: 100_000,
-    }];
+    let spendable = vec![SpendableCoin::new(test_coin_id('a'), 100_000)];
     let ctx = test_exec_context(market, spendable, Some("split-op-test"));
     let plan = CoinOpPlan {
         op_type: CoinOpKind::Split,
@@ -371,10 +380,7 @@ async fn run_daemon_split_plan_submits_single_output_when_source_is_larger() {
     market.base_asset = "b".repeat(64);
     let ctx = test_exec_context(
         market,
-        vec![SpendableCoin {
-            id: test_coin_id('a'),
-            amount: 150_000,
-        }],
+        vec![SpendableCoin::new(test_coin_id('a'), 150_000)],
         Some("split-op"),
     );
     let plan = CoinOpPlan {
@@ -408,10 +414,7 @@ async fn run_daemon_split_plan_skips_when_amount_below_minimum() {
     market.base_asset = "b".repeat(64);
     let ctx = test_exec_context(
         market,
-        vec![SpendableCoin {
-            id: test_coin_id('h'),
-            amount: 100_000,
-        }],
+        vec![SpendableCoin::new(test_coin_id('h'), 100_000)],
         None,
     );
     let plan = CoinOpPlan {
@@ -434,10 +437,7 @@ async fn run_daemon_split_plan_submits_when_spendable_coin_available() {
     market.base_asset = test_coin_id('f');
     let ctx = test_exec_context(
         market,
-        vec![SpendableCoin {
-            id: test_coin_id('a'),
-            amount: 100_000,
-        }],
+        vec![SpendableCoin::new(test_coin_id('a'), 100_000)],
         Some("split-op-test"),
     );
     let plan = sample_plan(CoinOpKind::Split);
@@ -459,14 +459,8 @@ async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
         let mut ctx = test_exec_context(
             market,
             vec![
-                SpendableCoin {
-                    id: test_coin_id('a'),
-                    amount: 100_000,
-                },
-                SpendableCoin {
-                    id: test_coin_id('b'),
-                    amount: 80_000,
-                },
+                SpendableCoin::new(test_coin_id('a'), 100_000),
+                SpendableCoin::new(test_coin_id('b'), 80_000),
             ],
             Some("split-retry-op"),
         );
@@ -488,10 +482,7 @@ async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
 async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     let ctx = test_exec_context(
         sample_market("xch1test"),
-        vec![SpendableCoin {
-            id: test_coin_id('d'),
-            amount: 10_000,
-        }],
+        vec![SpendableCoin::new(test_coin_id('d'), 10_000)],
         None,
     );
     let plan = sample_plan(CoinOpKind::Combine);

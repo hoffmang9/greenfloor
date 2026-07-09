@@ -44,6 +44,13 @@ pub(crate) fn unwatched_spendable(
 ) -> Vec<SpendableCoin> {
     coins
         .into_iter()
-        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
+        .filter(|coin| {
+            let id = coin.id.to_ascii_lowercase();
+            if ctx.watched_coin_ids.contains(&id) {
+                return false;
+            }
+            let p2 = crate::hex::normalize_hex_id(&coin.puzzle_hash);
+            p2.is_empty() || !ctx.watched_p2s.contains(&p2)
+        })
         .collect()
 }

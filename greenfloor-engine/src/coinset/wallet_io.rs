@@ -21,15 +21,18 @@ pub struct WalletUnspentCoin {
     pub name: String,
     pub amount: u64,
     pub state: String,
+    /// On-chain puzzle hash (64 hex), used for coin-ops p2 watch exclusion.
+    pub puzzle_hash: String,
 }
 
-fn wallet_coin_from_id(coin_id: impl AsRef<[u8]>, amount: u64) -> WalletUnspentCoin {
-    let id = normalize_hex_id(&hex::encode(coin_id.as_ref()));
+fn wallet_coin_from_coin(coin: &chia_protocol::Coin) -> WalletUnspentCoin {
+    let id = normalize_hex_id(&hex::encode(coin.coin_id()));
     WalletUnspentCoin {
         name: id.clone(),
         id,
-        amount,
+        amount: coin.amount,
         state: "CONFIRMED".to_string(),
+        puzzle_hash: normalize_hex_id(&hex::encode(coin.puzzle_hash)),
     }
 }
 
@@ -87,7 +90,7 @@ pub(crate) async fn list_wallet_unspent_coins(
         return Ok(coins
             .into_iter()
             .filter(|coin| coin.amount > 0)
-            .map(|coin| wallet_coin_from_id(coin.coin_id(), coin.amount))
+            .map(|coin| wallet_coin_from_coin(&coin))
             .collect());
     }
     let asset_bytes = hex_to_bytes32(asset_id)?;
@@ -95,7 +98,7 @@ pub(crate) async fn list_wallet_unspent_coins(
     Ok(cats
         .into_iter()
         .filter(|cat| cat.coin.amount > 0)
-        .map(|cat| wallet_coin_from_id(cat.coin.coin_id(), cat.coin.amount))
+        .map(|cat| wallet_coin_from_coin(&cat.coin))
         .collect())
 }
 

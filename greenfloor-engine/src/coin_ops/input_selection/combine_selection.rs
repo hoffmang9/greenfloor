@@ -60,10 +60,7 @@ pub(crate) fn select_combine_inputs_for_target_in(
                 && !coin.id.trim().is_empty()
                 && coin.amount > 0
         })
-        .map(|coin| SpendableCoin {
-            id: coin.id.clone(),
-            amount: coin.amount,
-        })
+        .map(|coin| SpendableCoin::new(coin.id.clone(), coin.amount))
         .collect();
 
     let (unconstrained_ids, unconstrained_total, unconstrained_exact) =

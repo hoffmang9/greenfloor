@@ -23,6 +23,7 @@ pub(super) async fn build_coin_op_exec_context(
         gated,
         asset_id_override,
         HashSet::default(),
+        HashSet::default(),
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     )

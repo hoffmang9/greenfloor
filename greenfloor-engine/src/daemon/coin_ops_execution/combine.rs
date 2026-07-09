@@ -4,7 +4,9 @@ use super::items::{
     execute_daemon_coin_op_plan, executed_item_for_plan, plan_skip, skip_item_for_plan,
     skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult,
 };
-use super::prep::{list_spendable_coins_for_plan, validate_plan_target_amount};
+use super::prep::{
+    list_spendable_coins_for_plan, unwatched_spendable, validate_plan_target_amount,
+};
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::CoinOpExecContext;
 
@@ -29,7 +31,7 @@ async fn prepare_daemon_combine_inputs(
     let target_coin_amount_mojos =
         validate_plan_target_amount(ctx, plan, "combine_target_amount_below_coin_op_minimum")?;
 
-    let spendable = list_spendable_coins_for_plan(ctx, plan).await?;
+    let spendable = unwatched_spendable(ctx, list_spendable_coins_for_plan(ctx, plan).await?);
     let requested_count = skip_on_signer_err_for_plan(
         plan,
         i64_to_usize(requested_number_of_coins, "combine.op_count"),
@@ -43,7 +45,7 @@ async fn prepare_daemon_combine_inputs(
         &spendable,
         requested_count,
         target_coin_amount_mojos,
-        Some(&ctx.watched_coin_ids),
+        None,
         Some(capped_count),
     );
     if combine_input_coin_ids.len() < 2 {
