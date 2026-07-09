@@ -67,7 +67,7 @@ pub fn test_cycle_context(
                 dir.path().join("markets.yaml"),
                 None,
             ),
-            super::coinset_ws::CoinsetProcessContext::empty(),
+            super::coinset_ws::CoinsetWsShared::empty(),
             empty_cat_ticker_index(),
         ),
         dispatch: MarketDispatchContext {

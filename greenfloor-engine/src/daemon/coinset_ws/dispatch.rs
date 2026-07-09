@@ -2,15 +2,17 @@ use serde_json::json;
 
 use crate::coinset::{get_all_mempool_tx_ids, WsEvent};
 use crate::config::ManagerProgramConfig;
-use crate::daemon::coinset_ws::CoinsetProcessContext;
+use crate::daemon::coinset_ws::CoinsetWsShared;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
-use crate::offer::lifecycle::{apply_watch_hits_batch, apply_ws_offer_event};
+use crate::offer::lifecycle::{
+    apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
+};
 use crate::operator_log::{
     LogContext, COINSET_WS_MEMPOOL_EVENT, COINSET_WS_RECOVERY_POLL, COINSET_WS_RECOVERY_POLL_ERROR,
     COINSET_WS_TX_BLOCK_EVENT, COIN_WATCH_HIT, MEMPOOL_OBSERVED, TX_BLOCK_CONFIRMED,
 };
-use crate::storage::SqliteStore;
+use crate::storage::{SqliteStore, TxSignalIngress};
 
 pub async fn run_recovery_poll(
     store: &SqliteStore,
@@ -26,7 +28,7 @@ pub async fn run_recovery_poll(
     };
     match get_all_mempool_tx_ids(&program.network, base_opt).await {
         Ok(tx_ids) => {
-            let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
+            let new_count = store.ingest_tx_signals(&tx_ids, TxSignalIngress::Mempool)?;
             LogContext::COINSET.audit(
                 store,
                 COINSET_WS_RECOVERY_POLL,
@@ -56,7 +58,7 @@ pub async fn run_recovery_poll(
 }
 
 fn record_ws_mempool_tx_ids(store: &SqliteStore, mempool_tx_ids: &[String]) -> SignerResult<()> {
-    let new_count = store.observe_mempool_tx_ids(mempool_tx_ids)?;
+    let new_count = store.ingest_tx_signals(mempool_tx_ids, TxSignalIngress::Mempool)?;
     LogContext::COINSET.audit(
         store,
         COINSET_WS_MEMPOOL_EVENT,
@@ -78,7 +80,7 @@ fn record_ws_confirmed_tx_ids(
     store: &SqliteStore,
     confirmed_tx_ids: &[String],
 ) -> SignerResult<()> {
-    let confirmed = store.confirm_tx_ids(confirmed_tx_ids)?;
+    let confirmed = store.ingest_tx_signals(confirmed_tx_ids, TxSignalIngress::Confirmed)?;
     LogContext::COINSET.audit(
         store,
         COINSET_WS_TX_BLOCK_EVENT,
@@ -94,16 +96,17 @@ fn record_ws_confirmed_tx_ids(
             "source": "coinset_websocket",
         }),
         None,
-    )
+    )?;
+    promote_cancel_submitted_for_confirmed_txs(store, confirmed_tx_ids)
 }
 
 fn record_observed_watch_keys(
     store: &SqliteStore,
-    ctx: &CoinsetProcessContext,
+    ctx: &CoinsetWsShared,
     observed_p2s: &[String],
     observed_coin_ids: &[String],
 ) -> SignerResult<()> {
-    let inventory_markets = ctx.inventory_p2s().market_ids_for_p2s(observed_p2s);
+    let inventory_markets = ctx.p2_index().market_ids_for_p2s(observed_p2s);
     for market_id in &inventory_markets {
         ctx.inventory_freshness.mark_stale(market_id);
     }
@@ -142,7 +145,7 @@ fn record_observed_watch_keys(
 
 pub(crate) fn apply_ws_event(
     store: &SqliteStore,
-    ctx: &CoinsetProcessContext,
+    ctx: &CoinsetWsShared,
     event: WsEvent,
 ) -> SignerResult<()> {
     match event {

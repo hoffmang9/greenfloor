@@ -15,8 +15,8 @@ use super::builders::{
 use super::coinset_signals::CoinsetSignalSummary;
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
-    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
-    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_NONE,
+    REASON_CANCEL_SUBMIT_STALE_ORPHAN, REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
+    REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS, SIGNAL_SOURCE_NONE, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
@@ -109,6 +109,11 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
+    // Prepare→finalize may leave watches registered; a pure watch hit must not look
+    // like taker mempool activity while cancel_submitted is in flight.
+    if summary.is_pure_watch_hit() {
+        return preserve_state(&current, REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED);
+    }
     if let Some(taker) = apply_coinset_taker_dispatch_if_present(summary, dexie_status, &current) {
         return taker;
     }
@@ -128,23 +133,24 @@ fn cancel_submitted_status_fallback_transition(
     now: DateTime<Utc>,
     chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
+    if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids)
+        && matches!(dexie_status, None | Some(DEXIE_STATUS_OPEN))
+    {
+        // Dexie open or Coinset/splash (no status): cancel never confirmed → retry.
+        return ReconcileTransition::new(
+            ReconcileState::Lifecycle(OfferLifecycleState::Open),
+            REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+            SIGNAL_SOURCE_NONE,
+            None,
+            TAKER_NONE,
+            TAKER_NONE,
+        );
+    }
     match dexie_status {
         None if summary.has_coinset_activity() => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
         None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
-        Some(DEXIE_STATUS_OPEN)
-            if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids) =>
-        {
-            ReconcileTransition::new(
-                ReconcileState::Lifecycle(OfferLifecycleState::Open),
-                REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
-                SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
-                None,
-                TAKER_NONE,
-                TAKER_NONE,
-            )
-        }
         Some(status) => transition_from_dexie_status(status, ReconcileState::CancelSubmitted),
     }
 }

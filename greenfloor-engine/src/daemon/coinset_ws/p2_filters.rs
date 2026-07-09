@@ -8,7 +8,7 @@ use crate::coinset::market_inventory_p2s;
 use crate::config::{
     load_markets_config_with_overlay, lookup_asset_id_from_ticker, operator_ticker_index_from_paths,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::offer::assets::normalize_asset_id;
 
 /// Process-wide inventory p2 set plus reverse map for freshness invalidation.
@@ -36,10 +36,11 @@ impl InventoryP2Index {
         for market in markets.markets.iter().filter(|m| m.enabled) {
             let receive = market.receive_address.trim();
             if receive.is_empty() {
-                return Err(SignerError::Other(format!(
-                    "market {} missing receive_address for coinset ws p2 filters",
-                    market.market_id
-                )));
+                tracing::warn!(
+                    market_id = %market.market_id,
+                    "skipping market for coinset ws p2 filters: missing receive_address"
+                );
+                continue;
             }
             let base = market.base_asset.trim();
             let base_asset_id = if base.is_empty()
@@ -52,10 +53,12 @@ impl InventoryP2Index {
             } else if let Some(resolved) = lookup_asset_id_from_ticker(&ticker_index, base)? {
                 Some(normalize_asset_id(&resolved)?)
             } else {
-                return Err(SignerError::Other(format!(
-                    "market {} base_asset `{base}` could not be resolved to a CAT asset id for ws p2 filters",
-                    market.market_id
-                )));
+                tracing::warn!(
+                    market_id = %market.market_id,
+                    base_asset = %base,
+                    "skipping market for coinset ws p2 filters: base_asset could not be resolved"
+                );
+                continue;
             };
             for p2 in market_inventory_p2s(receive, base_asset_id.as_deref())? {
                 markets_by_p2

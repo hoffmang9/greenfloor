@@ -40,7 +40,7 @@ fn add_column_if_missing(
     Ok(())
 }
 
-const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v1";
+const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v2";
 
 /// Apply additive schema migrations after base `CREATE TABLE IF NOT EXISTS` bootstrap.
 ///
@@ -116,6 +116,10 @@ fn run_watch_venue_backfill_once(conn: &Connection) -> SignerResult<()> {
 }
 
 fn backfill_offer_publish_venue(conn: &Connection) -> SignerResult<()> {
+    // Never infer `coinset` from 64-hex ids (Dexie `trade_id` shares that shape).
+    // Leave 64-hex NULL unset (runtime treats non-`dexie` as Coinset-primary).
+    // Label only unambiguous non-64-hex legacy ids as `dexie`.
+    // Do not mass-clear explicit `coinset` — post-time writes are authoritative.
     let mut stmt = conn
         .prepare(
             r"
@@ -140,18 +144,16 @@ fn backfill_offer_publish_venue(conn: &Connection) -> SignerResult<()> {
         let offer_id = row.map_err(|err| {
             SignerError::Other(format!("failed to read publish_venue backfill row: {err}"))
         })?;
-        let venue = if crate::hex::normalize_hex_id(&offer_id).len() == 64 {
-            "coinset"
-        } else {
-            "dexie"
-        };
+        if crate::hex::normalize_hex_id(&offer_id).len() == 64 {
+            continue;
+        }
         conn.execute(
-            "UPDATE offer_state SET publish_venue = ?1 WHERE offer_id = ?2",
-            params![venue, offer_id],
+            "UPDATE offer_state SET publish_venue = 'dexie' WHERE offer_id = ?1",
+            params![offer_id],
         )
         .map_err(|err| {
             SignerError::Other(format!(
-                "failed to backfill publish_venue for {offer_id}: {err}"
+                "failed to backfill publish_venue=dexie for {offer_id}: {err}"
             ))
         })?;
     }
@@ -165,7 +167,7 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
             r"
             SELECT offer_id, market_id, presplit_input_coin_id, fixed_delegated_puzzle_hash
             FROM offer_state
-            WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility', 'cancel_submitted')
+            WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility')
               AND (
                 (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
                 OR (fixed_delegated_puzzle_hash IS NOT NULL AND length(trim(fixed_delegated_puzzle_hash)) > 0)

@@ -206,6 +206,9 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
 
 /// Resolve watched offer transition for venue.
 ///
+/// HTTP reconcile is Dexie-only. Coinset/splash lifecycle is driven by Coinset WS +
+/// local watches — callers must filter those rows out before invoking this.
+///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
@@ -217,8 +220,9 @@ pub async fn resolve_watched_offer_transition_for_venue(
     current_state: &str,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    if target_venue != "dexie" {
-        let transition = unsupported_venue_offer_transition(current_state, target_venue)
+    let venue = target_venue.trim().to_ascii_lowercase();
+    if venue != "dexie" {
+        let transition = unsupported_venue_offer_transition(current_state, &venue)
             .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
         return Ok((transition, None, None));
     }
@@ -266,5 +270,24 @@ mod tests {
         );
         assert!(status.is_none());
         assert!(error.is_some());
+    }
+
+    #[tokio::test]
+    async fn non_dexie_venue_is_unsupported_for_http_reconcile() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let (transition, status, error) = resolve_watched_offer_transition_for_venue(
+            &store,
+            None,
+            "coinset",
+            &"ab".repeat(32),
+            "open",
+            WatchedOfferTransitionEnv::at_now(None),
+        )
+        .await
+        .expect("transition");
+        assert_eq!(transition.new_state.as_str(), "reconcile_unsupported_venue");
+        assert!(status.is_none());
+        assert!(error.is_none());
     }
 }

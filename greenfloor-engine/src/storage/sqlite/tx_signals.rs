@@ -7,7 +7,34 @@ use crate::hex::{canonical_tx_id, extend_tx_id_lookup_candidates, tx_id_lookup_c
 
 use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
 
+/// How to ingest tx ids into `tx_signal_state`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxSignalIngress {
+    /// First-seen or refresh mempool observation only.
+    Mempool,
+    /// Observe (if needed) then mark block-confirmed.
+    Confirmed,
+}
+
 impl SqliteStore {
+    /// Ingest tx ids into `tx_signal_state` (canonical observe / observe+confirm).
+    ///
+    /// `Confirmed` always observes first so a first-seen confirmed frame still seeds a row
+    /// (`confirm_tx_ids` only updates existing rows).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn ingest_tx_signals(&self, tx_ids: &[String], kind: TxSignalIngress) -> SignerResult<u64> {
+        match kind {
+            TxSignalIngress::Mempool => self.observe_mempool_tx_ids(tx_ids),
+            TxSignalIngress::Confirmed => {
+                self.observe_mempool_tx_ids(tx_ids)?;
+                self.confirm_tx_ids(tx_ids)
+            }
+        }
+    }
+
     /// Get tx signal state.
     ///
     /// # Errors

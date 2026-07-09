@@ -8,9 +8,13 @@ use crate::cycle::reconcile::{
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
+use super::cancel_context::chain_confirmed_tx_ids_for_transition;
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 
 /// Resolve watched-offer transition from signals and persist when state changes.
+///
+/// Merges `confirmed_tx_ids` with the tracked cancel tx via
+/// [`chain_confirmed_tx_ids_for_transition`] so WS and Dexie share one promotion path.
 ///
 /// # Errors
 ///
@@ -26,11 +30,13 @@ pub fn apply_watched_offer_signals(
     cancel_submitted: Option<&CancelSubmittedContext>,
     options: &ReconcilePersistOptions<'_>,
 ) -> SignerResult<()> {
+    let chain_confirmed =
+        chain_confirmed_tx_ids_for_transition(store, cancel_submitted, &signals.confirmed_tx_ids)?;
     let transition = resolve_watched_offer_transition_from_signals(
         current_state,
         status,
         signals,
-        &[],
+        &chain_confirmed,
         cancel_submitted,
         Utc::now(),
     )

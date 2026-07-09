@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::coinset::parse_ws_event;
-use crate::daemon::coinset_ws::CoinsetProcessContext;
+use crate::daemon::coinset_ws::CoinsetWsShared;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, COINSET_WS_PAYLOAD_IGNORED, COINSET_WS_PAYLOAD_PARSE_ERROR};
 use crate::storage::SqliteStore;
@@ -10,11 +10,7 @@ use super::dispatch::apply_ws_event;
 
 pub use super::dispatch::run_recovery_poll;
 
-pub fn handle_ws_text(
-    store: &SqliteStore,
-    ctx: &CoinsetProcessContext,
-    raw: &str,
-) -> SignerResult<()> {
+pub fn handle_ws_text(store: &SqliteStore, ctx: &CoinsetWsShared, raw: &str) -> SignerResult<()> {
     let payload: Value = if let Ok(value) = serde_json::from_str(raw) {
         value
     } else {
@@ -70,7 +66,7 @@ mod tests {
     #[test]
     fn handle_ws_text_routes_envelope_transaction() {
         let (_dir, store) = open_store();
-        let ctx = CoinsetProcessContext::empty();
+        let ctx = CoinsetWsShared::empty();
         let tx_id = "ab".repeat(32);
         handle_ws_text(
             &store,
@@ -97,7 +93,7 @@ mod tests {
         let mut markets_by_p2 = std::collections::HashMap::new();
         markets_by_p2.insert(p2.clone(), vec!["m1".to_string()]);
         let index = InventoryP2Index::from_markets_by_p2(markets_by_p2);
-        let ctx = CoinsetProcessContext::new(index, crate::daemon::InventoryFreshnessCache::new());
+        let ctx = CoinsetWsShared::new(index, crate::daemon::InventoryFreshnessCache::new());
         ctx.inventory_freshness
             .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
         handle_ws_text(
@@ -128,7 +124,7 @@ mod tests {
         let mut markets_by_p2 = std::collections::HashMap::new();
         markets_by_p2.insert(p2.clone(), vec!["m1".to_string()]);
         let index = InventoryP2Index::from_markets_by_p2(markets_by_p2);
-        let ctx = CoinsetProcessContext::new(index, crate::daemon::InventoryFreshnessCache::new());
+        let ctx = CoinsetWsShared::new(index, crate::daemon::InventoryFreshnessCache::new());
         ctx.inventory_freshness
             .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
         let offer_id = "ab".repeat(32);
@@ -194,7 +190,7 @@ mod tests {
     #[test]
     fn handle_ws_text_emits_parse_error_for_invalid_json() {
         let (_dir, store) = open_store();
-        let ctx = CoinsetProcessContext::empty();
+        let ctx = CoinsetWsShared::empty();
         handle_ws_text(&store, &ctx, "{not-json").expect("parse error audit");
         let events = store
             .list_recent_audit_events(Some(&[COINSET_WS_PAYLOAD_PARSE_ERROR]), None, 5)
@@ -205,7 +201,7 @@ mod tests {
     #[test]
     fn non_envelope_payload_is_ignored_without_mempool_audit() {
         let (_dir, store) = open_store();
-        let ctx = CoinsetProcessContext::empty();
+        let ctx = CoinsetWsShared::empty();
         let tx_id = "c".repeat(64);
         handle_ws_text(
             &store,

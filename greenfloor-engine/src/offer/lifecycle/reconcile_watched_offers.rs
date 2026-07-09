@@ -81,6 +81,19 @@ pub async fn reconcile_offers_batch(
     };
 
     let rows = store.list_offer_states(market_id, limit)?;
+    // HTTP reconcile is Dexie-only; Coinset/splash rows are driven by WS + watches.
+    let rows: Vec<_> = if venue == "dexie" {
+        rows.into_iter()
+            .filter(|row| {
+                SqliteStore::is_dexie_authoritative_for_offer(
+                    &row.offer_id,
+                    row.publish_venue.as_deref(),
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(&store, &rows)?;
     let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
     let mut items = Vec::with_capacity(rows.len());

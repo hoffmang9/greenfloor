@@ -201,17 +201,8 @@ pub async fn offers_cancel_cli(
     signer_config: SignerConfig,
     operator_network: &str,
 ) -> SignerResult<OffersCancelCliResult> {
-    let venue = target_venue.trim().to_ascii_lowercase();
-    if venue != "dexie" && venue != "coinset" && venue != "splash" {
-        return Err(SignerError::Other(format!(
-            "offer cancel supports coinset|dexie|splash (got {venue})"
-        )));
-    }
-    if request.cancel_open && !request.offer_files.is_empty() {
-        return Err(SignerError::Other(
-            "--cancel-open cannot be combined with --offer-file".to_string(),
-        ));
-    }
+    let venue = normalize_cancel_venue(target_venue)?;
+    validate_cancel_cli_request(request)?;
     let store = SqliteStore::open(db_path)?;
     let requested_offer_ids: Vec<String> = request
         .offer_ids
@@ -224,37 +215,9 @@ pub async fn offers_cancel_cli(
             "provide at least one --offer-id, --offer-file, or pass --cancel-open".to_string(),
         ));
     }
-    let rows = load_rows_for_cancel(&store, &requested_offer_ids, request.cancel_open)?;
-    let mut selections = select_targets_for_cancel(
-        &rows,
-        &requested_offer_ids,
-        request.cancel_open,
-        request.market_id.as_deref(),
-    )?;
-    selections.extend(targets_from_offer_files(
-        &request.offer_files,
-        request.market_id.as_deref(),
-    )?);
-    let partition = partition_defer_in_flight_cancel_targets(
-        &store,
-        &rows,
-        selections,
-        Utc::now(),
-        |selection| selection.target.offer_id(),
-        |selection| selection.target.persists_state(),
-    )?;
-    let mut selections = partition.active;
-    let skipped = partition.skipped;
-    let mut items: Vec<OffersCancelCliItem> = skipped
-        .iter()
-        .map(|selection| OffersCancelCliItem {
-            offer_id: selection.target.offer_id().to_string(),
-            market_id: selection.target.normalized_market_id(),
-            state: selection.state.clone(),
-            result: cancel_submit_in_flight_skip_result(),
-        })
-        .collect();
-    let skipped_count = crate::metrics::metric_collection_len_to_u64(skipped.len());
+    let (mut selections, skipped_items, skipped_count) =
+        collect_cancel_cli_selections(&store, request, &requested_offer_ids)?;
+    let mut items = skipped_items;
     let targets: Vec<CancelOfferTarget> = selections
         .iter()
         .map(|selection| selection.target.clone())
@@ -286,6 +249,7 @@ pub async fn offers_cancel_cli(
                 "success": outcome.success,
                 "operation_id": outcome.operation_id,
                 "error": outcome.error,
+                "warning": outcome.warning,
             }),
         });
     }
@@ -299,6 +263,63 @@ pub async fn offers_cancel_cli(
         failed_count: failures,
         items,
     })
+}
+
+fn normalize_cancel_venue(target_venue: &str) -> SignerResult<String> {
+    let venue = target_venue.trim().to_ascii_lowercase();
+    if venue != "dexie" && venue != "coinset" && venue != "splash" {
+        return Err(SignerError::Other(format!(
+            "offer cancel supports coinset|dexie|splash (got {venue})"
+        )));
+    }
+    Ok(venue)
+}
+
+fn validate_cancel_cli_request(request: &OffersCancelCliRequest) -> SignerResult<()> {
+    if request.cancel_open && !request.offer_files.is_empty() {
+        return Err(SignerError::Other(
+            "--cancel-open cannot be combined with --offer-file".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_cancel_cli_selections(
+    store: &SqliteStore,
+    request: &OffersCancelCliRequest,
+    requested_offer_ids: &[String],
+) -> SignerResult<(Vec<CancelCliSelection>, Vec<OffersCancelCliItem>, u64)> {
+    let rows = load_rows_for_cancel(store, requested_offer_ids, request.cancel_open)?;
+    let mut selections = select_targets_for_cancel(
+        &rows,
+        requested_offer_ids,
+        request.cancel_open,
+        request.market_id.as_deref(),
+    )?;
+    selections.extend(targets_from_offer_files(
+        &request.offer_files,
+        request.market_id.as_deref(),
+    )?);
+    let partition = partition_defer_in_flight_cancel_targets(
+        store,
+        &rows,
+        selections,
+        Utc::now(),
+        |selection| selection.target.offer_id(),
+        |selection| selection.target.persists_state(),
+    )?;
+    let skipped_count = crate::metrics::metric_collection_len_to_u64(partition.skipped.len());
+    let skipped_items = partition
+        .skipped
+        .iter()
+        .map(|selection| OffersCancelCliItem {
+            offer_id: selection.target.offer_id().to_string(),
+            market_id: selection.target.normalized_market_id(),
+            state: selection.state.clone(),
+            result: cancel_submit_in_flight_skip_result(),
+        })
+        .collect();
+    Ok((partition.active, skipped_items, skipped_count))
 }
 
 #[cfg(test)]

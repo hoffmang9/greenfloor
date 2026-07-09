@@ -89,13 +89,19 @@ async fn execute_on_chain_cancellations(
     for outcome in outcomes {
         if outcome.success {
             cancel_executed += 1;
-            items.push(json!({
+            let mut item = json!({
                 "offer_id": outcome.offer_id,
                 "status": ReconcileState::CancelSubmitted.as_str(),
                 "reason": "cancel_submitted_on_strong_unstable_move",
                 "operation_id": outcome.operation_id,
                 "attempts": 1,
-            }));
+            });
+            if !outcome.warning.is_empty() {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.insert("warning".to_string(), json!(outcome.warning));
+                }
+            }
+            items.push(item);
         } else {
             let error = if outcome.error.is_empty() {
                 "cancel_failed"

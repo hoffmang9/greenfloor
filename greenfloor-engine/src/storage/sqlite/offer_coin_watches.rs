@@ -110,6 +110,86 @@ impl SqliteStore {
         })
     }
 
+    /// Insert missing coin/p2 watches without clearing existing rows (`INSERT OR IGNORE`).
+    ///
+    /// Used to heal pre-upgrade Dexie offers that never received watch backfill.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` writes fail.
+    pub fn ensure_offer_coin_watches(
+        &self,
+        offer_id: &str,
+        market_id: &str,
+        coin_ids: &[String],
+        p2s: &[String],
+    ) -> SignerResult<()> {
+        let clean_offer = offer_id.trim();
+        let clean_market = market_id.trim();
+        if clean_offer.is_empty() || clean_market.is_empty() {
+            return Err(SignerError::Other(
+                "offer_id and market_id are required for offer_coin_watches".to_string(),
+            ));
+        }
+        let now = utcnow_iso();
+        for coin_id in coin_ids {
+            let normalized = normalize_hex_id(coin_id);
+            if normalized.len() != 64 {
+                continue;
+            }
+            self.conn
+                .execute(
+                    r"
+                    INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+                    VALUES (?1, ?2, ?3, 'coin', ?4)
+                    ",
+                    params![normalized, clean_offer, clean_market, now],
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("offer_coin_watches ensure coin: {err}"))
+                })?;
+        }
+        for p2 in p2s {
+            let normalized = normalize_hex_id(p2);
+            if normalized.len() != 64 {
+                continue;
+            }
+            self.conn
+                .execute(
+                    r"
+                    INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+                    VALUES (?1, ?2, ?3, 'p2', ?4)
+                    ",
+                    params![normalized, clean_offer, clean_market, now],
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("offer_coin_watches ensure p2: {err}"))
+                })?;
+        }
+        Ok(())
+    }
+
+    /// True when the offer has at least one durable coin or p2 watch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn offer_has_coin_watches(&self, offer_id: &str) -> SignerResult<bool> {
+        let clean = offer_id.trim();
+        if clean.is_empty() {
+            return Ok(false);
+        }
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM offer_coin_watches WHERE offer_id = ?1",
+                params![clean],
+                |row| row.get(0),
+            )
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches count: {err}")))?;
+        Ok(count > 0)
+    }
+
     /// Replace watches without opening a transaction (caller must hold one).
     pub(crate) fn replace_offer_coin_watches_no_txn(
         &self,
@@ -119,6 +199,47 @@ impl SqliteStore {
         p2s: &[String],
     ) -> SignerResult<()> {
         replace_offer_coin_watches_on_conn(&self.conn, offer_id, market_id, coin_ids, p2s)
+    }
+
+    /// List coin and p2 watches for one offer (post-time set for cancel rollback).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_offer_coin_watches_for_offer(
+        &self,
+        offer_id: &str,
+    ) -> SignerResult<(Vec<String>, Vec<String>)> {
+        let clean_offer = offer_id.trim();
+        if clean_offer.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT coin_id, kind FROM offer_coin_watches WHERE offer_id = ?1 ORDER BY kind, coin_id",
+            )
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches list prepare: {err}")))?;
+        let rows = stmt
+            .query_map(params![clean_offer], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches list query: {err}")))?;
+        let mut coins = Vec::new();
+        let mut p2s = Vec::new();
+        for row in rows {
+            let (raw_id, kind) = row
+                .map_err(|err| SignerError::Other(format!("offer_coin_watches list row: {err}")))?;
+            let normalized = normalize_hex_id(&raw_id);
+            if normalized.len() != 64 {
+                continue;
+            }
+            match kind.as_str() {
+                "p2" => p2s.push(normalized),
+                _ => coins.push(normalized),
+            }
+        }
+        Ok((coins, p2s))
     }
 
     /// Clear watches for one offer (terminal lifecycle / cancel submit).
@@ -292,6 +413,11 @@ mod tests {
             .list_offer_ids_for_watched_coin(&coin)
             .expect("offers");
         assert_eq!(offers, vec!["offer1".to_string()]);
+        let (coins, p2s) = store
+            .list_offer_coin_watches_for_offer("offer1")
+            .expect("by offer");
+        assert_eq!(coins, vec![coin.clone()]);
+        assert_eq!(p2s, vec![p2]);
         store.clear_offer_coin_watches("offer1").expect("clear");
         assert!(store
             .list_watched_coin_ids_for_market("m1")
@@ -429,7 +555,7 @@ mod tests {
             store
                 .conn
                 .execute(
-                    "DELETE FROM schema_meta WHERE key = 'watch_venue_backfill_v1'",
+                    "DELETE FROM schema_meta WHERE key IN ('watch_venue_backfill_v1', 'watch_venue_backfill_v2')",
                     [],
                 )
                 .expect("clear schema_meta");
@@ -486,7 +612,7 @@ mod tests {
             store
                 .conn
                 .execute(
-                    "DELETE FROM schema_meta WHERE key = 'watch_venue_backfill_v1'",
+                    "DELETE FROM schema_meta WHERE key IN ('watch_venue_backfill_v1', 'watch_venue_backfill_v2')",
                     [],
                 )
                 .expect("clear schema_meta");

@@ -37,6 +37,7 @@ mod strategy_phase;
 mod strategy_support;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod watch_heal;
 #[cfg(test)]
 pub use coin_ops_phase::harness::CoinOpsPhaseHarness;
 pub mod watchlist;
@@ -55,8 +56,8 @@ pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecutionResult,
 };
 pub use coinset_ws::{
-    resolve_coinset_ws_url_with_p2s, start_coinset_websocket_loop, CoinsetProcessContext,
-    CoinsetWebsocketLoopHandle, InventoryP2Index,
+    resolve_coinset_ws_url_with_p2s, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
+    CoinsetWsShared, InventoryP2Index,
 };
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use cycle_paths::DaemonCyclePaths;

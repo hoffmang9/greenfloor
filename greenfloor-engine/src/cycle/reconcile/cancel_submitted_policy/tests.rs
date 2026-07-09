@@ -5,10 +5,10 @@ use chrono::TimeZone;
 use super::*;
 use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::reconcile::metadata::{
-    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_CANCEL_TX_CHAIN_CONFIRMED,
-    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
+    REASON_CANCEL_SUBMIT_STALE_ORPHAN, REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED,
+    REASON_COINSET_MEMPOOL, REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
     SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBSOCKET,
-    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_COINSET_TX_BLOCK_WEBSOCKET,
+    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE, TAKER_COINSET_TX_BLOCK_WEBSOCKET,
     TAKER_DIAGNOSTIC_CANCEL_TX_CHAIN_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
     TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_NONE,
 };
@@ -468,12 +468,52 @@ fn cancel_submitted_dexie_open_resets_to_open_for_cancel_retry() {
         transition.new_state,
         ReconcileState::Lifecycle(OfferLifecycleState::Open)
     );
-    assert_eq!(transition.reason, REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN);
-    assert_eq!(
-        transition.signal_source,
-        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
-    );
+    assert_eq!(transition.reason, REASON_CANCEL_SUBMIT_STALE_ORPHAN);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_NONE);
     assert_eq!(transition.taker_signal, TAKER_NONE);
+}
+
+#[test]
+fn cancel_submitted_coinset_orphan_resets_to_open_after_grace() {
+    let now = Utc::now();
+    let transition = resolve_cancel_submitted_transition(
+        None,
+        coinset_summary(&[], &[], &[]),
+        &[],
+        &stale_cancel_ctx(now),
+        now,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(
+        transition.new_state,
+        ReconcileState::Lifecycle(OfferLifecycleState::Open)
+    );
+    assert_eq!(transition.reason, REASON_CANCEL_SUBMIT_STALE_ORPHAN);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_NONE);
+    assert_eq!(transition.taker_signal, TAKER_NONE);
+}
+
+#[test]
+fn cancel_submitted_coinset_within_grace_stays_cancel_submitted() {
+    let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some("tx1".to_string()),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(submitted.to_rfc3339()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some(submitted.to_rfc3339()),
+    };
+    let transition = resolve_cancel_submitted_transition(
+        None,
+        coinset_summary(&[], &[], &[]),
+        &[],
+        &ctx,
+        submitted + chrono::Duration::seconds(60),
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert_eq!(transition.reason, REASON_MISSING_STATUS);
 }
 
 #[test]

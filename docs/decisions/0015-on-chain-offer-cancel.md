@@ -50,16 +50,17 @@ offer-file fetch.
      offer input is already spent.
 
 5. **Optimistic operator state is `cancel_submitted`, not `cancelled`.**
-   Successful cancel **submit** atomically records (before `push_tx`):
-   - `offer_state.state = cancel_submitted`
-   - `cancel_submitted_tx_id` (canonical spend-bundle hash)
-   - `cancel_submitted_at` (submit timestamp; preserved across reconcile preserves)
-   - clears `offer_coin_watches` for the offer
-   - `tx_signal_state` mempool observation for the cancel tx id
+   Tracked cancel submit is prepare → broadcast → finalize:
+   - **Prepare** (before `push_tx`): `state = cancel_submitted`, `cancel_submitted_tx_id`
+     (spend-bundle hash), `cancel_submitted_at`. Watches stay registered.
+   - **Finalize** (after successful `push_tx`): clear `offer_coin_watches`, observe cancel
+     tx in `tx_signal_state`.
+   - **Rollback** (broadcast failure): restore prior lifecycle state only (watches were
+     never cleared; cancel tx was never observed).
 
    Reconcile promotes to `cancelled` when Dexie status is `3`, cancel tx chain-confirms, or
-   other canonical reconcile signals apply. Failed broadcast rolls state back; failed
-   persist before broadcast never submits.
+   other canonical reconcile signals apply. Watch hits while `cancel_submitted` are ignored
+   so the cancel spend cannot look like taker mempool activity during the prepare window.
 
 6. **`cancel_submitted` reconcile and defer policy.**
    - Pure policy: `cycle/reconcile/cancel_submitted_policy/` (`CancelSubmittedContext`,
@@ -84,11 +85,11 @@ offer-file fetch.
      unwedge (`cancel_submitted` → `open`) is blocked even if Dexie still reports open
      (`status = 1`) and the cancel tx has no `tx_block_confirmed_at` in SQLite yet. Chain
      confirmation still promotes to `cancelled` via the cancel-tx signal path.
-   - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) but the
-     cancel tx remains unconfirmed past grace **and** is absent from the confirmed list,
-     reconcile resets `cancel_submitted` → `open`
-     (`REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN`). This avoids an indefinite wedge when Coinset
-     shows mempool-only observation with no chain confirmation.
+   - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) or there
+     is no Dexie status (Coinset/splash), and the cancel tx remains unconfirmed past grace
+     **and** is absent from the confirmed list, reconcile resets `cancel_submitted` →
+     `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`). This avoids an indefinite wedge when
+     Coinset shows mempool-only observation with no chain confirmation.
    - **Preload fallback.** Batch reconcile preloads cancel-submit context for all
      `cancel_submitted` rows. Per-offer reconcile uses the preloaded map when present; on a
      cache miss it falls through to a row + tx-signal lookup so a single offer is not left
@@ -97,11 +98,11 @@ offer-file fetch.
      context cannot be loaded (no row, lookup failure surfaced as absent context), reconcile
      preserves `cancel_submitted` (`REASON_CANCEL_SUBMIT_CONTEXT_MISSING`) rather than
      applying stale-unwedge with empty defaults.
-   - **Persist before broadcast.** Tracked cancels write `cancel_submitted`, clear
-     `offer_coin_watches`, and observe the cancel tx id (spend-bundle hash) **before**
-     `push_tx`. Broadcast failure rolls state back to the prior lifecycle state and
-     restores watches from stored cancel metadata when present. Persist failure before
-     broadcast never submits.
+   - **Persist before broadcast.** Tracked cancels **prepare** `cancel_submitted` (state +
+     cancel tx id) before `push_tx`, keeping watches. On success, **finalize** clears
+     watches and observes the cancel tx. On broadcast failure, roll state back only
+     (no orphan tx signals, no watch restore). Persist failure before broadcast never
+     submits.
 
 7. **CLI and audit naming reflects submit semantics.**
    - `greenfloor-manager offers-cancel` JSON: `submitted_count`, `skipped_count`, and per-item

@@ -17,6 +17,7 @@ use super::dexie_size::{
     build_dexie_size_by_offer_id, dexie_offer_lookup_keys, dexie_status_index,
 };
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
+use super::watch_heal::heal_missing_watches_from_dexie_offers;
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, preload_cancel_submitted_contexts,
     transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
@@ -160,16 +161,38 @@ pub async fn run_reconcile_market_cycle(
         &mut metrics,
     )
     .await?;
-    let augmented_offers = augmented.offers;
-    let dexie_size_by_offer_id =
-        build_dexie_size_by_offer_id(&augmented_offers, &market.base_asset);
-    let dexie_status_by_lookup_key = dexie_status_index(&augmented_offers);
+    // Heal durable watches from Dexie payloads so coin-ops never scrapes JSON.
+    heal_missing_watches_from_dexie_offers(store, market_id, &dexie_offer_ids, &augmented.offers)?;
+    apply_dexie_list_transitions(
+        store,
+        market_id,
+        &dexie_offer_ids,
+        &augmented.offers,
+        &mut state_by_offer_id,
+        &mut metrics,
+    )?;
 
+    Ok(ReconcileMarketCycleResult {
+        dexie_size_by_offer_id: build_dexie_size_by_offer_id(&augmented.offers, &market.base_asset),
+        dexie_status_by_lookup_key: dexie_status_index(&augmented.offers),
+        dexie_fetch_error: None,
+        metrics,
+    })
+}
+
+fn apply_dexie_list_transitions(
+    store: &SqliteStore,
+    market_id: &str,
+    dexie_offer_ids: &HashSet<String>,
+    offers: &[serde_json::Value],
+    state_by_offer_id: &mut HashMap<String, String>,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<()> {
     let offer_rows = store.list_offer_states(Some(market_id), 5000)?;
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(store, &offer_rows)?;
     let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
 
-    for raw in &augmented_offers {
+    for raw in offers {
         let Some(offer_obj) = raw.as_object() else {
             continue;
         };
@@ -191,19 +214,13 @@ pub async fn run_reconcile_market_cycle(
             market_id,
             offer_id: &local_offer_id,
             transition: &transition,
-            metrics: &mut metrics,
-            state_by_offer_id: &mut state_by_offer_id,
+            metrics,
+            state_by_offer_id,
             last_seen_status: status,
             dexie_error: None,
         })?;
     }
-
-    Ok(ReconcileMarketCycleResult {
-        dexie_size_by_offer_id,
-        dexie_status_by_lookup_key,
-        dexie_fetch_error: None,
-        metrics,
-    })
+    Ok(())
 }
 
 #[cfg(test)]

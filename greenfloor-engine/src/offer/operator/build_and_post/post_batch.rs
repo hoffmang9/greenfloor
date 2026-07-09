@@ -6,7 +6,7 @@ use crate::operator_log::{
     audit_row_defer_dual, emit_deferred_dual_traces, offer_log_ref, DeferredDualEmit, LogContext,
     OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION, STRATEGY_OFFER_EXECUTION,
 };
-use crate::storage::{upsert_offer_post_record, OfferPostPersistRecord, SqliteStore};
+use crate::storage::{write_offer_post_record_in_txn, OfferPostPersistRecord, SqliteStore};
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PostIterationOutcome;
@@ -127,7 +127,7 @@ impl<'a> PostBatchEmitter<'a> {
         let mut deferred_traces = Vec::new();
         store.immediate_transaction("post flush", |store| {
             for record in records {
-                upsert_offer_post_record(store, record)?;
+                write_offer_post_record_in_txn(store, record)?;
             }
             for failure in failures {
                 audit_row_defer_dual(&mut deferred_traces, store, self.deferred_failure(failure))?;

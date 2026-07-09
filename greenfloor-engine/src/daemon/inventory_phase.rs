@@ -234,7 +234,7 @@ mod tests {
             empty_cat_ticker_index, CycleProgramConfig, ManagerProgramConfig, MarketsConfig,
         };
         use crate::cycle::MarketCycleResultState;
-        use crate::daemon::coinset_ws::{CoinsetProcessContext, InventoryP2Index};
+        use crate::daemon::coinset_ws::{CoinsetWsShared, InventoryP2Index};
         use crate::daemon::cycle_paths::DaemonCyclePaths;
         use crate::daemon::market_context::DaemonCycleResources;
         use crate::operator_log::INVENTORY_BUCKET_SCAN;
@@ -247,7 +247,7 @@ mod tests {
         let buckets = BTreeMap::from([(10, 2)]);
         let freshness = crate::daemon::InventoryFreshnessCache::new();
         freshness.mark_fresh("m1", buckets.clone());
-        let coinset = CoinsetProcessContext::new(
+        let coinset = CoinsetWsShared::new(
             Arc::new(InventoryP2Index::default()),
             Arc::clone(&freshness),
         );

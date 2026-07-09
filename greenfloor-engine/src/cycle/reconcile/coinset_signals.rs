@@ -32,15 +32,19 @@ impl CoinsetTxSignals {
             has_tx_ids: !self.tx_ids.is_empty(),
             has_confirmed: !self.confirmed_tx_ids.is_empty(),
             has_mempool: !self.mempool_tx_ids.is_empty() || self.watch_hit,
+            watch_hit: self.watch_hit,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(clippy::struct_excessive_bools)] // Compact signal flags for reconcile dispatch.
 pub struct CoinsetSignalSummary {
     pub has_tx_ids: bool,
     pub has_confirmed: bool,
     pub has_mempool: bool,
+    /// True when mempool activity is only a durable coin/p2 watch hit (no concrete tx ids).
+    pub watch_hit: bool,
 }
 
 impl CoinsetSignalSummary {
@@ -54,7 +58,14 @@ impl CoinsetSignalSummary {
             has_tx_ids: !coinset_tx_ids.is_empty(),
             has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
             has_mempool: !coinset_mempool_tx_ids.is_empty(),
+            watch_hit: false,
         }
+    }
+
+    /// Pure watch hit: no concrete tx ids / confirmations (ignore during `cancel_submitted`).
+    #[must_use]
+    pub fn is_pure_watch_hit(self) -> bool {
+        self.watch_hit && !self.has_tx_ids && !self.has_confirmed
     }
 
     /// True when any Coinset activity is known (tx ids and/or mempool/confirmed flags).
@@ -143,6 +154,8 @@ mod tests {
         assert!(!summary.has_tx_ids);
         assert!(summary.has_mempool);
         assert!(!summary.has_confirmed);
+        assert!(summary.watch_hit);
+        assert!(summary.is_pure_watch_hit());
         assert!(summary.has_coinset_activity());
         assert!(signals.tx_ids.is_empty());
         assert!(signals.mempool_tx_ids.is_empty());

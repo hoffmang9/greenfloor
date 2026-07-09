@@ -70,10 +70,10 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     if args.once {
         let use_websocket_capture = use_websocket_capture_for_once(&runtime);
-        let coinset = crate::daemon::CoinsetProcessContext::from_markets(
+        let coinset = crate::daemon::CoinsetWsShared::from_markets_or_empty(
             &args.markets_config,
             testnet_markets_path.as_deref(),
-        )?;
+        );
         let request = DaemonRunOnceRequest {
             program_path: args.program_config,
             markets_path: args.markets_config,
@@ -193,6 +193,6 @@ mod tests {
             request.testnet_markets_path.as_deref(),
             Some(testnet_path.as_path())
         );
-        assert!(request.coinset.inventory_p2s().p2s().is_empty());
+        assert!(request.coinset.p2_index().p2s().is_empty());
     }
 }

@@ -16,7 +16,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll};
-use super::process_context::CoinsetProcessContext;
+use super::process_context::CoinsetWsShared;
 use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub struct CoinsetWebsocketLoopHandle {
@@ -49,7 +49,7 @@ pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coinset: Arc<CoinsetProcessContext>,
+    coinset: Arc<CoinsetWsShared>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -77,7 +77,7 @@ async fn run_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coinset: Arc<CoinsetProcessContext>,
+    coinset: Arc<CoinsetWsShared>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
@@ -88,11 +88,8 @@ async fn run_coinset_websocket_loop(
 
     while !stop.load(Ordering::SeqCst) {
         // Rebuild URL each connect so markets reload can refresh p2 filters.
-        let ws_url = resolve_coinset_ws_url_with_p2s(
-            &program,
-            &coinset_base_url,
-            coinset.inventory_p2s().p2s(),
-        );
+        let ws_url =
+            resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, coinset.p2_index().p2s());
         let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
         LogContext::COINSET.audit_best_effort(
             &store,
@@ -109,7 +106,7 @@ async fn run_coinset_websocket_loop(
                     None,
                 );
                 while !stop.load(Ordering::SeqCst) {
-                    if coinset.take_ws_reconnect_requested() {
+                    if coinset.take_reconnect_requested() {
                         tracing::info!(
                             "coinset websocket reconnect requested after inventory p2 reload"
                         );
@@ -201,7 +198,7 @@ mod tests {
             &store,
             &program,
             &server.url(),
-            &CoinsetProcessContext::empty(),
+            &CoinsetWsShared::empty(),
             OnceCaptureTimings {
                 capture_window: Duration::from_millis(50),
                 reconnect: Duration::from_millis(10),
@@ -233,7 +230,7 @@ mod tests {
             db_path,
             program,
             "https://example.test".to_string(),
-            CoinsetProcessContext::empty(),
+            CoinsetWsShared::empty(),
         );
         handle.stop();
     }
@@ -247,7 +244,7 @@ mod tests {
             db_path,
             sample_program(),
             "https://example.test".to_string(),
-            CoinsetProcessContext::empty(),
+            CoinsetWsShared::empty(),
             stop,
         )
         .await;
@@ -291,7 +288,7 @@ mod tests {
                 db_path,
                 program,
                 coinset_base_url,
-                CoinsetProcessContext::empty(),
+                CoinsetWsShared::empty(),
                 stop_flag,
             ));
         });

@@ -194,6 +194,56 @@ impl SqliteStore {
             .collect())
     }
 
+    /// List `cancel_submitted` offers whose cancel tx id is in `tx_ids`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_offer_states_for_cancel_submitted_tx_ids(
+        &self,
+        tx_ids: &[String],
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        let clean_ids: Vec<String> = tx_ids
+            .iter()
+            .filter_map(|value| crate::hex::canonical_tx_id(value))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        if clean_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders: Vec<String> =
+            (1..=clean_ids.len()).map(|idx| format!("?{idx}")).collect();
+        let query = format!(
+            r"
+            SELECT {OFFER_STATE_LIST_COLUMNS}
+            FROM offer_state
+            WHERE state = 'cancel_submitted'
+              AND cancel_submitted_tx_id IN ({})
+            ",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&query).map_err(|err| {
+            SignerError::Other(format!(
+                "failed to prepare cancel_submitted by tx ids query: {err}"
+            ))
+        })?;
+        let mut rows = stmt
+            .query(rusqlite::params_from_iter(clean_ids.iter()))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query cancel_submitted by tx ids: {err}"))
+            })?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!(
+                "failed to read cancel_submitted by tx ids row: {err}"
+            ))
+        })? {
+            out.push(read_offer_state_list_row(row)?);
+        }
+        Ok(out)
+    }
+
     /// List offer states.
     ///
     /// # Errors

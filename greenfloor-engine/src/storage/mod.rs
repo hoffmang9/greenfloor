@@ -19,7 +19,9 @@ pub use audit_retention::{
 };
 
 pub use crate::offer::types::PresplitCancelFields;
-pub use persist::{persist_offer_post_records, upsert_offer_post_record};
+pub use persist::{
+    persist_offer_post_records, upsert_offer_post_record, write_offer_post_record_in_txn,
+};
 #[doc(hidden)]
 pub mod test_support;
 pub use sqlite::{
@@ -27,7 +29,7 @@ pub use sqlite::{
     CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow, SqliteStore,
-    StoredAlertState, TxSignalStateRow,
+    StoredAlertState, TxSignalIngress, TxSignalStateRow,
 };
 
 #[cfg(test)]

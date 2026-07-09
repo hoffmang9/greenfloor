@@ -26,33 +26,43 @@ never the operator transport.
    per-offer watches; `InventoryP2Index` still drives WS filters and inventory
    freshness. Optional coin-id fields on transaction frames are matched when present.
    WS offer events and watch hits drive lifecycle transitions directly.
-   Cancel submit clears `offer_coin_watches` (cancel spend reuses maker coin/p2
-   keys); promotion to `cancelled` waits on cancel-tx confirmation, not watch hits.
-   Watch/venue backfill from cancel metadata runs once via `schema_meta`.
+   Cancel submit prepares `cancel_submitted` before broadcast (watches kept), then
+   finalizes by clearing watches after successful `push_tx`. Pure watch hits while
+   `cancel_submitted` are ignored by cancel policy. Watch backfill skips
+   `cancel_submitted` rows. Venue backfill never labels 64-hex ids as `coinset`
+   (Dexie `trade_id` shares that shape) and never mass-clears explicit
+   `publish_venue=coinset`; it only sets `dexie` for unambiguous non-64-hex
+   legacy NULL ids (via `schema_meta` `watch_venue_backfill_v2`). Missing watches
+   for Dexie-listed open offers are healed each reconcile cycle
+   (`heal_missing_watches_from_dexie_offers`).
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
-   `publish_venue=dexie`). Schema migration backfills legacy `NULL` venues from
-   offer-id shape once; authority checks no longer infer from id shape at runtime.
-   Coinset/splash offers skip Dexie HTTP entirely. Dexie list matching uses
-   `trade_id` ∪ bech32 `id`.
+   `publish_venue=dexie`). Authority checks use persisted venue only (no id-shape
+   heuristics at runtime). Coinset/splash / NULL venues skip Dexie HTTP entirely.
+   Dexie list matching uses `trade_id` ∪ bech32 `id`.
 5. **Cancel:** local cancel + `POST /push_tx`; watch cancel on WS. Cancel targets
    come from local cancel-eligible offer state (Coinset/splash included). Dexie
    venue offers additionally require Dexie list status open (status index built
-   once in reconcile from `trade_id` ∪ bech32 `id`). Cancel spend construction
-   prefers local offer file or Coinset + stored cancel metadata; Dexie offer-file
-   fetch is optional fallback only. Do not submit spends over WebSocket.
+   once in reconcile from `trade_id` ∪ bech32 `id`). Orphan `cancel_submitted`
+   past grace resets to `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`) for
+   Coinset/splash (no Dexie status) and Dexie-open alike. Cancel spend
+   construction prefers local offer file or Coinset + stored cancel metadata;
+   Dexie offer-file fetch is optional fallback only. Do not submit spends over
+   WebSocket.
 6. **Inventory:** WS p2/coin hits mark inventory stale; skip blind HTTP polls within
    90s max-staleness and reuse last bucket counts when fresh. Durable watches are
-   registered atomically at post and backfilled/healed once on schema open via
-   `schema_meta` (`watch_venue_backfill_v1`); coin-ops only reads the watch table
-   for do-not-touch.
+   registered atomically at post, backfilled once on schema open via
+   `schema_meta` (`watch_venue_backfill_v2`), and healed from Dexie at reconcile
+   when missing. Coin-ops reads watched coin ids from the watch table only.
 
 ## Consequences
 
 - Operators configure `venues.offer_publish.provider` and websocket URL only.
 - Webhook listen addresses and mempool_monitor YAML are removed.
 - Mainnet-first; testnet11 WS hardening deferred.
-- Daemon loop and CLI `--once` both build `InventoryP2Index` from markets before
-  WS capture/subscribe. Config reload rebuilds the index and reconnects WS so
-  p2 filters stay current without a process restart. The `config_reloaded` audit
-  payload includes `inventory_p2_rebuild: ok|failed`; a failed rebuild keeps prior
-  filters.
+- Daemon loop and CLI `--once` both build shared WS state via
+  `CoinsetWsShared::from_markets_or_empty` before WS capture/subscribe. Bad
+  markets are skipped with a warning so a single bad receive/base_asset does not
+  abort the process; a total index build failure starts with empty filters.
+  Config reload rebuilds the index and reconnects WS so p2 filters stay current
+  without a process restart. The `config_reloaded` audit payload includes
+  `inventory_p2_rebuild: ok|failed`; a failed rebuild keeps prior filters.

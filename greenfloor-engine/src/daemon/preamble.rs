@@ -11,7 +11,7 @@ use crate::operator_log::{
 };
 use crate::storage::SqliteStore;
 
-use super::coinset_ws::{capture_coinset_websocket_once, CoinsetProcessContext};
+use super::coinset_ws::{capture_coinset_websocket_once, CoinsetWsShared};
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -25,7 +25,7 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
-    coinset: &CoinsetProcessContext,
+    coinset: &CoinsetWsShared,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
@@ -99,7 +99,7 @@ async fn poll_coinset_mempool_snapshot(
         Some(base_url)
     };
     let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
-    let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
+    let new_count = store.ingest_tx_signals(&tx_ids, crate::storage::TxSignalIngress::Mempool)?;
     LogContext::DAEMON_CYCLE.dual_audit(
         store,
         Level::DEBUG,
@@ -211,7 +211,7 @@ mod tests {
             &sample_mainnet_program(),
             &store,
             "",
-            &CoinsetProcessContext::empty(),
+            &CoinsetWsShared::empty(),
             false,
             false,
         )
@@ -236,7 +236,7 @@ mod tests {
             &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
-            &CoinsetProcessContext::empty(),
+            &CoinsetWsShared::empty(),
             true,
             false,
         )

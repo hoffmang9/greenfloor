@@ -113,6 +113,8 @@ pub struct OfferStateDetailRow {
     pub updated_at: String,
 }
 
+pub use tx_signals::TxSignalIngress;
+
 #[derive(Debug, Clone, Default)]
 pub struct TxSignalStateRow {
     pub mempool_observed_at: Option<String>,

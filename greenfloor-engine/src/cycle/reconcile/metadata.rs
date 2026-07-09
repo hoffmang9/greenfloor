@@ -10,10 +10,11 @@ pub(crate) const SIGNAL_SOURCE_CANCEL_TX_CHAIN: &str = "cancel_tx_chain";
 pub(crate) const REASON_OK: &str = "ok";
 pub(crate) const REASON_POTENTIAL_TAKE_SEEN: &str = "potential_take_seen";
 pub(crate) const REASON_TAKE_CONFIRMED_ON_TX_BLOCK: &str = "take_confirmed_on_tx_block";
-pub(crate) const REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN: &str =
-    "cancel_submitted_stale_dexie_still_open";
+pub(crate) const REASON_CANCEL_SUBMIT_STALE_ORPHAN: &str = "cancel_submitted_stale_orphan";
 pub(crate) const REASON_CANCEL_SUBMIT_CONTEXT_MISSING: &str = "cancel_submitted_context_missing";
 pub(crate) const REASON_CANCEL_TX_CHAIN_CONFIRMED: &str = "cancel_tx_chain_confirmed";
+pub(crate) const REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED: &str =
+    "cancel_submitted_watch_hit_ignored";
 pub(crate) const REASON_MISSING_STATUS: &str = "missing_status";
 pub(crate) const REASON_COINSET_UNAVAILABLE: &str = "coinset_signal_unavailable_for_offer";
 pub(crate) const REASON_COINSET_CONFIRMED: &str = "coinset_tx_block_websocket_confirmed";

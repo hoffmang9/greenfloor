@@ -13,14 +13,14 @@ use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll, ws_error};
 use super::once_timings::OnceCaptureTimings;
-use super::process_context::CoinsetProcessContext;
+use super::process_context::CoinsetWsShared;
 use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub async fn capture_coinset_websocket_once(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    ctx: &CoinsetProcessContext,
+    ctx: &CoinsetWsShared,
 ) -> SignerResult<()> {
     capture_coinset_websocket_once_with_timings(
         store,
@@ -36,12 +36,11 @@ pub async fn capture_coinset_websocket_once_with_timings(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
-    ctx: &CoinsetProcessContext,
+    ctx: &CoinsetWsShared,
     timings: OnceCaptureTimings,
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
-    let ws_url =
-        resolve_coinset_ws_url_with_p2s(program, coinset_base_url, ctx.inventory_p2s().p2s());
+    let ws_url = resolve_coinset_ws_url_with_p2s(program, coinset_base_url, ctx.p2_index().p2s());
     LogContext::COINSET.audit(
         store,
         COINSET_WS_ONCE_STARTED,

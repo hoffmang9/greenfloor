@@ -5,7 +5,7 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Value};
 use tracing::Level;
 
-use crate::daemon::coinset_ws::{CoinsetProcessContext, InventoryP2Index};
+use crate::daemon::coinset_ws::{CoinsetWsShared, InventoryP2Index};
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, CONFIG_RELOADED};
 use crate::storage::SqliteStore;
@@ -119,15 +119,15 @@ pub fn record_config_reloaded(
 }
 
 fn refresh_inventory_p2s_after_reload(
-    coinset: &CoinsetProcessContext,
+    coinset: &CoinsetWsShared,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
 ) -> InventoryP2RebuildStatus {
     match InventoryP2Index::from_markets(markets_path, testnet_markets_path) {
         Ok(index) => {
             let p2_count = index.p2s().len();
-            coinset.replace_inventory_p2s(index);
-            coinset.request_ws_reconnect();
+            coinset.replace_p2_index(index);
+            coinset.request_reconnect();
             tracing::info!(
                 p2_count,
                 markets_path = %markets_path.display(),
@@ -154,7 +154,7 @@ fn refresh_inventory_p2s_after_reload(
 pub fn handle_reload_marker_if_present(
     state_dir: &Path,
     db_path: &Path,
-    coinset: &Arc<CoinsetProcessContext>,
+    coinset: &Arc<CoinsetWsShared>,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
 ) {
@@ -296,7 +296,7 @@ mod tests {
     }
 
     fn call_reload(state_dir: &Path, db_path: &Path, markets_path: &Path) {
-        let coinset = CoinsetProcessContext::empty();
+        let coinset = CoinsetWsShared::empty();
         handle_reload_marker_if_present(state_dir, db_path, &coinset, markets_path, None);
     }
 
@@ -396,12 +396,12 @@ mod tests {
     fn handle_reload_marker_keeps_prior_index_when_rebuild_fails() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
-        let coinset = CoinsetProcessContext::empty();
+        let coinset = CoinsetWsShared::empty();
         let p2 = "ab".repeat(32);
         let mut markets_by_p2 = std::collections::HashMap::new();
         markets_by_p2.insert(p2.clone(), vec!["m1".to_string()]);
-        coinset.replace_inventory_p2s(InventoryP2Index::from_markets_by_p2(markets_by_p2));
-        assert_eq!(coinset.inventory_p2s().p2s(), std::slice::from_ref(&p2));
+        coinset.replace_p2_index(InventoryP2Index::from_markets_by_p2(markets_by_p2));
+        assert_eq!(coinset.p2_index().p2s(), std::slice::from_ref(&p2));
 
         std::fs::write(
             reload_marker_path(dir.path()),
@@ -416,8 +416,8 @@ mod tests {
             None,
         );
         assert!(!reload_marker_present(dir.path()));
-        assert_eq!(coinset.inventory_p2s().p2s(), std::slice::from_ref(&p2));
-        assert!(!coinset.take_ws_reconnect_requested());
+        assert_eq!(coinset.p2_index().p2s(), std::slice::from_ref(&p2));
+        assert!(!coinset.take_reconnect_requested());
         let store = SqliteStore::open(&db_path).expect("open");
         let events = store
             .list_recent_audit_events(Some(&[CONFIG_RELOADED]), None, 1)
@@ -437,8 +437,8 @@ mod tests {
         let db_path = dir.path().join("greenfloor.sqlite");
         let markets_path = dir.path().join("markets.yaml");
         write_xch_markets(&markets_path);
-        let coinset = CoinsetProcessContext::empty();
-        assert!(coinset.inventory_p2s().p2s().is_empty());
+        let coinset = CoinsetWsShared::empty();
+        assert!(coinset.p2_index().p2s().is_empty());
 
         std::fs::write(
             reload_marker_path(dir.path()),
@@ -448,11 +448,8 @@ mod tests {
         handle_reload_marker_if_present(dir.path(), &db_path, &coinset, &markets_path, None);
 
         let expected = expected_receive_p2();
-        assert_eq!(
-            coinset.inventory_p2s().p2s(),
-            std::slice::from_ref(&expected)
-        );
-        assert!(coinset.take_ws_reconnect_requested());
+        assert_eq!(coinset.p2_index().p2s(), std::slice::from_ref(&expected));
+        assert!(coinset.take_reconnect_requested());
         assert!(!reload_marker_present(dir.path()));
         let store = SqliteStore::open(&db_path).expect("open");
         let events = store

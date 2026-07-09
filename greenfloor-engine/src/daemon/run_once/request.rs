@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::daemon::coinset_ws::CoinsetProcessContext;
+use crate::daemon::coinset_ws::CoinsetWsShared;
 
 #[cfg(test)]
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
@@ -47,32 +47,33 @@ pub struct DaemonRunOnceRequest {
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,
     #[serde(skip, default = "default_coinset_process_context")]
-    pub coinset: Arc<CoinsetProcessContext>,
+    pub coinset: Arc<CoinsetWsShared>,
 }
 
 fn default_poll_coinset_mempool() -> bool {
     true
 }
 
-fn default_coinset_process_context() -> Arc<CoinsetProcessContext> {
-    CoinsetProcessContext::empty()
+fn default_coinset_process_context() -> Arc<CoinsetWsShared> {
+    CoinsetWsShared::empty()
 }
 
 impl DaemonRunOnceRequest {
     /// From json value.
     ///
-    /// Builds `coinset` from markets paths (same contract as CLI `--once` / daemon loop).
+    /// Builds `coinset` via [`CoinsetWsShared::from_markets_or_empty`] (same contract as
+    /// CLI `--once` / daemon loop).
     ///
     /// # Errors
     ///
-    /// Returns an error if JSON parse fails or inventory p2s cannot be derived from markets.
+    /// Returns an error if JSON parse fails.
     pub fn from_json_value(value: Value) -> crate::error::SignerResult<Self> {
         let mut request: Self = serde_json::from_value(value)
             .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-        request.coinset = CoinsetProcessContext::from_markets(
+        request.coinset = CoinsetWsShared::from_markets_or_empty(
             &request.markets_path,
             request.testnet_markets_path.as_deref(),
-        )?;
+        );
         Ok(request)
     }
 }

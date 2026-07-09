@@ -8,7 +8,7 @@ use crate::config::{
 use crate::error::SignerResult;
 use crate::storage::CycleWriteStore;
 
-use super::coinset_ws::CoinsetProcessContext;
+use super::coinset_ws::CoinsetWsShared;
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
@@ -24,7 +24,7 @@ pub struct DaemonCycleResources {
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
     /// Process-scoped Coinset WS inventory filters + freshness.
-    pub coinset: Arc<CoinsetProcessContext>,
+    pub coinset: Arc<CoinsetWsShared>,
     pub ticker_index: CatTickerIndex,
 }
 
@@ -68,7 +68,7 @@ impl DaemonCycleResources {
         network: String,
         dexie: DexieClient,
         paths: DaemonCyclePaths,
-        coinset: Arc<CoinsetProcessContext>,
+        coinset: Arc<CoinsetWsShared>,
         ticker_index: CatTickerIndex,
     ) -> Self {
         Self {
@@ -216,7 +216,7 @@ mod tests {
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            CoinsetProcessContext::empty(),
+            CoinsetWsShared::empty(),
             empty_cat_ticker_index(),
         )
     }
@@ -290,7 +290,7 @@ mod tests {
             allowed_key_ids: Vec::new(),
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
-            coinset: CoinsetProcessContext::new(
+            coinset: CoinsetWsShared::new(
                 Arc::new(InventoryP2Index::default()),
                 Arc::clone(&freshness),
             ),
@@ -308,7 +308,7 @@ mod tests {
             "freshness Arc must be preserved"
         );
         assert!(
-            resources.coinset.inventory_p2s().p2s().is_empty(),
+            resources.coinset.p2_index().p2s().is_empty(),
             "empty request index must stay empty"
         );
         assert!(!resources

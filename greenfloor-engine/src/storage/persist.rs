@@ -2,7 +2,12 @@ use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 
-fn write_offer_post_record(
+/// Write one offer post record without opening a transaction (caller must hold one).
+///
+/// # Errors
+///
+/// Returns an error if state or watch writes fail.
+pub fn write_offer_post_record_in_txn(
     store: &SqliteStore,
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
@@ -41,7 +46,7 @@ pub fn upsert_offer_post_record(
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
     store.unchecked_transaction_scope("offer_post_record", |store| {
-        write_offer_post_record(store, record)
+        write_offer_post_record_in_txn(store, record)
     })
 }
 
@@ -62,7 +67,7 @@ pub fn persist_offer_post_records(
     }
     store.unchecked_transaction_scope("offer_post_records", |store| {
         for record in records {
-            write_offer_post_record(store, record)?;
+            write_offer_post_record_in_txn(store, record)?;
         }
         Ok(())
     })

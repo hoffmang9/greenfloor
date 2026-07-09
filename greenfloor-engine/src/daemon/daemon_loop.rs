@@ -8,7 +8,7 @@ use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::resolve_state_db_path;
 
-use super::coinset_ws::{start_coinset_websocket_loop, CoinsetProcessContext};
+use super::coinset_ws::{start_coinset_websocket_loop, CoinsetWsShared};
 use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, DaemonProgramRuntime};
@@ -65,7 +65,7 @@ fn loop_should_continue(
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
-    coinset: Arc<CoinsetProcessContext>,
+    coinset: Arc<CoinsetWsShared>,
     test_controls: DaemonCycleTestControls,
 ) -> SignerResult<i32> {
     let once_request = DaemonRunOnceRequest {
@@ -97,10 +97,10 @@ async fn run_daemon_loop_inner(
 
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
-    let coinset = CoinsetProcessContext::from_markets(
+    let coinset = CoinsetWsShared::from_markets_or_empty(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
-    )?;
+    );
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,
