@@ -12,11 +12,15 @@ use crate::storage::{OfferStateListRow, TxSignalStateRow};
 use super::builders::{
     cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status,
 };
-use super::coinset_signals::CoinsetSignalSummary;
+use super::coinset_signals::{
+    cancel_submit_taker_signals, CancelSubmitNonAttributable, CoinsetSignalSummary,
+    CoinsetTxSignals,
+};
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
-    REASON_CANCEL_SUBMIT_STALE_ORPHAN, REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
-    REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS, SIGNAL_SOURCE_NONE, TAKER_NONE,
+    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+    REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
+    SIGNAL_SOURCE_NONE, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
@@ -97,7 +101,7 @@ pub(crate) fn allowed_cancel_target_offer_ids(
 /// Resolve reconcile transition for an offer already in `cancel_submitted`.
 pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
-    summary: CoinsetSignalSummary,
+    signals: &CoinsetTxSignals,
     chain_confirmed_tx_ids: &[String],
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
@@ -109,11 +113,17 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    // Watches stay registered through prepare/finalize; a pure watch hit must not
-    // look like taker mempool activity while cancel_submitted is in flight.
-    if summary.is_pure_watch_hit() {
-        return preserve_state(&current, REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED);
-    }
+    // Strip tracked cancel spend, then ignore non-attributable noise so
+    // promote_cancel_submitted_for_confirmed_txs stays eligible — but only
+    // within orphan grace. Past grace, fall through so stale unwedge can run
+    // (ADR 0015: mempool-only cancel observation must not wedge forever).
+    let summary = match cancel_submit_taker_signals(signals, ctx.cancel_tx_id.as_deref()) {
+        Err(kind) if cancel_submit_within_grace(ctx, now) => {
+            return preserve_state(&current, non_attributable_reason(kind));
+        }
+        Err(_) => CoinsetSignalSummary::default(),
+        Ok(summary) => summary,
+    };
     if let Some(taker) = apply_coinset_taker_dispatch_if_present(summary, dexie_status, &current) {
         return taker;
     }
@@ -124,6 +134,15 @@ pub(crate) fn resolve_cancel_submitted_transition(
         now,
         chain_confirmed_tx_ids,
     )
+}
+
+fn non_attributable_reason(kind: CancelSubmitNonAttributable) -> &'static str {
+    match kind {
+        CancelSubmitNonAttributable::WatchHit => REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
+        CancelSubmitNonAttributable::CancelTxMempool => {
+            REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED
+        }
+    }
 }
 
 fn cancel_submitted_status_fallback_transition(

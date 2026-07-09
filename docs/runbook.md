@@ -197,7 +197,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `error: "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"` means Coinset endpoint is reachable but currently not returning usable fee advice.
   - `coinset_fee_lookup.coinset_base_url` + `coinset_fee_lookup.coinset_network` report exactly which endpoint/network pair was validated.
 - **Websocket signal ingestion issues:** inspect daemon audit events `coinset_ws_*` (`coinset_ws_connecting`, `coinset_ws_connected`, `coinset_ws_disconnected`, `coinset_ws_recovery_poll*`) and validate `chain_signals.tx_block_trigger.websocket_url` + network endpoint routing. Confirm WS URL includes required `events` / `tx_status` / market `p2` filters (operator query strings are replaced). After markets YAML reload, expect inventory p2 rebuild + WS reconnect without a process restart.
-- **Missing mempool_observed after post:** confirm `offer_coin_watches` were seeded at post (invalid coin/p2 keys fail closed) and that hits arrive on **transaction** frames; offer-frame `p2s` do not drive watches or inventory stale.
+- **Missing mempool_observed after post:** confirm `offer_coin_watches` were seeded at post (invalid coin/p2 keys fail closed) and that hits arrive on **transaction** frames; offer-frame `pending` / `p2s` do not drive `mempool_observed` or inventory stale.
 - **Cancel policy not triggering:** verify market `quote_asset_type` is `unstable`, `pricing.cancel_policy_stable_vs_unstable: true`, and compare `move_bps` vs `threshold_bps` in `offer_cancel_policy`.
 
 ## 6) Runtime Controls

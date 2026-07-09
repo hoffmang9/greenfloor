@@ -16,6 +16,7 @@ use crate::storage::SqliteStore;
 
 use super::dexie_size::offer_matches_local_id;
 use super::reconcile_transition::ReconcileMarketCycleMetrics;
+use crate::storage::OfferStateListRow;
 
 /// Per-market watch reconcile plan from one `offer_state` scan.
 #[derive(Debug, Clone, Default)]
@@ -33,7 +34,9 @@ impl MarketWatchPlan {
     }
 }
 
-/// One scan: heal from cancel metadata, classify Dexie authoritative vs heal-only.
+/// One scan: heal from cancel metadata, classify Dexie roles, and collect
+/// `cancel_submitted` rows for reconcile orphan policy (Dexie HTTP never drives
+/// that state).
 ///
 /// # Errors
 ///
@@ -41,18 +44,23 @@ impl MarketWatchPlan {
 pub fn classify_and_heal_local(
     store: &SqliteStore,
     market_id: &str,
-) -> SignerResult<MarketWatchPlan> {
+) -> SignerResult<(MarketWatchPlan, Vec<OfferStateListRow>)> {
     let clean_market = market_id.trim();
     if clean_market.is_empty() {
-        return Ok(MarketWatchPlan::default());
+        return Ok((MarketWatchPlan::default(), Vec::new()));
     }
     let rows = store.list_offer_states(Some(clean_market), 5000)?;
     let mut plan = MarketWatchPlan::default();
+    let mut cancel_submitted_rows: Vec<OfferStateListRow> = Vec::new();
     for row in rows {
         let Ok(state) = ReconcileState::parse(&row.state) else {
             continue;
         };
-        if !state.is_watched_for_reconcile() || matches!(state, ReconcileState::CancelSubmitted) {
+        if matches!(state, ReconcileState::CancelSubmitted) {
+            cancel_submitted_rows.push(row);
+            continue;
+        }
+        if !state.is_watched_for_reconcile() {
             continue;
         }
         let venue = row
@@ -107,7 +115,7 @@ pub fn classify_and_heal_local(
             plan.heal_only.insert(row.offer_id);
         }
     }
-    Ok(plan)
+    Ok((plan, cancel_submitted_rows))
 }
 
 /// Maker coin ids + on-chain p2s for durable watch heal from a Dexie payload.
@@ -256,7 +264,7 @@ mod tests {
                 },
             )
             .expect("upsert");
-        let plan = classify_and_heal_local(&store, "m1").expect("plan");
+        let (plan, _) = classify_and_heal_local(&store, "m1").expect("plan");
         assert!(plan.authoritative.is_empty());
         assert!(plan.heal_only.is_empty());
         assert!(store.offer_has_coin_watches(&offer_id).expect("healed"));
@@ -290,7 +298,7 @@ mod tests {
                 },
             )
             .expect("upsert");
-        let plan = classify_and_heal_local(&store, "m1").expect("plan");
+        let (plan, _) = classify_and_heal_local(&store, "m1").expect("plan");
         assert!(plan.authoritative.is_empty());
         assert!(plan.heal_only.is_empty());
     }
@@ -313,7 +321,7 @@ mod tests {
                 },
             )
             .expect("upsert");
-        let plan = classify_and_heal_local(&store, "m1").expect("plan");
+        let (plan, _) = classify_and_heal_local(&store, "m1").expect("plan");
         assert!(plan.authoritative.is_empty());
         assert_eq!(plan.heal_only, HashSet::from([offer_id]));
     }
@@ -332,5 +340,68 @@ mod tests {
     fn maker_p2s_present_false_without_offer_file() {
         let payload = serde_json::json!({"id": "ab".repeat(32), "coin_id": "cd".repeat(32)});
         assert!(!maker_p2s_present(&payload));
+    }
+
+    #[test]
+    fn classify_past_grace_cancel_submitted_resets_to_open() {
+        use crate::offer::lifecycle::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        let submitted = (chrono::Utc::now() - chrono::Duration::seconds(600)).to_rfc3339();
+        store
+            .prepare_offer_cancel_submitted_at(&offer_id, "m1", &cancel_tx, None, &submitted)
+            .expect("prepare");
+        let (plan, cancel_rows) = classify_and_heal_local(&store, "m1").expect("plan");
+        assert!(plan.authoritative.is_empty());
+        assert!(plan.heal_only.is_empty());
+        assert_eq!(cancel_rows.len(), 1);
+        apply_cancel_submitted_rows(
+            &store,
+            &cancel_rows,
+            &ReconcilePersistOptions {
+                action: "cancel_submitted_orphan_reconcile",
+                venue: None,
+                dexie_error: None,
+            },
+        )
+        .expect("apply");
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        assert_eq!(rows[0].state, "open");
+    }
+
+    #[test]
+    fn classify_within_grace_preserves_cancel_submitted() {
+        use crate::offer::lifecycle::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("cancel_submitted");
+        let (plan, cancel_rows) = classify_and_heal_local(&store, "m1").expect("plan");
+        assert!(plan.authoritative.is_empty());
+        assert!(plan.heal_only.is_empty());
+        assert_eq!(cancel_rows.len(), 1);
+        apply_cancel_submitted_rows(
+            &store,
+            &cancel_rows,
+            &ReconcilePersistOptions {
+                action: "cancel_submitted_orphan_reconcile",
+                venue: None,
+                dexie_error: None,
+            },
+        )
+        .expect("apply");
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        assert_eq!(rows[0].state, "cancel_submitted");
     }
 }

@@ -15,6 +15,8 @@ pub(crate) const REASON_CANCEL_SUBMIT_CONTEXT_MISSING: &str = "cancel_submitted_
 pub(crate) const REASON_CANCEL_TX_CHAIN_CONFIRMED: &str = "cancel_tx_chain_confirmed";
 pub(crate) const REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED: &str =
     "cancel_submitted_watch_hit_ignored";
+pub(crate) const REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED: &str =
+    "cancel_submitted_cancel_tx_mempool_ignored";
 pub(crate) const REASON_MISSING_STATUS: &str = "missing_status";
 pub(crate) const REASON_COINSET_UNAVAILABLE: &str = "coinset_signal_unavailable_for_offer";
 pub(crate) const REASON_COINSET_CONFIRMED: &str = "coinset_tx_block_websocket_confirmed";

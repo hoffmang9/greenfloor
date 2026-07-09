@@ -184,7 +184,143 @@ mod tests {
         let offer_rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("offer rows");
-        assert_eq!(offer_rows[0].state, "mempool_observed");
+        assert_eq!(
+            offer_rows[0].state, "open",
+            "offer-frame pending seeds tx only; stays open for active-slot counting"
+        );
+        let pending_tx = "cd".repeat(32);
+        let signals = store
+            .get_tx_signal_state(std::slice::from_ref(&pending_tx))
+            .expect("signal");
+        assert!(signals[&pending_tx].mempool_observed_at.is_some());
+    }
+
+    #[test]
+    fn handle_ws_text_offer_confirmed_marks_inventory_stale() {
+        let (_dir, store) = open_store();
+        let ctx = CoinsetWsShared::new(
+            std::sync::Arc::new(InventoryP2Index::default()),
+            crate::daemon::InventoryFreshnessCache::new(),
+        );
+        ctx.inventory_freshness
+            .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        let offer_id = "ab".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        handle_ws_text(
+            &store,
+            &ctx,
+            &json!({
+                "message": {
+                    "type": "offer",
+                    "data": {
+                        "offer_id": offer_id,
+                        "status": "confirmed",
+                        "tx_id": "cd".repeat(32),
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("offer");
+        assert!(
+            ctx.inventory_freshness
+                .needs_refresh("m1", std::time::Duration::from_secs(90)),
+            "offer confirmed must invalidate inventory freshness"
+        );
+    }
+
+    #[test]
+    fn handle_ws_text_maker_watch_hit_marks_inventory_stale_without_inventory_p2() {
+        let (_dir, store) = open_store();
+        let maker_p2 = "ef".repeat(32);
+        // Empty inventory index: shared receive/CAT p2s are not present.
+        let ctx = CoinsetWsShared::new(
+            std::sync::Arc::new(InventoryP2Index::default()),
+            crate::daemon::InventoryFreshnessCache::new(),
+        );
+        ctx.inventory_freshness
+            .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        let offer_id = "ab".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&maker_p2))
+            .expect("watch");
+        handle_ws_text(
+            &store,
+            &ctx,
+            &json!({
+                "message": {
+                    "type": "transaction",
+                    "data": {
+                        "status": "pending",
+                        "ids": ["cd".repeat(32)],
+                        "p2s": [maker_p2]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("tx");
+        assert!(
+            ctx.inventory_freshness
+                .needs_refresh("m1", std::time::Duration::from_secs(90)),
+            "maker watch hit must invalidate inventory even without inventory-index p2"
+        );
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        assert_eq!(rows[0].state, "mempool_observed");
+    }
+
+    #[test]
+    fn handle_ws_text_confirmed_maker_watch_does_not_force_mempool_observed() {
+        let (_dir, store) = open_store();
+        let maker_p2 = "ef".repeat(32);
+        let ctx = CoinsetWsShared::new(
+            std::sync::Arc::new(InventoryP2Index::default()),
+            crate::daemon::InventoryFreshnessCache::new(),
+        );
+        ctx.inventory_freshness
+            .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        let offer_id = "ab".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&maker_p2))
+            .expect("watch");
+        handle_ws_text(
+            &store,
+            &ctx,
+            &json!({
+                "message": {
+                    "type": "transaction",
+                    "data": {
+                        "status": "confirmed",
+                        "ids": ["cd".repeat(32)],
+                        "p2s": [maker_p2]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("tx");
+        assert!(
+            ctx.inventory_freshness
+                .needs_refresh("m1", std::time::Duration::from_secs(90)),
+            "confirmed maker watch must still invalidate inventory"
+        );
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        assert_eq!(
+            rows[0].state, "open",
+            "confirmed tx frames must not apply synthetic watch_hit → mempool_observed"
+        );
     }
 
     #[test]

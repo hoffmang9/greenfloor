@@ -181,12 +181,19 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
   Offer frames carry `offer_id` + `status` (+ optional `tx_id` / `p2s`).
 - Non-envelope / legacy flat payloads are ignored. Mainnet operators should confirm live frames match this envelope.
 - Frame routing (GreenFloor):
-  - **Transaction** frames: record tx signals; inventory `p2` hits mark markets stale (90s
-    freshness gate); durable `offer_coin_watches` hits (maker-specific p2 and/or coin id)
-    drive `mempool_observed` via reconcile. Shared market inventory p2s are not stored on
-    per-offer watches. HTTP enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
-  - **Offer** frames: drive offer lifecycle by `offer_id` / status only. Offer-frame `p2s`
-    must **not** mark inventory stale or apply watch-hit lifecycle.
+  - **Transaction** frames: record tx signals; inventory-index `p2` hits **and** durable
+    maker watch hits mark markets stale (90s freshness gate). Pending-frame durable
+    `offer_coin_watches` hits (maker-specific p2 and/or coin id) drive `mempool_observed`
+    via reconcile; confirmed frames still mark inventory stale but do **not** apply
+    synthetic watch-hit → `mempool_observed` (take confirm stays on offer-frame
+    `confirmed`). Shared market inventory p2s are not stored on per-offer watches. HTTP
+    enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
+  - **Offer** frames: drive offer lifecycle by `offer_id` / status for `confirmed`,
+    `cancelled`, and `expired` only (those also mark the offer's market inventory stale).
+    Offer-frame `pending` / `cancel_pending` seed `tx_signal_state` when `tx_id` is present
+    but do **not** advance to `mempool_observed` (avoids aging live listings out of
+    active-slot counts). Offer-frame `p2s` must **not** mark inventory stale or apply
+    watch-hit lifecycle.
 - HTTP webhooks are out of scope; cancel and other spends use `POST /push_tx`, not the WebSocket.
 
 ### Offers

@@ -17,8 +17,8 @@ use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::reconcile_transition::{apply_reconcile_transition, ReconcileTransitionParams};
 use super::watch_plan::{classify_and_heal_local, fetch_and_ensure_watches};
 use crate::offer::lifecycle::{
-    preload_cancel_submitted_contexts, transition_from_list_offer_payload,
-    WatchedOfferTransitionEnv,
+    apply_cancel_submitted_rows, preload_cancel_submitted_contexts,
+    transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
 };
 
 pub use super::reconcile_transition::ReconcileMarketCycleMetrics;
@@ -42,8 +42,18 @@ pub async fn run_reconcile_market_cycle(
     let market_id = market.market_id.as_str();
     let mut metrics = ReconcileMarketCycleMetrics::default();
 
-    // One scan: local cancel-metadata heal + classify Dexie roles.
-    let plan = classify_and_heal_local(store, market_id)?;
+    // One scan: local cancel-metadata heal + classify Dexie roles; collect
+    // cancel_submitted for orphan unwedge (all venues; Dexie HTTP skips that state).
+    let (plan, cancel_submitted_rows) = classify_and_heal_local(store, market_id)?;
+    apply_cancel_submitted_rows(
+        store,
+        &cancel_submitted_rows,
+        &ReconcilePersistOptions {
+            action: "cancel_submitted_orphan_reconcile",
+            venue: None,
+            dexie_error: None,
+        },
+    )?;
     if !plan.needs_dexie_http() {
         return Ok(ReconcileMarketCycleResult {
             dexie_size_by_offer_id: HashMap::default(),

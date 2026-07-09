@@ -8,7 +8,7 @@ fn open_store() -> (tempfile::TempDir, SqliteStore) {
 }
 
 #[test]
-fn offer_pending_moves_open_to_mempool_observed() {
+fn offer_pending_seeds_tx_without_leaving_open() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);
     let tx_id = "cd".repeat(32);
@@ -28,7 +28,10 @@ fn offer_pending_moves_open_to_mempool_observed() {
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
-    assert_eq!(rows[0].state, "mempool_observed");
+    assert_eq!(
+        rows[0].state, "open",
+        "offer-frame pending must not age the slot out of active counts via mempool_observed"
+    );
     let signals = store
         .get_tx_signal_state(std::slice::from_ref(&tx_id))
         .expect("signal");
@@ -37,7 +40,7 @@ fn offer_pending_moves_open_to_mempool_observed() {
 }
 
 #[test]
-fn offer_pending_without_tx_id_still_moves_open_to_mempool_observed() {
+fn offer_pending_without_tx_id_is_noop_on_open() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);
     store
@@ -56,11 +59,11 @@ fn offer_pending_without_tx_id_still_moves_open_to_mempool_observed() {
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
-    assert_eq!(rows[0].state, "mempool_observed");
+    assert_eq!(rows[0].state, "open");
 }
 
 #[test]
-fn offer_pending_without_tx_id_moves_cancel_submitted_to_mempool_observed() {
+fn offer_pending_with_cancel_tx_id_seeds_without_leaving_cancel_submitted() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);
     let cancel_tx = "cd".repeat(32);
@@ -72,7 +75,7 @@ fn offer_pending_without_tx_id_moves_cancel_submitted_to_mempool_observed() {
         &WsOfferEvent {
             offer_id: offer_id.clone(),
             status: "pending".to_string(),
-            tx_id: None,
+            tx_id: Some(cancel_tx.clone()),
             p2s: Vec::new(),
         },
     )
@@ -80,7 +83,40 @@ fn offer_pending_without_tx_id_moves_cancel_submitted_to_mempool_observed() {
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
-    assert_eq!(rows[0].state, "mempool_observed");
+    assert_eq!(rows[0].state, "cancel_submitted");
+    let signals = store
+        .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
+        .expect("signal");
+    assert!(signals[&cancel_tx].mempool_observed_at.is_some());
+}
+
+#[test]
+fn offer_pending_with_cancel_tx_id_then_confirm_still_promotes() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    let cancel_tx = "cd".repeat(32);
+    store
+        .upsert_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+        .expect("cancel_submitted");
+    apply_ws_offer_event(
+        &store,
+        &WsOfferEvent {
+            offer_id: offer_id.clone(),
+            status: "pending".to_string(),
+            tx_id: Some(cancel_tx.clone()),
+            p2s: Vec::new(),
+        },
+    )
+    .expect("cancel-owned pending");
+    store
+        .ingest_tx_signals(std::slice::from_ref(&cancel_tx), TxSignalIngress::Confirmed)
+        .expect("ingest");
+    promote_cancel_submitted_for_confirmed_txs(&store, std::slice::from_ref(&cancel_tx))
+        .expect("promote");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(rows[0].state, "cancelled");
 }
 
 #[test]

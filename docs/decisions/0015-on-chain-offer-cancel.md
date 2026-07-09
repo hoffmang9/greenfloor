@@ -61,9 +61,12 @@ offer-file fetch.
      never cleared; cancel tx was never observed).
 
    Reconcile promotes to `cancelled` when Dexie status is `3`, cancel tx chain-confirms, or
-   other canonical reconcile signals apply. Terminal persist clears watches. Watch hits
-   while `cancel_submitted` are ignored so the cancel spend cannot look like taker
-   mempool activity.
+   other canonical reconcile signals apply. Terminal persist clears watches. While
+   `cancel_submitted`, non-attributable Coinset noise is stripped/ignored before taker
+   dispatch (pure watch hits and mempool/tx lists that only contain the tracked cancel
+   spend) so cancel-tx confirmation promotion stays eligible and the cancel spend cannot
+   look like taker mempool activity. Offer-frame `pending` does not drive lifecycle
+   (seed-only); see ADR 0019.
 
 6. **`cancel_submitted` reconcile and defer policy.**
    - Pure policy: `cycle/reconcile/cancel_submitted_policy/` (`CancelSubmittedContext`,
@@ -71,10 +74,12 @@ offer-file fetch.
    - SQLite I/O adapter: `offer/lifecycle/cancel_context.rs` (`preload_cancel_submitted_contexts`,
      `cancel_submitted_context_for_offer`, `defer_in_flight_cancel_offer_ids`,
      `partition_defer_in_flight_cancel_targets`).
-   - **Partitioned Dexie vs cancel tx signals.** Reconcile classifies only Dexie-linked tx ids
-     into mempool/confirmed buckets (`CoinsetTxSignals` / `CoinsetSignalSummary`). Tracked
-     cancel tx observation lives in `CancelSubmittedContext` and `chain_confirmed_tx_ids`;
-     cancel mempool/confirm never flows through taker dispatch.
+   - **Partitioned Dexie vs cancel tx signals.** HTTP reconcile classifies only Dexie-linked
+     tx ids into mempool/confirmed buckets (`CoinsetTxSignals` / `CoinsetSignalSummary`).
+     Tracked cancel tx observation lives in `CancelSubmittedContext` and
+     `chain_confirmed_tx_ids`. WS offer frames may still carry the cancel spend id; cancel
+     policy strips that id via `excluding_cancel_tx` / `cancel_submit_taker_signals` before
+     taker dispatch so cancel mempool/confirm never advances lifecycle as a take.
    - Orphan grace (`CANCEL_SUBMIT_TRACKING_GRACE_SECS`, default 5 minutes) anchors on
      `cancel_submitted_at`, not `updated_at`, so reconcile preserve upserts do not extend
      the grace window. When `cancel_submitted_at` is missing (legacy rows before migration),
@@ -91,8 +96,12 @@ offer-file fetch.
    - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) or there
      is no Dexie status (Coinset/splash), and the cancel tx remains unconfirmed past grace
      **and** is absent from the confirmed list, reconcile resets `cancel_submitted` →
-     `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`). This avoids an indefinite wedge when
-     Coinset shows mempool-only observation with no chain confirmation.
+     `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`). Non-attributable Coinset noise (watch
+     hits / cancel-tx-only mempool) preserves only **within** grace; past grace it falls
+     through to this unwedge so mempool-only observation cannot wedge forever. Daemon
+     reconcile applies empty-signal cancel-submitted policy on rows collected by
+     `classify_and_heal_local` (before Dexie HTTP), so all venues unwedge without Dexie
+     lifecycle or a WS confirm frame.
    - **Preload fallback.** Batch reconcile preloads cancel-submit context for all
      `cancel_submitted` rows. Per-offer reconcile uses the preloaded map when present; on a
      cache miss it falls through to a row + tx-signal lookup so a single offer is not left

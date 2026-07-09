@@ -92,11 +92,10 @@ pub fn resolve_watched_offer_transition_from_signals(
     now: DateTime<Utc>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
     let old_state = ReconcileState::parse(current_state)?;
-    let summary = signals.summary();
     Ok(resolve_watched_offer_decision(
         &old_state,
         status,
-        summary,
+        &signals,
         chain_confirmed_tx_ids,
         cancel_submitted,
         now,

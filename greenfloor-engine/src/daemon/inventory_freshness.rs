@@ -1,4 +1,4 @@
-//! Inventory freshness driven by Coinset WS p2 hits.
+//! Inventory freshness driven by Coinset WS activity that changes spendable coins.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -30,12 +30,27 @@ impl InventoryFreshnessCache {
     }
 
     pub fn mark_stale(&self, market_id: &str) {
-        let clean = market_id.trim();
-        if clean.is_empty() {
+        self.mark_stale_markets(std::iter::once(market_id));
+    }
+
+    /// Mark one or more markets stale (idempotent; empty / blank ids ignored).
+    pub fn mark_stale_markets<'a, I>(&self, market_ids: I)
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let cleaned: Vec<String> = market_ids
+            .into_iter()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect();
+        if cleaned.is_empty() {
             return;
         }
         if let Ok(mut guard) = self.inner.lock() {
-            guard.stale.insert(clean.to_string(), true);
+            for id in cleaned {
+                guard.stale.insert(id, true);
+            }
         }
     }
 
@@ -106,6 +121,16 @@ mod tests {
         assert_eq!(cache.cached_buckets("m1"), Some(buckets));
         cache.mark_stale("m1");
         assert!(cache.needs_refresh("m1", Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn mark_stale_markets_marks_all() {
+        let cache = InventoryFreshnessCache::new();
+        cache.mark_fresh("m1", BTreeMap::from([(1, 1)]));
+        cache.mark_fresh("m2", BTreeMap::from([(10, 1)]));
+        cache.mark_stale_markets(["m1", "m2", "", "  "]);
+        assert!(cache.needs_refresh("m1", Duration::from_secs(60)));
+        assert!(cache.needs_refresh("m2", Duration::from_secs(60)));
     }
 
     #[test]

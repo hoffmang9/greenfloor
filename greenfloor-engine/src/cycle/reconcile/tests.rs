@@ -14,8 +14,7 @@ use super::metadata::{
 use super::{
     decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CoinsetSignalSummary, CoinsetTxSignals,
-    CycleOfferTransition, ReconcileState,
+    unsupported_venue_offer_transition, CoinsetTxSignals, CycleOfferTransition, ReconcileState,
 };
 use crate::cycle::reconcile::CancelSubmittedContext;
 
@@ -225,7 +224,7 @@ fn run_dispatch_case(case: &DispatchCase) -> CycleOfferTransition {
     resolve_watched_offer_decision(
         &current,
         case.status,
-        signals.summary(),
+        &signals,
         &chain_confirmed,
         None,
         Utc::now(),
@@ -492,7 +491,7 @@ fn cancel_submitted_preserves_when_cancel_tx_pending() {
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,
         Some(0),
-        CoinsetSignalSummary::default(),
+        &CoinsetTxSignals::default(),
         &[],
         Some(&ctx),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
@@ -507,7 +506,7 @@ fn cancel_submitted_preserves_when_context_missing() {
     let transition = resolve_watched_offer_decision(
         &ReconcileState::CancelSubmitted,
         Some(1),
-        CoinsetSignalSummary::default(),
+        &CoinsetTxSignals::default(),
         &[],
         None,
         Utc.with_ymd_and_hms(2020, 1, 1, 1, 0, 0).unwrap(),

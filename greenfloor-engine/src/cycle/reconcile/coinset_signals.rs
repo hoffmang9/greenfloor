@@ -14,8 +14,6 @@ pub struct CoinsetTxSignals {
     pub mempool_tx_ids: Vec<String>,
     /// Maker coin/p2 watch hit without a concrete spend-bundle id yet.
     pub watch_hit: bool,
-    /// Offer-frame `pending` without a concrete tx id (venue mempool, not a maker watch).
-    pub anonymous_mempool: bool,
 }
 
 impl CoinsetTxSignals {
@@ -28,12 +26,23 @@ impl CoinsetTxSignals {
         }
     }
 
-    /// Offer WS `pending` with no `tx_id` — mempool activity without fabricating a spend-bundle id.
+    /// Drop the tracked cancel spend-bundle id so it cannot look like taker activity.
     #[must_use]
-    pub fn offer_pending() -> Self {
+    pub fn excluding_cancel_tx(&self, cancel_tx_id: Option<&str>) -> Self {
+        let Some(cancel) = cancel_tx_id.and_then(crate::hex::canonical_tx_id) else {
+            return self.clone();
+        };
+        let drop_cancel = |ids: &[String]| -> Vec<String> {
+            ids.iter()
+                .filter(|id| crate::hex::canonical_tx_id(id).as_deref() != Some(cancel.as_str()))
+                .cloned()
+                .collect()
+        };
         Self {
-            anonymous_mempool: true,
-            ..Self::default()
+            tx_ids: drop_cancel(&self.tx_ids),
+            confirmed_tx_ids: drop_cancel(&self.confirmed_tx_ids),
+            mempool_tx_ids: drop_cancel(&self.mempool_tx_ids),
+            watch_hit: self.watch_hit,
         }
     }
 
@@ -42,9 +51,7 @@ impl CoinsetTxSignals {
         CoinsetSignalSummary {
             has_tx_ids: !self.tx_ids.is_empty(),
             has_confirmed: !self.confirmed_tx_ids.is_empty(),
-            has_mempool: !self.mempool_tx_ids.is_empty()
-                || self.watch_hit
-                || self.anonymous_mempool,
+            has_mempool: !self.mempool_tx_ids.is_empty() || self.watch_hit,
             watch_hit: self.watch_hit,
         }
     }
@@ -88,10 +95,43 @@ impl CoinsetSignalSummary {
     }
 }
 
+/// Why a Coinset signal must not leave `cancel_submitted` via taker dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CancelSubmitNonAttributable {
+    WatchHit,
+    CancelTxMempool,
+}
+
+/// Strip tracked cancel spend and classify noise that must preserve `cancel_submitted`.
+///
+/// `Ok(summary)` is safe for taker dispatch; `Err(kind)` keeps cancel-tx promotion eligible.
+pub(crate) fn cancel_submit_taker_signals(
+    signals: &CoinsetTxSignals,
+    cancel_tx_id: Option<&str>,
+) -> Result<CoinsetSignalSummary, CancelSubmitNonAttributable> {
+    let original = signals.summary();
+    if original.is_pure_watch_hit() {
+        return Err(CancelSubmitNonAttributable::WatchHit);
+    }
+    let stripped = signals.excluding_cancel_tx(cancel_tx_id).summary();
+    // Tracked cancel spend in mempool/tx lists only — strip left nothing for taker.
+    if original.has_coinset_activity()
+        && !original.has_confirmed
+        && !stripped.has_coinset_activity()
+    {
+        return Err(CancelSubmitNonAttributable::CancelTxMempool);
+    }
+    Ok(stripped)
+}
+
 /// Map a Coinset WS offer status (+ optional tx id) into reconcile status/signals.
 ///
-/// Returns `None` for statuses that only seed `tx_signal_state` (e.g. `cancel_pending`)
-/// or are unrecognized.
+/// Returns `None` for statuses that only seed `tx_signal_state` (`pending`,
+/// `cancel_pending`) or are unrecognized. Offer-frame `pending` must not drive
+/// `mempool_observed`: that state ages out of active-slot counts after ~3 minutes
+/// while the listing can still be live on Coinset, which would allow duplicate
+/// ladder posts. Take detection stays on durable maker watch hits and `confirmed`
+/// / terminal offer statuses.
 #[must_use]
 pub fn signals_from_ws_offer_status(
     status: &str,
@@ -99,21 +139,6 @@ pub fn signals_from_ws_offer_status(
 ) -> Option<(Option<i64>, CoinsetTxSignals)> {
     let tx = tx_id.map(str::to_string).into_iter().collect::<Vec<_>>();
     match status {
-        // Coinset documents `tx_id` as optional on offer frames. Pending without a
-        // concrete tx is still venue mempool activity — not a maker coin/p2 watch hit.
-        "pending" => {
-            let signals = if tx.is_empty() {
-                CoinsetTxSignals::offer_pending()
-            } else {
-                CoinsetTxSignals {
-                    tx_ids: tx.clone(),
-                    confirmed_tx_ids: Vec::new(),
-                    mempool_tx_ids: tx,
-                    ..Default::default()
-                }
-            };
-            Some((None, signals))
-        }
         "confirmed" => Some((
             Some(DEXIE_STATUS_CONFIRMED),
             CoinsetTxSignals {
@@ -125,6 +150,7 @@ pub fn signals_from_ws_offer_status(
         )),
         "expired" => Some((Some(DEXIE_STATUS_EXPIRED), CoinsetTxSignals::default())),
         "cancelled" => Some((Some(DEXIE_STATUS_CANCELLED), CoinsetTxSignals::default())),
+        // `pending` / `cancel_pending`: seed tx via apply path only (see ws_apply).
         _ => None,
     }
 }
@@ -136,19 +162,9 @@ mod tests {
     #[test]
     fn signals_from_ws_offer_status_matrix() {
         let tx = "ab".repeat(32);
-        let pending = signals_from_ws_offer_status("pending", Some(&tx)).expect("pending");
-        assert_eq!(pending.0, None);
-        assert_eq!(pending.1.mempool_tx_ids, vec![tx.clone()]);
-        assert!(pending.1.summary().has_mempool);
-        assert!(!pending.1.summary().watch_hit);
-
-        let pending_no_tx = signals_from_ws_offer_status("pending", None).expect("pending");
-        assert_eq!(pending_no_tx.0, None);
-        assert!(pending_no_tx.1.mempool_tx_ids.is_empty());
-        assert!(pending_no_tx.1.anonymous_mempool);
-        assert!(pending_no_tx.1.summary().has_mempool);
-        assert!(!pending_no_tx.1.summary().watch_hit);
-        assert!(!pending_no_tx.1.summary().is_pure_watch_hit());
+        // Pending is seed-only (tx_signal_state); must not invent mempool lifecycle.
+        assert!(signals_from_ws_offer_status("pending", Some(&tx)).is_none());
+        assert!(signals_from_ws_offer_status("pending", None).is_none());
 
         let confirmed = signals_from_ws_offer_status("confirmed", Some(&tx)).expect("confirmed");
         assert_eq!(confirmed.0, Some(DEXIE_STATUS_CONFIRMED));
@@ -187,21 +203,52 @@ mod tests {
         assert!(summary.has_coinset_activity());
         assert!(signals.tx_ids.is_empty());
         assert!(signals.mempool_tx_ids.is_empty());
-        assert!(!signals.anonymous_mempool);
         assert!(!CoinsetTxSignals::default().summary().has_mempool);
     }
 
     #[test]
-    fn offer_pending_is_mempool_without_watch_hit() {
-        let signals = CoinsetTxSignals::offer_pending();
-        let summary = signals.summary();
-        assert!(!summary.has_tx_ids);
+    fn excluding_cancel_tx_drops_tracked_id_from_all_lists() {
+        let cancel = "aa".repeat(32);
+        let taker = "bb".repeat(32);
+        let signals = CoinsetTxSignals {
+            tx_ids: vec![cancel.clone(), taker.clone()],
+            confirmed_tx_ids: vec![cancel.clone()],
+            mempool_tx_ids: vec![cancel.clone(), taker.clone()],
+            ..Default::default()
+        };
+        let stripped = signals.excluding_cancel_tx(Some(&cancel));
+        assert_eq!(stripped.tx_ids, vec![taker.clone()]);
+        assert!(stripped.confirmed_tx_ids.is_empty());
+        assert_eq!(stripped.mempool_tx_ids, vec![taker]);
+    }
+
+    #[test]
+    fn cancel_submit_taker_signals_classifies_non_attributable_noise() {
+        assert_eq!(
+            cancel_submit_taker_signals(&CoinsetTxSignals::watch_hit(), None),
+            Err(CancelSubmitNonAttributable::WatchHit)
+        );
+        let cancel = "aa".repeat(32);
+        let cancel_only = CoinsetTxSignals {
+            tx_ids: vec![cancel.clone()],
+            mempool_tx_ids: vec![cancel.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            cancel_submit_taker_signals(&cancel_only, Some(&cancel)),
+            Err(CancelSubmitNonAttributable::CancelTxMempool)
+        );
+        let taker = "bb".repeat(32);
+        let cancel_id = "aa".repeat(32);
+        let with_taker = CoinsetTxSignals {
+            tx_ids: vec![cancel_id.clone(), taker.clone()],
+            mempool_tx_ids: vec![cancel_id.clone(), taker.clone()],
+            ..Default::default()
+        };
+        let summary =
+            cancel_submit_taker_signals(&with_taker, Some(&cancel_id)).expect("taker remains");
         assert!(summary.has_mempool);
+        assert!(summary.has_tx_ids);
         assert!(!summary.has_confirmed);
-        assert!(!summary.watch_hit);
-        assert!(!summary.is_pure_watch_hit());
-        assert!(summary.has_coinset_activity());
-        assert!(signals.anonymous_mempool);
-        assert!(signals.mempool_tx_ids.is_empty());
     }
 }

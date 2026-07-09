@@ -30,7 +30,7 @@ pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };
-pub use signal_apply::apply_watched_offer_signals;
+pub use signal_apply::{apply_cancel_submitted_rows, apply_watched_offer_signals};
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };
