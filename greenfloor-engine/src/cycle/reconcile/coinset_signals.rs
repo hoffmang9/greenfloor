@@ -26,6 +26,21 @@ impl CoinsetTxSignals {
         }
     }
 
+    /// Confirmed-frame maker watch hit: promote via confirmed tx ids (not mempool).
+    #[must_use]
+    pub fn confirmed_watch(tx_ids: &[String]) -> Self {
+        let ids: Vec<String> = tx_ids
+            .iter()
+            .filter_map(|id| crate::hex::canonical_tx_id(id))
+            .collect();
+        Self {
+            tx_ids: ids.clone(),
+            confirmed_tx_ids: ids,
+            mempool_tx_ids: Vec::new(),
+            watch_hit: false,
+        }
+    }
+
     /// Drop the tracked cancel spend-bundle id so it cannot look like taker activity.
     #[must_use]
     pub fn excluding_cancel_tx(&self, cancel_tx_id: Option<&str>) -> Self {
@@ -189,6 +204,19 @@ mod tests {
                 .is_none()
         );
         assert!(signals_from_ws_offer_status("unknown", None).is_none());
+    }
+
+    #[test]
+    fn confirmed_watch_summary_is_confirmed_without_mempool() {
+        let tx = "ab".repeat(32);
+        let signals = CoinsetTxSignals::confirmed_watch(std::slice::from_ref(&tx));
+        let summary = signals.summary();
+        assert!(summary.has_tx_ids);
+        assert!(summary.has_confirmed);
+        assert!(!summary.has_mempool);
+        assert!(!summary.watch_hit);
+        assert!(!summary.is_pure_watch_hit());
+        assert_eq!(signals.confirmed_tx_ids, vec![tx]);
     }
 
     #[test]

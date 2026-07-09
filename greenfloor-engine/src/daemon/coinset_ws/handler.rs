@@ -277,7 +277,54 @@ mod tests {
     }
 
     #[test]
-    fn handle_ws_text_confirmed_maker_watch_does_not_force_mempool_observed() {
+    fn handle_ws_text_unknown_tx_status_marks_inventory_without_lifecycle() {
+        let (_dir, store) = open_store();
+        let maker_p2 = "ef".repeat(32);
+        let ctx = CoinsetWsShared::new(
+            std::sync::Arc::new(InventoryP2Index::default()),
+            crate::daemon::InventoryFreshnessCache::new(),
+        );
+        ctx.inventory_freshness
+            .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        let offer_id = "ab".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("upsert");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&maker_p2))
+            .expect("watch");
+        handle_ws_text(
+            &store,
+            &ctx,
+            &json!({
+                "message": {
+                    "type": "transaction",
+                    "data": {
+                        "status": "unknown",
+                        "ids": ["cd".repeat(32)],
+                        "p2s": [maker_p2]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("tx");
+        assert!(
+            ctx.inventory_freshness
+                .needs_refresh("m1", std::time::Duration::from_secs(90)),
+            "unknown status with maker keys must still invalidate inventory"
+        );
+        let rows = store
+            .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+            .expect("rows");
+        assert_eq!(
+            rows[0].state, "open",
+            "unknown tx status must not invent mempool_observed"
+        );
+    }
+
+    #[test]
+    fn handle_ws_text_confirmed_maker_watch_promotes_to_tx_block_confirmed() {
         let (_dir, store) = open_store();
         let maker_p2 = "ef".repeat(32);
         let ctx = CoinsetWsShared::new(
@@ -318,8 +365,8 @@ mod tests {
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
         assert_eq!(
-            rows[0].state, "open",
-            "confirmed tx frames must not apply synthetic watch_hit → mempool_observed"
+            rows[0].state, "tx_block_confirmed",
+            "confirmed maker watch must promote lifecycle (not leave open / mempool_observed)"
         );
     }
 

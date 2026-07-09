@@ -183,11 +183,11 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
 - Frame routing (GreenFloor):
   - **Transaction** frames: record tx signals; inventory-index `p2` hits **and** durable
     maker watch hits mark markets stale (90s freshness gate). Pending-frame durable
-    `offer_coin_watches` hits (maker-specific p2 and/or coin id) drive `mempool_observed`
-    via reconcile; confirmed frames still mark inventory stale but do **not** apply
-    synthetic watch-hit → `mempool_observed` (take confirm stays on offer-frame
-    `confirmed`). Shared market inventory p2s are not stored on per-offer watches. HTTP
-    enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
+    `offer_coin_watches` hits drive `mempool_observed`; confirmed-frame durable watch
+    hits promote to `tx_block_confirmed` via the frame's confirmed tx ids (so ladder
+    slots do not age free before an offer-frame `confirmed` arrives). Shared market
+    inventory p2s are not stored on per-offer watches. HTTP enrichment uses
+    `get_coin_records_by_puzzle_hashes` when needed.
   - **Offer** frames: drive offer lifecycle by `offer_id` / status for `confirmed`,
     `cancelled`, and `expired` only (those also mark the offer's market inventory stale).
     Offer-frame `pending` / `cancel_pending` seed `tx_signal_state` when `tx_id` is present

@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::coinset::{get_all_mempool_tx_ids, WsEvent};
 use crate::config::ManagerProgramConfig;
+use crate::cycle::reconcile::CoinsetTxSignals;
 use crate::daemon::coinset_ws::CoinsetWsShared;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
@@ -158,6 +159,24 @@ fn audit_coin_watch_hit(
     )
 }
 
+fn apply_and_audit_watch_hits(
+    store: &SqliteStore,
+    observed_p2s: &[String],
+    observed_coin_ids: &[String],
+    watch_keys: &[String],
+    market_ids: &[String],
+    signals: &CoinsetTxSignals,
+) -> SignerResult<()> {
+    apply_watch_hits_batch(store, watch_keys, signals)?;
+    audit_coin_watch_hit(
+        store,
+        observed_p2s,
+        observed_coin_ids,
+        watch_keys,
+        market_ids,
+    )
+}
+
 pub(crate) fn apply_ws_event(
     store: &SqliteStore,
     ctx: &CoinsetWsShared,
@@ -165,25 +184,46 @@ pub(crate) fn apply_ws_event(
 ) -> SignerResult<()> {
     match event {
         WsEvent::Transaction(tx) => {
+            let has_keys = !tx.p2s.is_empty() || !tx.coin_ids.is_empty();
+            let (watch_keys, market_ids) = if has_keys {
+                mark_observed_keys_inventory_stale(store, ctx, &tx.p2s, &tx.coin_ids)?
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            // Allowlist only: unknown status marks inventory stale (above) but
+            // must not invent mempool_observed / tx_block_confirmed.
             match tx.status.as_str() {
-                "pending" if !tx.tx_ids.is_empty() => {
-                    record_ws_mempool_tx_ids(store, &tx.tx_ids)?;
+                "pending" => {
+                    if !tx.tx_ids.is_empty() {
+                        record_ws_mempool_tx_ids(store, &tx.tx_ids)?;
+                    }
+                    if has_keys {
+                        apply_and_audit_watch_hits(
+                            store,
+                            &tx.p2s,
+                            &tx.coin_ids,
+                            &watch_keys,
+                            &market_ids,
+                            &CoinsetTxSignals::watch_hit(),
+                        )?;
+                    }
                 }
-                "confirmed" if !tx.tx_ids.is_empty() => {
-                    record_ws_confirmed_tx_ids(store, ctx, &tx.tx_ids)?;
+                "confirmed" => {
+                    if !tx.tx_ids.is_empty() {
+                        record_ws_confirmed_tx_ids(store, ctx, &tx.tx_ids)?;
+                    }
+                    if has_keys {
+                        apply_and_audit_watch_hits(
+                            store,
+                            &tx.p2s,
+                            &tx.coin_ids,
+                            &watch_keys,
+                            &market_ids,
+                            &CoinsetTxSignals::confirmed_watch(&tx.tx_ids),
+                        )?;
+                    }
                 }
                 _ => {}
-            }
-            if tx.p2s.is_empty() && tx.coin_ids.is_empty() {
-                return Ok(());
-            }
-            let (watch_keys, market_ids) =
-                mark_observed_keys_inventory_stale(store, ctx, &tx.p2s, &tx.coin_ids)?;
-            // Confirmed frames: inventory stale only. Synthetic watch_hit →
-            // mempool_observed is pending-path; take confirm stays on offer-frame.
-            if tx.status.as_str() != "confirmed" {
-                apply_watch_hits_batch(store, &watch_keys)?;
-                audit_coin_watch_hit(store, &tx.p2s, &tx.coin_ids, &watch_keys, &market_ids)?;
             }
         }
         WsEvent::Offer(offer) => {

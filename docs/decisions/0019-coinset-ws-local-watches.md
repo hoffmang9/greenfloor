@@ -32,8 +32,10 @@ never the operator transport.
    without `tx_id`) seeds `tx_signal_state` only and does **not** advance lifecycle
    to `mempool_observed` — that state ages out of active-slot counts after three
    minutes while a Coinset listing can still be live, which would allow duplicate
-   ladder posts. Take detection stays on durable maker watch hits and offer-frame
-   `confirmed` / terminal statuses. Pure watch hits while `cancel_submitted` are
+   ladder posts. Take detection stays on durable maker watch hits (pending →
+   `mempool_observed`; confirmed-frame maker hits → `tx_block_confirmed` via the
+   frame's confirmed tx ids) and offer-frame `confirmed` / terminal statuses. Pure
+   watch hits while `cancel_submitted` are
    ignored by cancel policy, so cancel-spend reuse of maker keys cannot look like
    taker activity. Mempool/tx lists whose only id is the tracked cancel spend are
    also ignored while `cancel_submitted`, so cancel-tx confirmation promotion

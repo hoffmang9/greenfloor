@@ -116,14 +116,24 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
     Ok(market_ids)
 }
 
-/// On durable coin/p2 watch hits, mark `mempool_observed` via reconcile dispatch (batched).
+/// Apply durable coin/p2 watch hits through reconcile dispatch (batched).
 ///
+/// Pending frames pass [`CoinsetTxSignals::watch_hit`] (`mempool_observed`).
+/// Confirmed frames pass [`CoinsetTxSignals::confirmed_watch`] (`tx_block_confirmed`)
+/// so slots do not age free while the take is already on-chain.
 /// Pure watch hits while `cancel_submitted` are preserved by cancel policy (not ignored here).
+///
+/// Do not wrap in a parent transaction: terminal persist uses
+/// `immediate_transaction` (clear watches + upsert) and cannot nest.
 ///
 /// # Errors
 ///
 /// Returns an error if `SQLite` or reconcile persist fails.
-pub fn apply_watch_hits_batch(store: &SqliteStore, watched_keys: &[String]) -> SignerResult<()> {
+pub fn apply_watch_hits_batch(
+    store: &SqliteStore,
+    watched_keys: &[String],
+    signals: &CoinsetTxSignals,
+) -> SignerResult<()> {
     if watched_keys.is_empty() {
         return Ok(());
     }
@@ -132,16 +142,8 @@ pub fn apply_watch_hits_batch(store: &SqliteStore, watched_keys: &[String]) -> S
         return Ok(());
     }
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
-    store.unchecked_transaction_scope("watch_hits_batch", |store| {
-        for row in &rows {
-            apply_row(
-                store,
-                row,
-                None,
-                CoinsetTxSignals::watch_hit(),
-                Some(&cancel_by_offer),
-            )?;
-        }
-        Ok(())
-    })
+    for row in &rows {
+        apply_row(store, row, None, signals.clone(), Some(&cancel_by_offer))?;
+    }
+    Ok(())
 }

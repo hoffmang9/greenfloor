@@ -207,6 +207,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn from_coinset_push_offer_rejects_non_64_hex_offer_id() {
+        let publish = PublishResult::from_coinset_push_offer(json!({
+            "success": true,
+            "offer_id": "not-a-trade-id",
+        }));
+        assert!(!publish.success);
+        assert!(publish.offer_id.is_none());
+
+        let short = PublishResult::from_coinset_push_offer(json!({
+            "success": true,
+            "offer_id": "abcd",
+        }));
+        assert!(!short.success);
+        assert!(short.offer_id.is_none());
+    }
+
     #[tokio::test]
     async fn publish_offer_rejects_missing_adapters_and_unknown_venue() {
         let expected = sample_expected_fields();
