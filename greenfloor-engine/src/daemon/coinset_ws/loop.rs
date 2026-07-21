@@ -4,20 +4,15 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
-use serde_json::json;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-
 use crate::config::ManagerProgramConfig;
 use crate::operator_log::{
-    LogContext, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED,
-    COINSET_WS_ONCE_ERROR,
+    COINSET_WS_CONNECTED, COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED, COINSET_WS_ONCE_ERROR,
 };
 use crate::storage::SqliteStore;
 
-use super::handler::{handle_ws_text, run_recovery_poll};
 use super::process_context::CoinsetWsShared;
-use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
+use super::session::{run_ws_session, OnTextError, WsSessionAudits, WsSessionParams};
+use super::url::ensure_rustls_crypto_provider;
 
 pub struct CoinsetWebsocketLoopHandle {
     stop: Arc<AtomicBool>,
@@ -87,63 +82,27 @@ async fn run_coinset_websocket_loop(
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
     while !stop.load(Ordering::SeqCst) {
-        // Rebuild URL each connect so markets reload can refresh p2 filters.
-        let ws_url =
-            resolve_coinset_ws_url_with_p2s(&program, &coinset_base_url, coinset.p2_index().p2s());
-        let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
-        LogContext::COINSET.audit_best_effort(
-            &store,
-            COINSET_WS_CONNECTING,
-            &json!({"ws_url": ws_url}),
-            None,
-        );
-        match connect_async(&ws_url).await {
-            Ok((mut ws, _response)) => {
-                LogContext::COINSET.audit_best_effort(
-                    &store,
-                    COINSET_WS_CONNECTED,
-                    &json!({"ws_url": ws_url}),
-                    None,
-                );
-                while !stop.load(Ordering::SeqCst) {
-                    if coinset.take_reconnect_requested() {
-                        tracing::info!(
-                            "coinset websocket reconnect requested after inventory p2 reload"
-                        );
-                        break;
-                    }
-                    match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
-                        Ok(Some(Ok(Message::Text(text)))) => {
-                            if let Err(err) = handle_ws_text(&store, &coinset, &text) {
-                                tracing::warn!(
-                                    error = %err,
-                                    "coinset websocket payload handler failed"
-                                );
-                                LogContext::COINSET.audit_best_effort(
-                                    &store,
-                                    COINSET_WS_ONCE_ERROR,
-                                    &json!({"error": err.to_string()}),
-                                    None,
-                                );
-                            }
-                        }
-                        Ok(Some(Ok(Message::Ping(payload)))) => {
-                            let _ = ws.send(Message::Pong(payload)).await;
-                        }
-                        Ok(None | Some(Ok(Message::Close(_)) | Err(_))) => break,
-                        _ => {}
-                    }
-                }
-            }
-            Err(err) => {
-                LogContext::COINSET.audit_best_effort(
-                    &store,
-                    COINSET_WS_DISCONNECTED,
-                    &json!({"error": err.to_string()}),
-                    None,
-                );
-            }
-        }
+        let params = WsSessionParams {
+            store: &store,
+            program: &program,
+            coinset_base_url: &coinset_base_url,
+            ctx: &coinset,
+            recovery_reason: "connected",
+            audits: WsSessionAudits {
+                connecting: Some(COINSET_WS_CONNECTING),
+                connected: COINSET_WS_CONNECTED,
+                disconnected: COINSET_WS_DISCONNECTED,
+                text_error: Some(COINSET_WS_ONCE_ERROR),
+            },
+            on_text_error: OnTextError::LogContinue,
+            strict_audit: false,
+        };
+        let _ = run_ws_session(
+            &params,
+            || stop.load(Ordering::SeqCst) || coinset.take_reconnect_requested(),
+            || Duration::from_secs(1),
+        )
+        .await;
         if stop.load(Ordering::SeqCst) {
             break;
         }

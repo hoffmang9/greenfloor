@@ -1,13 +1,13 @@
 use serde_json::json;
 
-use crate::coinset::{get_all_mempool_tx_ids, WsEvent};
+use crate::coinset::{get_all_mempool_tx_ids, WsEvent, WsTransactionEvent};
 use crate::config::ManagerProgramConfig;
-use crate::cycle::reconcile::CoinsetTxSignals;
 use crate::daemon::coinset_ws::CoinsetWsShared;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
 use crate::offer::lifecycle::{
     apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
+    WsOfferApply,
 };
 use crate::operator_log::{
     LogContext, COINSET_WS_MEMPOOL_EVENT, COINSET_WS_RECOVERY_POLL, COINSET_WS_RECOVERY_POLL_ERROR,
@@ -79,9 +79,8 @@ fn record_ws_mempool_tx_ids(store: &SqliteStore, mempool_tx_ids: &[String]) -> S
 
 fn record_ws_confirmed_tx_ids(
     store: &SqliteStore,
-    ctx: &CoinsetWsShared,
     confirmed_tx_ids: &[String],
-) -> SignerResult<()> {
+) -> SignerResult<Vec<String>> {
     let confirmed = store.ingest_tx_signals(confirmed_tx_ids, TxSignalIngress::Confirmed)?;
     LogContext::COINSET.audit(
         store,
@@ -100,20 +99,39 @@ fn record_ws_confirmed_tx_ids(
         None,
     )?;
     // Cancel confirmation spends maker coins / returns change — refresh inventory.
-    let market_ids = promote_cancel_submitted_for_confirmed_txs(store, confirmed_tx_ids)?;
-    ctx.inventory_freshness
-        .mark_stale_markets(market_ids.iter().map(String::as_str));
-    Ok(())
+    promote_cancel_submitted_for_confirmed_txs(store, confirmed_tx_ids)
 }
 
-/// Mark inventory stale for observed p2/coin keys. Returns deduped watch keys.
-fn mark_observed_keys_inventory_stale(
-    store: &SqliteStore,
+/// Markets whose spendable inventory may have changed for a transaction frame.
+fn markets_to_invalidate_for_tx(
     ctx: &CoinsetWsShared,
-    observed_p2s: &[String],
-    observed_coin_ids: &[String],
-) -> SignerResult<(Vec<String>, Vec<String>)> {
-    let inventory_markets = ctx.p2_index().market_ids_for_p2s(observed_p2s);
+    tx: &WsTransactionEvent,
+    watch_markets: &[String],
+    cancel_markets: &[String],
+) -> Vec<String> {
+    let mut market_ids = ctx.p2_index().market_ids_for_p2s(&tx.p2s);
+    market_ids.extend(watch_markets.iter().cloned());
+    market_ids.extend(cancel_markets.iter().cloned());
+    market_ids.sort();
+    market_ids.dedup();
+    market_ids
+}
+
+/// Markets whose spendable inventory may have changed for an offer frame.
+///
+/// Offer-frame p2s are intentionally ignored; only terminal take/cancel statuses
+/// on a locally tracked offer free maker coins.
+fn markets_to_invalidate_for_offer(offer_status: &str, apply: &WsOfferApply) -> Vec<String> {
+    if !matches!(offer_status, "confirmed" | "cancelled" | "expired") {
+        return Vec::new();
+    }
+    match apply {
+        WsOfferApply::Applied { market_id } => vec![market_id.clone()],
+        WsOfferApply::SeedOnly | WsOfferApply::NotTracked => Vec::new(),
+    }
+}
+
+fn dedupe_watch_keys(observed_p2s: &[String], observed_coin_ids: &[String]) -> Vec<String> {
     let mut watch_keys: Vec<String> = observed_p2s
         .iter()
         .chain(observed_coin_ids.iter())
@@ -121,15 +139,7 @@ fn mark_observed_keys_inventory_stale(
         .collect();
     watch_keys.sort();
     watch_keys.dedup();
-    let watch_markets = store.list_market_ids_for_watched_keys(&watch_keys)?;
-    let mut market_ids = inventory_markets;
-    market_ids.extend(watch_markets);
-    market_ids.sort();
-    market_ids.dedup();
-    // Inventory-index p2s and maker-only watch hits both change spendable inventory.
-    ctx.inventory_freshness
-        .mark_stale_markets(market_ids.iter().map(String::as_str));
-    Ok((watch_keys, market_ids))
+    watch_keys
 }
 
 fn audit_coin_watch_hit(
@@ -159,22 +169,20 @@ fn audit_coin_watch_hit(
     )
 }
 
-fn apply_and_audit_watch_hits(
+fn apply_transaction_watch_hits(
     store: &SqliteStore,
-    observed_p2s: &[String],
-    observed_coin_ids: &[String],
-    watch_keys: &[String],
-    market_ids: &[String],
-    signals: &CoinsetTxSignals,
-) -> SignerResult<()> {
-    apply_watch_hits_batch(store, watch_keys, signals)?;
-    audit_coin_watch_hit(
-        store,
-        observed_p2s,
-        observed_coin_ids,
-        watch_keys,
-        market_ids,
-    )
+    tx: &WsTransactionEvent,
+    frame_confirmed: bool,
+) -> SignerResult<Vec<String>> {
+    let has_keys = !tx.p2s.is_empty() || !tx.coin_ids.is_empty();
+    if !has_keys {
+        return Ok(Vec::new());
+    }
+    let watch_keys = dedupe_watch_keys(&tx.p2s, &tx.coin_ids);
+    let watch_markets = store.list_market_ids_for_watched_keys(&watch_keys)?;
+    let _hit_markets = apply_watch_hits_batch(store, &watch_keys, frame_confirmed, &tx.tx_ids)?;
+    audit_coin_watch_hit(store, &tx.p2s, &tx.coin_ids, &watch_keys, &watch_markets)?;
+    Ok(watch_markets)
 }
 
 pub(crate) fn apply_ws_event(
@@ -184,47 +192,34 @@ pub(crate) fn apply_ws_event(
 ) -> SignerResult<()> {
     match event {
         WsEvent::Transaction(tx) => {
-            let has_keys = !tx.p2s.is_empty() || !tx.coin_ids.is_empty();
-            let (watch_keys, market_ids) = if has_keys {
-                mark_observed_keys_inventory_stale(store, ctx, &tx.p2s, &tx.coin_ids)?
-            } else {
-                (Vec::new(), Vec::new())
-            };
-            // Allowlist only: unknown status marks inventory stale (above) but
-            // must not invent mempool_observed / tx_block_confirmed.
-            match tx.status.as_str() {
+            let mut cancel_markets = Vec::new();
+            // Allowlist only: unknown status marks inventory stale but must not
+            // invent mempool_observed / tx_block_confirmed.
+            let watch_markets = match tx.status.as_str() {
                 "pending" => {
                     if !tx.tx_ids.is_empty() {
                         record_ws_mempool_tx_ids(store, &tx.tx_ids)?;
                     }
-                    if has_keys {
-                        apply_and_audit_watch_hits(
-                            store,
-                            &tx.p2s,
-                            &tx.coin_ids,
-                            &watch_keys,
-                            &market_ids,
-                            &CoinsetTxSignals::watch_hit(),
-                        )?;
-                    }
+                    apply_transaction_watch_hits(store, &tx, false)?
                 }
                 "confirmed" => {
                     if !tx.tx_ids.is_empty() {
-                        record_ws_confirmed_tx_ids(store, ctx, &tx.tx_ids)?;
+                        cancel_markets = record_ws_confirmed_tx_ids(store, &tx.tx_ids)?;
                     }
-                    if has_keys {
-                        apply_and_audit_watch_hits(
-                            store,
-                            &tx.p2s,
-                            &tx.coin_ids,
-                            &watch_keys,
-                            &market_ids,
-                            &CoinsetTxSignals::confirmed_watch(&tx.tx_ids),
-                        )?;
+                    apply_transaction_watch_hits(store, &tx, true)?
+                }
+                _ => {
+                    let watch_keys = dedupe_watch_keys(&tx.p2s, &tx.coin_ids);
+                    if watch_keys.is_empty() {
+                        Vec::new()
+                    } else {
+                        store.list_market_ids_for_watched_keys(&watch_keys)?
                     }
                 }
-                _ => {}
-            }
+            };
+            let markets = markets_to_invalidate_for_tx(ctx, &tx, &watch_markets, &cancel_markets);
+            ctx.inventory_freshness
+                .mark_stale_markets(markets.iter().map(String::as_str));
         }
         WsEvent::Offer(offer) => {
             LogContext::COINSET.audit(
@@ -239,14 +234,10 @@ pub(crate) fn apply_ws_event(
                 }),
                 None,
             )?;
-            let market_id = apply_ws_offer_event(store, &offer)?;
-            // Terminal / take statuses free or spend maker coins; do not wait for an
-            // inventory-index p2 hit (offer-frame p2s are intentionally ignored).
-            if matches!(offer.status.as_str(), "confirmed" | "cancelled" | "expired") {
-                if let Some(market_id) = market_id.as_deref() {
-                    ctx.inventory_freshness.mark_stale(market_id);
-                }
-            }
+            let apply = apply_ws_offer_event(store, &offer)?;
+            let markets = markets_to_invalidate_for_offer(&offer.status, &apply);
+            ctx.inventory_freshness
+                .mark_stale_markets(markets.iter().map(String::as_str));
         }
     }
     Ok(())

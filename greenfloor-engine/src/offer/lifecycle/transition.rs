@@ -215,14 +215,13 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
 pub async fn resolve_watched_offer_transition_for_venue(
     store: &SqliteStore,
     dexie: Option<&DexieClient>,
-    target_venue: &str,
+    target_venue: crate::config::Venue,
     offer_id: &str,
     current_state: &str,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    let venue = target_venue.trim().to_ascii_lowercase();
-    if venue != "dexie" {
-        let transition = unsupported_venue_offer_transition(current_state, &venue)
+    if !target_venue.is_dexie() {
+        let transition = unsupported_venue_offer_transition(current_state, target_venue.as_str())
             .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
         return Ok((transition, None, None));
     }
@@ -279,7 +278,7 @@ mod tests {
         let (transition, status, error) = resolve_watched_offer_transition_for_venue(
             &store,
             None,
-            "coinset",
+            crate::config::Venue::Coinset,
             &"ab".repeat(32),
             "open",
             WatchedOfferTransitionEnv::at_now(None),

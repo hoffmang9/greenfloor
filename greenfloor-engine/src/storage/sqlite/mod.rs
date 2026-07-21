@@ -52,6 +52,7 @@ pub struct OfferPostPersistRecord {
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
 pub use offer_cancel::OfferCancelWrite;
+pub use offer_coin_watches::{WatchHitRow, WatchMatchKind};
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,

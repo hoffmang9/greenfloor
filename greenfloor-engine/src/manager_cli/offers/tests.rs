@@ -44,10 +44,28 @@ fn write_cancel_test_markets(path: &Path) {
 }
 
 fn seed_offer_states(db_path: &Path, rows: &[(&str, &str, &str)]) {
+    seed_offer_states_with_venue(db_path, rows, None);
+}
+
+fn seed_offer_states_with_venue(
+    db_path: &Path,
+    rows: &[(&str, &str, &str)],
+    publish_venue: Option<&str>,
+) {
     let store = SqliteStore::open(db_path).expect("open db");
     for (offer_id, market_id, state) in rows {
         store
-            .upsert_offer_state(offer_id, market_id, state, Some(0))
+            .upsert_offer_state_with_metadata_at(
+                offer_id,
+                market_id,
+                state,
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue,
+                    ..Default::default()
+                },
+            )
             .expect("seed offer");
     }
 }
@@ -62,12 +80,21 @@ async fn offers_reconcile_updates_states_from_dexie() {
     let confirmed_tx_id = "a".repeat(64);
     {
         let store = SqliteStore::open(&db_path).expect("open db");
-        store
-            .upsert_offer_state("offer-ok", "m1", "open", Some(0))
-            .expect("seed");
-        store
-            .upsert_offer_state("offer-missing", "m1", "open", Some(0))
-            .expect("seed");
+        for offer_id in ["offer-ok", "offer-missing"] {
+            store
+                .upsert_offer_state_with_metadata_at(
+                    offer_id,
+                    "m1",
+                    "open",
+                    Some(0),
+                    &chrono::Utc::now().to_rfc3339(),
+                    crate::storage::OfferCancelWrite {
+                        publish_venue: Some("dexie"),
+                        ..Default::default()
+                    },
+                )
+                .expect("seed");
+        }
         store
             .observe_mempool_tx_ids(std::slice::from_ref(&confirmed_tx_id))
             .expect("observe");
@@ -237,7 +264,7 @@ async fn offers_cancel_reports_dexie_failure() {
     let markets = dir.path().join("markets.yaml");
     write_cancel_test_markets(&markets);
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    seed_offer_states(&db_path, &[("offer-fail", "m1", "open")]);
+    seed_offer_states_with_venue(&db_path, &[("offer-fail", "m1", "open")], Some("dexie"));
 
     let mut server = mockito::Server::new_async().await;
     let _mock = server
@@ -283,7 +310,11 @@ async fn offers_cancel_reports_dexie_failure() {
         .and_then(|value| value.get("error"))
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    assert!(error.contains("offer_cancel_dexie_offer_not_found"));
+    assert!(
+        error.contains("offer_cancel_offer_file_not_found")
+            || error.contains("offer_cancel_dexie_offer_not_found"),
+        "unexpected cancel error: {error}"
+    );
 }
 
 #[test]

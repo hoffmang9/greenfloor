@@ -47,7 +47,7 @@ pub(crate) fn apply_reconcile_transition(
             last_seen_status,
             &ReconcilePersistOptions {
                 action: "reconcile_coins_and_offers",
-                venue: Some("dexie"),
+                venue: Some(crate::config::Venue::Dexie),
                 dexie_error,
             },
         )?;

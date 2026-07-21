@@ -73,8 +73,8 @@ pub async fn reconcile_offers_batch(
     limit: usize,
 ) -> SignerResult<ReconcileBatchResult> {
     let store = SqliteStore::open(db_path)?;
-    let venue = target_venue.trim().to_ascii_lowercase();
-    let dexie = if venue == "dexie" {
+    let venue = crate::config::Venue::parse(target_venue)?;
+    let dexie = if venue.is_dexie() {
         Some(DexieClient::new(dexie_base_url))
     } else {
         None
@@ -82,13 +82,10 @@ pub async fn reconcile_offers_batch(
 
     let rows = store.list_offer_states(market_id, limit)?;
     // HTTP reconcile is Dexie-only; Coinset/splash rows are driven by WS + watches.
-    let rows: Vec<_> = if venue == "dexie" {
+    let rows: Vec<_> = if venue.is_dexie() {
         rows.into_iter()
             .filter(|row| {
-                SqliteStore::is_dexie_authoritative_for_offer(
-                    &row.offer_id,
-                    row.publish_venue.as_deref(),
-                )
+                SqliteStore::is_dexie_authoritative_for_offer(row.publish_venue.as_deref())
             })
             .collect()
     } else {
@@ -104,7 +101,7 @@ pub async fn reconcile_offers_batch(
             resolve_watched_offer_transition_for_venue(
                 &store,
                 dexie.as_ref(),
-                &venue,
+                venue,
                 &row.offer_id,
                 &row.state,
                 env,
@@ -119,7 +116,7 @@ pub async fn reconcile_offers_batch(
             last_seen_status,
             &ReconcilePersistOptions {
                 action: "offers_reconcile",
-                venue: Some(&venue),
+                venue: Some(venue),
                 dexie_error: None,
             },
         )?;
@@ -189,12 +186,21 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         let confirmed_tx_id = "a".repeat(64);
-        store
-            .upsert_offer_state("offer-ok", "m1", "open", Some(0))
-            .expect("seed");
-        store
-            .upsert_offer_state("offer-missing", "m1", "open", Some(0))
-            .expect("seed");
+        for offer_id in ["offer-ok", "offer-missing"] {
+            store
+                .upsert_offer_state_with_metadata_at(
+                    offer_id,
+                    "m1",
+                    "open",
+                    Some(0),
+                    &Utc::now().to_rfc3339(),
+                    crate::storage::OfferCancelWrite {
+                        publish_venue: Some("dexie"),
+                        ..Default::default()
+                    },
+                )
+                .expect("seed");
+        }
         assert_eq!(
             store
                 .observe_mempool_tx_ids(std::slice::from_ref(&confirmed_tx_id))

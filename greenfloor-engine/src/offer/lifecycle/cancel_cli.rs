@@ -266,13 +266,9 @@ pub async fn offers_cancel_cli(
 }
 
 fn normalize_cancel_venue(target_venue: &str) -> SignerResult<String> {
-    let venue = target_venue.trim().to_ascii_lowercase();
-    if venue != "dexie" && venue != "coinset" && venue != "splash" {
-        return Err(SignerError::Other(format!(
-            "offer cancel supports coinset|dexie|splash (got {venue})"
-        )));
-    }
-    Ok(venue)
+    Ok(crate::config::Venue::parse(target_venue)?
+        .as_str()
+        .to_string())
 }
 
 fn validate_cancel_cli_request(request: &OffersCancelCliRequest) -> SignerResult<()> {

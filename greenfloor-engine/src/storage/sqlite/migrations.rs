@@ -194,49 +194,22 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
                 "failed to query offer_coin_watches backfill rows: {err}"
             ))
         })?;
-    let now = chrono::Utc::now().to_rfc3339();
     for row in rows {
         let (offer_id, market_id, input_coin, maker_p2) = row.map_err(|err| {
             SignerError::Other(format!(
                 "failed to read offer_coin_watches backfill row: {err}"
             ))
         })?;
-        if let Some(coin_id) = input_coin
-            .as_deref()
-            .map(crate::hex::normalize_hex_id)
-            .filter(|value| value.len() == 64)
-        {
-            conn.execute(
-                r"
-                INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                VALUES (?1, ?2, ?3, 'coin', ?4)
-                ",
-                params![coin_id, offer_id, market_id, now],
-            )
-            .map_err(|err| {
-                SignerError::Other(format!(
-                    "failed to backfill offer_coin_watches coin for {offer_id}: {err}"
-                ))
-            })?;
-        }
-        if let Some(p2_id) = maker_p2
-            .as_deref()
-            .map(crate::hex::normalize_hex_id)
-            .filter(|value| value.len() == 64)
-        {
-            conn.execute(
-                r"
-                INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                VALUES (?1, ?2, ?3, 'p2', ?4)
-                ",
-                params![p2_id, offer_id, market_id, now],
-            )
-            .map_err(|err| {
-                SignerError::Other(format!(
-                    "failed to backfill offer_coin_watches p2 for {offer_id}: {err}"
-                ))
-            })?;
-        }
+        let coins: Vec<String> = input_coin.into_iter().collect();
+        let p2s: Vec<String> = maker_p2.into_iter().collect();
+        super::offer_coin_watches::insert_watch_rows(
+            conn,
+            &offer_id,
+            &market_id,
+            &coins,
+            &p2s,
+            super::offer_coin_watches::WatchInsertMode::Ensure,
+        )?;
     }
     Ok(())
 }

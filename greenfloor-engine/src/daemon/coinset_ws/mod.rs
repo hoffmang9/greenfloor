@@ -5,6 +5,7 @@ mod r#loop;
 mod once_timings;
 mod p2_filters;
 mod process_context;
+mod session;
 mod url;
 
 pub use capture::capture_coinset_websocket_once;

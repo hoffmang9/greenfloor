@@ -1,5 +1,7 @@
 //! Shared resolve+persist for watched-offer Coinset signals.
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 
 use crate::cycle::reconcile::{
@@ -51,6 +53,33 @@ pub fn apply_watched_offer_signals(
     Ok(true)
 }
 
+/// Apply signals to one offer-state row (shared WS / cancel-submitted seam).
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` or reconcile persist fails.
+pub fn apply_signals_to_row(
+    store: &SqliteStore,
+    row: &OfferStateListRow,
+    status: Option<i64>,
+    signals: CoinsetTxSignals,
+    cancel_by_offer: Option<&HashMap<String, CancelSubmittedContext>>,
+    options: &ReconcilePersistOptions<'_>,
+) -> SignerResult<bool> {
+    let cancel_submitted =
+        cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, cancel_by_offer)?;
+    apply_watched_offer_signals(
+        store,
+        &row.market_id,
+        &row.offer_id,
+        &row.state,
+        status,
+        signals,
+        cancel_submitted.as_ref(),
+        options,
+    )
+}
+
 /// Apply empty-signal cancel-submitted policy to rows (orphan unwedge / cancel-tx promote).
 ///
 /// Past orphan grace, unconfirmed cancels reset to `open`. Within grace, non-attributable
@@ -71,20 +100,12 @@ pub fn apply_cancel_submitted_rows(
     let cancel_by_offer = preload_cancel_submitted_contexts(store, rows)?;
     let mut changed = 0_u64;
     for row in rows {
-        let cancel_submitted = cancel_submitted_context_for_offer(
+        if apply_signals_to_row(
             store,
-            &row.offer_id,
-            &row.state,
-            Some(&cancel_by_offer),
-        )?;
-        if apply_watched_offer_signals(
-            store,
-            &row.market_id,
-            &row.offer_id,
-            &row.state,
+            row,
             None,
             CoinsetTxSignals::default(),
-            cancel_submitted.as_ref(),
+            Some(&cancel_by_offer),
             options,
         )? {
             changed += 1;

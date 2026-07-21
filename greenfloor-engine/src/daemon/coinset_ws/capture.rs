@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
 use crate::error::SignerResult;
@@ -11,9 +9,9 @@ use crate::operator_log::{
 };
 use crate::storage::SqliteStore;
 
-use super::handler::{handle_ws_text, run_recovery_poll, ws_error};
 use super::once_timings::OnceCaptureTimings;
 use super::process_context::CoinsetWsShared;
+use super::session::{run_ws_session, OnTextError, WsSessionAudits, WsSessionParams};
 use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url_with_p2s};
 
 pub async fn capture_coinset_websocket_once(
@@ -47,7 +45,6 @@ pub async fn capture_coinset_websocket_once_with_timings(
         &json!({"ws_url": ws_url}),
         None,
     )?;
-    let _ = run_recovery_poll(store, program, coinset_base_url, "once_start").await;
     let OnceCaptureTimings {
         capture_window,
         reconnect,
@@ -55,29 +52,33 @@ pub async fn capture_coinset_websocket_once_with_timings(
     let deadline = tokio::time::Instant::now() + capture_window;
 
     while tokio::time::Instant::now() < deadline {
-        match connect_async(&ws_url).await {
-            Ok((mut ws, _response)) => {
-                LogContext::COINSET.audit(
-                    store,
-                    COINSET_WS_ONCE_CONNECTED,
-                    &json!({"ws_url": ws_url}),
-                    None,
-                )?;
-                while tokio::time::Instant::now() < deadline {
-                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    let wait_for = remaining.min(Duration::from_secs(1));
-                    match tokio::time::timeout(wait_for, ws.next()).await {
-                        Ok(Some(Ok(Message::Text(text)))) => {
-                            handle_ws_text(store, ctx, &text)?;
-                        }
-                        Ok(Some(Ok(Message::Ping(payload)))) => {
-                            let _ = ws.send(Message::Pong(payload)).await;
-                        }
-                        Ok(Some(Err(err))) => return Err(ws_error(&err)),
-                        Ok(None | Some(Ok(Message::Close(_)))) => break,
-                        _ => {}
-                    }
-                }
+        let params = WsSessionParams {
+            store,
+            program,
+            coinset_base_url,
+            ctx,
+            recovery_reason: "once_start",
+            audits: WsSessionAudits {
+                connecting: None,
+                connected: COINSET_WS_ONCE_CONNECTED,
+                disconnected: COINSET_WS_ONCE_DISCONNECTED,
+                text_error: None,
+            },
+            on_text_error: OnTextError::Propagate,
+            strict_audit: true,
+        };
+        match run_ws_session(
+            &params,
+            || tokio::time::Instant::now() >= deadline,
+            || {
+                deadline
+                    .saturating_duration_since(tokio::time::Instant::now())
+                    .min(Duration::from_secs(1))
+            },
+        )
+        .await
+        {
+            Ok(_) => {
                 LogContext::COINSET.audit(
                     store,
                     COINSET_WS_ONCE_DISCONNECTED,
@@ -87,14 +88,8 @@ pub async fn capture_coinset_websocket_once_with_timings(
                 return Ok(());
             }
             Err(err) => {
-                LogContext::COINSET.audit(
-                    store,
-                    COINSET_WS_ONCE_DISCONNECTED,
-                    &json!({"ws_url": ws_url, "error": err.to_string()}),
-                    None,
-                )?;
                 if tokio::time::Instant::now() + reconnect >= deadline {
-                    return Err(ws_error(&err));
+                    return Err(err);
                 }
                 tokio::time::sleep(reconnect).await;
             }

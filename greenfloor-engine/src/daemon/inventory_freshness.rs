@@ -117,10 +117,10 @@ mod tests {
         let mut buckets = BTreeMap::new();
         buckets.insert(1, 2);
         cache.mark_fresh("m1", buckets.clone());
-        assert!(!cache.needs_refresh("m1", Duration::from_secs(60)));
+        assert!(!cache.needs_refresh("m1", Duration::from_mins(1)));
         assert_eq!(cache.cached_buckets("m1"), Some(buckets));
         cache.mark_stale("m1");
-        assert!(cache.needs_refresh("m1", Duration::from_secs(60)));
+        assert!(cache.needs_refresh("m1", Duration::from_mins(1)));
     }
 
     #[test]
@@ -129,8 +129,8 @@ mod tests {
         cache.mark_fresh("m1", BTreeMap::from([(1, 1)]));
         cache.mark_fresh("m2", BTreeMap::from([(10, 1)]));
         cache.mark_stale_markets(["m1", "m2", "", "  "]);
-        assert!(cache.needs_refresh("m1", Duration::from_secs(60)));
-        assert!(cache.needs_refresh("m2", Duration::from_secs(60)));
+        assert!(cache.needs_refresh("m1", Duration::from_mins(1)));
+        assert!(cache.needs_refresh("m2", Duration::from_mins(1)));
     }
 
     #[test]

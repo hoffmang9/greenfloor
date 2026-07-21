@@ -1,22 +1,28 @@
 //! Apply Coinset WS offer / watch signals through canonical reconcile decision.
 
-use std::collections::HashMap;
-
 use crate::coinset::WsOfferEvent;
-use crate::cycle::reconcile::{
-    signals_from_ws_offer_status, CancelSubmittedContext, CoinsetTxSignals,
-};
+use crate::config::Venue;
+use crate::cycle::reconcile::{signals_from_ws_offer_status, CoinsetTxSignals};
 use crate::error::SignerResult;
-use crate::storage::{OfferStateListRow, SqliteStore, TxSignalIngress};
+use crate::storage::{SqliteStore, TxSignalIngress, WatchMatchKind};
 
-use super::cancel_context::{
-    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
-};
+use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::ReconcilePersistOptions;
-use super::signal_apply::{apply_cancel_submitted_rows, apply_watched_offer_signals};
+use super::signal_apply::{apply_cancel_submitted_rows, apply_signals_to_row};
 
 #[cfg(test)]
 mod tests;
+
+/// Result of applying a Coinset WS `offer` event to local state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsOfferApply {
+    /// Local row found and lifecycle dispatch ran.
+    Applied { market_id: String },
+    /// Status only seeds `tx_signal_state` (`pending` / `cancel_pending`).
+    SeedOnly,
+    /// No local offer row for this id.
+    NotTracked,
+}
 
 fn seed_offer_tx_signal(store: &SqliteStore, event: &WsOfferEvent) -> SignerResult<()> {
     let Some(tx_id) = event.tx_id.as_ref() else {
@@ -36,38 +42,30 @@ fn seed_offer_tx_signal(store: &SqliteStore, event: &WsOfferEvent) -> SignerResu
 fn ws_persist_options() -> ReconcilePersistOptions<'static> {
     ReconcilePersistOptions {
         action: "coinset_ws_lifecycle",
-        venue: Some("coinset"),
+        venue: Some(Venue::Coinset),
         dexie_error: None,
     }
 }
 
-fn apply_row(
-    store: &SqliteStore,
-    row: &OfferStateListRow,
-    status: Option<i64>,
-    signals: CoinsetTxSignals,
-    cancel_by_offer: Option<&HashMap<String, CancelSubmittedContext>>,
-) -> SignerResult<()> {
-    let cancel_submitted =
-        cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, cancel_by_offer)?;
-    apply_watched_offer_signals(
-        store,
-        &row.market_id,
-        &row.offer_id,
-        &row.state,
-        status,
-        signals,
-        cancel_submitted.as_ref(),
-        &ws_persist_options(),
-    )?;
-    Ok(())
+/// Signals for a durable watch hit, gated by match kind.
+///
+/// Confirmed frames terminalize only on a `kind='coin'` (or Both) match. P2-only
+/// confirmed hits stay soft (`mempool_observed`) so shared maker puzzle hashes
+/// cannot falsely clear open offers.
+#[must_use]
+pub fn signals_for_watch_hit(
+    frame_confirmed: bool,
+    match_kind: WatchMatchKind,
+    confirmed_tx_ids: &[String],
+) -> CoinsetTxSignals {
+    if frame_confirmed && match_kind.includes_coin() {
+        CoinsetTxSignals::confirmed_watch(confirmed_tx_ids)
+    } else {
+        CoinsetTxSignals::watch_hit()
+    }
 }
 
 /// Drive lifecycle from a Coinset WS `offer` event for a locally tracked offer.
-///
-/// Returns the offer's `market_id` when a local row was found and lifecycle was
-/// applied (so callers can invalidate inventory without a second `SQLite` read).
-/// Seed-only statuses (`pending` / `cancel_pending`) return `None`.
 ///
 /// # Errors
 ///
@@ -75,19 +73,21 @@ fn apply_row(
 pub fn apply_ws_offer_event(
     store: &SqliteStore,
     event: &WsOfferEvent,
-) -> SignerResult<Option<String>> {
+) -> SignerResult<WsOfferApply> {
     seed_offer_tx_signal(store, event)?;
     let Some((status, signals)) =
         signals_from_ws_offer_status(&event.status, event.tx_id.as_deref())
     else {
-        return Ok(None);
+        return Ok(WsOfferApply::SeedOnly);
     };
     let rows = store.list_offer_states_for_ids(std::slice::from_ref(&event.offer_id))?;
     let Some(row) = rows.first() else {
-        return Ok(None);
+        return Ok(WsOfferApply::NotTracked);
     };
-    apply_row(store, row, status, signals, None)?;
-    Ok(Some(row.market_id.clone()))
+    apply_signals_to_row(store, row, status, signals, None, &ws_persist_options())?;
+    Ok(WsOfferApply::Applied {
+        market_id: row.market_id.clone(),
+    })
 }
 
 /// Promote `cancel_submitted` offers whose cancel tx ids were just confirmed.
@@ -118,10 +118,9 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
 
 /// Apply durable coin/p2 watch hits through reconcile dispatch (batched).
 ///
-/// Pending frames pass [`CoinsetTxSignals::watch_hit`] (`mempool_observed`).
-/// Confirmed frames pass [`CoinsetTxSignals::confirmed_watch`] (`tx_block_confirmed`)
-/// so slots do not age free while the take is already on-chain.
-/// Pure watch hits while `cancel_submitted` are preserved by cancel policy (not ignored here).
+/// Pending frames always use [`CoinsetTxSignals::watch_hit`]. Confirmed frames use
+/// [`CoinsetTxSignals::confirmed_watch`] only when the match includes a maker coin
+/// watch; p2-only confirmed hits stay soft (`watch_hit`).
 ///
 /// Do not wrap in a parent transaction: terminal persist uses
 /// `immediate_transaction` (clear watches + upsert) and cannot nest.
@@ -132,18 +131,33 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
 pub fn apply_watch_hits_batch(
     store: &SqliteStore,
     watched_keys: &[String],
-    signals: &CoinsetTxSignals,
-) -> SignerResult<()> {
+    frame_confirmed: bool,
+    confirmed_tx_ids: &[String],
+) -> SignerResult<Vec<String>> {
     if watched_keys.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let rows = store.list_offer_states_for_watched_keys(watched_keys)?;
-    if rows.is_empty() {
-        return Ok(());
+    let hits = store.list_offer_states_for_watched_keys_with_kind(watched_keys)?;
+    if hits.is_empty() {
+        return Ok(Vec::new());
     }
+    let rows: Vec<_> = hits.iter().map(|hit| hit.row.clone()).collect();
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
-    for row in &rows {
-        apply_row(store, row, None, signals.clone(), Some(&cancel_by_offer))?;
+    let options = ws_persist_options();
+    let mut market_ids = Vec::new();
+    for hit in &hits {
+        let signals = signals_for_watch_hit(frame_confirmed, hit.kind, confirmed_tx_ids);
+        apply_signals_to_row(
+            store,
+            &hit.row,
+            None,
+            signals,
+            Some(&cancel_by_offer),
+            &options,
+        )?;
+        market_ids.push(hit.row.market_id.clone());
     }
-    Ok(())
+    market_ids.sort();
+    market_ids.dedup();
+    Ok(market_ids)
 }

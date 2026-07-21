@@ -30,7 +30,9 @@ pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };
-pub use signal_apply::{apply_cancel_submitted_rows, apply_watched_offer_signals};
+pub use signal_apply::{
+    apply_cancel_submitted_rows, apply_signals_to_row, apply_watched_offer_signals,
+};
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };
@@ -41,4 +43,5 @@ pub use transition::{
 };
 pub use ws_apply::{
     apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
+    signals_for_watch_hit, WsOfferApply,
 };

@@ -319,14 +319,14 @@ pub fn resolve_offer_publish_settings(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(value) => value.to_ascii_lowercase(),
-        None => program.offer_publish_venue.clone(),
+        Some(value) => crate::config::Venue::parse(value)?.as_str().to_string(),
+        None => {
+            // Program config is validated at load; keep as string for callers.
+            crate::config::Venue::parse(&program.offer_publish_venue)?
+                .as_str()
+                .to_string()
+        }
     };
-    if venue != "coinset" && venue != "dexie" && venue != "splash" {
-        return Err(SignerError::Other(
-            "offer publish venue must be coinset, dexie, or splash".to_string(),
-        ));
-    }
     let dexie_base = resolve_dexie_base_url(network, dexie_base_url, &program.dexie_api_base)?;
     let splash_base = resolve_splash_base_url(splash_base_url, &program.splash_api_base);
     Ok((venue, dexie_base, splash_base))

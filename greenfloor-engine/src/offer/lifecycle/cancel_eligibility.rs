@@ -40,7 +40,7 @@ pub fn filter_cancel_target_offer_ids(
         if offer_id.is_empty() || !seen.insert(offer_id.to_string()) {
             continue;
         }
-        if SqliteStore::is_dexie_authoritative_for_offer(offer_id, row.publish_venue.as_deref()) {
+        if SqliteStore::is_dexie_authoritative_for_offer(row.publish_venue.as_deref()) {
             match dexie_status_by_lookup_key.get(offer_id) {
                 Some(status) if dexie_status_open_for_cancel(*status) => {
                     targets.push(offer_id.to_string());

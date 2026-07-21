@@ -33,8 +33,10 @@ never the operator transport.
    to `mempool_observed` — that state ages out of active-slot counts after three
    minutes while a Coinset listing can still be live, which would allow duplicate
    ladder posts. Take detection stays on durable maker watch hits (pending →
-   `mempool_observed`; confirmed-frame maker hits → `tx_block_confirmed` via the
-   frame's confirmed tx ids) and offer-frame `confirmed` / terminal statuses. Pure
+   `mempool_observed`; confirmed-frame **coin** watch hits → `tx_block_confirmed`
+   via the frame's confirmed tx ids; confirmed-frame **p2-only** hits stay
+   `mempool_observed` so shared maker puzzle hashes cannot false-terminalize)
+   and offer-frame `confirmed` / terminal statuses. Pure
    watch hits while `cancel_submitted` are
    ignored by cancel policy, so cancel-spend reuse of maker keys cannot look like
    taker activity. Mempool/tx lists whose only id is the tracked cancel spend are

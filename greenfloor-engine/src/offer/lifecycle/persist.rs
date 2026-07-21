@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use tracing::Level;
 
+use crate::config::Venue;
 use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
@@ -9,7 +10,7 @@ use crate::storage::SqliteStore;
 
 pub struct ReconcilePersistOptions<'a> {
     pub action: &'a str,
-    pub venue: Option<&'a str>,
+    pub venue: Option<Venue>,
     pub dexie_error: Option<&'a str>,
 }
 
@@ -65,7 +66,10 @@ pub fn persist_offer_lifecycle_transition(
     });
     if let Some(venue) = options.venue {
         if let Value::Object(obj) = &mut payload {
-            obj.insert("venue".to_string(), Value::String(venue.to_string()));
+            obj.insert(
+                "venue".to_string(),
+                Value::String(venue.as_str().to_string()),
+            );
         }
     }
     if let Some(error) = options.dexie_error {
@@ -83,7 +87,7 @@ pub fn persist_offer_lifecycle_transition(
             &json!({
                 "offer_id": offer_id,
                 "market_id": market_id,
-                "venue": options.venue.unwrap_or("dexie"),
+                "venue": options.venue.unwrap_or(Venue::Dexie).as_str(),
                 "signal": transition.taker_signal,
                 "advisory_diagnostic": transition.taker_diagnostic,
                 "old_state": transition.old_state.as_str(),

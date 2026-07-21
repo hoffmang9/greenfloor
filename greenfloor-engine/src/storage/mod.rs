@@ -29,7 +29,7 @@ pub use sqlite::{
     CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow, SqliteStore,
-    StoredAlertState, TxSignalIngress, TxSignalStateRow,
+    StoredAlertState, TxSignalIngress, TxSignalStateRow, WatchHitRow, WatchMatchKind,
 };
 
 #[cfg(test)]

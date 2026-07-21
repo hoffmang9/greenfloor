@@ -189,12 +189,7 @@ fn watch_hit_marks_mempool_observed() {
     store
         .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
         .expect("watch");
-    apply_watch_hits_batch(
-        &store,
-        std::slice::from_ref(&coin),
-        &CoinsetTxSignals::watch_hit(),
-    )
-    .expect("hit");
+    apply_watch_hits_batch(&store, std::slice::from_ref(&coin), false, &[]).expect("hit");
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
@@ -220,12 +215,7 @@ fn watch_hits_batch_updates_multiple_offers_and_dedupes_keys() {
             .replace_offer_coin_watches(offer_id, "m1", &coins, &p2s)
             .expect("watch");
     }
-    apply_watch_hits_batch(
-        &store,
-        &[coin_a, p2, coin_b],
-        &CoinsetTxSignals::watch_hit(),
-    )
-    .expect("batch");
+    apply_watch_hits_batch(&store, &[coin_a, p2, coin_b], false, &[]).expect("batch");
     let rows = store
         .list_offer_states_for_ids(&[offer_a.clone(), offer_b.clone()])
         .expect("rows");
@@ -254,12 +244,7 @@ fn cancel_submitted_watch_hits_are_preserved_by_policy() {
             .expect("still watched"),
         vec![offer_id.clone()]
     );
-    apply_watch_hits_batch(
-        &store,
-        std::slice::from_ref(&coin),
-        &CoinsetTxSignals::watch_hit(),
-    )
-    .expect("hit");
+    apply_watch_hits_batch(&store, std::slice::from_ref(&coin), false, &[]).expect("hit");
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
@@ -274,16 +259,65 @@ fn cancel_submitted_watch_hits_are_preserved_by_policy() {
             .expect("watches kept"),
         vec![offer_id.clone()]
     );
-    apply_watch_hits_batch(
-        &store,
-        std::slice::from_ref(&coin),
-        &CoinsetTxSignals::watch_hit(),
-    )
-    .expect("post-observe hit");
+    apply_watch_hits_batch(&store, std::slice::from_ref(&coin), false, &[])
+        .expect("post-observe hit");
     let rows = store
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows after observe hit");
     assert_eq!(rows[0].state, "cancel_submitted");
+}
+
+#[test]
+fn confirmed_p2_only_hit_stays_mempool_observed() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    let p2 = "ef".repeat(32);
+    let tx_id = "cd".repeat(32);
+    store
+        .upsert_offer_state(&offer_id, "m1", "open", None)
+        .expect("upsert");
+    store
+        .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&p2))
+        .expect("watch");
+    apply_watch_hits_batch(
+        &store,
+        std::slice::from_ref(&p2),
+        true,
+        std::slice::from_ref(&tx_id),
+    )
+    .expect("p2 confirmed");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(
+        rows[0].state, "mempool_observed",
+        "p2-only confirmed hits must not terminalize"
+    );
+}
+
+#[test]
+fn confirmed_coin_hit_moves_to_tx_block_confirmed() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    let coin = "ef".repeat(32);
+    let tx_id = "cd".repeat(32);
+    store
+        .upsert_offer_state(&offer_id, "m1", "open", None)
+        .expect("upsert");
+    store
+        .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+        .expect("watch");
+    apply_watch_hits_batch(
+        &store,
+        std::slice::from_ref(&coin),
+        true,
+        std::slice::from_ref(&tx_id),
+    )
+    .expect("coin confirmed");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(rows[0].state, "tx_block_confirmed");
 }
 
 #[test]

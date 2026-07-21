@@ -162,12 +162,21 @@ async fn build_cancel_spend_bundle(
             "offer cancel fee not supported yet".to_string(),
         ));
     }
+    // Resolve offer inputs before vault/KMS so Dexie/local failures surface without
+    // requiring signer credentials.
+    let offer_text = if let Some(text) = params.offer_text.clone() {
+        Some(text)
+    } else if metadata_sufficient_for_coinset_cancel(params.cancel_metadata.as_ref()) {
+        None
+    } else {
+        resolve_offer_file_text_for_cancel(params.offer_id, None, params.dexie).await?
+    };
     let coinset_client =
         client_for_signer_on_network(&params.signer_config, params.operator_network)?;
     let backend = LiveCoinset(&coinset_client);
     let mut vault_ctx = resolve_vault_spend_context(params.signer_config.clone()).await?;
 
-    let spend_bundle = if let Some(text) = params.offer_text.as_deref() {
+    let spend_bundle = if let Some(text) = offer_text.as_deref() {
         build_offer_cancel_spend_bundle(
             &mut vault_ctx,
             &backend,
@@ -181,16 +190,6 @@ async fn build_cancel_spend_bundle(
         .filter(|meta| metadata_sufficient_for_coinset_cancel(Some(meta)))
     {
         build_offer_cancel_spend_bundle_from_metadata(&mut vault_ctx, &backend, metadata).await?
-    } else if let Some(text) =
-        resolve_offer_file_text_for_cancel(params.offer_id, None, params.dexie).await?
-    {
-        build_offer_cancel_spend_bundle(
-            &mut vault_ctx,
-            &backend,
-            &text,
-            params.cancel_metadata.as_ref(),
-        )
-        .await?
     } else {
         return Err(SignerError::Other(
             "offer cancel requires local offer file, stored cancel metadata, or Dexie offer-file fallback"
@@ -273,9 +272,6 @@ fn prepare_tracked_cancel_or_outcome(
     market_id: &str,
     operation_id: &str,
 ) -> Option<CancelOfferOutcome> {
-    if !target.persists_state() {
-        return None;
-    }
     store
         .prepare_offer_cancel_submitted(target.offer_id(), market_id, operation_id, None)
         .err()
@@ -290,19 +286,14 @@ fn prepare_tracked_cancel_or_outcome(
         })
 }
 
-async fn cancel_one_offer(
-    store: &SqliteStore,
+async fn build_cancel_bundle_for_target(
     dexie: Option<&DexieClient>,
     signer_config: &SignerConfig,
     operator_network: &str,
     target: &CancelOfferTarget,
-) -> SignerResult<CancelOfferOutcome> {
+    cancel_metadata: Option<StoredOfferCancelMetadata>,
+) -> SignerResult<(SpendBundle, String, String)> {
     let market_id = target.normalized_market_id();
-    let cancel_metadata = if target.persists_state() {
-        store.offer_cancel_metadata_for_id(target.offer_id())?
-    } else {
-        None
-    };
     let dexie_for_target = if target.offer_text().is_some()
         || metadata_sufficient_for_coinset_cancel(cancel_metadata.as_ref())
     {
@@ -319,36 +310,50 @@ async fn cancel_one_offer(
         offer_text: target.offer_text().map(str::to_string),
         cancel_metadata,
     };
-    let (spend_bundle, operation_id) = match build_cancel_spend_bundle(&params).await {
+    let (spend_bundle, operation_id) = build_cancel_spend_bundle(&params).await?;
+    Ok((spend_bundle, operation_id, market_id))
+}
+
+async fn cancel_tracked_offer(
+    store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    let cancel_metadata = store.offer_cancel_metadata_for_id(target.offer_id())?;
+    let (spend_bundle, operation_id, market_id) = match build_cancel_bundle_for_target(
+        dexie,
+        signer_config,
+        operator_network,
+        target,
+        cancel_metadata,
+    )
+    .await
+    {
         Ok(value) => value,
         Err(err) => {
             return Ok(outcome(
                 target,
-                market_id,
+                target.normalized_market_id(),
                 false,
                 String::new(),
                 err.to_string(),
             ));
         }
     };
-    let prior_state = if target.persists_state() {
-        prior_offer_state(store, target.offer_id())?
-    } else {
-        None
-    };
+    let prior_state = prior_offer_state(store, target.offer_id())?;
     if let Some(out) = prepare_tracked_cancel_or_outcome(store, target, &market_id, &operation_id) {
         return Ok(out);
     }
     let coinset_client = match client_for_signer_on_network(signer_config, operator_network) {
         Ok(client) => client,
         Err(err) => {
-            if target.persists_state() {
-                let _ = store.rollback_offer_cancel_submitted(
-                    target.offer_id(),
-                    &market_id,
-                    prior_state.as_deref().unwrap_or("open"),
-                );
-            }
+            let _ = store.rollback_offer_cancel_submitted(
+                target.offer_id(),
+                &market_id,
+                prior_state.as_deref().unwrap_or("open"),
+            );
             return Ok(outcome(
                 target,
                 market_id,
@@ -358,33 +363,83 @@ async fn cancel_one_offer(
             ));
         }
     };
-    if target.persists_state() {
-        Ok(broadcast_and_settle_tracked_cancel(
-            store,
-            target,
-            &market_id,
-            prior_state.as_deref(),
-            &coinset_client,
-            spend_bundle,
-            operation_id,
-        )
-        .await)
-    } else {
-        match coinset::broadcast_spend_bundle(&coinset_client, spend_bundle).await {
-            Ok(result) => Ok(outcome(
-                target,
-                market_id,
-                true,
-                result.operation_id,
-                String::new(),
-            )),
-            Err(err) => Ok(outcome(
+    Ok(broadcast_and_settle_tracked_cancel(
+        store,
+        target,
+        &market_id,
+        prior_state.as_deref(),
+        &coinset_client,
+        spend_bundle,
+        operation_id,
+    )
+    .await)
+}
+
+async fn cancel_local_file_offer(
+    _store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    let (spend_bundle, operation_id, market_id) =
+        match build_cancel_bundle_for_target(dexie, signer_config, operator_network, target, None)
+            .await
+        {
+            Ok(value) => value,
+            Err(err) => {
+                return Ok(outcome(
+                    target,
+                    target.normalized_market_id(),
+                    false,
+                    String::new(),
+                    err.to_string(),
+                ));
+            }
+        };
+    let coinset_client = match client_for_signer_on_network(signer_config, operator_network) {
+        Ok(client) => client,
+        Err(err) => {
+            return Ok(outcome(
                 target,
                 market_id,
                 false,
                 operation_id,
                 err.to_string(),
-            )),
+            ));
+        }
+    };
+    match coinset::broadcast_spend_bundle(&coinset_client, spend_bundle).await {
+        Ok(result) => Ok(outcome(
+            target,
+            market_id,
+            true,
+            result.operation_id,
+            String::new(),
+        )),
+        Err(err) => Ok(outcome(
+            target,
+            market_id,
+            false,
+            operation_id,
+            err.to_string(),
+        )),
+    }
+}
+
+async fn cancel_one_offer(
+    store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    match target {
+        CancelOfferTarget::Tracked { .. } => {
+            cancel_tracked_offer(store, dexie, signer_config, operator_network, target).await
+        }
+        CancelOfferTarget::LocalFile { .. } => {
+            cancel_local_file_offer(store, dexie, signer_config, operator_network, target).await
         }
     }
 }

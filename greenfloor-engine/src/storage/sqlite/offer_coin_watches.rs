@@ -1,19 +1,78 @@
 //! Durable offer coin / p2 watches for Coinset WS lifecycle matching.
+//!
+//! The `coin_id` column stores a watch key: either a maker coin id (`kind='coin'`)
+//! or an on-chain maker puzzle hash (`kind='p2'`).
 
 use rusqlite::{params, Connection};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{utcnow_iso, SqliteStore};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
+use crate::storage::OfferStateListRow;
 
-fn replace_offer_coin_watches_on_conn(
+/// How a durable watch row matched observed WS keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchMatchKind {
+    Coin,
+    P2,
+    Both,
+}
+
+impl WatchMatchKind {
+    #[must_use]
+    pub const fn includes_coin(self) -> bool {
+        matches!(self, Self::Coin | Self::Both)
+    }
+
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Both, _) | (_, Self::Both) | (Self::Coin, Self::P2) | (Self::P2, Self::Coin) => {
+                Self::Both
+            }
+            (Self::Coin, Self::Coin) => Self::Coin,
+            (Self::P2, Self::P2) => Self::P2,
+        }
+    }
+
+    fn from_kind_str(kind: &str) -> Option<Self> {
+        match kind {
+            "coin" => Some(Self::Coin),
+            "p2" => Some(Self::P2),
+            _ => None,
+        }
+    }
+}
+
+/// Offer state row plus the watch kind(s) that matched the query keys.
+#[derive(Debug, Clone)]
+pub struct WatchHitRow {
+    pub row: OfferStateListRow,
+    pub kind: WatchMatchKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WatchInsertMode {
+    /// DELETE existing rows for the offer, then INSERT. Dedup. Error if all keys invalid.
+    Replace,
+    /// INSERT OR IGNORE. Skip invalid keys silently.
+    Ensure,
+}
+
+/// Insert coin/p2 watch rows. `coin_id` column holds the watch key (coin id or p2).
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` writes fail, or (Replace) when all provided keys are invalid.
+pub(crate) fn insert_watch_rows(
     conn: &Connection,
     offer_id: &str,
     market_id: &str,
     coin_ids: &[String],
     p2s: &[String],
-) -> SignerResult<()> {
+    mode: WatchInsertMode,
+) -> SignerResult<usize> {
     let clean_offer = offer_id.trim();
     let clean_market = market_id.trim();
     if clean_offer.is_empty() || clean_market.is_empty() {
@@ -22,74 +81,71 @@ fn replace_offer_coin_watches_on_conn(
         ));
     }
     let now = utcnow_iso();
-    conn.execute(
-        "DELETE FROM offer_coin_watches WHERE offer_id = ?1",
-        params![clean_offer],
-    )
-    .map_err(|err| SignerError::Other(format!("offer_coin_watches delete: {err}")))?;
+    if mode == WatchInsertMode::Replace {
+        conn.execute(
+            "DELETE FROM offer_coin_watches WHERE offer_id = ?1",
+            params![clean_offer],
+        )
+        .map_err(|err| SignerError::Other(format!("offer_coin_watches delete: {err}")))?;
+    }
+
+    let sql = match mode {
+        WatchInsertMode::Replace => {
+            r"
+            INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "
+        }
+        WatchInsertMode::Ensure => {
+            r"
+            INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "
+        }
+    };
 
     let mut seen = HashSet::new();
     let mut inserted = 0usize;
-    for coin_id in coin_ids {
-        let normalized = normalize_hex_id(coin_id);
-        if normalized.len() != 64 {
-            tracing::warn!(
-                offer_id = clean_offer,
-                market_id = clean_market,
-                kind = "coin",
-                raw_len = coin_id.trim().len(),
-                normalized_len = normalized.len(),
-                "skipping non-64-char coin id for offer_coin_watches"
-            );
-            continue;
+    for (kind, keys) in [("coin", coin_ids), ("p2", p2s)] {
+        for key in keys {
+            let normalized = normalize_hex_id(key);
+            if normalized.len() != 64 {
+                if mode == WatchInsertMode::Replace {
+                    tracing::warn!(
+                        offer_id = clean_offer,
+                        market_id = clean_market,
+                        kind,
+                        raw_len = key.trim().len(),
+                        normalized_len = normalized.len(),
+                        "skipping non-64-char watch key for offer_coin_watches"
+                    );
+                }
+                continue;
+            }
+            if mode == WatchInsertMode::Replace && !seen.insert(normalized.clone()) {
+                continue;
+            }
+            conn.execute(
+                sql,
+                params![normalized, clean_offer, clean_market, kind, now],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches insert {kind}: {err}"))
+            })?;
+            inserted += 1;
         }
-        if !seen.insert(normalized.clone()) {
-            continue;
-        }
-        conn.execute(
-            r"
-            INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-            VALUES (?1, ?2, ?3, 'coin', ?4)
-            ",
-            params![normalized, clean_offer, clean_market, now],
-        )
-        .map_err(|err| SignerError::Other(format!("offer_coin_watches insert coin: {err}")))?;
-        inserted += 1;
     }
-    for p2 in p2s {
-        let normalized = normalize_hex_id(p2);
-        if normalized.len() != 64 {
-            tracing::warn!(
-                offer_id = clean_offer,
-                market_id = clean_market,
-                kind = "p2",
-                raw_len = p2.trim().len(),
-                normalized_len = normalized.len(),
-                "skipping non-64-char p2 for offer_coin_watches"
-            );
-            continue;
-        }
-        if !seen.insert(normalized.clone()) {
-            continue;
-        }
-        conn.execute(
-            r"
-            INSERT INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-            VALUES (?1, ?2, ?3, 'p2', ?4)
-            ",
-            params![normalized, clean_offer, clean_market, now],
-        )
-        .map_err(|err| SignerError::Other(format!("offer_coin_watches insert p2: {err}")))?;
-        inserted += 1;
-    }
-    if inserted == 0 && (!coin_ids.is_empty() || !p2s.is_empty()) {
+    if mode == WatchInsertMode::Replace
+        && inserted == 0
+        && (!coin_ids.is_empty() || !p2s.is_empty())
+    {
         return Err(SignerError::Other(format!(
             "offer_coin_watches for offer {clean_offer}: all {coin_count} coin ids and {p2_count} p2s were invalid or empty after normalize",
             coin_count = coin_ids.len(),
             p2_count = p2s.len(),
         )));
     }
-    Ok(())
+    Ok(inserted)
 }
 
 impl SqliteStore {
@@ -124,48 +180,14 @@ impl SqliteStore {
         coin_ids: &[String],
         p2s: &[String],
     ) -> SignerResult<()> {
-        let clean_offer = offer_id.trim();
-        let clean_market = market_id.trim();
-        if clean_offer.is_empty() || clean_market.is_empty() {
-            return Err(SignerError::Other(
-                "offer_id and market_id are required for offer_coin_watches".to_string(),
-            ));
-        }
-        let now = utcnow_iso();
-        for coin_id in coin_ids {
-            let normalized = normalize_hex_id(coin_id);
-            if normalized.len() != 64 {
-                continue;
-            }
-            self.conn
-                .execute(
-                    r"
-                    INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                    VALUES (?1, ?2, ?3, 'coin', ?4)
-                    ",
-                    params![normalized, clean_offer, clean_market, now],
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("offer_coin_watches ensure coin: {err}"))
-                })?;
-        }
-        for p2 in p2s {
-            let normalized = normalize_hex_id(p2);
-            if normalized.len() != 64 {
-                continue;
-            }
-            self.conn
-                .execute(
-                    r"
-                    INSERT OR IGNORE INTO offer_coin_watches (coin_id, offer_id, market_id, kind, updated_at)
-                    VALUES (?1, ?2, ?3, 'p2', ?4)
-                    ",
-                    params![normalized, clean_offer, clean_market, now],
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("offer_coin_watches ensure p2: {err}"))
-                })?;
-        }
+        insert_watch_rows(
+            &self.conn,
+            offer_id,
+            market_id,
+            coin_ids,
+            p2s,
+            WatchInsertMode::Ensure,
+        )?;
         Ok(())
     }
 
@@ -198,7 +220,15 @@ impl SqliteStore {
         coin_ids: &[String],
         p2s: &[String],
     ) -> SignerResult<()> {
-        replace_offer_coin_watches_on_conn(&self.conn, offer_id, market_id, coin_ids, p2s)
+        insert_watch_rows(
+            &self.conn,
+            offer_id,
+            market_id,
+            coin_ids,
+            p2s,
+            WatchInsertMode::Replace,
+        )?;
+        Ok(())
     }
 
     /// List coin and p2 watches for one offer (post-time set for cancel rollback).
@@ -235,8 +265,15 @@ impl SqliteStore {
                 continue;
             }
             match kind.as_str() {
+                "coin" => coins.push(normalized),
                 "p2" => p2s.push(normalized),
-                _ => coins.push(normalized),
+                other => {
+                    tracing::warn!(
+                        offer_id = clean_offer,
+                        kind = other,
+                        "skipping unknown offer_coin_watches kind"
+                    );
+                }
             }
         }
         Ok((coins, p2s))
@@ -328,9 +365,88 @@ impl SqliteStore {
     pub fn list_offer_states_for_watched_keys(
         &self,
         keys: &[String],
-    ) -> SignerResult<Vec<crate::storage::OfferStateListRow>> {
-        let offer_ids = self.query_distinct_watch_column("offer_id", keys)?;
-        self.list_offer_states_for_ids(&offer_ids)
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        Ok(self
+            .list_offer_states_for_watched_keys_with_kind(keys)?
+            .into_iter()
+            .map(|hit| hit.row)
+            .collect())
+    }
+
+    /// List offer state rows with the watch kind(s) that matched `keys`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_offer_states_for_watched_keys_with_kind(
+        &self,
+        keys: &[String],
+    ) -> SignerResult<Vec<WatchHitRow>> {
+        let kind_by_offer = self.query_offer_watch_kinds(keys)?;
+        if kind_by_offer.is_empty() {
+            return Ok(Vec::new());
+        }
+        let offer_ids: Vec<String> = kind_by_offer.keys().cloned().collect();
+        let rows = self.list_offer_states_for_ids(&offer_ids)?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                kind_by_offer
+                    .get(&row.offer_id)
+                    .copied()
+                    .map(|kind| WatchHitRow { row, kind })
+            })
+            .collect())
+    }
+
+    fn query_offer_watch_kinds(
+        &self,
+        keys: &[String],
+    ) -> SignerResult<HashMap<String, WatchMatchKind>> {
+        let normalized: Vec<String> = keys
+            .iter()
+            .map(|key| normalize_hex_id(key))
+            .filter(|key| key.len() == 64)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if normalized.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders: Vec<String> = (1..=normalized.len())
+            .map(|idx| format!("?{idx}"))
+            .collect();
+        let query = format!(
+            "SELECT DISTINCT offer_id, kind FROM offer_coin_watches WHERE coin_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = self
+            .conn
+            .prepare(&query)
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches kind prepare: {err}")))?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(normalized.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|err| SignerError::Other(format!("offer_coin_watches kind query: {err}")))?;
+        let mut kind_by_offer: HashMap<String, WatchMatchKind> = HashMap::new();
+        for row in rows {
+            let (offer_id, kind_str) = row
+                .map_err(|err| SignerError::Other(format!("offer_coin_watches kind row: {err}")))?;
+            let Some(kind) = WatchMatchKind::from_kind_str(kind_str.as_str()) else {
+                tracing::warn!(
+                    offer_id = %offer_id,
+                    kind = %kind_str,
+                    "skipping unknown offer_coin_watches kind in match query"
+                );
+                continue;
+            };
+            kind_by_offer
+                .entry(offer_id)
+                .and_modify(|existing| *existing = existing.merge(kind))
+                .or_insert(kind);
+        }
+        Ok(kind_by_offer)
     }
 
     fn query_distinct_watch_column(
@@ -502,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn list_offer_states_for_watched_keys_dedupes_and_joins_state() {
+    fn list_offer_states_for_watched_keys_with_kind_aggregates() {
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let offer_a = "aa".repeat(32);
@@ -526,15 +642,21 @@ mod tests {
         store
             .replace_offer_coin_watches(&offer_b, "m1", std::slice::from_ref(&coin), &[])
             .expect("watch b");
-        let rows = store
-            .list_offer_states_for_watched_keys(&[coin, p2])
-            .expect("rows");
-        assert_eq!(rows.len(), 2);
-        let mut by_id: std::collections::HashMap<_, _> = rows
+        let hits = store
+            .list_offer_states_for_watched_keys_with_kind(&[coin, p2])
+            .expect("hits");
+        assert_eq!(hits.len(), 2);
+        let mut by_id: HashMap<_, _> = hits
             .into_iter()
-            .map(|row| (row.offer_id, row.state))
+            .map(|hit| (hit.row.offer_id, (hit.row.state, hit.kind)))
             .collect();
-        assert_eq!(by_id.remove(&offer_a).as_deref(), Some("open"));
-        assert_eq!(by_id.remove(&offer_b).as_deref(), Some("mempool_observed"));
+        assert_eq!(
+            by_id.remove(&offer_a),
+            Some(("open".to_string(), WatchMatchKind::Both))
+        );
+        assert_eq!(
+            by_id.remove(&offer_b),
+            Some(("mempool_observed".to_string(), WatchMatchKind::Coin))
+        );
     }
 }

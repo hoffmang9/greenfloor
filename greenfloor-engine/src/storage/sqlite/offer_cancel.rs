@@ -149,11 +149,8 @@ impl SqliteStore {
     /// Explicit `dexie` → yes; anything else (including legacy `NULL` after venue
     /// backfill) → no. Prefer persisted `publish_venue` over id-shape heuristics.
     #[must_use]
-    pub fn is_dexie_authoritative_for_offer(_offer_id: &str, publish_venue: Option<&str>) -> bool {
-        publish_venue
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_some_and(|venue| venue.eq_ignore_ascii_case("dexie"))
+    pub fn is_dexie_authoritative_for_offer(publish_venue: Option<&str>) -> bool {
+        crate::config::Venue::is_dexie_authoritative(publish_venue)
     }
 
     /// Publish venue recorded at post time (`coinset` / `dexie` / `splash`).
@@ -190,10 +187,7 @@ impl SqliteStore {
     /// Returns an error if the venue lookup fails.
     pub fn is_dexie_authoritative_offer(&self, offer_id: &str) -> SignerResult<bool> {
         let venue = self.offer_publish_venue_for_id(offer_id)?;
-        Ok(Self::is_dexie_authoritative_for_offer(
-            offer_id,
-            venue.as_deref(),
-        ))
+        Ok(Self::is_dexie_authoritative_for_offer(venue.as_deref()))
     }
 
     /// Load cancel metadata persisted at offer post time.
@@ -343,25 +337,13 @@ mod venue_authority_tests {
 
     #[test]
     fn dexie_authority_uses_explicit_venue_only() {
-        assert!(SqliteStore::is_dexie_authoritative_for_offer(
-            "offer-bech32-like",
-            Some("dexie")
-        ));
-        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
-            &"ab".repeat(32),
-            Some("coinset")
-        ));
-        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
-            &"ab".repeat(32),
-            None
-        ));
-        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
-            "legacy-dexie-id",
-            None
-        ));
-        assert!(!SqliteStore::is_dexie_authoritative_for_offer(
-            "legacy-dexie-id",
-            Some("splash")
-        ));
+        assert!(SqliteStore::is_dexie_authoritative_for_offer(Some("dexie")));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(Some(
+            "coinset"
+        )));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(None));
+        assert!(!SqliteStore::is_dexie_authoritative_for_offer(Some(
+            "splash"
+        )));
     }
 }

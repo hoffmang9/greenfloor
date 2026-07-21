@@ -63,12 +63,8 @@ pub fn classify_and_heal_local(
         if !state.is_watched_for_reconcile() {
             continue;
         }
-        let venue = row
-            .publish_venue
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let is_dexie_auth = venue.is_some_and(|v| v.eq_ignore_ascii_case("dexie"));
+        let venue = crate::config::Venue::parse_optional(row.publish_venue.as_deref());
+        let is_dexie_auth = venue.is_some_and(crate::config::Venue::is_dexie);
         if is_dexie_auth {
             plan.authoritative.insert(row.offer_id.clone());
         }
@@ -108,8 +104,7 @@ pub fn classify_and_heal_local(
         // Still missing watches: Dexie payload heal for dexie + legacy NULL venue only.
         let may_need_dexie = match venue {
             None => true,
-            Some(v) if v.eq_ignore_ascii_case("dexie") => true,
-            Some(_) => false,
+            Some(v) => v.is_dexie(),
         };
         if may_need_dexie {
             plan.heal_only.insert(row.offer_id);

@@ -29,15 +29,15 @@ pub(super) async fn publish_offer(
     claim_rewards: bool,
     expected: &ExpectedPublishAssetFields,
 ) -> SignerResult<PublishResult> {
-    match publish_venue {
-        "coinset" => {
+    match crate::config::Venue::parse(publish_venue)? {
+        crate::config::Venue::Coinset => {
             let endpoint = coinset.ok_or_else(|| {
                 SignerError::Other("coinset endpoint missing for coinset publish".to_string())
             })?;
             let payload = push_offer_text(endpoint.network, endpoint.base_url, offer_text).await?;
             Ok(PublishResult::from_coinset_push_offer(payload))
         }
-        "dexie" => {
+        crate::config::Venue::Dexie => {
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
@@ -52,7 +52,7 @@ pub(super) async fn publish_offer(
                 .await?,
             ))
         }
-        "splash" => {
+        crate::config::Venue::Splash => {
             let splash = splash.ok_or_else(|| {
                 SignerError::Other("splash adapter missing for splash publish".to_string())
             })?;
@@ -60,9 +60,6 @@ pub(super) async fn publish_offer(
                 splash.post_offer(offer_text).await?,
             ))
         }
-        other => Err(SignerError::Other(format!(
-            "unsupported publish venue: {other}"
-        ))),
     }
 }
 
@@ -251,6 +248,9 @@ mod tests {
         )
         .await
         .expect_err("unknown venue");
-        assert!(err.to_string().contains("unsupported publish venue"));
+        assert!(
+            err.to_string().contains("offer venue must be"),
+            "unexpected error: {err}"
+        );
     }
 }
