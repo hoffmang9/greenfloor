@@ -37,17 +37,24 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
    puzzle hash. This matches the hash baked into the coin at offer-build time regardless of
    source-coin nonce used during planning.
 
-3a. **Presplit cancel metadata is persisted at post time** in `offer_state`:
-`presplit_input_coin_id`, `fixed_delegated_puzzle_hash`, and `execution_mode`. Cancel
-prefers Coinset + stored metadata (no offer file). When metadata is absent (legacy rows,
-DB loss, manual posts), cancel may fall back to a local `--offer-file` or optional Dexie
-offer-file fetch.
+3a. **Cancel metadata (`OfferCancelFields`) is persisted at post time** in
+`offer_state`. Columns (historical names kept for migrations):
+`presplit_input_coin_id` (maker input coin id for **any** execution mode),
+optional `fixed_delegated_puzzle_hash` (presplit only), `maker_puzzle_hash`, and
+`execution_mode`. Presplit paths store the fixed CONDITIONS hash; Direct paths
+store the single maker input coin id + on-chain puzzle hash (no fixed delegated
+hash). **Direct offers require exactly one input coin** equal to the offer amount
+(multi-coin exact sums must combine or use `--split-input-coins`); that invariant
+keeps metadata cancel and durable watches aligned on one maker coin. Cancel
+prefers Coinset + stored metadata (no offer file). When metadata is absent
+(legacy rows, DB loss, manual posts), cancel may fall back to a local
+`--offer-file` or optional Dexie offer-file fetch.
 
 4. **Input CAT resolution is coin-id authoritative.** Cancel resolves the offered input
-   via stored `presplit_input_coin_id` when present, then scans coin ids from the decoded
-   offer spend bundle (offered coin id plus same-amount maker spends). Ambiguous inner-puzzle
-   - amount fingerprint lookup is not used — it can select a different vault coin when the
-     offer input is already spent.
+   via stored maker input coin id (`presplit_input_coin_id`) when present, then scans
+   coin ids from the decoded offer spend bundle (offered coin id plus same-amount
+   maker spends). Ambiguous inner-puzzle amount fingerprint lookup is not used — it
+   can select a different vault coin when the offer input is already spent.
 
 5. **Optimistic operator state is `cancel_submitted`, not `cancelled`.**
    Tracked cancel submit is prepare → broadcast → finalize:

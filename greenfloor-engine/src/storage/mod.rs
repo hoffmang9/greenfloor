@@ -18,7 +18,7 @@ pub use audit_retention::{
     DEFAULT_AUDIT_RETENTION_DAYS,
 };
 
-pub use crate::offer::types::PresplitCancelFields;
+pub use crate::offer::types::OfferCancelFields;
 pub use persist::{
     persist_offer_post_records, upsert_offer_post_record, write_offer_post_record_in_txn,
 };

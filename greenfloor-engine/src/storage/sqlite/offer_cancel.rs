@@ -1,6 +1,6 @@
 use crate::error::{SignerError, SignerResult};
 use crate::hex::canonical_tx_id;
-use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
+use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
@@ -8,7 +8,7 @@ use super::SqliteStore;
 /// Cancel metadata written alongside an offer state upsert.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OfferCancelWrite<'a> {
-    pub fields: Option<&'a PresplitCancelFields>,
+    pub fields: Option<&'a OfferCancelFields>,
     pub execution_mode: Option<OfferExecutionMode>,
     pub cancel_submitted_tx_id: Option<&'a str>,
     pub cancel_submitted_at: Option<&'a str>,
@@ -229,7 +229,7 @@ impl SqliteStore {
             return Ok(None);
         };
         Ok(Some(StoredOfferCancelMetadata {
-            fields: PresplitCancelFields {
+            fields: OfferCancelFields {
                 input_coin_id: row.get(0).ok(),
                 fixed_delegated_puzzle_hash: row.get(1).ok(),
                 maker_puzzle_hash: row.get(2).ok(),

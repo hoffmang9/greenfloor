@@ -201,6 +201,9 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
 
 - `POST /push_offer` - body `{ "offer": "offer1..." }`; success returns 64-hex `offer_id` (spend-bundle hash / Dexie `trade_id`)
 - GreenFloor default publish venue is `coinset` via this endpoint; Dexie/Splash remain explicit opt-ins
+- After a successful push, GreenFloor persists `OfferCancelFields` (maker input coin id +
+  mode-specific hints) so on-chain cancel can reclaim without an offer blob. Direct
+  offers use exactly one input coin equal to the offer amount.
 
 ## Integration Cheat Sheet (Required Body Fields)
 

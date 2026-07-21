@@ -11,7 +11,7 @@ use crate::offer::presplit::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
     verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup,
 };
-use crate::offer::types::{OfferExecutionMode, PresplitCancelFields, StoredOfferCancelMetadata};
+use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
 use crate::vault::spend::VaultSpendContext;
 
 /// How a vault-owned maker coin should be reclaimed to vault change.
@@ -66,10 +66,10 @@ fn stored_input_coin_id(
     Ok(Some(hex_to_bytes32(coin_id_hex)?))
 }
 
-/// Persisted presplit cancel fields when stored metadata is usable for cancel.
+/// Fixed-delegated cancel fields when stored metadata is usable for presplit cancel.
 pub(crate) fn stored_presplit_fields(
     metadata: Option<&StoredOfferCancelMetadata>,
-) -> Option<&PresplitCancelFields> {
+) -> Option<&OfferCancelFields> {
     let metadata = metadata?;
     let hash = metadata
         .fields
@@ -146,7 +146,7 @@ fn presplit_hash_from_stored_fields(
     launcher_id: Bytes32,
     coin: Coin,
     cat: Option<Cat>,
-    fields: &PresplitCancelFields,
+    fields: &OfferCancelFields,
 ) -> SignerResult<TreeHash> {
     let hash = hex_to_tree_hash(
         fields

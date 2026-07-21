@@ -99,7 +99,7 @@ pub(super) fn offer_post_persist_record(
     }
     let offer_id = publish.offer_id.clone()?;
     let cancel_fields = create_result
-        .and_then(|result| result.presplit_cancel_fields.clone())
+        .map(|result| result.cancel_fields.clone())
         .unwrap_or_default();
     let execution_mode = create_result
         .map(|result| result.execution_mode)

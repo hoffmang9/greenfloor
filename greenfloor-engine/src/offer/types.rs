@@ -43,10 +43,12 @@ pub(crate) struct OfferTerms {
 /// # Execution vs input mode
 ///
 /// [`OfferInput::PresplitNew`] means the operator enabled `--split-input-coins`.
-/// Planning still selects the direct offer path when selected CAT inputs already
-/// equal `--offer-amount` exactly (no change to split off). In that case execution
-/// uses the direct offer assembler and `execution_mode` is
-/// [`OfferExecutionMode::Direct`], even though the input variant is `PresplitNew`.
+/// Planning still selects the direct offer path when a **single** selected CAT
+/// already equals `--offer-amount` exactly (no change to split off). Multi-coin
+/// exact sums require combine or the split path — Direct cancel metadata stores
+/// one maker input. In the single-coin case execution uses the direct assembler
+/// and `execution_mode` is [`OfferExecutionMode::Direct`], even though the input
+/// variant is `PresplitNew`.
 #[derive(Debug, Clone)]
 pub(crate) enum OfferInput {
     Direct {
@@ -177,8 +179,13 @@ impl OfferExecutionMode {
     }
 }
 
+/// Cancel hints persisted at offer post time (Direct and presplit execution modes).
+///
+/// Stored in `offer_state` columns `presplit_input_coin_id` (historical name for the
+/// maker input coin id), `fixed_delegated_puzzle_hash` (presplit only), and
+/// `maker_puzzle_hash`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct PresplitCancelFields {
+pub struct OfferCancelFields {
     pub input_coin_id: Option<String>,
     /// Fixed CONDITIONS tree hash (cancel/reclaim verification). Not an on-chain coin p2.
     pub fixed_delegated_puzzle_hash: Option<String>,
@@ -186,7 +193,7 @@ pub struct PresplitCancelFields {
     pub maker_puzzle_hash: Option<String>,
 }
 
-impl PresplitCancelFields {
+impl OfferCancelFields {
     #[must_use]
     pub fn from_presplit_build(
         input_coin_id: String,
@@ -199,12 +206,22 @@ impl PresplitCancelFields {
             maker_puzzle_hash: Some(maker_puzzle_hash),
         }
     }
+
+    /// Direct-path cancel hints: maker input coin id + on-chain puzzle hash (no fixed CONDITIONS).
+    #[must_use]
+    pub fn from_direct_build(input_coin_id: String, maker_puzzle_hash: String) -> Self {
+        Self {
+            input_coin_id: Some(input_coin_id),
+            fixed_delegated_puzzle_hash: None,
+            maker_puzzle_hash: Some(maker_puzzle_hash),
+        }
+    }
 }
 
 /// Cancel hints persisted at offer post time (`offer_state` row).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StoredOfferCancelMetadata {
-    pub fields: PresplitCancelFields,
+    pub fields: OfferCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
 }
 
@@ -220,8 +237,8 @@ pub struct CreateOfferResult {
     /// Presplit offer coin ID for presplit-new and presplit-existing paths.
     pub presplit_coin_id: Option<String>,
     pub split_broadcast_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presplit_cancel_fields: Option<PresplitCancelFields>,
+    /// Maker cancel hints required for Coinset-primary cancel without an offer file.
+    pub cancel_fields: OfferCancelFields,
 }
 
 #[derive(Debug, Clone)]
@@ -244,7 +261,7 @@ impl CreateOfferResult {
         execution_mode: OfferExecutionMode,
         core: OfferArtifacts,
         presplit: PresplitArtifacts,
-        presplit_cancel_fields: Option<PresplitCancelFields>,
+        cancel_fields: OfferCancelFields,
     ) -> Self {
         Self {
             execution_mode,
@@ -255,7 +272,7 @@ impl CreateOfferResult {
             split_spend_bundle_hex: presplit.split_spend_bundle_hex,
             presplit_coin_id: presplit.presplit_coin_id,
             split_broadcast_status: presplit.split_broadcast_status,
-            presplit_cancel_fields,
+            cancel_fields,
         }
     }
 }
@@ -322,8 +339,16 @@ mod tests {
     }
 
     #[test]
+    fn from_direct_build_omits_fixed_delegated_hash() {
+        let fields = OfferCancelFields::from_direct_build("aa".repeat(32), "bb".repeat(32));
+        assert_eq!(fields.input_coin_id.as_deref(), Some(&*"aa".repeat(32)));
+        assert_eq!(fields.maker_puzzle_hash.as_deref(), Some(&*"bb".repeat(32)));
+        assert!(fields.fixed_delegated_puzzle_hash.is_none());
+    }
+
+    #[test]
     fn create_offer_result_assembled_carries_presplit_fields() {
-        let cancel = PresplitCancelFields::from_presplit_build(
+        let cancel = OfferCancelFields::from_presplit_build(
             "coin".to_string(),
             "delegated".to_string(),
             "makerp2".to_string(),
@@ -341,10 +366,10 @@ mod tests {
                 presplit_coin_id: Some("cc".repeat(64)),
                 split_broadcast_status: Some("submitted".to_string()),
             },
-            Some(cancel.clone()),
+            cancel.clone(),
         );
         assert_eq!(result.execution_mode, OfferExecutionMode::PresplitExisting);
-        assert_eq!(result.presplit_cancel_fields, Some(cancel));
+        assert_eq!(result.cancel_fields, cancel);
     }
 
     #[test]

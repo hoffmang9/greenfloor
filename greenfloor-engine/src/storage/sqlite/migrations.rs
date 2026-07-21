@@ -397,7 +397,7 @@ fn normalize_offer_cancel_submitted_tx_ids(conn: &Connection) -> SignerResult<()
 mod tests {
     use tempfile::tempdir;
 
-    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
     use crate::storage::sqlite::{OfferCancelWrite, SqliteStore};
 
     use super::super::utcnow_iso;
@@ -411,7 +411,7 @@ mod tests {
         let meta_p2 = "ef".repeat(32);
         {
             let store = SqliteStore::open(&db_path).expect("open");
-            let fields = PresplitCancelFields {
+            let fields = OfferCancelFields {
                 input_coin_id: Some(coin.clone()),
                 fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
                 maker_puzzle_hash: Some(meta_p2.clone()),
@@ -471,7 +471,7 @@ mod tests {
         let meta_p2 = "ef".repeat(32);
         {
             let store = SqliteStore::open(&db_path).expect("open");
-            let fields = PresplitCancelFields {
+            let fields = OfferCancelFields {
                 input_coin_id: Some(coin.clone()),
                 fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
                 maker_puzzle_hash: Some(meta_p2.clone()),

@@ -97,7 +97,8 @@ This file summarizes the public API docs at `https://dexie.space/api` and relate
 - GreenFloor offer strategy is expiry-first: all offers expire, with shorter expiries on stable-vs-unstable pairs.
 - GreenFloor cancel path is intentionally rare and policy-gated (stable-vs-unstable pairs only; triggered by strong unstable-leg price movement).
 - Dexie does **not** expose a public cancel API. Cancelling an offer means spending an offered input coin on-chain (typically back to vault change). GreenFloor:
-  1. Prefers local `--offer-file` or Coinset coin lookup + stored cancel metadata (Coinset `get_offer` does not return the offer blob)
+  1. Prefers local `--offer-file` or Coinset coin lookup + stored `OfferCancelFields`
+     (Coinset `get_offer` does not return the offer blob)
   2. Optionally falls back to Dexie `GET /v1/offers/:id` for legacy / Dexie-posted rows without usable metadata
   3. Builds a reclaim/cancel spend bundle in Rust (`offer/reclaim.rs`)
   4. Submits the spend through the direct Coinset HTTP API (`push_tx` / broadcast helpers)

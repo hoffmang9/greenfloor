@@ -10,7 +10,7 @@ use super::post_batch::{
 };
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
-use crate::offer::types::{CreateOfferResult, OfferExecutionMode, PresplitCancelFields};
+use crate::offer::types::{CreateOfferResult, OfferCancelFields, OfferExecutionMode};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{
     state_db_path_for_home, upsert_offer_post_record, CycleWriteStore, SqliteStore,
@@ -157,11 +157,11 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         split_spend_bundle_hex: None,
         presplit_coin_id: Some(presplit_coin.clone()),
         split_broadcast_status: None,
-        presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
+        cancel_fields: OfferCancelFields::from_presplit_build(
             input_coin.clone(),
             "aa".repeat(32),
             p2.clone(),
-        )),
+        ),
     };
     let presplit = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&create))
         .expect("presplit record");
@@ -178,6 +178,37 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         vec![selected, presplit_coin, input_coin]
     );
     assert_eq!(presplit.watched_p2s, vec![p2]);
+
+    let direct_coin = "ee".repeat(32);
+    let direct_p2 = "ff".repeat(32);
+    let direct_create = CreateOfferResult {
+        offer: "offer1".to_string(),
+        spend_bundle_hex: String::new(),
+        selected_coin_ids: vec![direct_coin.clone()],
+        offer_nonce: String::new(),
+        execution_mode: OfferExecutionMode::Direct,
+        split_spend_bundle_hex: None,
+        presplit_coin_id: None,
+        split_broadcast_status: None,
+        cancel_fields: OfferCancelFields::from_direct_build(direct_coin.clone(), direct_p2.clone()),
+    };
+    let direct =
+        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&direct_create))
+            .expect("direct record");
+    assert_eq!(direct.execution_mode, Some(OfferExecutionMode::Direct));
+    assert_eq!(
+        direct.cancel_fields.input_coin_id.as_deref(),
+        Some(direct_coin.as_str())
+    );
+    assert!(direct.cancel_fields.fixed_delegated_puzzle_hash.is_none());
+    assert_eq!(direct.watched_coin_ids, vec![direct_coin]);
+    assert_eq!(direct.watched_p2s, vec![direct_p2]);
+    assert!(crate::offer::metadata_sufficient_for_coinset_cancel(Some(
+        &crate::offer::types::StoredOfferCancelMetadata {
+            fields: direct.cancel_fields.clone(),
+            execution_mode: Some(OfferExecutionMode::Direct),
+        }
+    )));
 }
 
 #[test]
@@ -219,7 +250,7 @@ fn flush_post_batch_writes_execution_audit_only() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
@@ -274,7 +305,7 @@ fn success_persists_offer_state_immediately_before_flush() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: vec![coin.clone()],
                 watched_p2s: vec![p2.clone()],
@@ -338,7 +369,7 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),

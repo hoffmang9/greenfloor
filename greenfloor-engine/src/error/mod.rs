@@ -131,6 +131,11 @@ pub enum SignerError {
     #[error("offer input exceeds offer amount; enable split-input-coins or specify exact coin")]
     OfferInputRequiresPresplit,
 
+    #[error(
+        "direct offer requires exactly one input coin equal to offer amount; combine or enable split-input-coins"
+    )]
+    DirectOfferRequiresSingleInputCoin,
+
     #[error("presplit coin not found on chain")]
     PresplitCoinNotFound,
 

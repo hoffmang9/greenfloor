@@ -28,7 +28,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::error::{SignerError, SignerResult};
-use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
 
 use super::schema::SCHEMA;
 
@@ -42,7 +42,7 @@ pub struct OfferPostPersistRecord {
     pub resolved_base_asset_id: String,
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
-    pub cancel_fields: PresplitCancelFields,
+    pub cancel_fields: OfferCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
     /// Maker coin ids to watch on Coinset WS (from create/select or offer decode).
     pub watched_coin_ids: Vec<String>,

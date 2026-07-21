@@ -311,7 +311,7 @@ fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
     use serde_json::json;
 
     #[test]
@@ -325,7 +325,7 @@ mod tests {
             resolved_base_asset_id: "a1".to_string(),
             resolved_quote_asset_id: "xch".to_string(),
             created_extra: json!({}),
-            cancel_fields: PresplitCancelFields::default(),
+            cancel_fields: OfferCancelFields::default(),
             execution_mode: Some(OfferExecutionMode::Direct),
             watched_coin_ids: Vec::new(),
             watched_p2s: Vec::new(),

@@ -192,7 +192,7 @@ pass `include_spent=true` when tracing coin history. Full catalog:
   it and reconnects WS so filters stay current.
 - Durable `offer_coin_watches` (maker coins + known maker p2s) are registered
   atomically at post and cleared on terminal lifecycle. Schema migration backfills
-  missing watches from cancel metadata. Shared market inventory p2s are not written
+  missing watches from cancel metadata (`OfferCancelFields`). Shared market inventory p2s are not written
   into per-offer watches. Optional coin-id fields on transaction frames are matched
   when present. Offer-frame `p2s` must not drive watches. Dexie reconcile runs only
   for Dexie-authoritative offers; Coinset/splash offers skip Dexie HTTP. Dexie list

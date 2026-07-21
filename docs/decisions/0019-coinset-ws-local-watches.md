@@ -25,8 +25,10 @@ never the operator transport.
    API keys.
 3. **Watches:** durable SQLite `offer_coin_watches` registered atomically at post
    (maker coins + on-chain maker puzzle hashes — CAT outer or XCH p2 — not the
-   fixed delegated CONDITIONS hash). Schema migration backfills missing watches
-   from cancel/presplit metadata for pre-upgrade rows. Shared market inventory
+   fixed delegated CONDITIONS hash), sourced from required `OfferCancelFields` on
+   every successful create (Direct: single exact-size maker coin; presplit: split
+   coin + fixed CONDITIONS hash). Schema migration backfills missing watches
+   from cancel metadata for pre-upgrade rows. Shared market inventory
    receive/CAT outer p2s are **not** stored on per-offer watches; `InventoryP2Index`
    still drives WS filters and inventory freshness. Optional coin-id fields on
    transaction frames are matched when present. WS offer events and watch hits

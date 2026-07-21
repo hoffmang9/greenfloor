@@ -88,7 +88,10 @@ Optional developer bootstrap for testnet markets:
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Cancel offers when policy requires it (on-chain via Coinset; offer file from local `--offer-file` or stored cancel metadata; Dexie offer-file fetch is optional fallback for legacy Dexie rows):
+- Cancel offers when policy requires it (on-chain via Coinset; offer file from local
+  `--offer-file` or stored `OfferCancelFields` / maker input coin id; Dexie offer-file
+  fetch is optional fallback for legacy Dexie rows). Direct posts require a single
+  exact-size maker coin so Coinset-primary cancel metadata is complete:
   - `greenfloor-manager offers-cancel --offer-id <id>` (Dexie fetch; DB row optional)
   - Cancel from local offer file: `greenfloor-manager offers-cancel --offer-file <path-or-offer1>`
   - Cancel all open offers tracked in state DB: `greenfloor-manager offers-cancel --cancel-open`

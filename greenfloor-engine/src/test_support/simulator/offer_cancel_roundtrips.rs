@@ -31,10 +31,7 @@ fn stored_cancel_metadata(
     result: &crate::offer::types::CreateOfferResult,
 ) -> StoredOfferCancelMetadata {
     StoredOfferCancelMetadata {
-        fields: result
-            .presplit_cancel_fields
-            .clone()
-            .expect("presplit cancel fields"),
+        fields: result.cancel_fields.clone(),
         execution_mode: Some(result.execution_mode),
     }
 }

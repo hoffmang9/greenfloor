@@ -268,7 +268,7 @@ pub async fn fetch_and_ensure_watches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
     use crate::storage::OfferCancelWrite;
     use tempfile::tempdir;
 
@@ -279,7 +279,7 @@ mod tests {
         let offer_id = "ab".repeat(32);
         let coin = "cd".repeat(32);
         let p2 = "ef".repeat(32);
-        let fields = PresplitCancelFields {
+        let fields = OfferCancelFields {
             input_coin_id: Some(coin.clone()),
             fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
             maker_puzzle_hash: Some(p2),
@@ -326,7 +326,7 @@ mod tests {
                 None,
                 &chrono::Utc::now().to_rfc3339(),
                 OfferCancelWrite {
-                    fields: Some(&PresplitCancelFields::default()),
+                    fields: Some(&OfferCancelFields::default()),
                     execution_mode: Some(OfferExecutionMode::PresplitExisting),
                     publish_venue: Some("coinset"),
                     ..OfferCancelWrite::default()

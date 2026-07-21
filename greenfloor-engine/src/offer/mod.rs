@@ -60,6 +60,6 @@ pub use request::{
     signer_split_asset_id, SignerOfferLegAmounts,
 };
 pub use types::{
-    CreateOfferRequest, CreateOfferResult, OfferExecutionMode, PresplitCancelFields,
+    CreateOfferRequest, CreateOfferResult, OfferCancelFields, OfferExecutionMode,
     StoredOfferCancelMetadata,
 };

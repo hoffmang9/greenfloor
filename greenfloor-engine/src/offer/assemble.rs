@@ -13,8 +13,8 @@ use crate::offer::presplit::{
     verify_presplit_cat_offer_binding, PresplitOfferBinding, PresplitPaymentContext,
 };
 use crate::offer::types::{
-    CreateOfferResult, OfferArtifacts, OfferExecutionMode, OfferInput, PresplitArtifacts,
-    PresplitCancelFields,
+    CreateOfferResult, OfferArtifacts, OfferCancelFields, OfferExecutionMode, OfferInput,
+    PresplitArtifacts,
 };
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::spend::VaultSpendContext;
@@ -97,11 +97,11 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
     let presplit_cat =
         resolve_presplit_cat_after_split(coinset, *broadcast_split, predicted_presplit_cat).await?;
     let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
-    let cancel_fields = Some(PresplitCancelFields::from_presplit_build(
+    let cancel_fields = OfferCancelFields::from_presplit_build(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
         hex::encode(presplit_cat.coin.puzzle_hash),
-    ));
+    );
     let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
     let (offer, spend_bundle_hex, offer_nonce_hex) =
         build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, &binding, &payment_ctx)?;
@@ -155,11 +155,11 @@ pub(crate) async fn execute_existing_presplit_offer<C: OfferCoinsetBackend>(
     )?;
     verify_presplit_cat_offer_binding(&presplit_cat, &binding)?;
     let presplit_coin_id_hex = hex::encode(presplit_cat.coin.coin_id());
-    let cancel_fields = Some(PresplitCancelFields::from_presplit_build(
+    let cancel_fields = OfferCancelFields::from_presplit_build(
         presplit_coin_id_hex.clone(),
         tree_hash_to_hex(binding.fixed_conditions_tree_hash),
         hex::encode(presplit_cat.coin.puzzle_hash),
-    ));
+    );
     let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
     let (offer, spend_bundle_hex, offer_nonce_hex) =
         build_offer_from_presplit_cat(presplit_cat, vault_ctx.launcher_id, &binding, &payment_ctx)?;
@@ -246,20 +246,25 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
     let offer_text = crate::bech32m::encode_offer(&offer_spend_bundle)?;
     let spend_bundle_hex = spend_bundle_hex(&offer_spend_bundle)?;
 
+    // Plan enforces a single Direct input; cancel metadata is required for Coinset-primary cancel.
+    let [cat] = selection.selected.as_slice() else {
+        return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+    };
+    let cancel_fields = OfferCancelFields::from_direct_build(
+        hex::encode(cat.coin.coin_id()),
+        hex::encode(cat.coin.puzzle_hash),
+    );
+
     Ok(CreateOfferResult::assembled(
         OfferExecutionMode::Direct,
         OfferArtifacts {
             offer: offer_text,
             spend_bundle_hex,
             offer_nonce: hex::encode(offer_nonce),
-            selected_coin_ids: selection
-                .selected
-                .iter()
-                .map(|cat| hex::encode(cat.coin.coin_id()))
-                .collect(),
+            selected_coin_ids: vec![hex::encode(cat.coin.coin_id())],
         },
         PresplitArtifacts::default(),
-        None,
+        cancel_fields,
     ))
 }
 

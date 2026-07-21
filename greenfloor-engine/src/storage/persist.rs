@@ -76,7 +76,7 @@ pub fn persist_offer_post_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
     use serde_json::json;
 
     #[test]
@@ -96,7 +96,7 @@ mod tests {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: vec!["ab".repeat(32)],
                 watched_p2s: Vec::new(),
@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn persist_offer_post_records_writes_presplit_cancel_fields() {
+    fn persist_offer_post_records_writes_cancel_fields() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
         let store = SqliteStore::open(&db_path).expect("open");
@@ -141,7 +141,7 @@ mod tests {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields {
+                cancel_fields: OfferCancelFields {
                     input_coin_id: Some("c".repeat(64)),
                     fixed_delegated_puzzle_hash: Some("d".repeat(64)),
                     maker_puzzle_hash: Some("e".repeat(64)),
@@ -203,7 +203,7 @@ mod tests {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
