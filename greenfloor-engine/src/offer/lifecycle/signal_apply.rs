@@ -7,6 +7,7 @@ use chrono::Utc;
 use crate::cycle::reconcile::{
     resolve_watched_offer_transition_from_signals, CancelSubmittedContext, CoinsetTxSignals,
 };
+use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::storage::{OfferStateListRow, SqliteStore};
 
@@ -16,10 +17,11 @@ use super::cancel_context::{
 };
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 
-/// Resolve watched-offer transition from signals and persist when state changes.
+/// Resolve watched-offer transition from signals and persist when needed.
 ///
 /// Merges `confirmed_tx_ids` with the tracked cancel tx via
 /// [`chain_confirmed_tx_ids_for_transition`] so WS and Dexie share one promotion path.
+/// Persists when state changes **or** `last_seen_status` is present (Dexie status touch).
 ///
 /// # Errors
 ///
@@ -34,7 +36,8 @@ pub fn apply_watched_offer_signals(
     signals: CoinsetTxSignals,
     cancel_submitted: Option<&CancelSubmittedContext>,
     options: &ReconcilePersistOptions<'_>,
-) -> SignerResult<bool> {
+    last_seen_status: Option<i64>,
+) -> SignerResult<CycleOfferTransition> {
     let chain_confirmed =
         chain_confirmed_tx_ids_for_transition(store, cancel_submitted, &signals.confirmed_tx_ids)?;
     let transition = resolve_watched_offer_transition_from_signals(
@@ -46,11 +49,17 @@ pub fn apply_watched_offer_signals(
         Utc::now(),
     )
     .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-    if !transition.changed {
-        return Ok(false);
+    if transition.changed || last_seen_status.is_some() {
+        persist_offer_lifecycle_transition(
+            store,
+            market_id,
+            offer_id,
+            &transition,
+            last_seen_status,
+            options,
+        )?;
     }
-    persist_offer_lifecycle_transition(store, market_id, offer_id, &transition, None, options)?;
-    Ok(true)
+    Ok(transition)
 }
 
 /// Apply signals to one offer-state row (shared WS / cancel-submitted seam).
@@ -68,7 +77,7 @@ pub fn apply_signals_to_row(
 ) -> SignerResult<bool> {
     let cancel_submitted =
         cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, cancel_by_offer)?;
-    apply_watched_offer_signals(
+    let transition = apply_watched_offer_signals(
         store,
         &row.market_id,
         &row.offer_id,
@@ -77,7 +86,9 @@ pub fn apply_signals_to_row(
         signals,
         cancel_submitted.as_ref(),
         options,
-    )
+        None,
+    )?;
+    Ok(transition.changed)
 }
 
 /// Apply empty-signal cancel-submitted policy to rows (orphan unwedge / cancel-tx promote).

@@ -25,6 +25,37 @@ pub(crate) struct ReconcileTransitionParams<'a> {
     pub dexie_error: Option<&'a str>,
 }
 
+/// Update cycle metrics / in-memory state after a lifecycle transition was applied.
+pub(crate) fn note_reconcile_transition_side_effects(
+    transition: &CycleOfferTransition,
+    offer_id: &str,
+    metrics: &mut ReconcileMarketCycleMetrics,
+    state_by_offer_id: &mut HashMap<String, String>,
+) {
+    if transition.changed {
+        state_by_offer_id.insert(
+            offer_id.to_string(),
+            transition.new_state.as_str().into_owned(),
+        );
+    }
+    if transition.immediate_requeue {
+        metrics.immediate_requeue_requested = true;
+        if let Some(signal) = transition.signal {
+            metrics
+                .immediate_requeue_signals
+                .push(signal.as_str().to_string());
+        }
+    }
+}
+
+/// Persist a pre-resolved transition (missing-offer / augment edge paths).
+///
+/// Prefer [`crate::offer::lifecycle::apply_watched_offer_signals`] for the Dexie
+/// list lifecycle path so resolve+persist share the WS spine.
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` persist fails.
 pub(crate) fn apply_reconcile_transition(
     params: ReconcileTransitionParams<'_>,
 ) -> SignerResult<()> {
@@ -52,20 +83,7 @@ pub(crate) fn apply_reconcile_transition(
             },
         )?;
     }
-    if transition.changed {
-        state_by_offer_id.insert(
-            offer_id.to_string(),
-            transition.new_state.as_str().into_owned(),
-        );
-    }
-    if transition.immediate_requeue {
-        metrics.immediate_requeue_requested = true;
-        if let Some(signal) = transition.signal {
-            metrics
-                .immediate_requeue_signals
-                .push(signal.as_str().to_string());
-        }
-    }
+    note_reconcile_transition_side_effects(transition, offer_id, metrics, state_by_offer_id);
     Ok(())
 }
 

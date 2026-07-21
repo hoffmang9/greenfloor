@@ -12,12 +12,12 @@ pub struct CoinsetTxSignals {
     pub tx_ids: Vec<String>,
     pub confirmed_tx_ids: Vec<String>,
     pub mempool_tx_ids: Vec<String>,
-    /// Maker coin/p2 watch hit without a concrete spend-bundle id yet.
+    /// Maker coin watch hit without a concrete spend-bundle id yet.
     pub watch_hit: bool,
 }
 
 impl CoinsetTxSignals {
-    /// Synthetic mempool observation from a durable coin/p2 watch hit.
+    /// Synthetic mempool observation from a durable maker coin watch hit.
     #[must_use]
     pub fn watch_hit() -> Self {
         Self {
@@ -78,7 +78,7 @@ pub struct CoinsetSignalSummary {
     pub has_tx_ids: bool,
     pub has_confirmed: bool,
     pub has_mempool: bool,
-    /// True when mempool activity is only a durable coin/p2 watch hit (no concrete tx ids).
+    /// True when mempool activity is only a durable maker coin watch hit (no concrete tx ids).
     pub watch_hit: bool,
 }
 

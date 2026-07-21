@@ -180,7 +180,7 @@ fn apply_transaction_watch_hits(
     }
     let watch_keys = dedupe_watch_keys(&tx.p2s, &tx.coin_ids);
     let watch_markets = store.list_market_ids_for_watched_keys(&watch_keys)?;
-    let _hit_markets = apply_watch_hits_batch(store, &watch_keys, frame_confirmed, &tx.tx_ids)?;
+    apply_watch_hits_batch(store, &watch_keys, frame_confirmed, &tx.tx_ids)?;
     audit_coin_watch_hit(store, &tx.p2s, &tx.coin_ids, &watch_keys, &watch_markets)?;
     Ok(watch_markets)
 }

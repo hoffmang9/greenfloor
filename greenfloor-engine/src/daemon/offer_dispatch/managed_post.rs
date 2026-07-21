@@ -18,7 +18,7 @@ use crate::offer::operator::{
 };
 use crate::offer::request::normalize_offer_side;
 use crate::paths::resolve_cats_config_path;
-use crate::storage::CycleWriteStore;
+use crate::storage::{upsert_offer_post_record, CycleWriteStore};
 
 use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
 
@@ -98,7 +98,12 @@ async fn execute_managed_post(
         return Ok(false);
     }
     let request = daemon_managed_post_request(post_ctx, market, action)?;
-    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
+    let write_store = post_ctx.write_store.clone();
+    let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
+        write_store.sync(|store| upsert_offer_post_record(store, record))
+    };
+    let (response, artifacts) =
+        build_and_post_offer_with_persist_artifacts(request, Some(&mut persist)).await?;
     if let Some(artifacts) = artifacts {
         let store = post_ctx.write_store.lock()?;
         flush_build_and_post_persist(&store, &artifacts)?;

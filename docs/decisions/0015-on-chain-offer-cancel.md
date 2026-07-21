@@ -100,7 +100,7 @@ offer-file fetch.
      hits / cancel-tx-only mempool) preserves only **within** grace; past grace it falls
      through to this unwedge so mempool-only observation cannot wedge forever. Daemon
      reconcile applies empty-signal cancel-submitted policy on rows collected by
-     `classify_and_heal_local` (before Dexie HTTP), so all venues unwedge without Dexie
+     `prepare_market_reconcile_local` (before Dexie HTTP), so all venues unwedge without Dexie
      lifecycle or a WS confirm frame.
    - **Preload fallback.** Batch reconcile preloads cancel-submit context for all
      `cancel_submitted` rows. Per-offer reconcile uses the preloaded map when present; on a

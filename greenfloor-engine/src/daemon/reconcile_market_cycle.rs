@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
 use serde_json::json;
 use tracing::Level;
 
@@ -14,11 +13,12 @@ use crate::storage::SqliteStore;
 
 use super::dexie_size::{build_dexie_size_by_offer_id, dexie_status_index};
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::reconcile_transition::{apply_reconcile_transition, ReconcileTransitionParams};
-use super::watch_plan::{classify_and_heal_local, fetch_and_ensure_watches};
+use super::reconcile_transition::note_reconcile_transition_side_effects;
+use super::watch_plan::{fetch_and_ensure_watches, prepare_market_reconcile_local};
 use crate::offer::lifecycle::{
-    apply_cancel_submitted_rows, preload_cancel_submitted_contexts,
-    transition_from_list_offer_payload, ReconcilePersistOptions, WatchedOfferTransitionEnv,
+    apply_cancel_submitted_rows, apply_watched_offer_signals, cancel_submitted_context_for_offer,
+    coinset_signals_from_dexie_offer_payload, preload_cancel_submitted_contexts,
+    ReconcilePersistOptions,
 };
 
 pub use super::reconcile_transition::ReconcileMarketCycleMetrics;
@@ -42,19 +42,18 @@ pub async fn run_reconcile_market_cycle(
     let market_id = market.market_id.as_str();
     let mut metrics = ReconcileMarketCycleMetrics::default();
 
-    // One scan: local cancel-metadata heal + classify Dexie roles; collect
-    // cancel_submitted for orphan unwedge (all venues; Dexie HTTP skips that state).
-    let (plan, cancel_submitted_rows) = classify_and_heal_local(store, market_id)?;
+    // One scan: cancel-submitted rows, local metadata heal, Dexie roles, state map.
+    let local = prepare_market_reconcile_local(store, market_id)?;
     apply_cancel_submitted_rows(
         store,
-        &cancel_submitted_rows,
+        &local.cancel_submitted_rows,
         &ReconcilePersistOptions {
             action: "cancel_submitted_orphan_reconcile",
             venue: None,
             dexie_error: None,
         },
     )?;
-    if !plan.needs_dexie_http() {
+    if !local.dexie.needs_dexie_http() {
         return Ok(ReconcileMarketCycleResult {
             dexie_size_by_offer_id: HashMap::default(),
             dexie_status_by_lookup_key: HashMap::default(),
@@ -62,6 +61,8 @@ pub async fn run_reconcile_market_cycle(
             metrics,
         });
     }
+    let plan = local.dexie;
+    let mut state_by_offer_id = local.state_by_offer_id;
 
     let dexie_offered_asset = resolve_trade_asset_for_network(&market.base_asset, network);
     let dexie_requested_asset = resolve_quote_asset_for_offer(&market.quote_asset, network);
@@ -109,12 +110,6 @@ pub async fn run_reconcile_market_cycle(
         });
     }
 
-    let mut state_by_offer_id: HashMap<String, String> = store
-        .list_offer_state_details(market_id, 5000)?
-        .into_iter()
-        .map(|row| (row.offer_id, row.state))
-        .collect();
-
     let augmented = augment_dexie_offers_for_watchlist(
         dexie,
         store,
@@ -152,26 +147,46 @@ fn apply_dexie_lifecycle_transitions(
     state_by_offer_id: &mut HashMap<String, String>,
     metrics: &mut ReconcileMarketCycleMetrics,
 ) -> SignerResult<()> {
-    let offer_rows = store.list_offer_states(Some(market_id), 5000)?;
+    if by_local_id.is_empty() {
+        return Ok(());
+    }
+    let offer_ids: Vec<String> = by_local_id.keys().cloned().collect();
+    let offer_rows = store.list_offer_states_for_ids(&offer_ids)?;
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(store, &offer_rows)?;
-    let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
+    let options = ReconcilePersistOptions {
+        action: "reconcile_coins_and_offers",
+        venue: Some(crate::config::Venue::Dexie),
+        dexie_error: None,
+    };
 
     for (local_offer_id, raw) in by_local_id {
         let current_state = state_by_offer_id
             .get(local_offer_id)
             .map_or("open", String::as_str);
-        let (transition, status) =
-            transition_from_list_offer_payload(store, local_offer_id, current_state, raw, env)?;
-        apply_reconcile_transition(ReconcileTransitionParams {
+        let (status, signals) = coinset_signals_from_dexie_offer_payload(store, raw)?;
+        let cancel_submitted = cancel_submitted_context_for_offer(
+            store,
+            local_offer_id,
+            current_state,
+            Some(&cancel_submitted_by_offer),
+        )?;
+        let transition = apply_watched_offer_signals(
             store,
             market_id,
-            offer_id: local_offer_id,
-            transition: &transition,
+            local_offer_id,
+            current_state,
+            status,
+            signals,
+            cancel_submitted.as_ref(),
+            &options,
+            status,
+        )?;
+        note_reconcile_transition_side_effects(
+            &transition,
+            local_offer_id,
             metrics,
             state_by_offer_id,
-            last_seen_status: status,
-            dexie_error: None,
-        })?;
+        );
     }
     Ok(())
 }

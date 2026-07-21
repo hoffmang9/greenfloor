@@ -4,7 +4,7 @@ use crate::coinset::WsOfferEvent;
 use crate::config::Venue;
 use crate::cycle::reconcile::{signals_from_ws_offer_status, CoinsetTxSignals};
 use crate::error::SignerResult;
-use crate::storage::{SqliteStore, TxSignalIngress, WatchMatchKind};
+use crate::storage::{SqliteStore, TxSignalIngress};
 
 use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::ReconcilePersistOptions;
@@ -47,18 +47,13 @@ fn ws_persist_options() -> ReconcilePersistOptions<'static> {
     }
 }
 
-/// Signals for a durable watch hit, gated by match kind.
-///
-/// Confirmed frames terminalize only on a `kind='coin'` (or Both) match. P2-only
-/// confirmed hits stay soft (`mempool_observed`) so shared maker puzzle hashes
-/// cannot falsely clear open offers.
+/// Signals for a durable maker coin watch hit.
 #[must_use]
 pub fn signals_for_watch_hit(
     frame_confirmed: bool,
-    match_kind: WatchMatchKind,
     confirmed_tx_ids: &[String],
 ) -> CoinsetTxSignals {
-    if frame_confirmed && match_kind.includes_coin() {
+    if frame_confirmed {
         CoinsetTxSignals::confirmed_watch(confirmed_tx_ids)
     } else {
         CoinsetTxSignals::watch_hit()
@@ -116,11 +111,11 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
     Ok(market_ids)
 }
 
-/// Apply durable coin/p2 watch hits through reconcile dispatch (batched).
+/// Apply durable coin watch hits through reconcile dispatch (batched).
 ///
-/// Pending frames always use [`CoinsetTxSignals::watch_hit`]. Confirmed frames use
-/// [`CoinsetTxSignals::confirmed_watch`] only when the match includes a maker coin
-/// watch; p2-only confirmed hits stay soft (`watch_hit`).
+/// Pending coin matches → [`CoinsetTxSignals::watch_hit`]. Confirmed coin matches
+/// → [`CoinsetTxSignals::confirmed_watch`]. P2-only matches are skipped here
+/// (inventory freshness is handled by the WS dispatch layer).
 ///
 /// Do not wrap in a parent transaction: terminal persist uses
 /// `immediate_transaction` (clear watches + upsert) and cannot nest.
@@ -133,20 +128,23 @@ pub fn apply_watch_hits_batch(
     watched_keys: &[String],
     frame_confirmed: bool,
     confirmed_tx_ids: &[String],
-) -> SignerResult<Vec<String>> {
+) -> SignerResult<()> {
     if watched_keys.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
-    let hits = store.list_offer_states_for_watched_keys_with_kind(watched_keys)?;
+    let hits: Vec<_> = store
+        .match_watch_keys(watched_keys)?
+        .into_iter()
+        .filter(|hit| hit.kind.includes_coin())
+        .collect();
     if hits.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let rows: Vec<_> = hits.iter().map(|hit| hit.row.clone()).collect();
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
     let options = ws_persist_options();
-    let mut market_ids = Vec::new();
     for hit in &hits {
-        let signals = signals_for_watch_hit(frame_confirmed, hit.kind, confirmed_tx_ids);
+        let signals = signals_for_watch_hit(frame_confirmed, confirmed_tx_ids);
         apply_signals_to_row(
             store,
             &hit.row,
@@ -155,9 +153,6 @@ pub fn apply_watch_hits_batch(
             Some(&cancel_by_offer),
             &options,
         )?;
-        market_ids.push(hit.row.market_id.clone());
     }
-    market_ids.sort();
-    market_ids.dedup();
-    Ok(market_ids)
+    Ok(())
 }

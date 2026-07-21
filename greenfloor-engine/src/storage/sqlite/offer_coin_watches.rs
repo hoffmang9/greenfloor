@@ -1,7 +1,7 @@
-//! Durable offer coin / p2 watches for Coinset WS lifecycle matching.
+//! Durable offer watches for Coinset WS matching.
 //!
-//! The `coin_id` column stores a watch key: either a maker coin id (`kind='coin'`)
-//! or an on-chain maker puzzle hash (`kind='p2'`).
+//! Coin matches drive offer lifecycle. P2 matches mark inventory stale and exclude
+//! watched spendable coins, but do not drive lifecycle.
 
 use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet};
@@ -357,31 +357,12 @@ impl SqliteStore {
         Ok(markets)
     }
 
-    /// List offer state rows watching any of the given coin/p2 keys (deduped by `offer_id`).
+    /// Match offer state rows with the watch kind(s) that matched `keys`.
     ///
     /// # Errors
     ///
     /// Returns an error if `SQLite` reads fail.
-    pub fn list_offer_states_for_watched_keys(
-        &self,
-        keys: &[String],
-    ) -> SignerResult<Vec<OfferStateListRow>> {
-        Ok(self
-            .list_offer_states_for_watched_keys_with_kind(keys)?
-            .into_iter()
-            .map(|hit| hit.row)
-            .collect())
-    }
-
-    /// List offer state rows with the watch kind(s) that matched `keys`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `SQLite` reads fail.
-    pub fn list_offer_states_for_watched_keys_with_kind(
-        &self,
-        keys: &[String],
-    ) -> SignerResult<Vec<WatchHitRow>> {
+    pub fn match_watch_keys(&self, keys: &[String]) -> SignerResult<Vec<WatchHitRow>> {
         let kind_by_offer = self.query_offer_watch_kinds(keys)?;
         if kind_by_offer.is_empty() {
             return Ok(Vec::new());
@@ -618,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn list_offer_states_for_watched_keys_with_kind_aggregates() {
+    fn match_watch_keys_aggregates_kinds() {
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let offer_a = "aa".repeat(32);
@@ -642,9 +623,7 @@ mod tests {
         store
             .replace_offer_coin_watches(&offer_b, "m1", std::slice::from_ref(&coin), &[])
             .expect("watch b");
-        let hits = store
-            .list_offer_states_for_watched_keys_with_kind(&[coin, p2])
-            .expect("hits");
+        let hits = store.match_watch_keys(&[coin, p2]).expect("hits");
         assert_eq!(hits.len(), 2);
         let mut by_id: HashMap<_, _> = hits
             .into_iter()

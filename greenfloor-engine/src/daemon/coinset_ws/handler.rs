@@ -271,7 +271,10 @@ mod tests {
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
-        assert_eq!(rows[0].state, "mempool_observed");
+        assert_eq!(
+            rows[0].state, "open",
+            "p2-only pending hits must not advance lifecycle"
+        );
     }
 
     #[test]
@@ -369,13 +372,15 @@ mod tests {
     }
 
     #[test]
-    fn handle_ws_text_confirmed_p2_only_watch_stays_mempool_observed() {
+    fn handle_ws_text_p2_only_watch_keeps_open_and_marks_inventory_stale() {
         let (_dir, store) = open_store();
         let maker_p2 = "ef".repeat(32);
         let ctx = CoinsetWsShared::new(
             std::sync::Arc::new(InventoryP2Index::default()),
             crate::daemon::InventoryFreshnessCache::new(),
         );
+        ctx.inventory_freshness
+            .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
         let offer_id = "ab".repeat(32);
         store
             .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -399,12 +404,17 @@ mod tests {
             .to_string(),
         )
         .expect("tx");
+        assert!(
+            ctx.inventory_freshness
+                .needs_refresh("m1", std::time::Duration::from_secs(90)),
+            "p2-only watch must still invalidate inventory"
+        );
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
         assert_eq!(
-            rows[0].state, "mempool_observed",
-            "p2-only confirmed hits must not terminalize"
+            rows[0].state, "open",
+            "p2-only hits must not advance lifecycle"
         );
     }
 

@@ -14,8 +14,12 @@ never the operator transport.
 ## Decision
 
 1. **Publish venue:** optional `coinset | dexie | splash`; **default `coinset`** via
-   `POST /push_offer`. Mark offers `open` as soon as Coinset accepts. Canonical
-   offer id is the 64-hex spend-bundle hash (Coinset `offer_id` / Dexie `trade_id`).
+   `POST /push_offer`. Persist `open` + durable watches immediately after venue
+   accept through the caller's synchronous store sink (the daemon uses its
+   cycle write store), before audit flush. A persist failure is recorded as a
+   post failure; batch flush writes audits only and never replays offer state
+   or watches. Canonical offer id is the 64-hex spend-bundle
+   hash (Coinset `offer_id` / Dexie `trade_id`).
 2. **Inbound signals:** Coinset WebSocket only (`events=transaction,offer` +
    `tx_status=pending,confirmed` + stable market `p2` filters). No HTTP webhooks /
    API keys.
@@ -32,11 +36,12 @@ never the operator transport.
    without `tx_id`) seeds `tx_signal_state` only and does **not** advance lifecycle
    to `mempool_observed` — that state ages out of active-slot counts after three
    minutes while a Coinset listing can still be live, which would allow duplicate
-   ladder posts. Take detection stays on durable maker watch hits (pending →
-   `mempool_observed`; confirmed-frame **coin** watch hits → `tx_block_confirmed`
-   via the frame's confirmed tx ids; confirmed-frame **p2-only** hits stay
-   `mempool_observed` so shared maker puzzle hashes cannot false-terminalize)
-   and offer-frame `confirmed` / terminal statuses. Pure
+   ladder posts. Take detection stays on durable maker **coin** watch hits
+   (pending → `mempool_observed`; confirmed → `tx_block_confirmed` via the
+   frame's confirmed tx ids). P2-only hits mark inventory stale only and do
+   **not** advance lifecycle — shared maker puzzle hashes can match every open
+   offer on a market when Coinset omits coin ids. Offer-frame `confirmed` /
+   terminal statuses still drive lifecycle. Pure
    watch hits while `cancel_submitted` are
    ignored by cancel policy, so cancel-spend reuse of maker keys cannot look like
    taker activity. Mempool/tx lists whose only id is the tracked cancel spend are
@@ -46,12 +51,14 @@ never the operator transport.
    shares that shape) and never mass-clears explicit `publish_venue=coinset`; it
    only sets `dexie` for unambiguous non-64-hex legacy NULL ids (via `schema_meta`
    `watch_venue_backfill_v2`). Missing watches are healed each reconcile via a
-   single `MarketWatchPlan` scan: cancel metadata first (all venues), then Dexie
+   single `prepare_market_reconcile_local` scan: cancel-submitted collection,
+   cancel-metadata heal, and Dexie role classify (`DexieWatchRoles`), then Dexie
    payloads for heal-only NULL/`dexie` gaps (`fetch_and_ensure_watches` seeds both
    maker coin ids and on-chain maker p2s from cancellable offer inputs; when a
    list row lacks a decodable `offer1…`, heal calls `get_offer` so watches are
    not stuck coin-only; no Dexie lifecycle). Dexie lifecycle remains
-   `publish_venue=dexie` only.
+   `publish_venue=dexie` only and applies through the same
+   `apply_watched_offer_signals` spine as Coinset WS.
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
    `publish_venue=dexie`). Authority checks use persisted venue only (no id-shape
    heuristics at runtime). Coinset/splash / NULL venues skip Dexie lifecycle
@@ -63,8 +70,9 @@ never the operator transport.
    once in reconcile from `trade_id` ∪ bech32 `id`). Orphan `cancel_submitted`
    past grace resets to `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`) for
    Coinset/splash (no Dexie status) and Dexie-open alike. Daemon reconcile collects
-   those rows in `classify_and_heal_local` and applies empty-signal cancel-submitted
-   policy so all venues unwedge without Dexie HTTP lifecycle or a WS confirm frame.
+   those rows in `prepare_market_reconcile_local` and applies empty-signal
+   cancel-submitted policy so all venues unwedge without Dexie HTTP lifecycle or a
+   WS confirm frame.
    Cancel spend
    construction prefers local offer file or Coinset + stored cancel metadata;
    Dexie offer-file fetch is optional fallback only. Do not submit spends over
@@ -75,7 +83,7 @@ never the operator transport.
    when fresh. Offer-frame `p2s` alone do not mark inventory stale. Durable watches are
    registered atomically at post, backfilled once on schema open via
    `schema_meta` (`watch_venue_backfill_v2`), and healed each reconcile via
-   `classify_and_heal_local` + heal-only Dexie fetch. Coin-ops excludes durable
+   `prepare_market_reconcile_local` + heal-only Dexie fetch. Coin-ops excludes durable
    `kind='coin'` watch ids and durable `kind='p2'` maker puzzle hashes inside
    `list_spendable_coins` (local on-chain `puzzle_hash`; no network expand).
    Explicit CLI coin ids are refused when they match durable maker coin watches.

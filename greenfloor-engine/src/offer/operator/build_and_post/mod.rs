@@ -9,6 +9,7 @@ mod types;
 mod tests;
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -16,7 +17,9 @@ use serde_json::{json, Value};
 use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
-use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::storage::{
+    state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
+};
 
 use context::resolve_build_and_post_context;
 #[cfg(test)]
@@ -28,6 +31,13 @@ use post_batch::{
     PostPersistPayload,
 };
 use types::build_and_post_exit_code;
+
+/// Synchronously persist a successful venue post before its outcome is recorded.
+///
+/// The hook is called only after an iteration's async venue work completes; it is
+/// never invoked while an async operation is pending.
+pub(crate) type OfferPostPersistSink<'a> =
+    dyn FnMut(&OfferPostPersistRecord) -> SignerResult<()> + Send + 'a;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostVenueOptions {
@@ -142,6 +152,7 @@ async fn run_post_iterations(
     target: PostEmitTarget,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
+    mut persist: Option<&mut OfferPostPersistSink<'_>>,
 ) -> SignerResult<PostIterationBatch> {
     let mut batch = PostIterationBatch {
         post_results: Vec::new(),
@@ -157,7 +168,14 @@ async fn run_post_iterations(
     for _ in 0..request.repeat {
         let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
         batch.bootstrap_actions.push(bootstrap_action);
-        apply_post_iteration_outcome(target, &emitter, iteration, &mut batch);
+        // Reborrow the sink each iteration (cannot move Option<&mut _> in a loop).
+        apply_post_iteration_outcome(
+            target,
+            &emitter,
+            iteration,
+            &mut batch,
+            persist.as_deref_mut(),
+        );
     }
     Ok(batch)
 }
@@ -207,7 +225,7 @@ pub(crate) fn flush_build_and_post_persist(
     artifacts: &BuildAndPostPersistArtifacts,
 ) -> SignerResult<()> {
     let emitter = PostBatchEmitter::new(&artifacts.ctx);
-    emitter.flush(
+    emitter.flush_audits(
         store,
         &artifacts.persist.persist_records,
         &artifacts.persist.failure_audits,
@@ -216,6 +234,7 @@ pub(crate) fn flush_build_and_post_persist(
 
 async fn run_build_and_post_offer(
     request: &BuildAndPostOfferRequest,
+    persist: Option<&mut OfferPostPersistSink<'_>>,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
     Option<BuildAndPostPersistArtifacts>,
@@ -234,7 +253,40 @@ async fn run_build_and_post_offer(
         None
     };
 
-    let batch = run_post_iterations(request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
+    // CLI posts own a connection for their whole synchronous persist phase. Daemon
+    // callers supply their cycle write store instead, avoiding a side connection.
+    let cli_store = if target == PostEmitTarget::TraceAndStore && persist.is_none() {
+        Some(Arc::new(Mutex::new(SqliteStore::open(
+            &state_db_path_for_home(&ctx.gated.program.home_dir),
+        )?)))
+    } else {
+        None
+    };
+    let mut cli_persist = move |record: &OfferPostPersistRecord| {
+        let store = cli_store
+            .as_ref()
+            .expect("CLI persist sink requires a SQLite store")
+            .lock()
+            .map_err(|err| SignerError::Other(format!("CLI persist store lock: {err}")))?;
+        upsert_offer_post_record(&store, record)
+    };
+    let persist = if target == PostEmitTarget::TraceAndStore {
+        match persist {
+            Some(persist) => Some(persist),
+            None => Some(&mut cli_persist as &mut OfferPostPersistSink<'_>),
+        }
+    } else {
+        None
+    };
+    let batch = run_post_iterations(
+        request,
+        &ctx,
+        target,
+        dexie.as_ref(),
+        splash.as_ref(),
+        persist,
+    )
+    .await?;
 
     let payload = build_and_post_payload(request, &ctx, &batch);
     let exit_code = build_and_post_exit_code(batch.publish_failures);
@@ -271,7 +323,7 @@ async fn run_build_and_post_offer(
 async fn build_and_post_offer_async(
     request: BuildAndPostOfferRequest,
 ) -> SignerResult<BuildAndPostOfferResponse> {
-    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request).await?;
+    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(request, None).await?;
     if let Some(artifacts) = artifacts {
         let store = SqliteStore::open(&state_db_path_for_home(
             &artifacts.ctx.gated.program.home_dir,
@@ -288,6 +340,7 @@ async fn build_and_post_offer_async(
 /// Returns an error if the operation fails.
 pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     request: BuildAndPostOfferRequest,
+    persist: Option<&mut OfferPostPersistSink<'_>>,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
     Option<BuildAndPostPersistArtifacts>,
@@ -300,7 +353,7 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     if request.repeat == 0 {
         return Err(SignerError::Other("repeat must be positive".to_string()));
     }
-    run_build_and_post_offer(&request).await
+    run_build_and_post_offer(&request, persist).await
 }
 
 #[cfg(test)]

@@ -6,10 +6,11 @@ use crate::operator_log::{
     audit_row_defer_dual, emit_deferred_dual_traces, offer_log_ref, DeferredDualEmit, LogContext,
     OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION, STRATEGY_OFFER_EXECUTION,
 };
-use crate::storage::{write_offer_post_record_in_txn, OfferPostPersistRecord, SqliteStore};
+use crate::storage::{OfferPostPersistRecord, SqliteStore};
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PostIterationOutcome;
+use super::OfferPostPersistSink;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PostEmitTarget {
@@ -118,7 +119,7 @@ impl<'a> PostBatchEmitter<'a> {
         );
     }
 
-    pub fn flush(
+    pub fn flush_audits(
         &self,
         store: &SqliteStore,
         records: &[OfferPostPersistRecord],
@@ -126,9 +127,6 @@ impl<'a> PostBatchEmitter<'a> {
     ) -> SignerResult<()> {
         let mut deferred_traces = Vec::new();
         store.immediate_transaction("post flush", |store| {
-            for record in records {
-                write_offer_post_record_in_txn(store, record)?;
-            }
             for failure in failures {
                 audit_row_defer_dual(&mut deferred_traces, store, self.deferred_failure(failure))?;
             }
@@ -184,11 +182,18 @@ impl<'a> PostBatchEmitter<'a> {
     }
 }
 
+/// Apply one post iteration into the batch.
+///
+/// When `persist` is present and `target` is [`PostEmitTarget::TraceAndStore`], each
+/// successful publish persists offer state + watches immediately so a later
+/// batch/flush failure cannot leave a live venue listing without local rows.
+/// Per-record persist failures become iteration failures (not panics).
 pub fn apply_post_iteration_outcome(
     target: PostEmitTarget,
     emitter: &PostBatchEmitter<'_>,
     outcome: PostIterationOutcome,
     batch: &mut PostIterationBatch,
+    persist: Option<&mut OfferPostPersistSink<'_>>,
 ) {
     match outcome {
         PostIterationOutcome::Preview(preview) => {
@@ -214,7 +219,34 @@ pub fn apply_post_iteration_outcome(
                 .push(failure.to_venue_result(&emitter.ctx.publish_venue));
         }
         PostIterationOutcome::Success(success) => {
+            let mut success = *success;
             if success.success {
+                if let (PostEmitTarget::TraceAndStore, Some(persist), Some(record)) =
+                    (target, persist, success.persist_record.as_ref())
+                {
+                    if let Err(err) = persist(record) {
+                        let offer_ref = offer_log_ref(&record.offer_id);
+                        let error = format!(
+                            "publish succeeded but local persist failed (live listing may need manual cancel): {err}"
+                        );
+                        batch.persist.failure_audits.push(PostFailureAudit {
+                            error: error.clone(),
+                            offer_ref: Some(offer_ref.clone()),
+                        });
+                        batch.publish_failures += 1;
+                        if let Value::Object(obj) = &mut success.result {
+                            obj.insert("success".to_string(), json!(false));
+                            obj.insert("error".to_string(), json!(error));
+                        }
+                        success.success = false;
+                        batch.post_results.push(success.to_venue_result());
+                        // The venue accepted this offer, so retain its execution audit
+                        // record while deferring the persist failure's only trace/audit
+                        // emission to the normal TraceAndStore flush path.
+                        batch.persist.persist_records.push(record.clone());
+                        return;
+                    }
+                }
                 let offer_ref = success
                     .persist_record
                     .as_ref()
@@ -244,6 +276,7 @@ pub fn apply_post_iteration_outcome(
             }
             batch.post_results.push(success.to_venue_result());
             if let Some(record) = success.persist_record {
+                // Already written when store was available; keep for flush audits.
                 batch.persist.persist_records.push(record);
             }
         }

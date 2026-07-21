@@ -77,6 +77,29 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
+/// Dexie list/get status + Coinset tx signal lists for the shared apply spine.
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` tx-signal reads fail.
+pub fn coinset_signals_from_dexie_offer_payload(
+    store: &SqliteStore,
+    offer_payload: &Value,
+) -> SignerResult<(Option<i64>, CoinsetTxSignals)> {
+    let status = dexie_offer_status(offer_payload);
+    let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
+    let (confirmed_tx_ids, mempool_tx_ids) = coinset_signal_lists(store, &coinset_tx_ids)?;
+    Ok((
+        status,
+        CoinsetTxSignals {
+            tx_ids: coinset_tx_ids,
+            confirmed_tx_ids,
+            mempool_tx_ids,
+            ..Default::default()
+        },
+    ))
+}
+
 /// Transition from dexie offer payload.
 ///
 /// # Errors
@@ -89,22 +112,13 @@ pub fn transition_from_dexie_offer_payload(
     offer_payload: &Value,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<CycleOfferTransition> {
-    let status = dexie_offer_status(offer_payload);
-    let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
+    let (status, signals) = coinset_signals_from_dexie_offer_payload(store, offer_payload)?;
     let cancel_submitted = cancel_submitted_context_for_offer(
         store,
         offer_id,
         current_state,
         env.cancel_submitted_by_offer,
     )?;
-    let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
-        coinset_signal_lists(store, &coinset_tx_ids)?;
-    let signals = CoinsetTxSignals {
-        tx_ids: coinset_tx_ids,
-        confirmed_tx_ids: coinset_confirmed_tx_ids.clone(),
-        mempool_tx_ids: coinset_mempool_tx_ids,
-        ..Default::default()
-    };
     let chain_confirmed_tx_ids = chain_confirmed_tx_ids_for_transition(
         store,
         cancel_submitted.as_ref(),

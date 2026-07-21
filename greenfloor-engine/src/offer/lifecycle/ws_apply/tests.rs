@@ -268,7 +268,7 @@ fn cancel_submitted_watch_hits_are_preserved_by_policy() {
 }
 
 #[test]
-fn confirmed_p2_only_hit_stays_mempool_observed() {
+fn p2_only_hit_does_not_advance_lifecycle() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);
     let p2 = "ef".repeat(32);
@@ -279,6 +279,7 @@ fn confirmed_p2_only_hit_stays_mempool_observed() {
     store
         .replace_offer_coin_watches(&offer_id, "m1", &[], std::slice::from_ref(&p2))
         .expect("watch");
+    apply_watch_hits_batch(&store, std::slice::from_ref(&p2), false, &[]).expect("p2 pending");
     apply_watch_hits_batch(
         &store,
         std::slice::from_ref(&p2),
@@ -290,8 +291,8 @@ fn confirmed_p2_only_hit_stays_mempool_observed() {
         .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
         .expect("rows");
     assert_eq!(
-        rows[0].state, "mempool_observed",
-        "p2-only confirmed hits must not terminalize"
+        rows[0].state, "open",
+        "p2-only hits must not drive mempool_observed or terminalize"
     );
 }
 
