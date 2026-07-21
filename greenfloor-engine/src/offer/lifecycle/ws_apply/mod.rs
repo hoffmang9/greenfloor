@@ -1,5 +1,7 @@
 //! Apply Coinset WS offer / watch signals through canonical reconcile decision.
 
+use chrono::Utc;
+
 use crate::coinset::WsOfferEvent;
 use crate::config::Venue;
 use crate::cycle::reconcile::{signals_from_ws_offer_status, CoinsetTxSignals};
@@ -79,7 +81,15 @@ pub fn apply_ws_offer_event(
     let Some(row) = rows.first() else {
         return Ok(WsOfferApply::NotTracked);
     };
-    apply_signals_to_row(store, row, status, signals, None, &ws_persist_options())?;
+    apply_signals_to_row(
+        store,
+        row,
+        status,
+        signals,
+        None,
+        &ws_persist_options(),
+        Utc::now(),
+    )?;
     Ok(WsOfferApply::Applied {
         market_id: row.market_id.clone(),
     })
@@ -104,7 +114,7 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
     let rows = store.list_offer_states_for_cancel_submitted_tx_ids(confirmed_tx_ids)?;
     // Do not wrap in a parent transaction: terminal persist uses
     // immediate_transaction (clear watches + upsert) and cannot nest.
-    apply_cancel_submitted_rows(store, &rows, &ws_persist_options())?;
+    apply_cancel_submitted_rows(store, &rows, &ws_persist_options(), Utc::now())?;
     let mut market_ids: Vec<String> = rows.into_iter().map(|row| row.market_id).collect();
     market_ids.sort();
     market_ids.dedup();
@@ -114,8 +124,8 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
 /// Apply durable coin watch hits through reconcile dispatch (batched).
 ///
 /// Pending coin matches → [`CoinsetTxSignals::watch_hit`]. Confirmed coin matches
-/// → [`CoinsetTxSignals::confirmed_watch`]. P2-only matches are skipped here
-/// (inventory freshness is handled by the WS dispatch layer).
+/// → [`CoinsetTxSignals::confirmed_watch`]. P2-only matches do not drive lifecycle,
+/// but their markets are included in the returned inventory invalidation set.
 ///
 /// Do not wrap in a parent transaction: terminal persist uses
 /// `immediate_transaction` (clear watches + upsert) and cannot nest.
@@ -128,22 +138,23 @@ pub fn apply_watch_hits_batch(
     watched_keys: &[String],
     frame_confirmed: bool,
     confirmed_tx_ids: &[String],
-) -> SignerResult<()> {
+) -> SignerResult<Vec<String>> {
     if watched_keys.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let hits: Vec<_> = store
-        .match_watch_keys(watched_keys)?
-        .into_iter()
-        .filter(|hit| hit.kind.includes_coin())
-        .collect();
-    if hits.is_empty() {
-        return Ok(());
+    let hits = store.match_watch_keys(watched_keys)?;
+    let mut market_ids: Vec<String> = hits.iter().map(|hit| hit.row.market_id.clone()).collect();
+    market_ids.sort();
+    market_ids.dedup();
+    let coin_hits: Vec<_> = hits.iter().filter(|hit| hit.kind.includes_coin()).collect();
+    if coin_hits.is_empty() {
+        return Ok(market_ids);
     }
-    let rows: Vec<_> = hits.iter().map(|hit| hit.row.clone()).collect();
+    let rows: Vec<_> = coin_hits.iter().map(|hit| hit.row.clone()).collect();
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
     let options = ws_persist_options();
-    for hit in &hits {
+    let now = Utc::now();
+    for hit in coin_hits {
         let signals = signals_for_watch_hit(frame_confirmed, confirmed_tx_ids);
         apply_signals_to_row(
             store,
@@ -152,7 +163,8 @@ pub fn apply_watch_hits_batch(
             signals,
             Some(&cancel_by_offer),
             &options,
+            now,
         )?;
     }
-    Ok(())
+    Ok(market_ids)
 }

@@ -41,6 +41,8 @@ fn add_column_if_missing(
 }
 
 const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v2";
+const SCHEMA_META_WATCH_PK_KIND: &str = "offer_coin_watches_pk_kind_v1";
+const SCHEMA_META_CANCEL_INPUT_COIN_RENAME: &str = "cancel_input_coin_id_rename_v1";
 
 /// Apply additive schema migrations after base `CREATE TABLE IF NOT EXISTS` bootstrap.
 ///
@@ -48,7 +50,9 @@ const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v2";
 ///
 /// Returns an error if a migration fails for reasons other than idempotent re-run.
 pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
+    // Legacy column kept until rename migration copies into cancel_input_coin_id.
     add_column_if_missing(conn, "offer_state", "presplit_input_coin_id", "TEXT NULL")?;
+    add_column_if_missing(conn, "offer_state", "cancel_input_coin_id", "TEXT NULL")?;
     add_column_if_missing(
         conn,
         "offer_state",
@@ -62,6 +66,8 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     add_column_if_missing(conn, "offer_state", "publish_venue", "TEXT NULL")?;
     ensure_offer_coin_watches_table(conn)?;
     ensure_schema_meta_table(conn)?;
+    migrate_offer_coin_watches_pk_kind(conn)?;
+    migrate_cancel_input_coin_id_rename(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
     // One-shot upgrade: seed/heal watches + venue for pre-upgrade rows only.
@@ -161,16 +167,69 @@ fn backfill_offer_publish_venue(conn: &Connection) -> SignerResult<()> {
     Ok(())
 }
 
+fn migrate_offer_coin_watches_pk_kind(conn: &Connection) -> SignerResult<()> {
+    if schema_meta_applied(conn, SCHEMA_META_WATCH_PK_KIND)? {
+        return Ok(());
+    }
+    // Rebuild so PRIMARY KEY includes kind (coin and p2 may share the same 64-hex).
+    conn.execute_batch(
+        r"
+        CREATE TABLE IF NOT EXISTS offer_coin_watches_new (
+          coin_id TEXT NOT NULL,
+          offer_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'coin',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (coin_id, offer_id, kind)
+        );
+        INSERT OR IGNORE INTO offer_coin_watches_new
+          (coin_id, offer_id, market_id, kind, updated_at)
+        SELECT coin_id, offer_id, market_id, kind, updated_at FROM offer_coin_watches;
+        DROP TABLE offer_coin_watches;
+        ALTER TABLE offer_coin_watches_new RENAME TO offer_coin_watches;
+        CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_market
+          ON offer_coin_watches(market_id);
+        CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_offer
+          ON offer_coin_watches(offer_id);
+        ",
+    )
+    .map_err(|err| SignerError::Other(format!("offer_coin_watches pk(kind) migrate: {err}")))?;
+    mark_schema_meta_applied(conn, SCHEMA_META_WATCH_PK_KIND)?;
+    Ok(())
+}
+
+fn migrate_cancel_input_coin_id_rename(conn: &Connection) -> SignerResult<()> {
+    if schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_COIN_RENAME)? {
+        return Ok(());
+    }
+    conn.execute(
+        r"
+        UPDATE offer_state
+        SET cancel_input_coin_id = presplit_input_coin_id
+        WHERE (cancel_input_coin_id IS NULL OR length(trim(cancel_input_coin_id)) = 0)
+          AND presplit_input_coin_id IS NOT NULL
+          AND length(trim(presplit_input_coin_id)) > 0
+        ",
+        [],
+    )
+    .map_err(|err| SignerError::Other(format!("cancel_input_coin_id rename backfill: {err}")))?;
+    mark_schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_COIN_RENAME)?;
+    Ok(())
+}
+
 fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
     // INSERT OR IGNORE heals both fully-missing and partial (coin-without-p2) rows.
     let mut stmt = conn
         .prepare(
             r"
-            SELECT offer_id, market_id, presplit_input_coin_id, maker_puzzle_hash
+            SELECT offer_id, market_id,
+                   COALESCE(cancel_input_coin_id, presplit_input_coin_id),
+                   maker_puzzle_hash
             FROM offer_state
             WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility')
               AND (
-                (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
+                (cancel_input_coin_id IS NOT NULL AND length(trim(cancel_input_coin_id)) > 0)
+                OR (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
                 OR (maker_puzzle_hash IS NOT NULL AND length(trim(maker_puzzle_hash)) > 0)
               )
             ",
@@ -223,7 +282,7 @@ fn ensure_offer_coin_watches_table(conn: &Connection) -> SignerResult<()> {
           market_id TEXT NOT NULL,
           kind TEXT NOT NULL DEFAULT 'coin',
           updated_at TEXT NOT NULL,
-          PRIMARY KEY (coin_id, offer_id)
+          PRIMARY KEY (coin_id, offer_id, kind)
         );
         CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_market
           ON offer_coin_watches(market_id);

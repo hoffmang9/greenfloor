@@ -75,7 +75,7 @@ impl SqliteStore {
         cancel: OfferCancelWrite<'_>,
     ) -> SignerResult<()> {
         let (
-            presplit_input_coin_id,
+            cancel_input_coin_id,
             fixed_delegated_puzzle_hash,
             maker_puzzle_hash,
             execution_mode_str,
@@ -95,7 +95,7 @@ impl SqliteStore {
                   state,
                   last_seen_status,
                   updated_at,
-                  presplit_input_coin_id,
+                  cancel_input_coin_id,
                   fixed_delegated_puzzle_hash,
                   maker_puzzle_hash,
                   execution_mode,
@@ -109,7 +109,7 @@ impl SqliteStore {
                   state = excluded.state,
                   last_seen_status = excluded.last_seen_status,
                   updated_at = excluded.updated_at,
-                  presplit_input_coin_id = COALESCE(excluded.presplit_input_coin_id, offer_state.presplit_input_coin_id),
+                  cancel_input_coin_id = COALESCE(excluded.cancel_input_coin_id, offer_state.cancel_input_coin_id),
                   fixed_delegated_puzzle_hash = COALESCE(excluded.fixed_delegated_puzzle_hash, offer_state.fixed_delegated_puzzle_hash),
                   maker_puzzle_hash = COALESCE(excluded.maker_puzzle_hash, offer_state.maker_puzzle_hash),
                   execution_mode = COALESCE(excluded.execution_mode, offer_state.execution_mode),
@@ -131,7 +131,7 @@ impl SqliteStore {
                     state,
                     last_seen_status,
                     updated_at,
-                    presplit_input_coin_id,
+                    cancel_input_coin_id,
                     fixed_delegated_puzzle_hash,
                     maker_puzzle_hash,
                     execution_mode_str.as_deref(),
@@ -209,7 +209,7 @@ impl SqliteStore {
             .conn
             .prepare(
                 r"
-                SELECT presplit_input_coin_id, fixed_delegated_puzzle_hash, maker_puzzle_hash, execution_mode
+                SELECT cancel_input_coin_id, fixed_delegated_puzzle_hash, maker_puzzle_hash, execution_mode
                 FROM offer_state
                 WHERE offer_id = ?1
                 ",

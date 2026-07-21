@@ -6,11 +6,15 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::adapters::DexieClient;
+use crate::cycle::reconcile::CoinsetTxSignals;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::cancel_context::preload_cancel_submitted_contexts;
-use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+use super::cancel_context::{
+    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
+};
+use super::persist::ReconcilePersistOptions;
+use super::signal_apply::{apply_watched_offer_signals, persist_resolved_watched_transition};
 use super::transition::{resolve_watched_offer_transition_for_venue, WatchedOfferTransitionEnv};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,34 +96,61 @@ pub async fn reconcile_offers_batch(
         Vec::new()
     };
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(&store, &rows)?;
-    let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
+    let now = Utc::now();
+    let env = WatchedOfferTransitionEnv::new(now, Some(&cancel_submitted_by_offer));
     let mut items = Vec::with_capacity(rows.len());
     let mut changed_count = 0u64;
 
     for row in rows {
-        let (transition, last_seen_status, _dexie_error) =
-            resolve_watched_offer_transition_for_venue(
+        let (resolved, last_seen_status, dexie_error) = resolve_watched_offer_transition_for_venue(
+            &store,
+            dexie.as_ref(),
+            venue,
+            &row.offer_id,
+            &row.state,
+            env,
+        )
+        .await?;
+        let options = ReconcilePersistOptions {
+            action: "offers_reconcile",
+            venue: Some(venue),
+            dexie_error: dexie_error.as_deref(),
+        };
+        let transition = if dexie_error.is_some() {
+            persist_resolved_watched_transition(
                 &store,
-                dexie.as_ref(),
-                venue,
+                &row.market_id,
+                &row.offer_id,
+                &resolved,
+                last_seen_status,
+                &options,
+            )?;
+            resolved
+        } else {
+            let cancel_submitted = cancel_submitted_context_for_offer(
+                &store,
                 &row.offer_id,
                 &row.state,
-                env,
-            )
-            .await?;
-
-        persist_offer_lifecycle_transition(
-            &store,
-            &row.market_id,
-            &row.offer_id,
-            &transition,
-            last_seen_status,
-            &ReconcilePersistOptions {
-                action: "offers_reconcile",
-                venue: Some(venue),
-                dexie_error: None,
-            },
-        )?;
+                Some(&cancel_submitted_by_offer),
+            )?;
+            apply_watched_offer_signals(
+                &store,
+                &row.market_id,
+                &row.offer_id,
+                &row.state,
+                last_seen_status,
+                CoinsetTxSignals {
+                    tx_ids: resolved.coinset_tx_ids.clone(),
+                    confirmed_tx_ids: resolved.coinset_confirmed_tx_ids.clone(),
+                    mempool_tx_ids: resolved.coinset_mempool_tx_ids.clone(),
+                    ..Default::default()
+                },
+                cancel_submitted.as_ref(),
+                &options,
+                last_seen_status,
+                now,
+            )?
+        };
 
         if transition.changed {
             changed_count += 1;

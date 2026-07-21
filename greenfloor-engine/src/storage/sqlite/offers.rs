@@ -194,6 +194,47 @@ impl SqliteStore {
             .collect())
     }
 
+    /// Distinct non-empty `cancel_submitted_tx_id` values for in-flight cancels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_cancel_submitted_tx_ids(&self) -> SignerResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+                SELECT DISTINCT cancel_submitted_tx_id
+                FROM offer_state
+                WHERE state = 'cancel_submitted'
+                  AND cancel_submitted_tx_id IS NOT NULL
+                  AND length(trim(cancel_submitted_tx_id)) > 0
+                ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare cancel_submitted tx list: {err}"))
+            })?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query cancel_submitted tx list: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to read cancel_submitted tx list row: {err}"
+                ))
+            })?;
+            if let Some(clean) = crate::hex::canonical_tx_id(&raw) {
+                out.push(clean);
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
     /// List `cancel_submitted` offers whose cancel tx id is in `tx_ids`.
     ///
     /// # Errors

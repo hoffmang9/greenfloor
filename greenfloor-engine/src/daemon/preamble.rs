@@ -6,12 +6,15 @@ use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    LogContext, COINSET_MEMPOOL_ERROR, COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR,
-    MEMPOOL_OBSERVED, XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT,
+    LogContext, CANCEL_SUBMITTED_CONFIRM_POLL_ERROR, COINSET_MEMPOOL_ERROR,
+    COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR, MEMPOOL_OBSERVED, XCH_PRICE_ERROR,
+    XCH_PRICE_SNAPSHOT,
 };
 use crate::storage::SqliteStore;
 
-use super::coinset_ws::{capture_coinset_websocket_once, CoinsetWsShared};
+use super::coinset_ws::{
+    capture_coinset_websocket_once, confirm_cancel_submitted_txs_via_http, CoinsetWsShared,
+};
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -82,6 +85,20 @@ pub async fn run_cycle_preamble(
                 None,
             )?;
         }
+    }
+
+    if let Err(err) =
+        confirm_cancel_submitted_txs_via_http(store, &program.network, coinset_base_url).await
+    {
+        result.cycle_error_count += 1;
+        LogContext::DAEMON_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "cancel submitted confirmation poll failed",
+            CANCEL_SUBMITTED_CONFIRM_POLL_ERROR,
+            &json!({"error": err.to_string()}),
+            None,
+        )?;
     }
 
     Ok(result)

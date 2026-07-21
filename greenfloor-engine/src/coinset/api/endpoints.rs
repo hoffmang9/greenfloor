@@ -126,6 +126,65 @@ pub async fn get_all_mempool_tx_ids(
         .collect())
 }
 
+/// Whether Coinset reports `tx_id` as chain-confirmed (`get_transaction` + `include_state`).
+///
+/// Soft-fails to `false` on RPC/`success: false` so cancel confirm polling does not
+/// abort the daemon cycle when Coinset is briefly unavailable.
+///
+/// # Errors
+///
+/// Returns an error only on local input normalization failure (never today).
+pub async fn is_transaction_confirmed(
+    network: &str,
+    base_url: Option<&str>,
+    tx_id: &str,
+) -> SignerResult<bool> {
+    let Some(clean) = crate::hex::canonical_tx_id(tx_id) else {
+        return Ok(false);
+    };
+    let Ok(payload) = post_coinset_rpc(
+        network,
+        base_url,
+        "get_transaction",
+        json!({ "tx_id": clean, "include_state": true }),
+    )
+    .await
+    else {
+        return Ok(false);
+    };
+    if !payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let state = payload
+        .get("state")
+        .and_then(Value::as_str)
+        .map_or("", str::trim);
+    Ok(state.eq_ignore_ascii_case("confirmed"))
+}
+
+/// Filter `tx_ids` to those Coinset reports as confirmed.
+///
+/// # Errors
+///
+/// Propagates only unexpected local errors from [`is_transaction_confirmed`].
+pub async fn filter_confirmed_tx_ids(
+    network: &str,
+    base_url: Option<&str>,
+    tx_ids: &[String],
+) -> SignerResult<Vec<String>> {
+    let mut confirmed = Vec::new();
+    for tx_id in tx_ids {
+        if is_transaction_confirmed(network, base_url, tx_id).await? {
+            confirmed.push(crate::hex::canonical_tx_id(tx_id).unwrap_or_else(|| tx_id.clone()));
+        }
+    }
+    Ok(confirmed)
+}
+
 /// Push tx hex.
 ///
 /// # Errors

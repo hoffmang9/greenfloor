@@ -17,6 +17,7 @@ pub const XCH_PRICE_ERROR: &str = "xch_price_error";
 pub const COINSET_WS_ONCE_ERROR: &str = "coinset_ws_once_error";
 pub const COINSET_MEMPOOL_ERROR: &str = "coinset_mempool_error";
 pub const COINSET_MEMPOOL_SNAPSHOT: &str = "coinset_mempool_snapshot";
+pub const CANCEL_SUBMITTED_CONFIRM_POLL_ERROR: &str = "cancel_submitted_confirm_poll_error";
 pub const MEMPOOL_OBSERVED: &str = "mempool_observed";
 
 pub const COINSET_WS_RECOVERY_POLL: &str = "coinset_ws_recovery_poll";

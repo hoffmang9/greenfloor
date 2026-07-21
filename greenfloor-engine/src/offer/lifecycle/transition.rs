@@ -15,9 +15,7 @@ use crate::cycle::{
     unsupported_venue_offer_transition, CycleOfferTransition,
 };
 use crate::error::SignerResult;
-use crate::offer::dexie_payload::{
-    dexie_offer_status, extract_coinset_tx_ids_from_offer_payload, DexieOfferPayload,
-};
+use crate::offer::dexie_payload::{dexie_offer_status, extract_coinset_tx_ids_from_offer_payload};
 use crate::storage::SqliteStore;
 
 use super::cancel_context::{
@@ -163,22 +161,6 @@ fn transition_from_offer_body(
     let transition =
         transition_from_dexie_offer_payload(store, offer_id, current_state, offer_body, env)?;
     Ok((transition, status))
-}
-
-/// Resolve a lifecycle transition from an already-fetched Dexie offer payload.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn transition_from_list_offer_payload(
-    store: &SqliteStore,
-    offer_id: &str,
-    current_state: &str,
-    offer_payload: &Value,
-    env: WatchedOfferTransitionEnv<'_>,
-) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
-    let offer = DexieOfferPayload::new(offer_payload.clone());
-    transition_from_offer_body(store, offer_id, current_state, offer.body(), env)
 }
 
 /// Resolve a lifecycle transition by fetching a single offer from Dexie.

@@ -354,7 +354,7 @@ pub(crate) async fn classify_maker_input_from_stored_metadata<C: OfferCoinsetBac
 ) -> SignerResult<CancellableMakerInput> {
     let coin_id = stored_input_coin_id(Some(metadata))?.ok_or_else(|| {
         SignerError::Other(
-            "offer cancel requires stored presplit_input_coin_id when offer file is unavailable"
+            "offer cancel requires stored cancel_input_coin_id when offer file is unavailable"
                 .to_string(),
         )
     })?;

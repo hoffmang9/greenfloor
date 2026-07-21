@@ -104,7 +104,8 @@ pub(crate) fn insert_watch_rows(
         }
     };
 
-    let mut seen = HashSet::new();
+    // Deduplicate per (key, kind) so the same 64-hex can exist as both coin and p2.
+    let mut seen: HashSet<(String, &'static str)> = HashSet::new();
     let mut inserted = 0usize;
     for (kind, keys) in [("coin", coin_ids), ("p2", p2s)] {
         for key in keys {
@@ -122,7 +123,7 @@ pub(crate) fn insert_watch_rows(
                 }
                 continue;
             }
-            if mode == WatchInsertMode::Replace && !seen.insert(normalized.clone()) {
+            if mode == WatchInsertMode::Replace && !seen.insert((normalized.clone(), kind)) {
                 continue;
             }
             conn.execute(
@@ -317,6 +318,38 @@ impl SqliteStore {
     /// Returns an error if `SQLite` reads fail.
     pub fn list_watched_p2s_for_market(&self, market_id: &str) -> SignerResult<HashSet<String>> {
         self.list_watched_keys_for_market(market_id, "p2")
+    }
+
+    /// List all distinct durable maker p2 watch keys (process-wide WS filter union).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `SQLite` reads fail.
+    pub fn list_watched_p2s(&self) -> SignerResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT coin_id FROM offer_coin_watches WHERE kind = 'p2'")
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches p2 list prepare: {err}"))
+            })?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches p2 list query: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let value = row.map_err(|err| {
+                SignerError::Other(format!("offer_coin_watches p2 list row: {err}"))
+            })?;
+            let normalized = normalize_hex_id(&value);
+            if normalized.len() == 64 {
+                out.push(normalized);
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
     }
 
     fn list_watched_keys_for_market(

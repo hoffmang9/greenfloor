@@ -26,8 +26,9 @@ mod ws_event;
 mod xch;
 
 pub use api::{
-    conservative_fee_from_payload, direct_coinset_client, get_all_mempool_tx_ids,
-    get_conservative_fee_estimate, get_conservative_fee_estimate_for_signer, get_fee_estimate,
+    conservative_fee_from_payload, direct_coinset_client, filter_confirmed_tx_ids,
+    get_all_mempool_tx_ids, get_conservative_fee_estimate,
+    get_conservative_fee_estimate_for_signer, get_fee_estimate, is_transaction_confirmed,
     post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_offer_text, push_tx_hex,
 };
 pub use asset::is_canonical_xch_asset;

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use crate::cycle::reconcile::{
     resolve_watched_offer_transition_from_signals, CancelSubmittedContext, CoinsetTxSignals,
@@ -16,6 +16,33 @@ use super::cancel_context::{
     preload_cancel_submitted_contexts,
 };
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+
+/// Persist an already-resolved watched-offer transition when it changes state or
+/// carries a venue status touch.
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` persist fails.
+pub fn persist_resolved_watched_transition(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    transition: &CycleOfferTransition,
+    last_seen_status: Option<i64>,
+    options: &ReconcilePersistOptions<'_>,
+) -> SignerResult<()> {
+    if transition.changed || last_seen_status.is_some() {
+        persist_offer_lifecycle_transition(
+            store,
+            market_id,
+            offer_id,
+            transition,
+            last_seen_status,
+            options,
+        )?;
+    }
+    Ok(())
+}
 
 /// Resolve watched-offer transition from signals and persist when needed.
 ///
@@ -37,6 +64,7 @@ pub fn apply_watched_offer_signals(
     cancel_submitted: Option<&CancelSubmittedContext>,
     options: &ReconcilePersistOptions<'_>,
     last_seen_status: Option<i64>,
+    now: DateTime<Utc>,
 ) -> SignerResult<CycleOfferTransition> {
     let chain_confirmed =
         chain_confirmed_tx_ids_for_transition(store, cancel_submitted, &signals.confirmed_tx_ids)?;
@@ -46,19 +74,17 @@ pub fn apply_watched_offer_signals(
         signals,
         &chain_confirmed,
         cancel_submitted,
-        Utc::now(),
+        now,
     )
     .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-    if transition.changed || last_seen_status.is_some() {
-        persist_offer_lifecycle_transition(
-            store,
-            market_id,
-            offer_id,
-            &transition,
-            last_seen_status,
-            options,
-        )?;
-    }
+    persist_resolved_watched_transition(
+        store,
+        market_id,
+        offer_id,
+        &transition,
+        last_seen_status,
+        options,
+    )?;
     Ok(transition)
 }
 
@@ -74,6 +100,7 @@ pub fn apply_signals_to_row(
     signals: CoinsetTxSignals,
     cancel_by_offer: Option<&HashMap<String, CancelSubmittedContext>>,
     options: &ReconcilePersistOptions<'_>,
+    now: DateTime<Utc>,
 ) -> SignerResult<bool> {
     let cancel_submitted =
         cancel_submitted_context_for_offer(store, &row.offer_id, &row.state, cancel_by_offer)?;
@@ -87,6 +114,7 @@ pub fn apply_signals_to_row(
         cancel_submitted.as_ref(),
         options,
         None,
+        now,
     )?;
     Ok(transition.changed)
 }
@@ -104,6 +132,7 @@ pub fn apply_cancel_submitted_rows(
     store: &SqliteStore,
     rows: &[OfferStateListRow],
     options: &ReconcilePersistOptions<'_>,
+    now: DateTime<Utc>,
 ) -> SignerResult<u64> {
     if rows.is_empty() {
         return Ok(0);
@@ -118,6 +147,7 @@ pub fn apply_cancel_submitted_rows(
             CoinsetTxSignals::default(),
             Some(&cancel_by_offer),
             options,
+            now,
         )? {
             changed += 1;
         }

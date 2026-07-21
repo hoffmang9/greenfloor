@@ -70,6 +70,20 @@ pub fn append_coinset_ws_filters(base_ws_url: &str, p2s: &[String]) -> String {
     url
 }
 
+/// Union inventory receive/CAT-outer p2s with durable maker p2 watches for WS filters.
+#[must_use]
+pub fn merge_ws_p2_filters(inventory_p2s: &[String], maker_p2s: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = inventory_p2s
+        .iter()
+        .chain(maker_p2s.iter())
+        .map(|p2| normalize_hex_id(p2))
+        .filter(|p2| p2.len() == 64)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Resolve the Coinset WS URL with required event filters and stable inventory p2s.
 #[must_use]
 pub fn resolve_coinset_ws_url_with_p2s(

@@ -38,8 +38,8 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
    source-coin nonce used during planning.
 
 3a. **Cancel metadata (`OfferCancelFields`) is persisted at post time** in
-`offer_state`. Columns (historical names kept for migrations):
-`presplit_input_coin_id` (maker input coin id for **any** execution mode),
+`offer_state`. Columns:
+`cancel_input_coin_id` (maker input coin id for **any** execution mode),
 optional `fixed_delegated_puzzle_hash` (presplit only), `maker_puzzle_hash`, and
 `execution_mode`. Presplit paths store the fixed CONDITIONS hash; Direct paths
 store the single maker input coin id + on-chain puzzle hash (no fixed delegated
@@ -51,7 +51,7 @@ prefers Coinset + stored metadata (no offer file). When metadata is absent
 `--offer-file` or optional Dexie offer-file fetch.
 
 4. **Input CAT resolution is coin-id authoritative.** Cancel resolves the offered input
-   via stored maker input coin id (`presplit_input_coin_id`) when present, then scans
+   via stored maker input coin id (`cancel_input_coin_id`) when present, then scans
    coin ids from the decoded offer spend bundle (offered coin id plus same-amount
    maker spends). Ambiguous inner-puzzle amount fingerprint lookup is not used — it
    can select a different vault coin when the offer input is already spent.

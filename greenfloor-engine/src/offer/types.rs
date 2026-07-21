@@ -181,8 +181,8 @@ impl OfferExecutionMode {
 
 /// Cancel hints persisted at offer post time (Direct and presplit execution modes).
 ///
-/// Stored in `offer_state` columns `presplit_input_coin_id` (historical name for the
-/// maker input coin id), `fixed_delegated_puzzle_hash` (presplit only), and
+/// Stored in `offer_state` columns `cancel_input_coin_id` (maker input coin id for
+/// every execution mode), `fixed_delegated_puzzle_hash` (presplit only), and
 /// `maker_puzzle_hash`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct OfferCancelFields {

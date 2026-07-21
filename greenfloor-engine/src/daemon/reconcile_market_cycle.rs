@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use chrono::Utc;
 use serde_json::json;
 use tracing::Level;
 
@@ -52,6 +53,7 @@ pub async fn run_reconcile_market_cycle(
             venue: None,
             dexie_error: None,
         },
+        Utc::now(),
     )?;
     if !local.dexie.needs_dexie_http() {
         return Ok(ReconcileMarketCycleResult {
@@ -180,6 +182,7 @@ fn apply_dexie_lifecycle_transitions(
             cancel_submitted.as_ref(),
             &options,
             status,
+            Utc::now(),
         )?;
         note_reconcile_transition_side_effects(
             &transition,

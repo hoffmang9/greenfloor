@@ -1,6 +1,6 @@
 //! Dexie list helpers used by daemon reconcile (offer size / status indexing).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -47,6 +47,26 @@ pub fn offer_matches_local_id(offer: &Value, local_offer_id: &str) -> bool {
             .iter()
             .any(|key| key == local_offer_id)
     })
+}
+
+/// Index Dexie payloads by the requested local offer ids.
+#[must_use]
+pub fn index_list_offers_by_local_ids(
+    offers: &[Value],
+    local_offer_ids: &HashSet<String>,
+) -> HashMap<String, Value> {
+    let mut by_local_id = HashMap::new();
+    for offer in offers {
+        let Some(obj) = offer.as_object() else {
+            continue;
+        };
+        for key in dexie_offer_lookup_keys(obj) {
+            if local_offer_ids.contains(&key) {
+                by_local_id.entry(key).or_insert_with(|| offer.clone());
+            }
+        }
+    }
+    by_local_id
 }
 
 /// Index Dexie list/augment payloads by every lookup key (`trade_id` ∪ bech32 `id`).

@@ -12,9 +12,8 @@ use crate::error::SignerResult;
 use crate::operator_log::LogContext;
 use crate::storage::SqliteStore;
 
-use super::dispatch::run_recovery_poll;
-use super::handler::{handle_ws_text, ws_error};
-use super::url::resolve_coinset_ws_url_with_p2s;
+use super::dispatch::{handle_ws_text, run_recovery_poll, ws_error};
+use super::url::{merge_ws_p2_filters, resolve_coinset_ws_url_with_p2s};
 
 /// How text-handler failures are treated inside the read pump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,11 +77,10 @@ pub(crate) async fn run_ws_session(
     mut should_stop: impl FnMut() -> bool,
     mut next_wait: impl FnMut() -> Duration,
 ) -> SignerResult<WsReadEnd> {
-    let ws_url = resolve_coinset_ws_url_with_p2s(
-        params.program,
-        params.coinset_base_url,
-        params.ctx.p2_index().p2s(),
-    );
+    let maker_p2s = params.store.list_watched_p2s().unwrap_or_default();
+    let filter_p2s = merge_ws_p2_filters(params.ctx.p2_index().p2s(), &maker_p2s);
+    let ws_url =
+        resolve_coinset_ws_url_with_p2s(params.program, params.coinset_base_url, &filter_p2s);
     if let Some(connecting) = params.audits.connecting {
         audit(params, connecting, &json!({"ws_url": ws_url}))?;
     }

@@ -73,7 +73,8 @@ pub struct CancelOfferOutcome {
     pub operation_id: String,
     /// Hard failure (build/broadcast/rollback). Empty on success.
     pub error: String,
-    /// Soft failure after successful broadcast (e.g. observe cancel tx failed).
+    /// Non-fatal supplemental detail. Observe failures are hard outcomes because
+    /// the daemon must retry lifecycle ingestion.
     pub warning: String,
 }
 
@@ -104,22 +105,6 @@ fn outcome(
         operation_id,
         error: error.into(),
         warning: String::new(),
-    }
-}
-
-fn outcome_with_warning(
-    target: &CancelOfferTarget,
-    market_id: String,
-    operation_id: String,
-    warning: impl Into<String>,
-) -> CancelOfferOutcome {
-    CancelOfferOutcome {
-        offer_id: target.offer_id().to_string(),
-        market_id,
-        success: true,
-        operation_id,
-        error: String::new(),
-        warning: warning.into(),
     }
 }
 
@@ -156,7 +141,7 @@ async fn resolve_offer_file_text_for_cancel(
 
 async fn build_cancel_spend_bundle(
     params: &CancelOfferOnChainParams<'_>,
-) -> SignerResult<(SpendBundle, String)> {
+) -> SignerResult<(SpendBundle, String, chia_sdk_coinset::CoinsetClient)> {
     if params.fee_mojos > 0 {
         return Err(SignerError::Other(
             "offer cancel fee not supported yet".to_string(),
@@ -197,7 +182,7 @@ async fn build_cancel_spend_bundle(
         ));
     };
     let operation_id = spend_bundle_operation_id(&spend_bundle)?;
-    Ok((spend_bundle, operation_id))
+    Ok((spend_bundle, operation_id, coinset_client))
 }
 
 fn prior_offer_state(store: &SqliteStore, offer_id: &str) -> SignerResult<Option<String>> {
@@ -208,18 +193,25 @@ fn prior_offer_state(store: &SqliteStore, offer_id: &str) -> SignerResult<Option
         .map(|row| row.state))
 }
 
-async fn broadcast_and_settle_tracked_cancel(
-    store: &SqliteStore,
+enum CancelPersistPolicy<'a> {
+    Tracked {
+        store: &'a SqliteStore,
+        prior_state: Option<&'a str>,
+    },
+    Ephemeral,
+}
+
+async fn broadcast_cancel(
     target: &CancelOfferTarget,
     market_id: &str,
-    prior_state: Option<&str>,
     coinset_client: &chia_sdk_coinset::CoinsetClient,
     spend_bundle: SpendBundle,
     operation_id: String,
+    persist: CancelPersistPolicy<'_>,
 ) -> CancelOfferOutcome {
     match coinset::broadcast_spend_bundle(coinset_client, spend_bundle).await {
-        Ok(result) => {
-            match store.ingest_tx_signals(
+        Ok(result) => match persist {
+            CancelPersistPolicy::Tracked { store, .. } => match store.ingest_tx_signals(
                 std::slice::from_ref(&result.operation_id),
                 TxSignalIngress::Mempool,
             ) {
@@ -230,29 +222,39 @@ async fn broadcast_and_settle_tracked_cancel(
                     result.operation_id,
                     String::new(),
                 ),
-                Err(err) => outcome_with_warning(
-                    target,
-                    market_id.to_string(),
-                    result.operation_id,
-                    format!("cancel broadcast succeeded; observe cancel tx failed: {err}"),
-                ),
-            }
-        }
-        Err(err) => {
-            if let Err(rollback_err) = store.rollback_offer_cancel_submitted(
-                target.offer_id(),
-                market_id,
-                prior_state.unwrap_or("open"),
-            ) {
-                return outcome(
+                Err(err) => outcome(
                     target,
                     market_id.to_string(),
                     false,
-                    operation_id,
-                    format!(
-                        "cancel broadcast failed ({err}); rollback also failed: {rollback_err}"
-                    ),
-                );
+                    result.operation_id,
+                    format!("cancel broadcast succeeded; observe cancel tx failed: {err}"),
+                ),
+            },
+            CancelPersistPolicy::Ephemeral => outcome(
+                target,
+                market_id.to_string(),
+                true,
+                result.operation_id,
+                String::new(),
+            ),
+        },
+        Err(err) => {
+            if let CancelPersistPolicy::Tracked { store, prior_state } = persist {
+                if let Err(rollback_err) = store.rollback_offer_cancel_submitted(
+                    target.offer_id(),
+                    market_id,
+                    prior_state.unwrap_or("open"),
+                ) {
+                    return outcome(
+                        target,
+                        market_id.to_string(),
+                        false,
+                        operation_id,
+                        format!(
+                            "cancel broadcast failed ({err}); rollback also failed: {rollback_err}"
+                        ),
+                    );
+                }
             }
             outcome(
                 target,
@@ -292,7 +294,7 @@ async fn build_cancel_bundle_for_target(
     operator_network: &str,
     target: &CancelOfferTarget,
     cancel_metadata: Option<StoredOfferCancelMetadata>,
-) -> SignerResult<(SpendBundle, String, String)> {
+) -> SignerResult<(SpendBundle, String, String, chia_sdk_coinset::CoinsetClient)> {
     let market_id = target.normalized_market_id();
     let dexie_for_target = if target.offer_text().is_some()
         || metadata_sufficient_for_coinset_cancel(cancel_metadata.as_ref())
@@ -310,8 +312,8 @@ async fn build_cancel_bundle_for_target(
         offer_text: target.offer_text().map(str::to_string),
         cancel_metadata,
     };
-    let (spend_bundle, operation_id) = build_cancel_spend_bundle(&params).await?;
-    Ok((spend_bundle, operation_id, market_id))
+    let (spend_bundle, operation_id, coinset_client) = build_cancel_spend_bundle(&params).await?;
+    Ok((spend_bundle, operation_id, market_id, coinset_client))
 }
 
 async fn cancel_tracked_offer(
@@ -322,55 +324,41 @@ async fn cancel_tracked_offer(
     target: &CancelOfferTarget,
 ) -> SignerResult<CancelOfferOutcome> {
     let cancel_metadata = store.offer_cancel_metadata_for_id(target.offer_id())?;
-    let (spend_bundle, operation_id, market_id) = match build_cancel_bundle_for_target(
-        dexie,
-        signer_config,
-        operator_network,
-        target,
-        cancel_metadata,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(err) => {
-            return Ok(outcome(
-                target,
-                target.normalized_market_id(),
-                false,
-                String::new(),
-                err.to_string(),
-            ));
-        }
-    };
+    let (spend_bundle, operation_id, market_id, coinset_client) =
+        match build_cancel_bundle_for_target(
+            dexie,
+            signer_config,
+            operator_network,
+            target,
+            cancel_metadata,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(err) => {
+                return Ok(outcome(
+                    target,
+                    target.normalized_market_id(),
+                    false,
+                    String::new(),
+                    err.to_string(),
+                ));
+            }
+        };
     let prior_state = prior_offer_state(store, target.offer_id())?;
     if let Some(out) = prepare_tracked_cancel_or_outcome(store, target, &market_id, &operation_id) {
         return Ok(out);
     }
-    let coinset_client = match client_for_signer_on_network(signer_config, operator_network) {
-        Ok(client) => client,
-        Err(err) => {
-            let _ = store.rollback_offer_cancel_submitted(
-                target.offer_id(),
-                &market_id,
-                prior_state.as_deref().unwrap_or("open"),
-            );
-            return Ok(outcome(
-                target,
-                market_id,
-                false,
-                operation_id,
-                err.to_string(),
-            ));
-        }
-    };
-    Ok(broadcast_and_settle_tracked_cancel(
-        store,
+    Ok(broadcast_cancel(
         target,
         &market_id,
-        prior_state.as_deref(),
         &coinset_client,
         spend_bundle,
         operation_id,
+        CancelPersistPolicy::Tracked {
+            store,
+            prior_state: prior_state.as_deref(),
+        },
     )
     .await)
 }
@@ -382,7 +370,7 @@ async fn cancel_local_file_offer(
     operator_network: &str,
     target: &CancelOfferTarget,
 ) -> SignerResult<CancelOfferOutcome> {
-    let (spend_bundle, operation_id, market_id) =
+    let (spend_bundle, operation_id, market_id, coinset_client) =
         match build_cancel_bundle_for_target(dexie, signer_config, operator_network, target, None)
             .await
         {
@@ -397,34 +385,15 @@ async fn cancel_local_file_offer(
                 ));
             }
         };
-    let coinset_client = match client_for_signer_on_network(signer_config, operator_network) {
-        Ok(client) => client,
-        Err(err) => {
-            return Ok(outcome(
-                target,
-                market_id,
-                false,
-                operation_id,
-                err.to_string(),
-            ));
-        }
-    };
-    match coinset::broadcast_spend_bundle(&coinset_client, spend_bundle).await {
-        Ok(result) => Ok(outcome(
-            target,
-            market_id,
-            true,
-            result.operation_id,
-            String::new(),
-        )),
-        Err(err) => Ok(outcome(
-            target,
-            market_id,
-            false,
-            operation_id,
-            err.to_string(),
-        )),
-    }
+    Ok(broadcast_cancel(
+        target,
+        &market_id,
+        &coinset_client,
+        spend_bundle,
+        operation_id,
+        CancelPersistPolicy::Ephemeral,
+    )
+    .await)
 }
 
 async fn cancel_one_offer(

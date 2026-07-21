@@ -1,19 +1,86 @@
-use serde_json::json;
+use serde_json::{json, Value};
 
-use crate::coinset::{get_all_mempool_tx_ids, WsEvent, WsTransactionEvent};
+use crate::coinset::{
+    filter_confirmed_tx_ids, get_all_mempool_tx_ids, parse_ws_event, WsEvent, WsTransactionEvent,
+};
 use crate::config::ManagerProgramConfig;
 use crate::daemon::coinset_ws::CoinsetWsShared;
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::lifecycle::{
     apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
     WsOfferApply,
 };
 use crate::operator_log::{
-    LogContext, COINSET_WS_MEMPOOL_EVENT, COINSET_WS_RECOVERY_POLL, COINSET_WS_RECOVERY_POLL_ERROR,
+    LogContext, COINSET_WS_MEMPOOL_EVENT, COINSET_WS_PAYLOAD_IGNORED,
+    COINSET_WS_PAYLOAD_PARSE_ERROR, COINSET_WS_RECOVERY_POLL, COINSET_WS_RECOVERY_POLL_ERROR,
     COINSET_WS_TX_BLOCK_EVENT, COIN_WATCH_HIT, MEMPOOL_OBSERVED, TX_BLOCK_CONFIRMED,
 };
 use crate::storage::{SqliteStore, TxSignalIngress};
+
+pub fn handle_ws_text(store: &SqliteStore, ctx: &CoinsetWsShared, raw: &str) -> SignerResult<()> {
+    let payload: Value = if let Ok(value) = serde_json::from_str(raw) {
+        value
+    } else {
+        LogContext::COINSET.audit(
+            store,
+            COINSET_WS_PAYLOAD_PARSE_ERROR,
+            &json!({"raw": raw.chars().take(200).collect::<String>()}),
+            None,
+        )?;
+        return Ok(());
+    };
+    if !payload.is_object() {
+        let kind = match &payload {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        };
+        LogContext::COINSET.audit(
+            store,
+            COINSET_WS_PAYLOAD_IGNORED,
+            &json!({"kind": kind}),
+            None,
+        )?;
+        return Ok(());
+    }
+    let Some(event) = parse_ws_event(&payload) else {
+        return Ok(());
+    };
+    apply_ws_event(store, ctx, event)
+}
+
+pub fn ws_error(err: &tokio_tungstenite::tungstenite::Error) -> SignerError {
+    SignerError::Other(format!("coinset_ws_once_error:{err}"))
+}
+
+/// Confirm prepared cancel transactions through Coinset HTTP and apply their
+/// lifecycle promotions.
+pub(crate) async fn confirm_cancel_submitted_txs_via_http(
+    store: &SqliteStore,
+    network: &str,
+    coinset_base_url: &str,
+) -> SignerResult<Vec<String>> {
+    let tx_ids = store.list_cancel_submitted_tx_ids()?;
+    if tx_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let base_url = coinset_base_url.trim();
+    let base_opt = if base_url.is_empty() {
+        None
+    } else {
+        Some(base_url)
+    };
+    let confirmed = filter_confirmed_tx_ids(network, base_opt, &tx_ids).await?;
+    if confirmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    store.ingest_tx_signals(&confirmed, TxSignalIngress::Confirmed)?;
+    promote_cancel_submitted_for_confirmed_txs(store, &confirmed)
+}
 
 pub async fn run_recovery_poll(
     store: &SqliteStore,
@@ -41,6 +108,21 @@ pub async fn run_recovery_poll(
                     store,
                     MEMPOOL_OBSERVED,
                     &json!({"new_tx_ids": new_count, "source": "coinset_websocket"}),
+                    None,
+                )?;
+            }
+            if let Err(err) =
+                confirm_cancel_submitted_txs_via_http(store, &program.network, coinset_base_url)
+                    .await
+            {
+                LogContext::COINSET.audit(
+                    store,
+                    COINSET_WS_RECOVERY_POLL_ERROR,
+                    &json!({
+                        "reason": reason,
+                        "operation": "cancel_submitted_http_confirm",
+                        "error": err.to_string(),
+                    }),
                     None,
                 )?;
             }
@@ -179,8 +261,7 @@ fn apply_transaction_watch_hits(
         return Ok(Vec::new());
     }
     let watch_keys = dedupe_watch_keys(&tx.p2s, &tx.coin_ids);
-    let watch_markets = store.list_market_ids_for_watched_keys(&watch_keys)?;
-    apply_watch_hits_batch(store, &watch_keys, frame_confirmed, &tx.tx_ids)?;
+    let watch_markets = apply_watch_hits_batch(store, &watch_keys, frame_confirmed, &tx.tx_ids)?;
     audit_coin_watch_hit(store, &tx.p2s, &tx.coin_ids, &watch_keys, &watch_markets)?;
     Ok(watch_markets)
 }
@@ -242,3 +323,7 @@ pub(crate) fn apply_ws_event(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;

@@ -17,16 +17,18 @@ use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOffe
 use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::offer_matches_local_id;
+use super::dexie_size::{index_list_offers_by_local_ids, offer_matches_local_id};
 use super::reconcile_transition::ReconcileMarketCycleMetrics;
 use crate::storage::OfferStateListRow;
 
 /// Dexie HTTP roles after local metadata heal (pure classify result).
 #[derive(Debug, Clone, Default)]
 pub struct DexieWatchRoles {
-    /// Dexie-authoritative watched offers (`publish_venue=dexie`).
+    /// Dexie-authoritative watched offers (`publish_venue=dexie`), including rows
+    /// whose missing watches must be healed from their authoritative payload.
     pub authoritative: HashSet<String>,
-    /// NULL or dexie venue rows that still lack watches after local metadata heal.
+    /// Legacy NULL-venue rows that still lack watches after local metadata heal.
+    /// These consume Dexie only for watch repair, never lifecycle authority.
     pub heal_only: HashSet<String>,
 }
 
@@ -101,14 +103,7 @@ fn classify_dexie_role(
     if is_dexie_auth {
         roles.authoritative.insert(offer_id.to_string());
     }
-    if has_watches {
-        return;
-    }
-    let may_need_dexie = match venue {
-        None => true,
-        Some(v) => v.is_dexie(),
-    };
-    if may_need_dexie {
+    if venue.is_none() && !has_watches {
         roles.heal_only.insert(offer_id.to_string());
     }
 }
@@ -170,6 +165,24 @@ fn maker_watch_keys_from_dexie_payload(raw: &Value) -> (Vec<String>, Vec<String>
     (extract_coin_ids_from_offer_payload(raw), Vec::new())
 }
 
+/// Ensure durable maker coin and p2 watches from a Dexie offer payload.
+///
+/// # Errors
+///
+/// Returns an error if `SQLite` reads or writes fail.
+pub fn ensure_watches_from_dexie_payload(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    raw: &Value,
+) -> SignerResult<()> {
+    let (coin_ids, p2s) = maker_watch_keys_from_dexie_payload(raw);
+    if !coin_ids.is_empty() || !p2s.is_empty() {
+        store.ensure_offer_coin_watches(offer_id, market_id, &coin_ids, &p2s)?;
+    }
+    Ok(())
+}
+
 #[must_use]
 fn maker_p2s_present(raw: &Value) -> bool {
     !maker_watch_keys_from_dexie_payload(raw).1.is_empty()
@@ -229,17 +242,7 @@ pub async fn fetch_and_ensure_watches(
     if heal_only.is_empty() {
         return Ok(());
     }
-    let mut by_local_id: HashMap<String, Value> = HashMap::default();
-    for offer in list_offers {
-        let Some(obj) = offer.as_object() else {
-            continue;
-        };
-        for key in crate::daemon::dexie_size::dexie_offer_lookup_keys(obj) {
-            if heal_only.contains(&key) {
-                by_local_id.entry(key).or_insert_with(|| offer.clone());
-            }
-        }
-    }
+    let by_local_id = index_list_offers_by_local_ids(list_offers, heal_only);
     for offer_id in heal_only {
         if store.offer_has_coin_watches(offer_id)? {
             continue;
@@ -257,10 +260,7 @@ pub async fn fetch_and_ensure_watches(
         let Some(raw) = raw else {
             continue;
         };
-        let (coin_ids, p2s) = maker_watch_keys_from_dexie_payload(&raw);
-        if !coin_ids.is_empty() || !p2s.is_empty() {
-            store.ensure_offer_coin_watches(offer_id, market_id, &coin_ids, &p2s)?;
-        }
+        ensure_watches_from_dexie_payload(store, market_id, offer_id, &raw)?;
     }
     Ok(())
 }
@@ -362,6 +362,20 @@ mod tests {
     }
 
     #[test]
+    fn classify_dexie_without_watches_is_authoritative_not_heal_only() {
+        let offer_id = "ab".repeat(32);
+        let mut roles = DexieWatchRoles::default();
+        classify_dexie_role(
+            Some(crate::config::Venue::Dexie),
+            false,
+            &offer_id,
+            &mut roles,
+        );
+        assert_eq!(roles.authoritative, HashSet::from([offer_id]));
+        assert!(roles.heal_only.is_empty());
+    }
+
+    #[test]
     fn maker_watch_keys_from_dexie_payload_falls_back_to_json_coin_ids() {
         let coin = "b".repeat(64);
         let payload = serde_json::json!({"offer": {"coin_id": coin}});
@@ -401,6 +415,7 @@ mod tests {
                 venue: None,
                 dexie_error: None,
             },
+            chrono::Utc::now(),
         )
         .expect("apply");
         let rows = store
@@ -432,6 +447,7 @@ mod tests {
                 venue: None,
                 dexie_error: None,
             },
+            chrono::Utc::now(),
         )
         .expect("apply");
         let rows = store

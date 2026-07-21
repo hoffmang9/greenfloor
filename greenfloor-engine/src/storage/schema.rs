@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS offer_state (
   state TEXT NOT NULL,
   last_seen_status INTEGER NULL,
   updated_at TEXT NOT NULL,
-  presplit_input_coin_id TEXT NULL,
+  cancel_input_coin_id TEXT NULL,
   fixed_delegated_puzzle_hash TEXT NULL,
   maker_puzzle_hash TEXT NULL,
   execution_mode TEXT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS offer_coin_watches (
   market_id TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'coin',
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (coin_id, offer_id)
+  PRIMARY KEY (coin_id, offer_id, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_market
   ON offer_coin_watches(market_id);
