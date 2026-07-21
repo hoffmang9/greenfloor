@@ -103,10 +103,13 @@ prefers Coinset + stored metadata (no offer file). When metadata is absent
    - **Stale unwedge after grace.** When Dexie still reports open (`status = 1`) or there
      is no Dexie status (Coinset/splash), and the cancel tx remains unconfirmed past grace
      **and** is absent from the confirmed list, reconcile resets `cancel_submitted` →
-     `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`). Non-attributable Coinset noise (watch
-     hits / cancel-tx-only mempool) preserves only **within** grace; past grace it falls
-     through to this unwedge so mempool-only observation cannot wedge forever. Daemon
-     reconcile applies empty-signal cancel-submitted policy on rows collected by
+     `open` (`REASON_CANCEL_SUBMIT_STALE_ORPHAN`). Non-attributable Coinset noise is typed
+     via `MakerHit` / `CancelSubmitNonAttributable`: mempool maker hits and cancel-tx-only
+     mempool preserve only **within** grace (past grace falls through to unwedge so
+     mempool-only observation cannot wedge forever); unattributed **confirmed** maker hits
+     always preserve (`REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED`) until HTTP
+     cancel confirm / cancel-tx chain confirm — they must not orphan-unwedge to `open`.
+     Daemon reconcile applies empty-signal cancel-submitted policy on rows collected by
      `prepare_market_reconcile_local` (before Dexie HTTP), so all venues unwedge without Dexie
      lifecycle or a WS confirm frame.
    - **Preload fallback.** Batch reconcile preloads cancel-submit context for all

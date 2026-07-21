@@ -18,7 +18,8 @@ use super::coinset_signals::{
 };
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
-    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED,
+    REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
     REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
     SIGNAL_SOURCE_NONE, TAKER_NONE,
 };
@@ -114,10 +115,17 @@ pub(crate) fn resolve_cancel_submitted_transition(
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
     // Strip tracked cancel spend, then ignore non-attributable noise so
-    // promote_cancel_submitted_for_confirmed_txs stays eligible — but only
-    // within orphan grace. Past grace, fall through so stale unwedge can run
-    // (ADR 0015: mempool-only cancel observation must not wedge forever).
+    // promote_cancel_submitted_for_confirmed_txs stays eligible.
+    // Confirmed maker hits always preserve (wait for HTTP cancel confirm).
+    // Mempool-only / cancel-tx-mempool noise preserves within grace; past grace
+    // falls through so stale unwedge can run (ADR 0015).
     let summary = match cancel_submit_taker_signals(signals, ctx.cancel_tx_id.as_deref()) {
+        Err(CancelSubmitNonAttributable::ConfirmedMakerHit) => {
+            return preserve_state(
+                &current,
+                non_attributable_reason(CancelSubmitNonAttributable::ConfirmedMakerHit),
+            );
+        }
         Err(kind) if cancel_submit_within_grace(ctx, now) => {
             return preserve_state(&current, non_attributable_reason(kind));
         }
@@ -138,7 +146,10 @@ pub(crate) fn resolve_cancel_submitted_transition(
 
 fn non_attributable_reason(kind: CancelSubmitNonAttributable) -> &'static str {
     match kind {
-        CancelSubmitNonAttributable::WatchHit => REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
+        CancelSubmitNonAttributable::MempoolMakerHit => REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
+        CancelSubmitNonAttributable::ConfirmedMakerHit => {
+            REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED
+        }
         CancelSubmitNonAttributable::CancelTxMempool => {
             REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED
         }

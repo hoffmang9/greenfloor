@@ -316,6 +316,33 @@ async fn build_cancel_bundle_for_target(
     Ok((spend_bundle, operation_id, market_id, coinset_client))
 }
 
+async fn build_cancel_bundle_or_outcome(
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+    cancel_metadata: Option<StoredOfferCancelMetadata>,
+) -> Result<(SpendBundle, String, String, chia_sdk_coinset::CoinsetClient), CancelOfferOutcome> {
+    match build_cancel_bundle_for_target(
+        dexie,
+        signer_config,
+        operator_network,
+        target,
+        cancel_metadata,
+    )
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(err) => Err(outcome(
+            target,
+            target.normalized_market_id(),
+            false,
+            String::new(),
+            err.to_string(),
+        )),
+    }
+}
+
 async fn cancel_tracked_offer(
     store: &SqliteStore,
     dexie: Option<&DexieClient>,
@@ -325,7 +352,7 @@ async fn cancel_tracked_offer(
 ) -> SignerResult<CancelOfferOutcome> {
     let cancel_metadata = store.offer_cancel_metadata_for_id(target.offer_id())?;
     let (spend_bundle, operation_id, market_id, coinset_client) =
-        match build_cancel_bundle_for_target(
+        match build_cancel_bundle_or_outcome(
             dexie,
             signer_config,
             operator_network,
@@ -335,15 +362,7 @@ async fn cancel_tracked_offer(
         .await
         {
             Ok(value) => value,
-            Err(err) => {
-                return Ok(outcome(
-                    target,
-                    target.normalized_market_id(),
-                    false,
-                    String::new(),
-                    err.to_string(),
-                ));
-            }
+            Err(out) => return Ok(out),
         };
     let prior_state = prior_offer_state(store, target.offer_id())?;
     if let Some(out) = prepare_tracked_cancel_or_outcome(store, target, &market_id, &operation_id) {
@@ -371,19 +390,11 @@ async fn cancel_local_file_offer(
     target: &CancelOfferTarget,
 ) -> SignerResult<CancelOfferOutcome> {
     let (spend_bundle, operation_id, market_id, coinset_client) =
-        match build_cancel_bundle_for_target(dexie, signer_config, operator_network, target, None)
+        match build_cancel_bundle_or_outcome(dexie, signer_config, operator_network, target, None)
             .await
         {
             Ok(value) => value,
-            Err(err) => {
-                return Ok(outcome(
-                    target,
-                    target.normalized_market_id(),
-                    false,
-                    String::new(),
-                    err.to_string(),
-                ));
-            }
+            Err(out) => return Ok(out),
         };
     Ok(broadcast_cancel(
         target,

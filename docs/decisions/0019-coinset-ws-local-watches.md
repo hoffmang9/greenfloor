@@ -41,19 +41,19 @@ never the operator transport.
    to `mempool_observed` — that state ages out of active-slot counts after three
    minutes while a Coinset listing can still be live, which would allow duplicate
    ladder posts. Take detection stays on durable maker **coin** watch hits
-   (pending → `mempool_observed`; confirmed → `tx_block_confirmed` via the
-   frame's confirmed tx ids). P2-only hits mark inventory stale only and do
+   (`MakerHit::{Mempool,Confirmed}`: pending → `mempool_observed`; confirmed →
+   `tx_block_confirmed`, including when Coinset omits spend-bundle `ids` but
+   still lists maker coin removals). P2-only hits mark inventory stale only and do
    **not** advance lifecycle — shared maker puzzle hashes can match every open
-   offer on a market when Coinset omits coin ids. Offer-frame `confirmed` /
-   terminal statuses still drive lifecycle. Pure
-   watch hits while `cancel_submitted` are
-   ignored by cancel policy, so cancel-spend reuse of maker keys cannot look like
-   taker activity. Mempool/tx lists whose only id is the tracked cancel spend are
-   also ignored while `cancel_submitted`, so cancel-tx confirmation promotion
-   remains eligible. Watch backfill skips `cancel_submitted`
-   rows. Venue backfill never labels 64-hex ids as `coinset` (Dexie `trade_id`
-   shares that shape) and never mass-clears explicit `publish_venue=coinset`; it
-   only sets `dexie` for unambiguous non-64-hex legacy NULL ids (via `schema_meta`
+   offer on a market when Coinset omits coin ids. While `cancel_submitted`,
+   unattributed confirmed maker hits preserve
+   (`REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED`, await HTTP cancel confirm)
+   and never orphan-unwedge to `open`; pure mempool maker hits / cancel-tx-only
+   mempool are ignored within grace. Offer-frame `confirmed` / terminal statuses
+   still drive lifecycle. Watch backfill skips `cancel_submitted` rows. Venue
+   backfill never labels 64-hex ids as `coinset` (Dexie `trade_id` shares that
+   shape) and never mass-clears explicit `publish_venue=coinset`; it only sets
+   `dexie` for unambiguous non-64-hex legacy NULL ids (via `schema_meta`
    `watch_venue_backfill_v2`). Missing watches are healed each reconcile via a
    single `prepare_market_reconcile_local` scan: cancel-submitted collection,
    cancel-metadata heal, and Dexie role classify (`DexieWatchRoles`), then Dexie
@@ -62,8 +62,10 @@ never the operator transport.
    list row lacks a decodable `offer1…`, heal calls `get_offer` so watches are
    not stuck coin-only; no Dexie lifecycle). Dexie lifecycle remains
    `publish_venue=dexie` only and applies through the same
-   `apply_watched_offer_signals` spine as Coinset WS. Dexie-authoritative rows
-   heal missing watches from the same payload used for lifecycle augment.
+   `apply_watched_offer_signals` spine as Coinset WS (CLI Dexie reconcile is
+   single-pass fetch → signals → apply). Dexie-authoritative rows heal missing
+   watches from the same payload used for lifecycle augment. Schema migration
+   drops legacy `presplit_input_coin_id` after copying into `cancel_input_coin_id`.
 4. **Dexie reconcile:** only for Dexie-authoritative watched offers (explicit
    `publish_venue=dexie`). Authority checks use persisted venue only (no id-shape
    heuristics at runtime). Coinset/splash / NULL venues skip Dexie lifecycle

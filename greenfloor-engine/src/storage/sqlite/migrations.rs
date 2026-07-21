@@ -43,6 +43,7 @@ fn add_column_if_missing(
 const SCHEMA_META_WATCH_VENUE_BACKFILL: &str = "watch_venue_backfill_v2";
 const SCHEMA_META_WATCH_PK_KIND: &str = "offer_coin_watches_pk_kind_v1";
 const SCHEMA_META_CANCEL_INPUT_COIN_RENAME: &str = "cancel_input_coin_id_rename_v1";
+const SCHEMA_META_CANCEL_INPUT_DROP_LEGACY: &str = "cancel_input_coin_id_drop_presplit_v1";
 
 /// Apply additive schema migrations after base `CREATE TABLE IF NOT EXISTS` bootstrap.
 ///
@@ -50,8 +51,8 @@ const SCHEMA_META_CANCEL_INPUT_COIN_RENAME: &str = "cancel_input_coin_id_rename_
 ///
 /// Returns an error if a migration fails for reasons other than idempotent re-run.
 pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
-    // Legacy column kept until rename migration copies into cancel_input_coin_id.
-    add_column_if_missing(conn, "offer_state", "presplit_input_coin_id", "TEXT NULL")?;
+    // Do not re-add legacy `presplit_input_coin_id` — rename/drop migrations copy then
+    // rebuild without it when the old column is still present on upgraded DBs.
     add_column_if_missing(conn, "offer_state", "cancel_input_coin_id", "TEXT NULL")?;
     add_column_if_missing(
         conn,
@@ -68,6 +69,7 @@ pub(crate) fn apply_schema_migrations(conn: &Connection) -> SignerResult<()> {
     ensure_schema_meta_table(conn)?;
     migrate_offer_coin_watches_pk_kind(conn)?;
     migrate_cancel_input_coin_id_rename(conn)?;
+    migrate_drop_presplit_input_coin_id(conn)?;
     backfill_offer_cancel_submitted_at(conn)?;
     normalize_legacy_tx_id_storage(conn)?;
     // One-shot upgrade: seed/heal watches + venue for pre-upgrade rows only.
@@ -202,6 +204,51 @@ fn migrate_cancel_input_coin_id_rename(conn: &Connection) -> SignerResult<()> {
     if schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_COIN_RENAME)? {
         return Ok(());
     }
+    if table_has_column(conn, "offer_state", "presplit_input_coin_id")? {
+        conn.execute(
+            r"
+            UPDATE offer_state
+            SET cancel_input_coin_id = presplit_input_coin_id
+            WHERE (cancel_input_coin_id IS NULL OR length(trim(cancel_input_coin_id)) = 0)
+              AND presplit_input_coin_id IS NOT NULL
+              AND length(trim(presplit_input_coin_id)) > 0
+            ",
+            [],
+        )
+        .map_err(|err| {
+            SignerError::Other(format!("cancel_input_coin_id rename backfill: {err}"))
+        })?;
+    }
+    mark_schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_COIN_RENAME)?;
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> SignerResult<bool> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|err| SignerError::Other(format!("pragma table_info {table}: {err}")))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|err| SignerError::Other(format!("pragma table_info query {table}: {err}")))?;
+    for row in rows {
+        let name =
+            row.map_err(|err| SignerError::Other(format!("pragma table_info row {table}: {err}")))?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn migrate_drop_presplit_input_coin_id(conn: &Connection) -> SignerResult<()> {
+    if schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_DROP_LEGACY)? {
+        return Ok(());
+    }
+    if !table_has_column(conn, "offer_state", "presplit_input_coin_id")? {
+        mark_schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_DROP_LEGACY)?;
+        return Ok(());
+    }
+    // Copy any leftover legacy values, then rebuild without the column.
     conn.execute(
         r"
         UPDATE offer_state
@@ -212,8 +259,39 @@ fn migrate_cancel_input_coin_id_rename(conn: &Connection) -> SignerResult<()> {
         ",
         [],
     )
-    .map_err(|err| SignerError::Other(format!("cancel_input_coin_id rename backfill: {err}")))?;
-    mark_schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_COIN_RENAME)?;
+    .map_err(|err| SignerError::Other(format!("cancel_input_coin_id pre-drop backfill: {err}")))?;
+    conn.execute_batch(
+        r"
+        CREATE TABLE offer_state_new (
+          offer_id TEXT PRIMARY KEY,
+          market_id TEXT NOT NULL,
+          state TEXT NOT NULL,
+          last_seen_status INTEGER NULL,
+          updated_at TEXT NOT NULL,
+          cancel_input_coin_id TEXT NULL,
+          fixed_delegated_puzzle_hash TEXT NULL,
+          maker_puzzle_hash TEXT NULL,
+          execution_mode TEXT NULL,
+          cancel_submitted_tx_id TEXT NULL,
+          cancel_submitted_at TEXT NULL,
+          publish_venue TEXT NULL
+        );
+        INSERT INTO offer_state_new (
+          offer_id, market_id, state, last_seen_status, updated_at,
+          cancel_input_coin_id, fixed_delegated_puzzle_hash, maker_puzzle_hash,
+          execution_mode, cancel_submitted_tx_id, cancel_submitted_at, publish_venue
+        )
+        SELECT
+          offer_id, market_id, state, last_seen_status, updated_at,
+          cancel_input_coin_id, fixed_delegated_puzzle_hash, maker_puzzle_hash,
+          execution_mode, cancel_submitted_tx_id, cancel_submitted_at, publish_venue
+        FROM offer_state;
+        DROP TABLE offer_state;
+        ALTER TABLE offer_state_new RENAME TO offer_state;
+        ",
+    )
+    .map_err(|err| SignerError::Other(format!("offer_state drop presplit_input_coin_id: {err}")))?;
+    mark_schema_meta_applied(conn, SCHEMA_META_CANCEL_INPUT_DROP_LEGACY)?;
     Ok(())
 }
 
@@ -222,14 +300,11 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
     let mut stmt = conn
         .prepare(
             r"
-            SELECT offer_id, market_id,
-                   COALESCE(cancel_input_coin_id, presplit_input_coin_id),
-                   maker_puzzle_hash
+            SELECT offer_id, market_id, cancel_input_coin_id, maker_puzzle_hash
             FROM offer_state
             WHERE state IN ('open', 'refresh_due', 'mempool_observed', 'pending_visibility')
               AND (
                 (cancel_input_coin_id IS NOT NULL AND length(trim(cancel_input_coin_id)) > 0)
-                OR (presplit_input_coin_id IS NOT NULL AND length(trim(presplit_input_coin_id)) > 0)
                 OR (maker_puzzle_hash IS NOT NULL AND length(trim(maker_puzzle_hash)) > 0)
               )
             ",
@@ -460,6 +535,57 @@ mod tests {
     use crate::storage::sqlite::{OfferCancelWrite, SqliteStore};
 
     use super::super::utcnow_iso;
+    use super::table_has_column;
+
+    #[test]
+    fn migration_drops_legacy_presplit_input_coin_id() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        {
+            let raw_db = rusqlite::Connection::open(&db_path).expect("open raw");
+            raw_db
+                .execute_batch(
+                    r"
+                CREATE TABLE offer_state (
+                  offer_id TEXT PRIMARY KEY,
+                  market_id TEXT NOT NULL,
+                  state TEXT NOT NULL,
+                  last_seen_status INTEGER NULL,
+                  updated_at TEXT NOT NULL,
+                  presplit_input_coin_id TEXT NULL
+                );
+                ",
+                )
+                .expect("legacy schema");
+            raw_db
+                .execute(
+                    r"
+                INSERT INTO offer_state (
+                  offer_id, market_id, state, last_seen_status, updated_at, presplit_input_coin_id
+                ) VALUES (?1, 'm1', 'open', NULL, '2020-01-01T00:00:00Z', ?2)
+                ",
+                    rusqlite::params![offer_id, coin],
+                )
+                .expect("seed legacy row");
+        }
+        let store = SqliteStore::open(&db_path).expect("open migrates");
+        assert!(
+            !table_has_column(&store.conn, "offer_state", "presplit_input_coin_id")
+                .expect("pragma"),
+            "legacy column must be dropped"
+        );
+        assert!(
+            table_has_column(&store.conn, "offer_state", "cancel_input_coin_id").expect("pragma"),
+            "canonical column must remain"
+        );
+        let meta = store
+            .offer_cancel_metadata_for_id(&offer_id)
+            .expect("metadata")
+            .expect("row");
+        assert_eq!(meta.fields.input_coin_id.as_deref(), Some(coin.as_str()));
+    }
 
     #[test]
     fn migration_heals_partial_coin_watch_with_missing_p2() {

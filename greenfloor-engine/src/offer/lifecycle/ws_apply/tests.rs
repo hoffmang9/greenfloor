@@ -322,6 +322,27 @@ fn confirmed_coin_hit_moves_to_tx_block_confirmed() {
 }
 
 #[test]
+fn confirmed_coin_hit_without_tx_ids_still_promotes() {
+    let (_dir, store) = open_store();
+    let offer_id = "ab".repeat(32);
+    let coin = "ef".repeat(32);
+    store
+        .upsert_offer_state(&offer_id, "m1", "open", None)
+        .expect("upsert");
+    store
+        .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+        .expect("watch");
+    apply_watch_hits_batch(&store, std::slice::from_ref(&coin), true, &[]).expect("coin confirmed");
+    let rows = store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+        .expect("rows");
+    assert_eq!(
+        rows[0].state, "tx_block_confirmed",
+        "confirmed maker coin hit must promote even when frame ids are empty"
+    );
+}
+
+#[test]
 fn offer_confirmed_during_cancel_submitted_applies_taker() {
     let (_dir, store) = open_store();
     let offer_id = "ab".repeat(32);

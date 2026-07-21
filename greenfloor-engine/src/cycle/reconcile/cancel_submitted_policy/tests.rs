@@ -5,7 +5,8 @@ use chrono::TimeZone;
 use super::*;
 use crate::cycle::lifecycle::OfferSignal;
 use crate::cycle::reconcile::metadata::{
-    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED,
+    REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
     REASON_CANCEL_TX_CHAIN_CONFIRMED, REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL,
     REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_CANCEL_TX_CHAIN,
     SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBSOCKET,
@@ -446,6 +447,34 @@ fn watch_hit_past_grace_unwedges_to_open() {
         ReconcileState::Lifecycle(OfferLifecycleState::Open)
     );
     assert_eq!(transition.reason, REASON_CANCEL_SUBMIT_STALE_ORPHAN);
+}
+
+#[test]
+fn confirmed_maker_hit_past_grace_preserves_for_http_cancel_confirm() {
+    let submitted = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let after_grace = submitted + chrono::Duration::seconds(600);
+    let ctx = CancelSubmittedContext {
+        cancel_tx_id: Some("a".repeat(64)),
+        cancel_tx_signal: Some(TxSignalStateRow {
+            mempool_observed_at: Some(submitted.to_rfc3339()),
+            tx_block_confirmed_at: None,
+        }),
+        cancel_submitted_at: Some(submitted.to_rfc3339()),
+    };
+    let transition = resolve_cancel_submitted_transition(
+        None,
+        &CoinsetTxSignals::confirmed_watch(&[]),
+        &[],
+        &ctx,
+        after_grace,
+    )
+    .into_cycle_transition_no_coinset(ReconcileState::CancelSubmitted);
+    assert_eq!(transition.new_state, ReconcileState::CancelSubmitted);
+    assert_eq!(
+        transition.reason,
+        REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED
+    );
+    assert!(!transition.changed);
 }
 
 #[test]

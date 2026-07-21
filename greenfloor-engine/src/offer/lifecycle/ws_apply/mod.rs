@@ -50,6 +50,9 @@ fn ws_persist_options() -> ReconcilePersistOptions<'static> {
 }
 
 /// Signals for a durable maker coin watch hit.
+///
+/// Confirmed frames promote even when `confirmed_tx_ids` is empty (Coinset may
+/// omit spend-bundle ids while still listing maker coin removals).
 #[must_use]
 pub fn signals_for_watch_hit(
     frame_confirmed: bool,
