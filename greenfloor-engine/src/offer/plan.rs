@@ -79,8 +79,11 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
                 .await?;
             let offer_nonce = offer_nonce_from_cats(&selection.selected);
 
-            // PresplitNew with exact-size inputs needs no vault split; reuse Direct plan.
+            // Exact-size inputs need no vault split; Direct cancel metadata assumes one maker coin.
             if selection.offered_total <= terms.offer_amount {
+                if selection.selected.len() != 1 {
+                    return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+                }
                 return Ok(OfferPlan::Direct {
                     selection,
                     offer_nonce,
@@ -194,12 +197,16 @@ mod tests {
     #[test]
     fn direct_input_requires_split_flag_when_change_without_presplit() {
         assert!(matches!(
-            direct_plan_kind_for_amounts(5000, 1000),
-            DirectPlanKind::RequiresSplitFlag
+            direct_plan_kind_for_amounts(5000, 1000, 1),
+            Ok(DirectPlanKind::RequiresSplitFlag)
         ));
         assert!(matches!(
-            direct_plan_kind_for_amounts(1000, 1000),
-            DirectPlanKind::Direct
+            direct_plan_kind_for_amounts(1000, 1000, 1),
+            Ok(DirectPlanKind::Direct)
+        ));
+        assert!(matches!(
+            direct_plan_kind_for_amounts(1000, 1000, 2),
+            Err(SignerError::DirectOfferRequiresSingleInputCoin)
         ));
     }
 
@@ -236,11 +243,18 @@ mod tests {
         RequiresSplitFlag,
     }
 
-    fn direct_plan_kind_for_amounts(offered_total: u64, offer_amount: u64) -> DirectPlanKind {
+    fn direct_plan_kind_for_amounts(
+        offered_total: u64,
+        offer_amount: u64,
+        input_count: usize,
+    ) -> Result<DirectPlanKind, SignerError> {
         if offered_total <= offer_amount {
-            DirectPlanKind::Direct
+            if input_count != 1 {
+                return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+            }
+            Ok(DirectPlanKind::Direct)
         } else {
-            DirectPlanKind::RequiresSplitFlag
+            Ok(DirectPlanKind::RequiresSplitFlag)
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::Level;
 
 use crate::coin_ops::{
@@ -18,8 +18,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
-    CoinOpExecItem, CoinOpExecutionResult,
+    execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecItem, CoinOpExecutionResult,
 };
 use super::market_context::MarketCycleContext;
 
@@ -133,10 +132,8 @@ async fn execute_coin_ops_plans(
     market: &MarketConfig,
     program: &ManagerProgramConfig,
     planning: &CoinOpsPlanningResult,
-    offers: &[Value],
 ) -> SignerResult<CoinOpExecutionResult> {
     let operator_network = ctx.resources.network.as_str();
-    let watched_coin_ids = watched_coin_ids_from_open_offers(store, &market.market_id, offers)?;
     if planning.executable_plans.is_empty() {
         return Ok(CoinOpExecutionResult {
             dry_run: program.runtime_dry_run,
@@ -152,13 +149,18 @@ async fn execute_coin_ops_plans(
         });
     }
 
+    // Durable watches: coin ids + on-chain maker puzzle hashes (local exclude).
+    let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
+    let watched_p2s = store.list_watched_p2s_for_market(&market.market_id)?;
+
     match ctx.gated_market(market) {
-        Ok(gated) => {
-            Ok(
-                execute_managed_coin_op_plans(gated, &planning.executable_plans, &watched_coin_ids)
-                    .await,
-            )
-        }
+        Ok(gated) => Ok(execute_managed_coin_op_plans(
+            gated,
+            &planning.executable_plans,
+            &watched_coin_ids,
+            &watched_p2s,
+        )
+        .await),
         Err(err) => Ok(skipped_coin_ops_result(
             program,
             market,
@@ -259,7 +261,6 @@ pub async fn run_coin_ops_phase(
     store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
-    offers: &[Value],
     wallet_bucket_counts: &BTreeMap<i64, i64>,
     active_counts: &BTreeMap<i64, i64>,
     newly_executed_counts: &BTreeMap<i64, i64>,
@@ -296,8 +297,7 @@ pub async fn run_coin_ops_phase(
         return Ok(());
     };
 
-    let mut execution =
-        execute_coin_ops_plans(store, ctx, market, program, &planning, offers).await?;
+    let mut execution = execute_coin_ops_plans(store, ctx, market, program, &planning).await?;
     apply_overflow_plan_skips(&mut execution, &planning.overflow_plans);
     execution.planned_count = planning.plans.len();
 

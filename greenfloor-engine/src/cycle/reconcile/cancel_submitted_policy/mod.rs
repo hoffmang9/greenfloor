@@ -12,11 +12,16 @@ use crate::storage::{OfferStateListRow, TxSignalStateRow};
 use super::builders::{
     cancel_tx_chain_confirmed_transition, preserve_state, transition_from_dexie_status,
 };
-use super::coinset_signals::{CoinsetSignalSummary, DexieCoinsetSignals};
+use super::coinset_signals::{
+    cancel_submit_taker_signals, CancelSubmitNonAttributable, CoinsetSignalSummary,
+    CoinsetTxSignals,
+};
 use super::dispatch::apply_coinset_taker_dispatch_if_present;
 use super::metadata::{
-    REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
-    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, TAKER_NONE,
+    REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED,
+    REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED, REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+    REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED, REASON_COINSET_UNAVAILABLE, REASON_MISSING_STATUS,
+    SIGNAL_SOURCE_NONE, TAKER_NONE,
 };
 use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
@@ -97,7 +102,7 @@ pub(crate) fn allowed_cancel_target_offer_ids(
 /// Resolve reconcile transition for an offer already in `cancel_submitted`.
 pub(crate) fn resolve_cancel_submitted_transition(
     dexie_status: Option<i64>,
-    dexie: &DexieCoinsetSignals,
+    signals: &CoinsetTxSignals,
     chain_confirmed_tx_ids: &[String],
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
@@ -109,45 +114,75 @@ pub(crate) fn resolve_cancel_submitted_transition(
     if dexie_status == Some(DEXIE_STATUS_CANCELLED) {
         return transition_from_dexie_status(DEXIE_STATUS_CANCELLED, current);
     }
-    let taker_coinset = dexie.summary();
-    if let Some(taker) =
-        apply_coinset_taker_dispatch_if_present(taker_coinset, dexie_status, &current)
-    {
+    // Strip tracked cancel spend, then ignore non-attributable noise so
+    // promote_cancel_submitted_for_confirmed_txs stays eligible.
+    // Confirmed maker hits always preserve (wait for HTTP cancel confirm).
+    // Mempool-only / cancel-tx-mempool noise preserves within grace; past grace
+    // falls through so stale unwedge can run (ADR 0015).
+    let summary = match cancel_submit_taker_signals(signals, ctx.cancel_tx_id.as_deref()) {
+        Err(CancelSubmitNonAttributable::ConfirmedMakerHit) => {
+            return preserve_state(
+                &current,
+                non_attributable_reason(CancelSubmitNonAttributable::ConfirmedMakerHit),
+            );
+        }
+        Err(kind) if cancel_submit_within_grace(ctx, now) => {
+            return preserve_state(&current, non_attributable_reason(kind));
+        }
+        Err(_) => CoinsetSignalSummary::default(),
+        Ok(summary) => summary,
+    };
+    if let Some(taker) = apply_coinset_taker_dispatch_if_present(summary, dexie_status, &current) {
         return taker;
     }
-    cancel_submitted_dexie_status_transition(
+    cancel_submitted_status_fallback_transition(
         dexie_status,
-        taker_coinset,
+        summary,
         ctx,
         now,
         chain_confirmed_tx_ids,
     )
 }
 
-fn cancel_submitted_dexie_status_transition(
+fn non_attributable_reason(kind: CancelSubmitNonAttributable) -> &'static str {
+    match kind {
+        CancelSubmitNonAttributable::MempoolMakerHit => REASON_CANCEL_SUBMIT_WATCH_HIT_IGNORED,
+        CancelSubmitNonAttributable::ConfirmedMakerHit => {
+            REASON_CANCEL_SUBMIT_CONFIRMED_MAKER_HIT_IGNORED
+        }
+        CancelSubmitNonAttributable::CancelTxMempool => {
+            REASON_CANCEL_SUBMIT_CANCEL_TX_MEMPOOL_IGNORED
+        }
+    }
+}
+
+fn cancel_submitted_status_fallback_transition(
     dexie_status: Option<i64>,
-    dexie: CoinsetSignalSummary,
+    summary: CoinsetSignalSummary,
     ctx: &CancelSubmittedContext,
     now: DateTime<Utc>,
     chain_confirmed_tx_ids: &[String],
 ) -> ReconcileTransition {
     match dexie_status {
-        None if dexie.has_tx_ids => {
+        // Partial Coinset activity (tx ids without mempool/confirmed dispatch) must
+        // preserve before stale-orphan reset — do not unwedge while signals are incomplete.
+        None if summary.has_coinset_activity() => {
             preserve_state(&ReconcileState::CancelSubmitted, REASON_COINSET_UNAVAILABLE)
         }
-        None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
-        Some(DEXIE_STATUS_OPEN)
+        None | Some(DEXIE_STATUS_OPEN)
             if cancel_submit_stale_reset_eligible(ctx, now, chain_confirmed_tx_ids) =>
         {
+            // Dexie open or Coinset/splash (no status): cancel never confirmed → retry.
             ReconcileTransition::new(
                 ReconcileState::Lifecycle(OfferLifecycleState::Open),
-                REASON_CANCEL_SUBMIT_STALE_DEXIE_OPEN,
-                SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
+                REASON_CANCEL_SUBMIT_STALE_ORPHAN,
+                SIGNAL_SOURCE_NONE,
                 None,
                 TAKER_NONE,
                 TAKER_NONE,
             )
         }
+        None => preserve_state(&ReconcileState::CancelSubmitted, REASON_MISSING_STATUS),
         Some(status) => transition_from_dexie_status(status, ReconcileState::CancelSubmitted),
     }
 }

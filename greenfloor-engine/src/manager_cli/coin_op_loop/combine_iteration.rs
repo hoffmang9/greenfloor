@@ -56,6 +56,7 @@ pub(super) async fn run_combine_iteration(
             payload: Some(json!({"error": "insufficient_combine_inputs"})),
         });
     }
+    ctx.reject_watched_inputs(&input_coin_ids)?;
 
     let operation_id = ctx
         .execute_combine(&input_coin_ids, Some(&spendable))

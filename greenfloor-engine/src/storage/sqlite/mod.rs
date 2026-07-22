@@ -5,6 +5,7 @@ mod audit;
 mod coin_ops;
 mod migrations;
 mod offer_cancel;
+mod offer_coin_watches;
 mod offers;
 mod pricing;
 mod reservations;
@@ -27,7 +28,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::error::{SignerError, SignerResult};
-use crate::offer::types::{OfferExecutionMode, PresplitCancelFields};
+use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
 
 use super::schema::SCHEMA;
 
@@ -41,12 +42,17 @@ pub struct OfferPostPersistRecord {
     pub resolved_base_asset_id: String,
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
-    pub cancel_fields: PresplitCancelFields,
+    pub cancel_fields: OfferCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
+    /// Maker coin ids to watch on Coinset WS (from create/select or offer decode).
+    pub watched_coin_ids: Vec<String>,
+    /// Maker puzzle hashes (p2) to watch on Coinset WS when known at post time.
+    pub watched_p2s: Vec<String>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
 pub use offer_cancel::OfferCancelWrite;
+pub use offer_coin_watches::{WatchHitRow, WatchMatchKind};
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,
@@ -95,6 +101,8 @@ pub struct OfferStateListRow {
     pub updated_at: String,
     pub cancel_submitted_tx_id: Option<String>,
     pub cancel_submitted_at: Option<String>,
+    /// Publish venue at post time (`coinset` / `dexie` / `splash`); `None` for legacy rows.
+    pub publish_venue: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +113,8 @@ pub struct OfferStateDetailRow {
     pub last_seen_status: Option<i64>,
     pub updated_at: String,
 }
+
+pub use tx_signals::TxSignalIngress;
 
 #[derive(Debug, Clone, Default)]
 pub struct TxSignalStateRow {

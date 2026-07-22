@@ -131,6 +131,11 @@ pub enum SignerError {
     #[error("offer input exceeds offer amount; enable split-input-coins or specify exact coin")]
     OfferInputRequiresPresplit,
 
+    #[error(
+        "direct offer requires exactly one input coin equal to offer amount; combine or enable split-input-coins"
+    )]
+    DirectOfferRequiresSingleInputCoin,
+
     #[error("presplit coin not found on chain")]
     PresplitCoinNotFound,
 
@@ -164,8 +169,8 @@ pub enum SignerError {
     #[error("offer_duplicate_spent_coin_ids")]
     OfferDuplicateSpentCoinIds,
 
-    #[error("offer_cancel_dexie_offer_not_found")]
-    OfferCancelDexieOfferNotFound,
+    #[error("offer_cancel_offer_file_not_found")]
+    OfferCancelOfferFileNotFound,
 
     #[error("offer_cancel_offer_file_missing")]
     OfferCancelOfferFileMissing,

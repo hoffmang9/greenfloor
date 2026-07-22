@@ -13,7 +13,6 @@ use super::lock::DaemonInstanceLock;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
-use super::watchlist::cache::CoinWatchlistCache;
 
 fn parse_key_ids(raw: &str) -> Vec<String> {
     raw.split(',')
@@ -71,6 +70,10 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     if args.once {
         let use_websocket_capture = use_websocket_capture_for_once(&runtime);
+        let coinset = crate::daemon::CoinsetWsShared::from_markets_or_empty(
+            &args.markets_config,
+            testnet_markets_path.as_deref(),
+        );
         let request = DaemonRunOnceRequest {
             program_path: args.program_config,
             markets_path: args.markets_config,
@@ -83,7 +86,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
             test_controls: DaemonCycleTestControls::default(),
-            coin_watchlist: CoinWatchlistCache::new(),
+            coinset,
         };
         let response = run_daemon_cycle_once(&request).await?;
         return Ok(response.exit_code);
@@ -114,7 +117,7 @@ pub async fn run_daemon_cycle_once_from_json(
 }
 
 fn parse_daemon_run_once_request(value: Value) -> SignerResult<DaemonRunOnceRequest> {
-    DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())
+    DaemonRunOnceRequest::from_json_value(value)
 }
 
 /// Run daemon loop from json.
@@ -159,10 +162,8 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_daemon_run_once_request, parse_key_ids, DaemonRunOnceRequest};
-    use crate::daemon::watchlist::cache::CoinWatchlistCache;
+    use super::{parse_daemon_run_once_request, parse_key_ids};
     use serde_json::json;
-    use std::sync::Arc;
 
     #[test]
     fn parse_key_ids_splits_and_trims_csv_values() {
@@ -175,31 +176,23 @@ mod tests {
 
     #[test]
     fn parse_daemon_run_once_request_reads_testnet_markets_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let markets_path = dir.path().join("markets.yaml");
+        std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+        let testnet_path = dir.path().join("testnet-markets.yaml");
+        std::fs::write(&testnet_path, "markets: []\n").expect("write testnet markets");
         let value = json!({
-            "program_path": "config/program.yaml",
-            "markets_path": "config/markets.yaml",
-            "testnet_markets_path": "/tmp/testnet-markets.yaml",
+            "program_path": dir.path().join("program.yaml"),
+            "markets_path": markets_path,
+            "testnet_markets_path": &testnet_path,
             "coinset_base_url": "https://api.coinset.org",
-            "state_dir": "/tmp/state",
+            "state_dir": dir.path().join("state"),
         });
         let request = parse_daemon_run_once_request(value).expect("parse request");
         assert_eq!(
             request.testnet_markets_path.as_deref(),
-            Some(std::path::Path::new("/tmp/testnet-markets.yaml"))
+            Some(testnet_path.as_path())
         );
-    }
-
-    #[test]
-    fn daemon_run_once_request_json_attaches_watchlist_cache() {
-        let value = json!({
-            "program_path": "config/program.yaml",
-            "markets_path": "config/markets.yaml",
-            "coinset_base_url": "https://api.coinset.org",
-            "state_dir": "/tmp/state",
-        });
-        let watchlist = CoinWatchlistCache::new();
-        let request =
-            DaemonRunOnceRequest::from_json_value(value, watchlist.clone()).expect("request");
-        assert!(Arc::ptr_eq(&request.coin_watchlist, &watchlist));
+        assert!(request.coinset.p2_index().p2s().is_empty());
     }
 }

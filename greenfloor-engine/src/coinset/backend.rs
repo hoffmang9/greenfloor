@@ -1,4 +1,4 @@
-use chia_protocol::{Bytes32, SpendBundle};
+use chia_protocol::{Bytes32, Coin, SpendBundle};
 use clvm_utils::TreeHash;
 
 use super::{broadcast, coin_select, presplit, vault_fetch, CoinsetClient, SelectedCats};
@@ -26,6 +26,11 @@ pub trait OfferCoinsetBackend {
         &self,
         coin_id: Bytes32,
     ) -> impl std::future::Future<Output = SignerResult<Cat>> + Send;
+
+    fn fetch_unspent_offer_input_coin(
+        &self,
+        coin_id: Bytes32,
+    ) -> impl std::future::Future<Output = SignerResult<Coin>> + Send;
 
     fn offer_input_coin_is_spent(
         &self,
@@ -71,6 +76,10 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
 
     async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
         presplit::fetch_offer_input_cat(self.0, coin_id).await
+    }
+
+    async fn fetch_unspent_offer_input_coin(&self, coin_id: Bytes32) -> SignerResult<Coin> {
+        presplit::fetch_unspent_offer_input_coin(self.0, coin_id).await
     }
 
     async fn offer_input_coin_is_spent(&self, coin_id: Bytes32) -> SignerResult<bool> {

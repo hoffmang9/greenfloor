@@ -8,13 +8,12 @@ use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::resolve_state_db_path;
 
-use super::coinset_ws::start_coinset_websocket_loop;
+use super::coinset_ws::{start_coinset_websocket_loop, CoinsetWsShared};
 use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, DaemonProgramRuntime};
 use super::reload::handle_reload_marker_if_present;
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
-use super::watchlist::cache::CoinWatchlistCache;
 
 #[cfg(test)]
 use super::loop_harness::DaemonLoopTestHarness;
@@ -66,7 +65,7 @@ fn loop_should_continue(
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
-    coin_watchlist: Arc<CoinWatchlistCache>,
+    coinset: Arc<CoinsetWsShared>,
     test_controls: DaemonCycleTestControls,
 ) -> SignerResult<i32> {
     let once_request = DaemonRunOnceRequest {
@@ -81,7 +80,7 @@ async fn run_one_loop_cycle(
         allowed_key_ids: request.allowed_key_ids.clone(),
         dispatch_state: dispatch_state.clone(),
         test_controls,
-        coin_watchlist,
+        coinset,
     };
     let response = run_daemon_cycle_once(&once_request).await?;
     *dispatch_state = response.dispatch_state;
@@ -98,12 +97,15 @@ async fn run_daemon_loop_inner(
 
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
-    let coin_watchlist = CoinWatchlistCache::new();
+    let coinset = CoinsetWsShared::from_markets_or_empty(
+        &request.markets_path,
+        request.testnet_markets_path.as_deref(),
+    );
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,
         request.coinset_base_url.clone(),
-        coin_watchlist.clone(),
+        Arc::clone(&coinset),
     );
 
     let mut dispatch_state = DaemonDispatchState::default();
@@ -118,7 +120,7 @@ async fn run_daemon_loop_inner(
         let exit_code = run_one_loop_cycle(
             &request,
             &mut dispatch_state,
-            coin_watchlist.clone(),
+            Arc::clone(&coinset),
             loop_cycle_test_controls(
                 #[cfg(test)]
                 harness_ref,
@@ -129,6 +131,9 @@ async fn run_daemon_loop_inner(
         handle_reload_marker_if_present(
             &request.state_dir,
             &resolve_state_db_path(&runtime.home_dir, request.state_db_override.as_deref()),
+            &coinset,
+            &request.markets_path,
+            request.testnet_markets_path.as_deref(),
         );
 
         cycles_completed += 1;
@@ -149,17 +154,17 @@ async fn run_daemon_loop_inner(
     }
 }
 
-/// Run daemon loop.
+/// Run the daemon loop until stopped (or harness max cycles in tests).
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
+/// Returns an error if a cycle fails fatally.
 pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
-    run_daemon_loop_inner(
+    Box::pin(run_daemon_loop_inner(
         request,
         #[cfg(test)]
         None,
-    )
+    ))
     .await
 }
 
@@ -168,5 +173,5 @@ pub(crate) async fn run_daemon_loop_with_harness(
     request: DaemonLoopRequest,
     harness: DaemonLoopTestHarness,
 ) -> SignerResult<i32> {
-    run_daemon_loop_inner(request, Some(harness)).await
+    Box::pin(run_daemon_loop_inner(request, Some(harness))).await
 }

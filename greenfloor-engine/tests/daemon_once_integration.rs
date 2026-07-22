@@ -34,6 +34,23 @@ fn setup_paths() -> (
     (dir, home, program, markets, db_path, state_dir)
 }
 
+fn seed_dexie_offer(db_path: &std::path::Path, offer_id: &str, market_id: &str) {
+    let store = SqliteStore::open(db_path).expect("open db");
+    store
+        .upsert_offer_state_with_metadata_at(
+            offer_id,
+            market_id,
+            "open",
+            Some(0),
+            &chrono::Utc::now().to_rfc3339(),
+            greenfloor_engine::storage::OfferCancelWrite {
+                publish_venue: Some("dexie"),
+                ..Default::default()
+            },
+        )
+        .expect("seed offer");
+}
+
 #[tokio::test]
 async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
     let (_dir, home, program, markets, db_path, _state_dir) = setup_paths();
@@ -62,11 +79,7 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
     write_daemon_program(&program, &home, &server.url());
     write_markets_one(&markets, true);
 
-    let store = SqliteStore::open(&db_path).expect("open db");
-    store
-        .upsert_offer_state("offer-1", "m1", "open", Some(0))
-        .expect("seed offer");
-    drop(store);
+    seed_dexie_offer(&db_path, "offer-1", "m1");
 
     let controls = json!({"skip_strategy_execution": true});
     let request = daemon_request(DaemonRequestParams {

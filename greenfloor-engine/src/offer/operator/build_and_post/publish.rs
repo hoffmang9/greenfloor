@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::adapters::{dexie_offer_view_url, DexieClient, SplashClient};
+use crate::coinset::push_offer_text;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::publish::{
     post_offer_phase_dexie, ExpectedPublishAssetFields, PostOfferPhaseDexieParams,
@@ -11,17 +12,32 @@ use crate::storage::OfferPostPersistRecord;
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PublishResult;
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CoinsetPublishEndpoint<'a> {
+    pub network: &'a str,
+    pub base_url: Option<&'a str>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn publish_offer(
     publish_venue: &str,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
+    coinset: Option<CoinsetPublishEndpoint<'_>>,
     offer_text: &str,
     drop_only: bool,
     claim_rewards: bool,
     expected: &ExpectedPublishAssetFields,
 ) -> SignerResult<PublishResult> {
-    match publish_venue {
-        "dexie" => {
+    match crate::config::Venue::parse(publish_venue)? {
+        crate::config::Venue::Coinset => {
+            let endpoint = coinset.ok_or_else(|| {
+                SignerError::Other("coinset endpoint missing for coinset publish".to_string())
+            })?;
+            let payload = push_offer_text(endpoint.network, endpoint.base_url, offer_text).await?;
+            Ok(PublishResult::from_coinset_push_offer(payload))
+        }
+        crate::config::Venue::Dexie => {
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
@@ -36,7 +52,7 @@ pub(super) async fn publish_offer(
                 .await?,
             ))
         }
-        "splash" => {
+        crate::config::Venue::Splash => {
             let splash = splash.ok_or_else(|| {
                 SignerError::Other("splash adapter missing for splash publish".to_string())
             })?;
@@ -44,9 +60,6 @@ pub(super) async fn publish_offer(
                 splash.post_offer(offer_text).await?,
             ))
         }
-        other => Err(SignerError::Other(format!(
-            "unsupported publish venue: {other}"
-        ))),
     }
 }
 
@@ -86,11 +99,33 @@ pub(super) fn offer_post_persist_record(
     }
     let offer_id = publish.offer_id.clone()?;
     let cancel_fields = create_result
-        .and_then(|result| result.presplit_cancel_fields.clone())
+        .map(|result| result.cancel_fields.clone())
         .unwrap_or_default();
     let execution_mode = create_result
         .map(|result| result.execution_mode)
         .or_else(|| OfferExecutionMode::parse_db(execution_mode));
+    let mut watched_coin_ids = create_result
+        .map(|result| result.selected_coin_ids.clone())
+        .unwrap_or_default();
+    if let Some(presplit) = create_result.and_then(|result| result.presplit_coin_id.clone()) {
+        watched_coin_ids.push(presplit);
+    }
+    if let Some(input) = cancel_fields.input_coin_id.clone() {
+        watched_coin_ids.push(input);
+    }
+    watched_coin_ids.sort();
+    watched_coin_ids.dedup();
+    let mut watched_p2s = Vec::new();
+    // On-chain maker puzzle hash only (not fixed_delegated CONDITIONS hash).
+    if let Some(p2) = cancel_fields.maker_puzzle_hash.clone() {
+        watched_p2s.push(p2);
+    }
+    // Do not seed shared market inventory receive/CAT outer p2s into per-offer
+    // watches: those hashes are common to every open offer on the market and would
+    // promote all of them on any deposit/spend. Inventory freshness uses
+    // InventoryP2Index separately; lifecycle watch hits need maker-specific keys.
+    watched_p2s.sort();
+    watched_p2s.dedup();
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.gated.market_row.market_id.clone(),
@@ -102,6 +137,8 @@ pub(super) fn offer_post_persist_record(
         created_extra: json!({}),
         cancel_fields,
         execution_mode,
+        watched_coin_ids,
+        watched_p2s,
     })
 }
 
@@ -148,22 +185,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn from_coinset_push_offer_normalizes_hex_offer_id() {
+        let expected = "ab".repeat(32);
+        let offer_id = format!("0x{expected}");
+        let publish = PublishResult::from_coinset_push_offer(json!({
+            "success": true,
+            "offer_id": offer_id,
+            "splash_enabled": true,
+            "splash_published": false,
+            "splash_error": "relay_failed",
+        }));
+        assert!(publish.success);
+        assert_eq!(publish.offer_id.as_deref(), Some(expected.as_str()));
+        assert_eq!(
+            publish.body.get("splash_error").and_then(Value::as_str),
+            Some("relay_failed")
+        );
+    }
+
+    #[test]
+    fn from_coinset_push_offer_rejects_non_64_hex_offer_id() {
+        let publish = PublishResult::from_coinset_push_offer(json!({
+            "success": true,
+            "offer_id": "not-a-trade-id",
+        }));
+        assert!(!publish.success);
+        assert!(publish.offer_id.is_none());
+
+        let short = PublishResult::from_coinset_push_offer(json!({
+            "success": true,
+            "offer_id": "abcd",
+        }));
+        assert!(!short.success);
+        assert!(short.offer_id.is_none());
+    }
+
     #[tokio::test]
     async fn publish_offer_rejects_missing_adapters_and_unknown_venue() {
         let expected = sample_expected_fields();
-        let err = publish_offer("dexie", None, None, "offer1", false, false, &expected)
+        let err = publish_offer(
+            "coinset", None, None, None, "offer1", false, false, &expected,
+        )
+        .await
+        .expect_err("missing coinset");
+        assert!(err.to_string().contains("coinset endpoint missing"));
+
+        let err = publish_offer("dexie", None, None, None, "offer1", false, false, &expected)
             .await
             .expect_err("missing dexie");
         assert!(err.to_string().contains("dexie adapter missing"));
 
-        let err = publish_offer("splash", None, None, "offer1", false, false, &expected)
-            .await
-            .expect_err("missing splash");
+        let err = publish_offer(
+            "splash", None, None, None, "offer1", false, false, &expected,
+        )
+        .await
+        .expect_err("missing splash");
         assert!(err.to_string().contains("splash adapter missing"));
 
-        let err = publish_offer("unknown", None, None, "offer1", false, false, &expected)
-            .await
-            .expect_err("unknown venue");
-        assert!(err.to_string().contains("unsupported publish venue"));
+        let err = publish_offer(
+            "unknown", None, None, None, "offer1", false, false, &expected,
+        )
+        .await
+        .expect_err("unknown venue");
+        assert!(
+            err.to_string().contains("offer venue must be"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -1,23 +1,18 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
-use serde_json::json;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-
 use crate::config::ManagerProgramConfig;
 use crate::operator_log::{
-    LogContext, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED,
+    COINSET_WS_CONNECTED, COINSET_WS_CONNECTING, COINSET_WS_DISCONNECTED, COINSET_WS_ONCE_ERROR,
 };
 use crate::storage::SqliteStore;
 
-use super::handler::{handle_ws_text, run_recovery_poll};
-use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url};
+use super::process_context::CoinsetWsShared;
+use super::session::{run_ws_session, OnTextError, WsReadEnd, WsSessionAudits, WsSessionParams};
+use super::url::ensure_rustls_crypto_provider;
 
 pub struct CoinsetWebsocketLoopHandle {
     stop: Arc<AtomicBool>,
@@ -44,11 +39,12 @@ impl Drop for CoinsetWebsocketLoopHandle {
 /// # Panics
 ///
 /// Panics if the dedicated Tokio runtime cannot be constructed.
+#[must_use]
 pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coin_watchlist: Arc<CoinWatchlistCache>,
+    coinset: Arc<CoinsetWsShared>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -62,7 +58,7 @@ pub fn start_coinset_websocket_loop(
             db_path,
             program,
             coinset_base_url,
-            coin_watchlist,
+            coinset,
             stop_flag,
         ));
     });
@@ -76,56 +72,44 @@ async fn run_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
-    coin_watchlist: Arc<CoinWatchlistCache>,
+    coinset: Arc<CoinsetWsShared>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let ws_url = resolve_coinset_ws_url(&program, &coinset_base_url);
     let reconnect =
         Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
     while !stop.load(Ordering::SeqCst) {
-        let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
-        LogContext::COINSET.audit_best_effort(
-            &store,
-            COINSET_WS_CONNECTING,
-            &json!({"ws_url": ws_url}),
-            None,
-        );
-        match connect_async(&ws_url).await {
-            Ok((mut ws, _response)) => {
-                LogContext::COINSET.audit_best_effort(
-                    &store,
-                    COINSET_WS_CONNECTED,
-                    &json!({"ws_url": ws_url}),
-                    None,
-                );
-                while !stop.load(Ordering::SeqCst) {
-                    match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
-                        Ok(Some(Ok(Message::Text(text)))) => {
-                            let _ = handle_ws_text(&store, &coin_watchlist, &text);
-                        }
-                        Ok(Some(Ok(Message::Ping(payload)))) => {
-                            let _ = ws.send(Message::Pong(payload)).await;
-                        }
-                        Ok(None | Some(Ok(Message::Close(_)) | Err(_))) => break,
-                        _ => {}
-                    }
-                }
-            }
-            Err(err) => {
-                LogContext::COINSET.audit_best_effort(
-                    &store,
-                    COINSET_WS_DISCONNECTED,
-                    &json!({"error": err.to_string()}),
-                    None,
-                );
-            }
-        }
+        let params = WsSessionParams {
+            store: &store,
+            program: &program,
+            coinset_base_url: &coinset_base_url,
+            ctx: &coinset,
+            recovery_reason: "connected",
+            audits: WsSessionAudits {
+                connecting: Some(COINSET_WS_CONNECTING),
+                connected: COINSET_WS_CONNECTED,
+                disconnected: COINSET_WS_DISCONNECTED,
+                text_error: Some(COINSET_WS_ONCE_ERROR),
+            },
+            on_text_error: OnTextError::LogContinue,
+            strict_audit: false,
+        };
+        let end = run_ws_session(
+            &params,
+            || stop.load(Ordering::SeqCst),
+            || Duration::from_secs(1),
+        )
+        .await;
         if stop.load(Ordering::SeqCst) {
             break;
+        }
+        // Filter expansion / explicit reconnect: rebuild URL immediately. Network
+        // drop and connect errors keep the configured backoff.
+        if matches!(end, Ok(WsReadEnd::Reconnect)) {
+            continue;
         }
         tokio::time::sleep(reconnect).await;
     }
@@ -133,11 +117,9 @@ async fn run_coinset_websocket_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicBool, Arc};
-
     use super::super::capture::capture_coinset_websocket_once_with_timings;
     use super::super::once_timings::OnceCaptureTimings;
-    use super::super::url::resolve_coinset_ws_url;
+    use super::super::url::resolve_coinset_ws_url_with_p2s;
     use super::*;
     use mockito::Server;
     use tempfile::tempdir;
@@ -154,38 +136,39 @@ mod tests {
     }
 
     #[test]
-    fn resolve_coinset_ws_url_prefers_program_override() {
-        let program = sample_program();
-        assert_eq!(
-            resolve_coinset_ws_url(&program, "https://api.coinset.org"),
-            "ws://127.0.0.1:9/ws"
-        );
+    fn resolve_coinset_ws_url_appends_required_filters() {
+        let program = ManagerProgramConfig::default();
+        let url = resolve_coinset_ws_url_with_p2s(&program, "https://api.coinset.org", &[]);
+        assert!(url.contains("events=transaction,offer"));
+        assert!(url.contains("tx_status=pending,confirmed"));
     }
 
     #[tokio::test]
     async fn capture_once_runs_recovery_poll_and_records_started() {
         let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
-
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let mut server = Server::new_async().await;
-        let tx_id = "a".repeat(64);
         let _mock = server
             .mock("POST", "/get_all_mempool_tx_ids")
             .with_status(200)
-            .with_body(format!(r#"{{"success":true,"tx_ids":["{tx_id}"]}}"#))
-            .create();
-
-        let program = sample_program();
-        capture_coinset_websocket_once_with_timings(
+            .with_body(r#"{"success":true,"tx_ids":[]}"#)
+            .create_async()
+            .await;
+        let program = ManagerProgramConfig {
+            tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
+            ..Default::default()
+        };
+        let _ = capture_coinset_websocket_once_with_timings(
             &store,
             &program,
             &server.url(),
-            &CoinWatchlistCache::new(),
-            OnceCaptureTimings::UNIT_TEST,
+            &CoinsetWsShared::empty(),
+            OnceCaptureTimings {
+                capture_window: Duration::from_millis(50),
+                reconnect: Duration::from_millis(10),
+            },
         )
-        .await
-        .expect("capture");
+        .await;
 
         let events = store
             .list_recent_audit_events(
@@ -211,7 +194,7 @@ mod tests {
             db_path,
             program,
             "https://example.test".to_string(),
-            CoinWatchlistCache::new(),
+            CoinsetWsShared::empty(),
         );
         handle.stop();
     }
@@ -225,7 +208,7 @@ mod tests {
             db_path,
             sample_program(),
             "https://example.test".to_string(),
-            CoinWatchlistCache::new(),
+            CoinsetWsShared::empty(),
             stop,
         )
         .await;
@@ -269,7 +252,7 @@ mod tests {
                 db_path,
                 program,
                 coinset_base_url,
-                CoinWatchlistCache::new(),
+                CoinsetWsShared::empty(),
                 stop_flag,
             ));
         });

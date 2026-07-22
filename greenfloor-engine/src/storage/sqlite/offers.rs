@@ -23,11 +23,15 @@ fn read_offer_state_list_row(row: &rusqlite::Row<'_>) -> SignerResult<OfferState
             .map_err(|err| SignerError::Other(format!("failed to read updated_at: {err}")))?,
         cancel_submitted_tx_id: row.get(5).ok(),
         cancel_submitted_at: row.get(6).ok(),
+        publish_venue: row
+            .get::<_, Option<String>>(7)
+            .ok()
+            .flatten()
+            .filter(|value| !value.trim().is_empty()),
     })
 }
 
-const OFFER_STATE_LIST_COLUMNS: &str =
-    "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id, cancel_submitted_at";
+const OFFER_STATE_LIST_COLUMNS: &str = "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id, cancel_submitted_at, publish_venue";
 
 impl SqliteStore {
     /// Upsert offer state.
@@ -188,6 +192,97 @@ impl SqliteStore {
             .into_iter()
             .filter_map(|offer_id| by_id.get(&offer_id).cloned())
             .collect())
+    }
+
+    /// Distinct non-empty `cancel_submitted_tx_id` values for in-flight cancels.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_cancel_submitted_tx_ids(&self) -> SignerResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+                SELECT DISTINCT cancel_submitted_tx_id
+                FROM offer_state
+                WHERE state = 'cancel_submitted'
+                  AND cancel_submitted_tx_id IS NOT NULL
+                  AND length(trim(cancel_submitted_tx_id)) > 0
+                ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare cancel_submitted tx list: {err}"))
+            })?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query cancel_submitted tx list: {err}"))
+            })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let raw = row.map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to read cancel_submitted tx list row: {err}"
+                ))
+            })?;
+            if let Some(clean) = crate::hex::canonical_tx_id(&raw) {
+                out.push(clean);
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
+    /// List `cancel_submitted` offers whose cancel tx id is in `tx_ids`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub fn list_offer_states_for_cancel_submitted_tx_ids(
+        &self,
+        tx_ids: &[String],
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        let clean_ids: Vec<String> = tx_ids
+            .iter()
+            .filter_map(|value| crate::hex::canonical_tx_id(value))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        if clean_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders: Vec<String> =
+            (1..=clean_ids.len()).map(|idx| format!("?{idx}")).collect();
+        let query = format!(
+            r"
+            SELECT {OFFER_STATE_LIST_COLUMNS}
+            FROM offer_state
+            WHERE state = 'cancel_submitted'
+              AND cancel_submitted_tx_id IN ({})
+            ",
+            placeholders.join(", ")
+        );
+        let mut stmt = self.conn.prepare(&query).map_err(|err| {
+            SignerError::Other(format!(
+                "failed to prepare cancel_submitted by tx ids query: {err}"
+            ))
+        })?;
+        let mut rows = stmt
+            .query(rusqlite::params_from_iter(clean_ids.iter()))
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query cancel_submitted by tx ids: {err}"))
+            })?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!(
+                "failed to read cancel_submitted by tx ids row: {err}"
+            ))
+        })? {
+            out.push(read_offer_state_list_row(row)?);
+        }
+        Ok(out)
     }
 
     /// List offer states.

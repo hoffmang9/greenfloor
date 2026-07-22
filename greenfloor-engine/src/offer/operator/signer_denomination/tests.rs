@@ -17,12 +17,14 @@ fn spendable_bootstrap_coins_filters_unconfirmed_wallet_rows() {
             name: "confirmed".to_string(),
             amount: 1000,
             state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
         },
         WalletUnspentCoin {
             id: "pending".to_string(),
             name: "pending".to_string(),
             amount: 2000,
             state: "PENDING".to_string(),
+            puzzle_hash: String::new(),
         },
     ];
 

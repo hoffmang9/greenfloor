@@ -93,6 +93,29 @@ impl PublishResult {
             body: result.into_value(),
         }
     }
+
+    /// Map Coinset `push_offer` JSON into a publish result.
+    ///
+    /// Canonical `offer_id` must be a 64-hex trade id (Dexie `trade_id`), matching
+    /// WS `parse_offer` / `offer_coin_watches`. Non-64-hex ids are treated as failure
+    /// so we never persist an `open` row the daemon cannot reconcile.
+    pub fn from_coinset_push_offer(body: Value) -> Self {
+        use crate::hex::canonical_tx_id;
+
+        let success = body
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let offer_id = body
+            .get("offer_id")
+            .and_then(Value::as_str)
+            .and_then(canonical_tx_id);
+        Self {
+            success: success && offer_id.is_some(),
+            offer_id,
+            body,
+        }
+    }
 }
 
 pub(super) fn timing_payload(

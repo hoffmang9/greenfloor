@@ -1,4 +1,4 @@
-use chia_protocol::Bytes32;
+use chia_protocol::{Bytes32, Coin};
 use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 
 use super::poll::{run_poll_loop, PollConfig};
@@ -35,6 +35,28 @@ pub async fn offer_input_coin_is_spent(
         None => true,
         Some(record) => coin_record_is_spent(record.spent_block_index),
     })
+}
+
+/// Fetch an unspent offer-input coin by id (XCH or outer puzzle).
+///
+/// # Errors
+///
+/// Returns [`SignerError::PresplitCoinNotFound`] when missing or spent.
+pub async fn fetch_unspent_offer_input_coin(
+    client: &CoinsetClient,
+    coin_id: Bytes32,
+) -> SignerResult<Coin> {
+    let response = client
+        .get_coin_record_by_name(coin_id)
+        .await
+        .map_err(SignerError::from)?;
+    let Some(record) = response.coin_record else {
+        return Err(SignerError::PresplitCoinNotFound);
+    };
+    if coin_record_is_spent(record.spent_block_index) {
+        return Err(SignerError::PresplitCoinNotFound);
+    }
+    Ok(record.coin)
 }
 
 /// Fetch an unspent offer-input CAT by coin id.

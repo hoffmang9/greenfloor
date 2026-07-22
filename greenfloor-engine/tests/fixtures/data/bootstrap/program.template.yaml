@@ -18,5 +18,8 @@ notifications:
       recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
 chain_signals:
   tx_block_trigger:
-    webhook_enabled: true
-    webhook_listen_addr: "127.0.0.1:8787"
+    mode: "websocket"
+    source: "coinset"
+    websocket_url: ""
+    websocket_reconnect_interval_seconds: 30
+    fallback_poll_interval_seconds: 60

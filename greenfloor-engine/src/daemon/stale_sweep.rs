@@ -61,6 +61,9 @@ pub async fn detect_stale_open_offers_for_requeue(
         }
         let market_id = candidate.market_id.trim().to_string();
         let offer_id = candidate.offer_id.trim().to_string();
+        if !store.is_dexie_authoritative_offer(&offer_id)? {
+            continue;
+        }
         let hit = match dexie.get_offer(&offer_id).await {
             Ok(response) => {
                 if response.is_explicit_failure() {
@@ -114,7 +117,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-expired", "m1", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-expired",
+                "m1",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = Server::new_async().await;
@@ -140,7 +153,17 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         store
-            .upsert_offer_state("offer-missing", "m2", "open", Some(0))
+            .upsert_offer_state_with_metadata_at(
+                "offer-missing",
+                "m2",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    publish_venue: Some("dexie"),
+                    ..Default::default()
+                },
+            )
             .expect("seed");
 
         let mut server = Server::new_async().await;

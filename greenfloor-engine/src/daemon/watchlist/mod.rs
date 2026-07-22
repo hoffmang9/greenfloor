@@ -1,19 +1,14 @@
-pub mod cache;
-
 mod counting;
 mod metadata;
 pub mod time;
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::SignerResult;
-use crate::operator_log::{LogContext, COIN_WATCHLIST_UPDATED};
 use crate::storage::SqliteStore;
 
-use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use counting::{bucket_active_offers_by_side, bucket_active_offers_by_size};
 use metadata::{recent_offer_metadata_by_offer_id, OfferExecutionMetadata};
 use time::is_recent_mempool_observed_offer_state;
@@ -60,20 +55,6 @@ pub fn recent_executed_offer_ids(
 ) -> SignerResult<HashSet<String>> {
     let metadata = recent_offer_metadata_by_offer_id(store, market_id)?;
     Ok(metadata.into_keys().collect())
-}
-
-/// Watchlist offer ids for coin tracking.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn watchlist_offer_ids_for_coin_tracking(
-    store: &SqliteStore,
-    market_id: &str,
-) -> SignerResult<HashSet<String>> {
-    let mut offer_ids = watchlist_offer_ids(store, market_id)?;
-    offer_ids.extend(recent_executed_offer_ids(store, market_id)?);
-    Ok(offer_ids)
 }
 
 fn active_offer_state_summary(
@@ -243,71 +224,6 @@ fn active_offer_counts_by_size_and_side_at(
         clock,
     );
     Ok((buckets.buy_counts, buckets.sell_counts, buckets.unmapped))
-}
-
-pub use cache::CoinWatchlistCache;
-
-pub fn watched_coin_ids_for_market(cache: &CoinWatchlistCache, market_id: &str) -> HashSet<String> {
-    cache.watched_coin_ids_for_market(market_id)
-}
-
-pub fn set_watched_coin_ids_for_market(
-    cache: &CoinWatchlistCache,
-    market_id: &str,
-    coin_ids: HashSet<String>,
-) {
-    cache.set_watched_coin_ids_for_market(market_id, coin_ids);
-}
-
-pub fn match_watched_coin_ids(
-    cache: &CoinWatchlistCache,
-    observed_coin_ids: &[String],
-) -> HashMap<String, Vec<String>> {
-    cache.match_watched_coin_ids(observed_coin_ids)
-}
-
-/// Update market coin watchlist from offers.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn update_market_coin_watchlist_from_offers(
-    store: &SqliteStore,
-    cache: &CoinWatchlistCache,
-    market_id: &str,
-    offers: &[Value],
-) -> SignerResult<()> {
-    let watch_offer_ids = watchlist_offer_ids_for_coin_tracking(store, market_id)?;
-    let mut watched_coin_ids: HashSet<String> = HashSet::default();
-    let mut matched_offer_count = 0_u64;
-    for offer in offers {
-        let offer_id = offer.get("id").and_then(Value::as_str).unwrap_or("").trim();
-        if offer_id.is_empty() || !watch_offer_ids.contains(offer_id) {
-            continue;
-        }
-        matched_offer_count += 1;
-        for coin_id in extract_coin_ids_from_offer_payload(offer) {
-            watched_coin_ids.insert(coin_id);
-        }
-    }
-    set_watched_coin_ids_for_market(cache, market_id, watched_coin_ids.clone());
-    let mut sample: Vec<String> = watched_coin_ids.iter().cloned().collect();
-    sample.sort();
-    sample.truncate(10);
-    LogContext::MARKET_CYCLE.dual_audit(
-        store,
-        tracing::Level::DEBUG,
-        "coin watchlist updated",
-        COIN_WATCHLIST_UPDATED,
-        &serde_json::json!({
-            "market_id": market_id,
-            "watch_offer_count": watch_offer_ids.len(),
-            "matched_offer_count": matched_offer_count,
-            "watch_coin_count": watched_coin_ids.len(),
-            "watch_coin_sample": sample,
-        }),
-        Some(market_id),
-    )
 }
 
 #[cfg(test)]

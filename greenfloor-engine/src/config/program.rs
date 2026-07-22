@@ -142,7 +142,7 @@ impl Default for ManagerProgramConfig {
             app_log_level_was_missing: true,
             dexie_api_base: DEFAULT_DEXIE_API_BASE.to_string(),
             splash_api_base: DEFAULT_SPLASH_API_BASE.to_string(),
-            offer_publish_venue: "dexie".to_string(),
+            offer_publish_venue: "coinset".to_string(),
             coin_ops_minimum_fee_mojos: 10_000_000,
             coin_ops_max_operations_per_run: 20,
             coin_ops_max_daily_fee_budget_mojos: 0,
@@ -319,14 +319,14 @@ pub fn resolve_offer_publish_settings(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(value) => value.to_ascii_lowercase(),
-        None => program.offer_publish_venue.clone(),
+        Some(value) => crate::config::Venue::parse(value)?.as_str().to_string(),
+        None => {
+            // Program config is validated at load; keep as string for callers.
+            crate::config::Venue::parse(&program.offer_publish_venue)?
+                .as_str()
+                .to_string()
+        }
     };
-    if venue != "dexie" && venue != "splash" {
-        return Err(SignerError::Other(
-            "offer publish venue must be dexie or splash".to_string(),
-        ));
-    }
     let dexie_base = resolve_dexie_base_url(network, dexie_base_url, &program.dexie_api_base)?;
     let splash_base = resolve_splash_base_url(splash_base_url, &program.splash_api_base);
     Ok((venue, dexie_base, splash_base))

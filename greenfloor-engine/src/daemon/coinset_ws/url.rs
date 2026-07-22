@@ -1,4 +1,5 @@
 use crate::config::ManagerProgramConfig;
+use crate::hex::normalize_hex_id;
 
 pub(crate) fn ensure_rustls_crypto_provider() {
     use std::sync::Once;
@@ -8,11 +9,22 @@ pub(crate) fn ensure_rustls_crypto_provider() {
     });
 }
 
+/// Default Coinset WS event filter: transaction lifecycle + offer lifecycle.
+pub const DEFAULT_WS_EVENTS: &str = "transaction,offer";
+pub const DEFAULT_WS_TX_STATUS: &str = "pending,confirmed";
+
 #[must_use]
-pub fn resolve_coinset_ws_url(program: &ManagerProgramConfig, coinset_base_url: &str) -> String {
+pub fn resolve_coinset_ws_base_url(
+    program: &ManagerProgramConfig,
+    coinset_base_url: &str,
+) -> String {
     let configured = program.tx_block_websocket_url.trim();
     if !configured.is_empty() {
-        return configured.to_string();
+        // Strip any operator-supplied query; required filters are always appended below.
+        return configured
+            .split_once('?')
+            .map_or(configured, |(base, _)| base)
+            .to_string();
     }
     let base_url = coinset_base_url.trim();
     if base_url.is_empty() {
@@ -34,4 +46,106 @@ pub fn resolve_coinset_ws_url(program: &ManagerProgramConfig, coinset_base_url: 
         return format!("ws://{host}/ws");
     }
     trimmed.to_string()
+}
+
+/// Append fixed query filters to a Coinset WS base URL.
+///
+/// Always sets `events` / `tx_status`. When `p2s` is non-empty, each puzzle hash is
+/// added as a repeatable `p2` query param.
+#[must_use]
+pub fn append_coinset_ws_filters(base_ws_url: &str, p2s: &[String]) -> String {
+    let trimmed = base_ws_url.trim();
+    let base = trimmed.split_once('?').map_or(trimmed, |(bare, _)| bare);
+    if base.is_empty() {
+        return base.to_string();
+    }
+    let mut url = format!("{base}?events={DEFAULT_WS_EVENTS}&tx_status={DEFAULT_WS_TX_STATUS}");
+    for p2 in p2s {
+        let normalized = normalize_hex_id(p2);
+        if normalized.len() == 64 {
+            url.push_str("&p2=");
+            url.push_str(&normalized);
+        }
+    }
+    url
+}
+
+/// Union inventory receive/CAT-outer p2s with durable maker p2 watches for WS filters.
+#[must_use]
+pub fn merge_ws_p2_filters(inventory_p2s: &[String], maker_p2s: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = inventory_p2s
+        .iter()
+        .chain(maker_p2s.iter())
+        .map(|p2| normalize_hex_id(p2))
+        .filter(|p2| p2.len() == 64)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// True when `desired` contains any 64-hex p2 absent from the sorted `connected` filter set.
+///
+/// Used to drop a live WS session after new durable maker watches land so the next
+/// connect rebuilds URL `p2` filters (Coinset applies filters at subscribe time only).
+#[must_use]
+pub fn ws_p2_filters_expanded(connected: &[String], desired: &[String]) -> bool {
+    desired
+        .iter()
+        .any(|p2| connected.binary_search(p2).is_err())
+}
+
+/// Resolve the Coinset WS URL with required event filters and stable inventory p2s.
+#[must_use]
+pub fn resolve_coinset_ws_url_with_p2s(
+    program: &ManagerProgramConfig,
+    coinset_base_url: &str,
+    p2s: &[String],
+) -> String {
+    let base = resolve_coinset_ws_base_url(program, coinset_base_url);
+    append_coinset_ws_filters(&base, p2s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn append_filters_adds_events_and_p2s() {
+        let p2 = "ab".repeat(32);
+        let url = append_coinset_ws_filters("wss://api.coinset.org/ws", std::slice::from_ref(&p2));
+        assert!(url.starts_with("wss://api.coinset.org/ws?events=transaction,offer"));
+        assert!(url.contains("tx_status=pending,confirmed"));
+        assert!(url.contains(&format!("p2={p2}")));
+    }
+
+    #[test]
+    fn configured_url_query_is_replaced_with_required_filters() {
+        let program = ManagerProgramConfig {
+            tx_block_websocket_url: "wss://example.test/ws?events=peak".to_string(),
+            ..Default::default()
+        };
+        let p2 = "ab".repeat(32);
+        let url = resolve_coinset_ws_url_with_p2s(&program, "", std::slice::from_ref(&p2));
+        assert!(url.starts_with("wss://example.test/ws?events=transaction,offer"));
+        assert!(!url.contains("events=peak"));
+        assert!(url.contains(&format!("p2={p2}")));
+    }
+
+    #[test]
+    fn ws_p2_filters_expanded_detects_new_maker_p2() {
+        let connected = vec!["aa".repeat(32)];
+        let desired = merge_ws_p2_filters(&connected, &["bb".repeat(32)]);
+        assert!(ws_p2_filters_expanded(&connected, &desired));
+        assert!(!ws_p2_filters_expanded(&desired, &desired));
+        assert!(!ws_p2_filters_expanded(&desired, &connected));
+    }
+
+    #[test]
+    fn merge_keeps_sorted_deduped_filters() {
+        let a = "bb".repeat(32);
+        let b = "aa".repeat(32);
+        let merged = merge_ws_p2_filters(&[a.clone(), b.clone()], std::slice::from_ref(&a));
+        assert_eq!(merged, vec![b, a]);
+    }
 }

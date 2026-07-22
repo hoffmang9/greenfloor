@@ -6,12 +6,21 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::adapters::DexieClient;
+use crate::cycle::{
+    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
+    unchanged_offer_transition,
+};
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::cancel_context::preload_cancel_submitted_contexts;
-use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
-use super::transition::{resolve_watched_offer_transition_for_venue, WatchedOfferTransitionEnv};
+use super::cancel_context::{
+    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
+};
+use super::persist::ReconcilePersistOptions;
+use super::signal_apply::{apply_watched_offer_signals, persist_resolved_watched_transition};
+use super::transition::{
+    coinset_signals_from_dexie_offer_payload, missing_offer_error_from_payload,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcileBatchItem {
@@ -73,43 +82,46 @@ pub async fn reconcile_offers_batch(
     limit: usize,
 ) -> SignerResult<ReconcileBatchResult> {
     let store = SqliteStore::open(db_path)?;
-    let venue = target_venue.trim().to_ascii_lowercase();
-    let dexie = if venue == "dexie" {
+    let venue = crate::config::Venue::parse(target_venue)?;
+    let dexie = if venue.is_dexie() {
         Some(DexieClient::new(dexie_base_url))
     } else {
         None
     };
 
     let rows = store.list_offer_states(market_id, limit)?;
+    // HTTP reconcile is Dexie-only; Coinset/splash rows are driven by WS + watches.
+    let rows: Vec<_> = if venue.is_dexie() {
+        rows.into_iter()
+            .filter(|row| {
+                SqliteStore::is_dexie_authoritative_for_offer(row.publish_venue.as_deref())
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let Some(dexie) = dexie else {
+        return Ok(ReconcileBatchResult {
+            items: Vec::new(),
+            reconciled_count: 0,
+            changed_count: 0,
+        });
+    };
     let cancel_submitted_by_offer = preload_cancel_submitted_contexts(&store, &rows)?;
-    let env = WatchedOfferTransitionEnv::new(Utc::now(), Some(&cancel_submitted_by_offer));
+    let now = Utc::now();
     let mut items = Vec::with_capacity(rows.len());
     let mut changed_count = 0u64;
 
     for row in rows {
-        let (transition, last_seen_status, _dexie_error) =
-            resolve_watched_offer_transition_for_venue(
-                &store,
-                dexie.as_ref(),
-                &venue,
-                &row.offer_id,
-                &row.state,
-                env,
-            )
-            .await?;
-
-        persist_offer_lifecycle_transition(
+        let (transition, last_seen_status) = reconcile_one_dexie_offer(
             &store,
-            &row.market_id,
-            &row.offer_id,
-            &transition,
-            last_seen_status,
-            &ReconcilePersistOptions {
-                action: "offers_reconcile",
-                venue: Some(&venue),
-                dexie_error: None,
-            },
-        )?;
+            &dexie,
+            venue,
+            &row,
+            Some(&cancel_submitted_by_offer),
+            now,
+        )
+        .await?;
 
         if transition.changed {
             changed_count += 1;
@@ -127,6 +139,105 @@ pub async fn reconcile_offers_batch(
         changed_count,
         items,
     })
+}
+
+async fn reconcile_one_dexie_offer(
+    store: &SqliteStore,
+    dexie: &DexieClient,
+    venue: crate::config::Venue,
+    row: &crate::storage::OfferStateListRow,
+    cancel_by_offer: Option<
+        &std::collections::HashMap<String, crate::cycle::reconcile::CancelSubmittedContext>,
+    >,
+    now: chrono::DateTime<Utc>,
+) -> SignerResult<(crate::cycle::CycleOfferTransition, Option<i64>)> {
+    match dexie.get_offer(&row.offer_id).await {
+        Ok(response) => {
+            let payload = response.body();
+            if let Some(error_text) = missing_offer_error_from_payload(payload) {
+                let resolved = resolve_missing_watched_offer_transition(&row.state)
+                    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+                let options = ReconcilePersistOptions {
+                    action: "offers_reconcile",
+                    venue: Some(venue),
+                    dexie_error: Some(error_text.as_str()),
+                };
+                persist_resolved_watched_transition(
+                    store,
+                    &row.market_id,
+                    &row.offer_id,
+                    &resolved,
+                    None,
+                    &options,
+                )?;
+                return Ok((resolved, None));
+            }
+            let offer_body = payload.get("offer").unwrap_or(payload);
+            let (status, signals) = coinset_signals_from_dexie_offer_payload(store, offer_body)?;
+            let cancel_submitted = cancel_submitted_context_for_offer(
+                store,
+                &row.offer_id,
+                &row.state,
+                cancel_by_offer,
+            )?;
+            let options = ReconcilePersistOptions {
+                action: "offers_reconcile",
+                venue: Some(venue),
+                dexie_error: None,
+            };
+            let transition = apply_watched_offer_signals(
+                store,
+                &row.market_id,
+                &row.offer_id,
+                &row.state,
+                status,
+                signals,
+                cancel_submitted.as_ref(),
+                &options,
+                status,
+                now,
+            )?;
+            Ok((transition, status))
+        }
+        Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
+            let error_text = err.to_string();
+            let resolved = resolve_missing_watched_offer_transition(&row.state)
+                .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
+            let options = ReconcilePersistOptions {
+                action: "offers_reconcile",
+                venue: Some(venue),
+                dexie_error: Some(error_text.as_str()),
+            };
+            persist_resolved_watched_transition(
+                store,
+                &row.market_id,
+                &row.offer_id,
+                &resolved,
+                None,
+                &options,
+            )?;
+            Ok((resolved, None))
+        }
+        Err(err) => {
+            let resolved =
+                unchanged_offer_transition(&row.state, format!("dexie_lookup_error:{err}"))
+                    .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
+            let options = ReconcilePersistOptions {
+                action: "offers_reconcile",
+                venue: Some(venue),
+                dexie_error: None,
+            };
+            persist_resolved_watched_transition(
+                store,
+                &row.market_id,
+                &row.offer_id,
+                &resolved,
+                None,
+                &options,
+            )?;
+            Ok((resolved, None))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,12 +287,21 @@ mod tests {
         let db_path = dir.path().join("state.db");
         let store = SqliteStore::open(&db_path).expect("open");
         let confirmed_tx_id = "a".repeat(64);
-        store
-            .upsert_offer_state("offer-ok", "m1", "open", Some(0))
-            .expect("seed");
-        store
-            .upsert_offer_state("offer-missing", "m1", "open", Some(0))
-            .expect("seed");
+        for offer_id in ["offer-ok", "offer-missing"] {
+            store
+                .upsert_offer_state_with_metadata_at(
+                    offer_id,
+                    "m1",
+                    "open",
+                    Some(0),
+                    &Utc::now().to_rfc3339(),
+                    crate::storage::OfferCancelWrite {
+                        publish_venue: Some("dexie"),
+                        ..Default::default()
+                    },
+                )
+                .expect("seed");
+        }
         assert_eq!(
             store
                 .observe_mempool_tx_ids(std::slice::from_ref(&confirmed_tx_id))

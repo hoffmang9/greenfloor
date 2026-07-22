@@ -22,18 +22,22 @@ mod spent_verify;
 pub(crate) mod test_support;
 mod vault_fetch;
 mod wallet_io;
+mod ws_event;
 mod xch;
 
 pub use api::{
-    conservative_fee_from_payload, direct_coinset_client, get_all_mempool_tx_ids,
-    get_conservative_fee_estimate, get_conservative_fee_estimate_for_signer, get_fee_estimate,
-    post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_tx_hex,
+    conservative_fee_from_payload, direct_coinset_client, filter_confirmed_tx_ids,
+    get_all_mempool_tx_ids, get_conservative_fee_estimate,
+    get_conservative_fee_estimate_for_signer, get_fee_estimate, is_transaction_confirmed,
+    post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_offer_text, push_tx_hex,
 };
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use batch::chunk_values;
-pub use broadcast::{broadcast_spend_bundle, BroadcastSpendBundleResult};
+pub use broadcast::{
+    broadcast_spend_bundle, spend_bundle_operation_id, BroadcastSpendBundleResult,
+};
 pub use cats::{
     cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats,
     list_unspent_cats_by_ids, require_cat_from_parent_spend,
@@ -51,7 +55,7 @@ pub use parse::{
     coin_from_record, coin_id_from_record, coin_records_from_payload,
     coin_spend_from_solution_payload, record_from_payload,
 };
-pub use presplit::{fetch_offer_input_cat, wait_for_unspent_cat};
+pub use presplit::{fetch_offer_input_cat, fetch_unspent_offer_input_coin, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{
     with_coinset_client_retries, with_coinset_client_retries_with_policy, with_script_retries,
@@ -64,9 +68,11 @@ pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{
     cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text,
-    list_wallet_unspent_coins_for_signer, puzzle_hash_hex_for_receive_address,
-    spend_bundle_hash_from_hex, spend_bundle_hex, WalletUnspentCoin,
+    extract_maker_watch_keys_from_offer_text, list_wallet_unspent_coins_for_signer,
+    market_inventory_p2s, puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex,
+    spend_bundle_hex, WalletUnspentCoin,
 };
+pub use ws_event::{parse_ws_event, WsEvent, WsOfferEvent, WsTransactionEvent};
 pub use xch::list_unspent_xch;
 
 pub use chia_sdk_coinset::CoinsetClient;

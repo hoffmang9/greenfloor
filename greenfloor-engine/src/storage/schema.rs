@@ -34,11 +34,13 @@ CREATE TABLE IF NOT EXISTS offer_state (
   state TEXT NOT NULL,
   last_seen_status INTEGER NULL,
   updated_at TEXT NOT NULL,
-  presplit_input_coin_id TEXT NULL,
+  cancel_input_coin_id TEXT NULL,
   fixed_delegated_puzzle_hash TEXT NULL,
+  maker_puzzle_hash TEXT NULL,
   execution_mode TEXT NULL,
   cancel_submitted_tx_id TEXT NULL,
-  cancel_submitted_at TEXT NULL
+  cancel_submitted_at TEXT NULL,
+  publish_venue TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS coin_op_ledger (
@@ -65,4 +67,17 @@ CREATE TABLE IF NOT EXISTS offer_reservation_lease (
   expires_at TEXT NOT NULL,
   released_at TEXT NULL
 );
+
+CREATE TABLE IF NOT EXISTS offer_coin_watches (
+  coin_id TEXT NOT NULL,
+  offer_id TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'coin',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (coin_id, offer_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_market
+  ON offer_coin_watches(market_id);
+CREATE INDEX IF NOT EXISTS idx_offer_coin_watches_offer
+  ON offer_coin_watches(offer_id);
 ";

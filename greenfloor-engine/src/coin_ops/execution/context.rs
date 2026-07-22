@@ -14,7 +14,9 @@ use crate::offer::OfferAssetResolver;
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 use super::cap::resolve_combine_input_cap;
-use super::helpers::wallet_coins_to_spendable;
+use super::helpers::{
+    exclude_watched_spendable, wallet_coins_to_spendable, watched_maker_coin_ids,
+};
 #[cfg(test)]
 use super::test_overrides::CoinOpTestOverrides;
 
@@ -24,6 +26,8 @@ pub struct CoinOpExecContext {
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
+    /// Durable maker puzzle hashes (`kind='p2'` watches) for local spend exclusion.
+    pub watched_p2s: HashSet<String>,
     #[cfg(test)]
     pub test_overrides: CoinOpTestOverrides,
 }
@@ -38,6 +42,7 @@ impl CoinOpExecContext {
         gated: GatedOperatorMarket,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
+        watched_p2s: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
         let resolver = gated.asset_resolver();
@@ -47,6 +52,7 @@ impl CoinOpExecContext {
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
+            watched_p2s,
             #[cfg(test)]
             test_overrides,
         ))
@@ -79,7 +85,10 @@ impl CoinOpExecContext {
             .await
     }
 
-    /// List spendable coins.
+    /// List spendable coins, excluding durable maker coin-id and p2 watches.
+    ///
+    /// Manager CLI and daemon both select from this set so open-offer maker coins
+    /// cannot be split/combined accidentally.
     ///
     /// # Errors
     ///
@@ -87,7 +96,11 @@ impl CoinOpExecContext {
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
         #[cfg(test)]
         if let Some(coins) = self.test_overrides.wallet_coins_override() {
-            return Ok(coins.to_vec());
+            return Ok(exclude_watched_spendable(
+                coins.iter().cloned(),
+                &self.watched_coin_ids,
+                &self.watched_p2s,
+            ));
         }
         let coins = list_wallet_unspent_coins_for_signer(
             &self.gated.operator_network,
@@ -96,10 +109,32 @@ impl CoinOpExecContext {
             &self.resolved_base_asset_id,
         )
         .await?;
-        Ok(wallet_coins_to_spendable(
-            &coins,
-            self.gated.market_row.base_asset.trim(),
+        Ok(exclude_watched_spendable(
+            wallet_coins_to_spendable(&coins, self.gated.market_row.base_asset.trim()),
+            &self.watched_coin_ids,
+            &self.watched_p2s,
         ))
+    }
+
+    /// Refuse explicit coin-op inputs that are durable maker coin watches.
+    ///
+    /// Auto-select already excludes via [`Self::list_spendable_coins`]; this gates
+    /// CLI `--coin-id` / explicit combine inputs so open-offer makers cannot be
+    /// spent by accident. P2-only watches still protect auto-select; post/heal
+    /// register maker coin ids alongside p2s.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any `coin_ids` entry is a watched maker coin.
+    pub fn reject_watched_inputs(&self, coin_ids: &[String]) -> SignerResult<()> {
+        let blocked = watched_maker_coin_ids(coin_ids, &self.watched_coin_ids);
+        if blocked.is_empty() {
+            return Ok(());
+        }
+        Err(SignerError::Other(format!(
+            "coin_op_watched_maker_inputs_forbidden:{}",
+            blocked.join(",")
+        )))
     }
 
     /// Execute mixed split.
@@ -151,6 +186,7 @@ impl CoinOpExecContext {
         gated: GatedOperatorMarket,
         resolved_base_asset_id: String,
         watched_coin_ids: HashSet<String>,
+        watched_p2s: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> Self {
         Self {
@@ -161,6 +197,7 @@ impl CoinOpExecContext {
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
+            watched_p2s,
             #[cfg(test)]
             test_overrides,
         }

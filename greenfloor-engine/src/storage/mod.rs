@@ -18,15 +18,18 @@ pub use audit_retention::{
     DEFAULT_AUDIT_RETENTION_DAYS,
 };
 
-pub use crate::offer::types::PresplitCancelFields;
-pub use persist::{persist_offer_post_records, upsert_offer_post_record};
+pub use crate::offer::types::OfferCancelFields;
+pub use persist::{
+    persist_offer_post_records, upsert_offer_post_record, write_offer_post_record_in_txn,
+};
 #[doc(hidden)]
 pub mod test_support;
 pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
-    CoinOpLedgerEntry, CycleWriteStore, OfferPostPersistRecord, OfferReservationAcquireOutcome,
-    OfferReservationLeaseRequest, OfferReservationLeaseRow, OfferReservationRejectReason,
-    OfferStateDetailRow, OfferStateListRow, SqliteStore, StoredAlertState, TxSignalStateRow,
+    CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
+    OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
+    OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow, SqliteStore,
+    StoredAlertState, TxSignalIngress, TxSignalStateRow, WatchHitRow, WatchMatchKind,
 };
 
 #[cfg(test)]

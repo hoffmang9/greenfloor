@@ -15,6 +15,10 @@ use super::coinset_spendable::list_spendable_base_unit_amounts_for_signer;
 use super::market_context::DaemonCycleResources;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
+///
+/// # Errors
+///
+/// Returns an error when the configured hex id does not match the resolved asset id.
 pub fn assert_inventory_asset_resolution_matches_config(
     market: &MarketConfig,
     resolved_base_asset_id: &str,
@@ -40,6 +44,12 @@ pub fn assert_inventory_asset_resolution_matches_config(
     Ok(())
 }
 
+/// Scan spendable inventory into ladder bucket counts, skipping HTTP when WS freshness allows.
+///
+/// # Errors
+///
+/// Returns an error when Coinset inventory scanning or audit persistence fails.
+#[allow(clippy::too_many_lines)]
 pub async fn run_inventory_phase(
     store: &SqliteStore,
     resources: &DaemonCycleResources,
@@ -55,6 +65,31 @@ pub async fn run_inventory_phase(
         .collect();
     if ladder_sizes.is_empty() {
         return Ok(BTreeMap::default());
+    }
+
+    if !resources.coinset.inventory_freshness.needs_refresh(
+        &market.market_id,
+        super::inventory_freshness::INVENTORY_MAX_STALENESS,
+    ) {
+        if let Some(cached) = resources
+            .coinset
+            .inventory_freshness
+            .cached_buckets(&market.market_id)
+        {
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::DEBUG,
+                "inventory bucket scan skipped (fresh)",
+                INVENTORY_BUCKET_SCAN,
+                &json!({
+                    "market_id": market.market_id,
+                    "source": "coinset_ws_fresh",
+                    "bucket_counts": cached,
+                }),
+                Some(&market.market_id),
+            )?;
+            return Ok(cached);
+        }
     }
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
@@ -78,6 +113,10 @@ pub async fn run_inventory_phase(
 
     match scan_result {
         Ok((resolved_base_asset_id, coin_count, bucket_counts)) => {
+            resources
+                .coinset
+                .inventory_freshness
+                .mark_fresh(&market.market_id, bucket_counts.clone());
             LogContext::MARKET_CYCLE.dual_audit(
                 store,
                 Level::DEBUG,
@@ -173,5 +212,96 @@ mod tests {
         let market = sample_market("my-cat-ticker");
         assert_inventory_asset_resolution_matches_config(&market, "c".repeat(64).as_str())
             .expect("symbol config uses resolved id only");
+    }
+
+    #[test]
+    fn freshness_cache_preserves_last_buckets() {
+        let freshness = super::super::inventory_freshness::InventoryFreshnessCache::new();
+        let buckets = BTreeMap::from([(1, 3), (10, 1)]);
+        freshness.mark_fresh("m1", buckets.clone());
+        assert!(!freshness.needs_refresh(
+            "m1",
+            super::super::inventory_freshness::INVENTORY_MAX_STALENESS
+        ));
+        assert_eq!(freshness.cached_buckets("m1"), Some(buckets));
+    }
+
+    #[tokio::test]
+    async fn run_inventory_phase_skips_http_when_fresh_and_rescans_after_stale() {
+        use crate::adapters::DexieClient;
+        use crate::config::LadderEntry;
+        use crate::config::{
+            empty_cat_ticker_index, CycleProgramConfig, ManagerProgramConfig, MarketsConfig,
+        };
+        use crate::cycle::MarketCycleResultState;
+        use crate::daemon::coinset_ws::{CoinsetWsShared, InventoryP2Index};
+        use crate::daemon::cycle_paths::DaemonCyclePaths;
+        use crate::daemon::market_context::DaemonCycleResources;
+        use crate::operator_log::INVENTORY_BUCKET_SCAN;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let buckets = BTreeMap::from([(10, 2)]);
+        let freshness = crate::daemon::InventoryFreshnessCache::new();
+        freshness.mark_fresh("m1", buckets.clone());
+        let coinset = CoinsetWsShared::new(
+            Arc::new(InventoryP2Index::default()),
+            Arc::clone(&freshness),
+        );
+        let mut market = sample_market("xch");
+        market.ladders.insert(
+            "sell".to_string(),
+            vec![LadderEntry {
+                size_base_units: 10,
+                target_count: 1,
+                split_buffer_count: 0,
+                combine_when_excess_factor: 2.0,
+            }],
+        );
+        let resources = DaemonCycleResources::with_program_config(
+            CycleProgramConfig::from_parts(ManagerProgramConfig::default(), None),
+            MarketsConfig {
+                markets: vec![market.clone()],
+            },
+            "mainnet".to_string(),
+            DexieClient::new("https://api.dexie.space"),
+            DaemonCyclePaths::new(
+                PathBuf::from("/tmp/program.yaml"),
+                PathBuf::from("/tmp/markets.yaml"),
+                None,
+            ),
+            coinset,
+            empty_cat_ticker_index(),
+        );
+        let mut state = MarketCycleResultState::default();
+        let returned = run_inventory_phase(&store, &resources, &market, &mut state)
+            .await
+            .expect("fresh skip");
+        assert_eq!(returned, buckets);
+        let audits = store
+            .list_recent_audit_events(Some(&[INVENTORY_BUCKET_SCAN]), Some("m1"), 5)
+            .expect("audits");
+        assert!(audits.iter().any(|event| {
+            event.payload.get("source").and_then(|value| value.as_str()) == Some("coinset_ws_fresh")
+        }));
+
+        freshness.mark_stale("m1");
+        assert!(freshness.needs_refresh(
+            "m1",
+            super::super::inventory_freshness::INVENTORY_MAX_STALENESS
+        ));
+        // After stale, phase attempts HTTP scan; without a live signer this soft-skips
+        // to empty buckets rather than returning the cached fresh map.
+        let mut state = MarketCycleResultState::default();
+        let after_stale = run_inventory_phase(&store, &resources, &market, &mut state)
+            .await
+            .expect("stale path");
+        assert_ne!(
+            after_stale, buckets,
+            "stale path must not return the prior fresh-skip cache"
+        );
     }
 }

@@ -171,6 +171,39 @@ GreenFloor operator inventory (`coinset/cats/list.rs`, `coinset/xch.rs`), vault 
 ### WebSocket
 
 - `GET /ws` - realtime stream for new transactions, mempool items, and offer files
+- GreenFloor daemon connects with query filters (always applied; configured URL query is replaced):
+  - `events=transaction,offer`
+  - `tx_status=pending,confirmed`
+  - repeatable `p2=<puzzle_hash>` for each enabled market receive puzzle and CAT outer hash
+    (CAT id from hex `base_asset` or `cats.yaml` ticker index)
+- Documented `transaction` frames carry tx `ids` + `p2s`. Optional coin-name fields
+  (`coin_ids` / `removals` / …) are parsed when present but are not required by Coinset docs.
+  Offer frames carry `offer_id` + `status` (+ optional `tx_id` / `p2s`).
+- Non-envelope / legacy flat payloads are ignored. Mainnet operators should confirm live frames match this envelope.
+- Frame routing (GreenFloor):
+  - **Transaction** frames: record tx signals; inventory-index `p2` hits **and** durable
+    maker watch hits mark markets stale (90s freshness gate). Pending-frame durable
+    maker **coin** watch hits drive `mempool_observed`; confirmed-frame maker coin
+    watch hits promote to `tx_block_confirmed` via the frame's confirmed tx ids (so
+    ladder slots do not age free before an offer-frame `confirmed` arrives).
+    P2-only durable watch hits mark inventory stale only (shared maker puzzle hashes
+    must not fan out takes). Shared market inventory p2s are not stored on per-offer
+    watches. HTTP enrichment uses `get_coin_records_by_puzzle_hashes` when needed.
+  - **Offer** frames: drive offer lifecycle by `offer_id` / status for `confirmed`,
+    `cancelled`, and `expired` only (those also mark the offer's market inventory stale).
+    Offer-frame `pending` / `cancel_pending` seed `tx_signal_state` when `tx_id` is present
+    but do **not** advance to `mempool_observed` (avoids aging live listings out of
+    active-slot counts). Offer-frame `p2s` must **not** mark inventory stale or apply
+    watch-hit lifecycle.
+- HTTP webhooks are out of scope; cancel and other spends use `POST /push_tx`, not the WebSocket.
+
+### Offers
+
+- `POST /push_offer` - body `{ "offer": "offer1..." }`; success returns 64-hex `offer_id` (spend-bundle hash / Dexie `trade_id`)
+- GreenFloor default publish venue is `coinset` via this endpoint; Dexie/Splash remain explicit opt-ins
+- After a successful push, GreenFloor persists `OfferCancelFields` (maker input coin id +
+  mode-specific hints) so on-chain cancel can reclaim without an offer blob. Direct
+  offers use exactly one input coin equal to the offer amount.
 
 ## Integration Cheat Sheet (Required Body Fields)
 
@@ -206,6 +239,7 @@ Use this as a quick "minimum payload" guide when wiring clients.
 | `POST /get_puzzle_and_solution`                 | `coin_id`                                                                                |
 | `POST /get_puzzle_and_solution_with_conditions` | `coin_id`                                                                                |
 | `POST /push_tx`                                 | `spend_bundle`                                                                           |
+| `POST /push_offer`                              | `offer` (`offer1...`)                                                                    |
 
 ### Fees / Full Node / Mempool / WebSocket
 

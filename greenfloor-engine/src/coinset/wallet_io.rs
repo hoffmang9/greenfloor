@@ -21,15 +21,18 @@ pub struct WalletUnspentCoin {
     pub name: String,
     pub amount: u64,
     pub state: String,
+    /// On-chain puzzle hash (64 hex), used for coin-ops p2 watch exclusion.
+    pub puzzle_hash: String,
 }
 
-fn wallet_coin_from_id(coin_id: impl AsRef<[u8]>, amount: u64) -> WalletUnspentCoin {
-    let id = normalize_hex_id(&hex::encode(coin_id.as_ref()));
+fn wallet_coin_from_coin(coin: &chia_protocol::Coin) -> WalletUnspentCoin {
+    let id = normalize_hex_id(&hex::encode(coin.coin_id()));
     WalletUnspentCoin {
         name: id.clone(),
         id,
-        amount,
+        amount: coin.amount,
         state: "CONFIRMED".to_string(),
+        puzzle_hash: normalize_hex_id(&hex::encode(coin.puzzle_hash)),
     }
 }
 
@@ -87,7 +90,7 @@ pub(crate) async fn list_wallet_unspent_coins(
         return Ok(coins
             .into_iter()
             .filter(|coin| coin.amount > 0)
-            .map(|coin| wallet_coin_from_id(coin.coin_id(), coin.amount))
+            .map(|coin| wallet_coin_from_coin(&coin))
             .collect());
     }
     let asset_bytes = hex_to_bytes32(asset_id)?;
@@ -95,7 +98,7 @@ pub(crate) async fn list_wallet_unspent_coins(
     Ok(cats
         .into_iter()
         .filter(|cat| cat.coin.amount > 0)
-        .map(|cat| wallet_coin_from_id(cat.coin.coin_id(), cat.coin.amount))
+        .map(|cat| wallet_coin_from_coin(&cat.coin))
         .collect())
 }
 
@@ -137,6 +140,59 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
     Ok(to_coinset_hex(&cat_outer))
 }
 
+/// Inventory puzzle hashes for one market receive address (inner + optional CAT outer).
+///
+/// `base_asset_id` should already be a resolved CAT asset id. Pass `None` (or xch/txch)
+/// for XCH-only markets.
+///
+/// # Errors
+///
+/// Returns an error if the receive address is empty or cannot be decoded, or if a CAT
+/// outer hash cannot be derived when a non-XCH base asset id is provided.
+pub fn market_inventory_p2s(
+    receive_address: &str,
+    base_asset_id: Option<&str>,
+) -> SignerResult<Vec<String>> {
+    let receive = receive_address.trim();
+    if receive.is_empty() {
+        return Err(SignerError::Other(
+            "receive_address is required for market inventory p2s".to_string(),
+        ));
+    }
+    let mut p2s = Vec::new();
+    let mut seen = HashSet::new();
+    let inner = normalize_hex_id(&puzzle_hash_hex_for_receive_address(receive)?);
+    if inner.len() != 64 {
+        return Err(SignerError::Other(format!(
+            "receive puzzle hash for `{receive}` is not 64 hex chars (len={})",
+            inner.len()
+        )));
+    }
+    seen.insert(inner.clone());
+    p2s.push(inner);
+
+    let Some(base) = base_asset_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(p2s);
+    };
+    if base.eq_ignore_ascii_case("xch") || base.eq_ignore_ascii_case("txch") {
+        return Ok(p2s);
+    }
+    let outer = normalize_hex_id(&cat_outer_puzzle_hash_hex(receive, base)?);
+    if outer.len() != 64 {
+        return Err(SignerError::Other(format!(
+            "CAT outer puzzle hash for `{receive}` / `{base}` is not 64 hex chars (len={})",
+            outer.len()
+        )));
+    }
+    if seen.insert(outer.clone()) {
+        p2s.push(outer);
+    }
+    Ok(p2s)
+}
+
 /// Extract coin id hints from offer text.
 ///
 /// # Errors
@@ -156,6 +212,41 @@ pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<V
     Ok(hints)
 }
 
+/// Maker coin ids and on-chain puzzle hashes from cancellable offer inputs.
+///
+/// Used to heal durable watches from a Dexie `offer1…` payload without inventing
+/// delegated CONDITIONS hashes.
+///
+/// # Errors
+///
+/// Returns an error if offer decode/parse fails.
+pub fn extract_maker_watch_keys_from_offer_text(
+    offer_text: &str,
+) -> SignerResult<(Vec<String>, Vec<String>)> {
+    use chia_sdk_driver::Offer;
+    use clvmr::Allocator;
+
+    let spend_bundle = decode_offer(offer_text)?;
+    let mut allocator = Allocator::new();
+    let offer = Offer::from_spend_bundle(&mut allocator, &spend_bundle)?;
+    let cancellable = offer.cancellable_coin_spends().map_err(SignerError::from)?;
+    let mut coins = Vec::new();
+    let mut p2s = Vec::new();
+    let mut seen_coins = HashSet::new();
+    let mut seen_p2s = HashSet::new();
+    for coin_spend in &cancellable {
+        let coin_id = normalize_hex_id(&hex::encode(coin_spend.coin.coin_id()));
+        if coin_id.len() == 64 && seen_coins.insert(coin_id.clone()) {
+            coins.push(coin_id);
+        }
+        let p2 = normalize_hex_id(&hex::encode(coin_spend.coin.puzzle_hash));
+        if p2.len() == 64 && seen_p2s.insert(p2.clone()) {
+            p2s.push(p2);
+        }
+    }
+    Ok((coins, p2s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +260,13 @@ mod tests {
     #[test]
     fn extract_coin_id_hints_from_offer_text_rejects_garbage() {
         let err = extract_coin_id_hints_from_offer_text("not-an-offer").expect_err("invalid offer");
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn extract_maker_watch_keys_from_offer_text_rejects_garbage() {
+        let err =
+            extract_maker_watch_keys_from_offer_text("not-an-offer").expect_err("invalid offer");
         assert!(!err.to_string().is_empty());
     }
 }

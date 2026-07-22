@@ -46,6 +46,7 @@ pub(super) async fn prepare_coin_op_loop_common(
             command: OperatorMarketCommand::Build,
         },
         prep.asset_id,
+        prep.mgr.state_db_override(),
     )
     .await?;
     let ladder_entry = prep

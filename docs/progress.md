@@ -16,6 +16,17 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-07-08 — Coinset WS local watches and inventory p2 index
+
+Default offer publish is Coinset `POST /push_offer`. Daemon WS uses
+`events=transaction,offer` + `tx_status=pending,confirmed` plus stable market `p2` filters
+from `InventoryP2Index` (receive puzzle + CAT outer). Durable SQLite `offer_coin_watches`
+seed at post and clear on terminal lifecycle; transaction-frame watch hits and offer frames
+drive reconcile via shared `apply_watched_offer_signals`. Offer-frame `p2s` do not mark
+inventory stale or apply watch hits. Inventory freshness skips blind HTTP polls within 90s
+when no relevant WS activity. Loop and CLI `--once` both build the index; config reload
+rebuilds it and reconnects WS. See ADR 0019.
+
 ### 2026-06-29 — Coinset parse and pagination decomposed (#158)
 
 Split monolithic `coinset/parse.rs` into `parse/{payload,record,tests}.rs`; extracted

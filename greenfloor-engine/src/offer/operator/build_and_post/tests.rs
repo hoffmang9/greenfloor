@@ -10,9 +10,11 @@ use super::post_batch::{
 };
 use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
-use crate::offer::types::{CreateOfferResult, OfferExecutionMode, PresplitCancelFields};
+use crate::offer::types::{CreateOfferResult, OfferCancelFields, OfferExecutionMode};
 use crate::operator_log::OFFER_POST_FAILURE;
-use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::storage::{
+    state_db_path_for_home, upsert_offer_post_record, CycleWriteStore, SqliteStore,
+};
 use crate::test_support::build_and_post::unused_post_iteration_request;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -27,7 +29,7 @@ fn flush_post_batch_writes_failure_audit_event() {
     let ctx = sample_resolved_build_and_post_context();
     let emitter = PostBatchEmitter::new(&ctx);
     emitter
-        .flush(
+        .flush_audits(
             &store,
             &[],
             &[PostFailureAudit {
@@ -72,6 +74,7 @@ fn dry_run_failure_traces_without_persisting() {
             bootstrap: None,
         }),
         &mut batch,
+        None,
     );
     assert_eq!(batch.persist.failure_audits.len(), 0);
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
@@ -111,11 +114,12 @@ fn persist_path_defers_failure_trace_until_flush() {
             bootstrap: None,
         }),
         &mut batch,
+        None,
     );
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
     assert_eq!(batch.persist.failure_audits.len(), 1);
     emitter
-        .flush(&store, &[], &batch.persist.failure_audits)
+        .flush_audits(&store, &[], &batch.persist.failure_audits)
         .expect("persist");
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }
@@ -140,19 +144,24 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
 
+    let selected = "aa".repeat(32);
+    let presplit_coin = "bb".repeat(32);
+    let input_coin = "cc".repeat(32);
+    let p2 = "dd".repeat(32);
     let create = CreateOfferResult {
         offer: "offer1".to_string(),
         spend_bundle_hex: String::new(),
-        selected_coin_ids: Vec::new(),
+        selected_coin_ids: vec![selected.clone()],
         offer_nonce: String::new(),
         execution_mode: OfferExecutionMode::PresplitNew,
         split_spend_bundle_hex: None,
-        presplit_coin_id: Some("cc".repeat(64)),
+        presplit_coin_id: Some(presplit_coin.clone()),
         split_broadcast_status: None,
-        presplit_cancel_fields: Some(PresplitCancelFields::from_presplit_build(
-            "coin".to_string(),
-            "puzzle".to_string(),
-        )),
+        cancel_fields: OfferCancelFields::from_presplit_build(
+            input_coin.clone(),
+            "aa".repeat(32),
+            p2.clone(),
+        ),
     };
     let presplit = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&create))
         .expect("presplit record");
@@ -162,8 +171,44 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     );
     assert_eq!(
         presplit.cancel_fields.input_coin_id.as_deref(),
-        Some("coin")
+        Some(input_coin.as_str())
     );
+    assert_eq!(
+        presplit.watched_coin_ids,
+        vec![selected, presplit_coin, input_coin]
+    );
+    assert_eq!(presplit.watched_p2s, vec![p2]);
+
+    let direct_coin = "ee".repeat(32);
+    let direct_p2 = "ff".repeat(32);
+    let direct_create = CreateOfferResult {
+        offer: "offer1".to_string(),
+        spend_bundle_hex: String::new(),
+        selected_coin_ids: vec![direct_coin.clone()],
+        offer_nonce: String::new(),
+        execution_mode: OfferExecutionMode::Direct,
+        split_spend_bundle_hex: None,
+        presplit_coin_id: None,
+        split_broadcast_status: None,
+        cancel_fields: OfferCancelFields::from_direct_build(direct_coin.clone(), direct_p2.clone()),
+    };
+    let direct =
+        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&direct_create))
+            .expect("direct record");
+    assert_eq!(direct.execution_mode, Some(OfferExecutionMode::Direct));
+    assert_eq!(
+        direct.cancel_fields.input_coin_id.as_deref(),
+        Some(direct_coin.as_str())
+    );
+    assert!(direct.cancel_fields.fixed_delegated_puzzle_hash.is_none());
+    assert_eq!(direct.watched_coin_ids, vec![direct_coin]);
+    assert_eq!(direct.watched_p2s, vec![direct_p2]);
+    assert!(crate::offer::metadata_sufficient_for_coinset_cancel(Some(
+        &crate::offer::types::StoredOfferCancelMetadata {
+            fields: direct.cancel_fields.clone(),
+            execution_mode: Some(OfferExecutionMode::Direct),
+        }
+    )));
 }
 
 #[test]
@@ -186,7 +231,7 @@ fn post_attempt_success_tracks_publish_outcome_without_json_reparse() {
 }
 
 #[test]
-fn flush_post_batch_writes_offer_state() {
+fn flush_post_batch_writes_execution_audit_only() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join("home");
     let db_path = state_db_path_for_home(Path::new(&home));
@@ -194,7 +239,7 @@ fn flush_post_batch_writes_offer_state() {
     let ctx = sample_resolved_build_and_post_context();
     let emitter = PostBatchEmitter::new(&ctx);
     emitter
-        .flush(
+        .flush_audits(
             &store,
             &[crate::storage::OfferPostPersistRecord {
                 offer_id: "offer-abc".to_string(),
@@ -205,20 +250,147 @@ fn flush_post_batch_writes_offer_state() {
                 resolved_base_asset_id: "a1".to_string(),
                 resolved_quote_asset_id: "xch".to_string(),
                 created_extra: json!({}),
-                cancel_fields: PresplitCancelFields::default(),
+                cancel_fields: OfferCancelFields::default(),
                 execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
             }],
             &[],
         )
         .expect("persist");
 
+    assert!(store
+        .offer_state_for_id("offer-abc")
+        .expect("state")
+        .is_none());
+}
+
+#[test]
+fn success_persists_offer_state_immediately_before_flush() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path().join("home");
+    let db_path = state_db_path_for_home(Path::new(&home));
+    let store = CycleWriteStore::from_sqlite(SqliteStore::open(&db_path).expect("open"));
+    let ctx = sample_resolved_build_and_post_context();
+    let emitter = PostBatchEmitter::new(&ctx);
+    let mut batch = PostIterationBatch {
+        post_results: Vec::new(),
+        built_offers_preview: Vec::new(),
+        bootstrap_actions: Vec::new(),
+        publish_failures: 0,
+        persist: PostPersistPayload {
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
+    };
+    let coin = "aa".repeat(32);
+    let p2 = "bb".repeat(32);
+    let persist_store = store.clone();
+    let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
+        persist_store.sync(|store| upsert_offer_post_record(store, record))
+    };
+    apply_post_iteration_outcome(
+        PostEmitTarget::TraceAndStore,
+        &emitter,
+        super::types::PostIterationOutcome::Success(Box::new(PostAttemptSuccess {
+            publish_venue: "coinset".to_string(),
+            result: json!({"success": true, "id": "offer-immediate"}),
+            success: true,
+            persist_record: Some(crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-immediate".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: OfferCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: vec![coin.clone()],
+                watched_p2s: vec![p2.clone()],
+            }),
+        })),
+        &mut batch,
+        Some(&mut persist),
+    );
+    assert_eq!(batch.publish_failures, 0);
     assert_eq!(
         store
-            .offer_state_for_id("offer-abc")
+            .sync(|store| store.offer_state_for_id("offer-immediate"))
             .expect("state")
             .as_deref(),
-        Some("open")
+        Some("open"),
+        "venue success must persist open before batch flush"
     );
+    let hits = store
+        .sync(|store| store.match_watch_keys(&[coin, p2]))
+        .expect("watches");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].row.offer_id, "offer-immediate");
+}
+
+#[test]
+fn immediate_persist_failure_defers_a_single_failure_emit() {
+    let capture = crate::operator_log::TraceCapture::install();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = SqliteStore::open(&state_db_path_for_home(dir.path())).expect("open");
+    let ctx = sample_resolved_build_and_post_context();
+    let emitter = PostBatchEmitter::new(&ctx);
+    let mut batch = PostIterationBatch {
+        post_results: Vec::new(),
+        built_offers_preview: Vec::new(),
+        bootstrap_actions: Vec::new(),
+        publish_failures: 0,
+        persist: PostPersistPayload {
+            persist_records: Vec::new(),
+            failure_audits: Vec::new(),
+        },
+    };
+    let mut persist = |_record: &crate::storage::OfferPostPersistRecord| {
+        Err(crate::error::SignerError::Other(
+            "sqlite is unavailable".to_string(),
+        ))
+    };
+
+    apply_post_iteration_outcome(
+        PostEmitTarget::TraceAndStore,
+        &emitter,
+        super::types::PostIterationOutcome::Success(Box::new(PostAttemptSuccess {
+            publish_venue: "coinset".to_string(),
+            result: json!({"success": true, "id": "offer-persist-failure"}),
+            success: true,
+            persist_record: Some(crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-persist-failure".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: OfferCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
+            }),
+        })),
+        &mut batch,
+        Some(&mut persist),
+    );
+
+    assert_eq!(batch.publish_failures, 1);
+    assert_eq!(batch.persist.failure_audits.len(), 1);
+    assert_eq!(batch.persist.persist_records.len(), 1);
+    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
+    emitter
+        .flush_audits(
+            &store,
+            &batch.persist.persist_records,
+            &batch.persist.failure_audits,
+        )
+        .expect("flush audits");
+    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }
 
 #[test]

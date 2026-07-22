@@ -67,7 +67,7 @@ pub fn test_cycle_context(
                 dir.path().join("markets.yaml"),
                 None,
             ),
-            super::watchlist::CoinWatchlistCache::new(),
+            super::coinset_ws::CoinsetWsShared::empty(),
             empty_cat_ticker_index(),
         ),
         dispatch: MarketDispatchContext {
@@ -98,8 +98,8 @@ pub fn test_cycle_context(
             test_controls: DaemonCycleTestControls::default(),
         },
         reconcile: ReconcileMarketCycleResult {
-            offers: Vec::new(),
             dexie_size_by_offer_id: HashMap::default(),
+            dexie_status_by_lookup_key: HashMap::default(),
             dexie_fetch_error: None,
             metrics: ReconcileMarketCycleMetrics::default(),
         },

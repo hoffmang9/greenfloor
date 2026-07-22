@@ -23,7 +23,7 @@ pub fn base_program_raw() -> Value {
         "venues": {
             "dexie": {"api_base": "https://api.dexie.space"},
             "splash": {"api_base": "http://localhost:4000"},
-            "offer_publish": {"provider": "dexie"}
+            "offer_publish": {"provider": "coinset"}
         },
         "coin_ops": {"minimum_fee_mojos": 0},
         "dev": {"python": {"min_version": "3.11"}},

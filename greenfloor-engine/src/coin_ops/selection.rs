@@ -42,6 +42,32 @@ impl TargetAmountSelectionOptions {
 pub struct SpendableCoin {
     pub id: String,
     pub amount: i64,
+    /// On-chain puzzle hash (64 hex). Empty in fixtures that only exercise amount selection.
+    pub puzzle_hash: String,
+}
+
+impl SpendableCoin {
+    #[must_use]
+    pub fn new(id: impl Into<String>, amount: i64) -> Self {
+        Self {
+            id: id.into(),
+            amount,
+            puzzle_hash: String::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_puzzle_hash(
+        id: impl Into<String>,
+        amount: i64,
+        puzzle_hash: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            amount,
+            puzzle_hash: puzzle_hash.into(),
+        }
+    }
 }
 
 #[must_use]
@@ -322,10 +348,7 @@ mod tests {
 
     fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
         rows.iter()
-            .map(|(id, amount)| SpendableCoin {
-                id: (*id).to_string(),
-                amount: *amount,
-            })
+            .map(|(id, amount)| SpendableCoin::new((*id).to_string(), *amount))
             .collect()
     }
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::daemon::coinset_ws::CoinsetWsShared;
 
 #[cfg(test)]
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
@@ -46,31 +46,34 @@ pub struct DaemonRunOnceRequest {
     pub dispatch_state: DaemonDispatchState,
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,
-    #[serde(skip, default = "default_coin_watchlist")]
-    pub coin_watchlist: Arc<CoinWatchlistCache>,
+    #[serde(skip, default = "default_coinset_process_context")]
+    pub coinset: Arc<CoinsetWsShared>,
 }
 
 fn default_poll_coinset_mempool() -> bool {
     true
 }
 
-fn default_coin_watchlist() -> Arc<CoinWatchlistCache> {
-    CoinWatchlistCache::new()
+fn default_coinset_process_context() -> Arc<CoinsetWsShared> {
+    CoinsetWsShared::empty()
 }
 
 impl DaemonRunOnceRequest {
     /// From json value.
     ///
+    /// Builds `coinset` via [`CoinsetWsShared::from_markets_or_empty`] (same contract as
+    /// CLI `--once` / daemon loop).
+    ///
     /// # Errors
     ///
-    /// Returns an error if the operation fails.
-    pub fn from_json_value(
-        value: Value,
-        coin_watchlist: Arc<CoinWatchlistCache>,
-    ) -> crate::error::SignerResult<Self> {
+    /// Returns an error if JSON parse fails.
+    pub fn from_json_value(value: Value) -> crate::error::SignerResult<Self> {
         let mut request: Self = serde_json::from_value(value)
             .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-        request.coin_watchlist = coin_watchlist;
+        request.coinset = CoinsetWsShared::from_markets_or_empty(
+            &request.markets_path,
+            request.testnet_markets_path.as_deref(),
+        );
         Ok(request)
     }
 }

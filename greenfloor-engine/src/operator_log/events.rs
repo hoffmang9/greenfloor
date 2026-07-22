@@ -17,6 +17,7 @@ pub const XCH_PRICE_ERROR: &str = "xch_price_error";
 pub const COINSET_WS_ONCE_ERROR: &str = "coinset_ws_once_error";
 pub const COINSET_MEMPOOL_ERROR: &str = "coinset_mempool_error";
 pub const COINSET_MEMPOOL_SNAPSHOT: &str = "coinset_mempool_snapshot";
+pub const CANCEL_SUBMITTED_CONFIRM_POLL_ERROR: &str = "cancel_submitted_confirm_poll_error";
 pub const MEMPOOL_OBSERVED: &str = "mempool_observed";
 
 pub const COINSET_WS_RECOVERY_POLL: &str = "coinset_ws_recovery_poll";
@@ -26,7 +27,6 @@ pub const COINSET_WS_PAYLOAD_IGNORED: &str = "coinset_ws_payload_ignored";
 pub const COINSET_WS_MEMPOOL_EVENT: &str = "coinset_ws_mempool_event";
 pub const COINSET_WS_TX_BLOCK_EVENT: &str = "coinset_ws_tx_block_event";
 pub const TX_BLOCK_CONFIRMED: &str = "tx_block_confirmed";
-pub const COINSET_WS_COIN_OBSERVED: &str = "coinset_ws_coin_observed";
 pub const COIN_WATCH_HIT: &str = "coin_watch_hit";
 pub const COINSET_WS_ONCE_STARTED: &str = "coinset_ws_once_started";
 pub const COINSET_WS_ONCE_CONNECTED: &str = "coinset_ws_once_connected";
@@ -34,7 +34,6 @@ pub const COINSET_WS_ONCE_DISCONNECTED: &str = "coinset_ws_once_disconnected";
 pub const COINSET_WS_CONNECTING: &str = "coinset_ws_connecting";
 pub const COINSET_WS_CONNECTED: &str = "coinset_ws_connected";
 pub const COINSET_WS_DISCONNECTED: &str = "coinset_ws_disconnected";
-pub const COIN_WATCHLIST_UPDATED: &str = "coin_watchlist_updated";
 
 pub const INVENTORY_BUCKET_SCAN: &str = "inventory_bucket_scan";
 pub const INVENTORY_BUCKET_SCAN_ERROR: &str = "inventory_bucket_scan_error";

@@ -2,7 +2,7 @@ use super::cancel_submitted_policy::{resolve_cancel_submitted_transition, Cancel
 use chrono::{DateTime, Utc};
 
 use super::builders::preserve_state;
-use super::coinset_signals::DexieCoinsetSignals;
+use super::coinset_signals::CoinsetTxSignals;
 use super::dispatch::apply_watched_offer_dispatch;
 use super::metadata::REASON_CANCEL_SUBMIT_CONTEXT_MISSING;
 use super::state::ReconcileState;
@@ -11,7 +11,7 @@ use super::transition::ReconcileTransition;
 pub(crate) fn resolve_watched_offer_decision(
     current_state: &ReconcileState,
     status: Option<i64>,
-    dexie: &DexieCoinsetSignals,
+    signals: &CoinsetTxSignals,
     chain_confirmed_tx_ids: &[String],
     cancel_submitted: Option<&CancelSubmittedContext>,
     now: DateTime<Utc>,
@@ -25,11 +25,11 @@ pub(crate) fn resolve_watched_offer_decision(
         };
         return resolve_cancel_submitted_transition(
             status,
-            dexie,
+            signals,
             chain_confirmed_tx_ids,
             ctx,
             now,
         );
     }
-    apply_watched_offer_dispatch(dexie.summary(), status, current_state)
+    apply_watched_offer_dispatch(signals.summary(), status, current_state)
 }

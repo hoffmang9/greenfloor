@@ -51,7 +51,7 @@ async fn execute_post_reconcile_phases(
     .await?;
 
     locked_logged_phase!(market.market_id.as_str(), "cancel", write_store, |store| {
-        run_market_cancel_phase(&store, ctx, market, &ctx.reconcile.offers, cycle_state)
+        run_market_cancel_phase(&store, ctx, market, cycle_state)
     })
     .await?;
 
@@ -64,7 +64,6 @@ async fn execute_post_reconcile_phases(
                 &store,
                 ctx,
                 market,
-                &ctx.reconcile.offers,
                 &bucket_counts,
                 &strategy.sell_active_counts,
                 &strategy.newly_executed_sell_counts,

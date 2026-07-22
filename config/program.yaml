@@ -60,7 +60,7 @@ venues:
   splash:
     api_base: "http://john-deere.hoffmang.com:4000"
   offer_publish:
-    provider: "dexie"
+    provider: "coinset"
 
 dev:
   python:
@@ -92,19 +92,14 @@ notifications:
       recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
 
 chain_signals:
-  mempool_monitor:
-    enabled: true
-    source: "coinset"
-    poll_interval_seconds: 20
   tx_block_trigger:
     mode: "websocket"
     source: "coinset"
     # Coinset websocket endpoint; when empty, defaults by network profile.
     # mainnet: wss://api.coinset.org/ws
     # testnet11: wss://testnet11.api.coinset.org/ws
+    # Daemon appends events=transaction,offer&tx_status=pending,confirmed and stable market p2 filters.
     websocket_url: ""
     websocket_reconnect_interval_seconds: 30
-    webhook_enabled: false
-    webhook_listen_addr: "127.0.0.1:8787" # legacy field; websocket mode ignores this listener.
     # Recovery poll cadence used by websocket mode to refresh mempool tx snapshots.
     fallback_poll_interval_seconds: 60

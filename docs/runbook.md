@@ -73,9 +73,10 @@ Optional developer bootstrap for testnet markets:
   - If multiple markets share the same pair, rerun with explicit `--market-id`.
   - Use `--markets-config` only when overriding the default config path.
   - Use `--testnet-markets-config ~/.greenfloor/config/testnet-markets.yaml` only when you want to include optional testnet market stanzas.
-  - Publish venue is selected by `venues.offer_publish.provider` in `~/.greenfloor/config/program.yaml` (`dexie` or `splash`).
-    - Optional one-off override: `--venue dexie` or `--venue splash`
+  - Publish venue is selected by `venues.offer_publish.provider` in `~/.greenfloor/config/program.yaml` (`coinset`, `dexie`, or `splash`; default `coinset`).
+    - Optional one-off override: `--venue coinset`, `--venue dexie`, or `--venue splash`
     - Optional URL overrides: `--dexie-base-url ...` and `--splash-base-url ...`
+  - Coinset path posts via `POST /push_offer` and marks the offer `open` on accept (no Dexie visibility wait).
   - Dexie path validates offer text with `chia-wallet-sdk` before submission; if validation fails, manager blocks submit and returns a `wallet_sdk_offer_verify_*` error.
   - On successful Dexie post, command JSON now includes a direct browser link:
     - `results[].result.offer_view_url` (for example `https://dexie.space/offers/<offer_id>`).
@@ -83,11 +84,14 @@ Optional developer bootstrap for testnet markets:
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
   - Reconcile output includes:
-    - `taker_signal`: Coinset-confirmed taker signal (`none` or `coinset_tx_block_webhook`).
+    - `taker_signal`: Coinset-confirmed taker signal (`none` or `coinset_tx_block_websocket`).
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Cancel offers when policy requires it (on-chain via Coinset; Dexie is only used to fetch the offer file):
+- Cancel offers when policy requires it (on-chain via Coinset; offer file from local
+  `--offer-file` or stored `OfferCancelFields` / maker input coin id; Dexie offer-file
+  fetch is optional fallback for legacy Dexie rows). Direct posts require a single
+  exact-size maker coin so Coinset-primary cancel metadata is complete:
   - `greenfloor-manager offers-cancel --offer-id <id>` (Dexie fetch; DB row optional)
   - Cancel from local offer file: `greenfloor-manager offers-cancel --offer-file <path-or-offer1>`
   - Cancel all open offers tracked in state DB: `greenfloor-manager offers-cancel --cancel-open`
@@ -133,6 +137,8 @@ Use this checklist when promoting from one-off manager proof runs to continuous 
    - at least one open offer maintained except brief rollover windows
    - no persistent post failures across consecutive daemon cycles
    - websocket tx-signal events (`coinset_ws_*`) continue without prolonged disconnect loops
+   - posted offers register durable `offer_coin_watches`; mempool/confirm transitions appear
+     from WS offer frames and/or transaction-frame watch hits (not offer-frame `p2s` alone)
 
 ## 3) Recovery and Revalidation
 
@@ -193,7 +199,8 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `error: "coinset_fee_preflight_failed:endpoint_validation_failed"` means endpoint routing/configuration failure (invalid/misrouted `GREENFLOOR_COINSET_BASE_URL`, wrong-network endpoint, DNS/TLS/connectivity issues).
   - `error: "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"` means Coinset endpoint is reachable but currently not returning usable fee advice.
   - `coinset_fee_lookup.coinset_base_url` + `coinset_fee_lookup.coinset_network` report exactly which endpoint/network pair was validated.
-- **Websocket signal ingestion issues:** inspect daemon audit events `coinset_ws_*` (`coinset_ws_connecting`, `coinset_ws_connected`, `coinset_ws_disconnected`, `coinset_ws_recovery_poll*`) and validate `chain_signals.tx_block_trigger.websocket_url` + network endpoint routing.
+- **Websocket signal ingestion issues:** inspect daemon audit events `coinset_ws_*` (`coinset_ws_connecting`, `coinset_ws_connected`, `coinset_ws_disconnected`, `coinset_ws_recovery_poll*`) and validate `chain_signals.tx_block_trigger.websocket_url` + network endpoint routing. Confirm WS URL includes required `events` / `tx_status` / market `p2` filters (operator query strings are replaced). After markets YAML reload, expect inventory p2 rebuild + WS reconnect without a process restart.
+- **Missing mempool_observed after post:** confirm `offer_coin_watches` were seeded at post (invalid coin/p2 keys fail closed) and that hits arrive on **transaction** frames; offer-frame `pending` / `p2s` do not drive `mempool_observed` or inventory stale.
 - **Cancel policy not triggering:** verify market `quote_asset_type` is `unstable`, `pricing.cancel_policy_stable_vs_unstable: true`, and compare `move_bps` vs `threshold_bps` in `offer_cancel_policy`.
 
 ## 6) Runtime Controls
@@ -228,6 +235,10 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `websocket_url`: Coinset websocket endpoint (defaults by network when blank)
   - `websocket_reconnect_interval_seconds`: reconnect cadence after disconnect/error (must be `>= 1`)
   - `fallback_poll_interval_seconds`: recovery snapshot window used by websocket reconnect and `greenfloord --once` bounded capture
+  - Loop and `--once` both build `InventoryP2Index` from enabled markets before WS subscribe/capture.
+  - Config reload marker rebuilds that index and requests WS reconnect so `p2` filters stay current.
+    Audit event `config_reloaded` includes `inventory_p2_rebuild: ok|failed` (failed keeps prior filters).
+  - Inventory HTTP polls may skip for up to 90s when freshness is clean (no relevant WS p2 activity).
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
 - Daemon singleton lock behavior:

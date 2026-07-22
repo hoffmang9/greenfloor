@@ -11,7 +11,10 @@ use clvm_utils::TreeHash;
 use crate::bech32m::decode_offer;
 use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
-use crate::offer::cancel_input::{classify_cancellable_maker_input, CancellableMakerInput};
+use crate::offer::cancel_input::{
+    classify_cancellable_maker_input, classify_maker_input_from_stored_metadata,
+    CancellableMakerInput,
+};
 use crate::offer::presplit::{build_presplit_offer_cancel_inner_spend, vault_change_puzzle_hash};
 use crate::offer::types::StoredOfferCancelMetadata;
 use crate::vault::materialize::{
@@ -176,6 +179,34 @@ pub async fn build_offer_cancel_spend_bundle<C: OfferCoinsetBackend>(
         append_cancellable_input_reclaim(&mut ctx, &input, change_puzzle_hash, vault_ctx)?;
     }
 
+    finalize_vault_reclaim_spend_bundle(ctx, vault_ctx, &vault, move |message| {
+        let signer = signer.clone();
+        async move { signer.sign(message).await }
+    })
+    .await
+}
+
+/// Build an on-chain offer cancel spend from Coinset coin state + stored cancel metadata.
+///
+/// Coinset `get_offer` does not return the raw offer blob; production cancel for Coinset
+/// venues uses this path when local cancel metadata was persisted at post time.
+///
+/// # Errors
+///
+/// Returns an error if Coinset lookup or spend construction fails.
+pub async fn build_offer_cancel_spend_bundle_from_metadata<C: OfferCoinsetBackend>(
+    vault_ctx: &mut VaultSpendContext,
+    backend: &C,
+    metadata: &StoredOfferCancelMetadata,
+) -> SignerResult<SpendBundle> {
+    let input = classify_maker_input_from_stored_metadata(vault_ctx, backend, metadata).await?;
+    let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id)?;
+    let vault = backend
+        .fetch_latest_vault(vault_ctx.launcher_id, vault_ctx.inner_puzzle_hash)
+        .await?;
+    let signer = VaultFastForwardSigner::from_context(vault_ctx);
+    let mut ctx = SpendContext::new();
+    append_cancellable_input_reclaim(&mut ctx, &input, change_puzzle_hash, vault_ctx)?;
     finalize_vault_reclaim_spend_bundle(ctx, vault_ctx, &vault, move |message| {
         let signer = signer.clone();
         async move { signer.sign(message).await }

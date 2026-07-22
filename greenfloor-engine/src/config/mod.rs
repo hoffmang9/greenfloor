@@ -8,6 +8,7 @@ mod program;
 mod program_parse;
 mod runtime_load;
 mod signer;
+mod venue;
 mod yaml_fields;
 pub(crate) mod yaml_file;
 
@@ -39,3 +40,4 @@ pub use runtime_load::{
     DaemonCycleConfig, GatedOperatorMarket, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
 pub use signer::{load_signer_config, parse_signer_config, SignerConfig};
+pub use venue::Venue;

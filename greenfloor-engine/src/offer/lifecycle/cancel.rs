@@ -1,45 +1,21 @@
 use crate::adapters::DexieClient;
-use crate::coinset::{self, client_for_signer_on_network, LiveCoinset};
+use crate::coinset::{self, client_for_signer_on_network, spend_bundle_operation_id, LiveCoinset};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::offer::cancel_input::metadata_sufficient_for_coinset_cancel;
 use crate::offer::dexie_payload::DexieOfferPayload;
-use crate::offer::reclaim::build_offer_cancel_spend_bundle;
+use crate::offer::reclaim::{
+    build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
+};
 use crate::offer::types::StoredOfferCancelMetadata;
-use crate::storage::SqliteStore;
+use crate::storage::{SqliteStore, TxSignalIngress};
 use crate::vault::session::resolve_vault_spend_context;
-const CANCEL_SUBMIT_PERSIST_RETRIES: u32 = 2;
-
-fn persist_cancel_submitted_after_broadcast(
-    store: &SqliteStore,
-    offer_id: &str,
-    market_id: &str,
-    cancel_tx_id: &str,
-    last_seen_status: Option<i64>,
-) -> SignerResult<()> {
-    let mut last_err = None;
-    for _ in 0..CANCEL_SUBMIT_PERSIST_RETRIES {
-        match store.upsert_offer_cancel_submitted(
-            offer_id,
-            market_id,
-            cancel_tx_id,
-            last_seen_status,
-        ) {
-            Ok(()) => return Ok(()),
-            Err(err) => last_err = Some(err),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| {
-        SignerError::Other(
-            "cancel broadcast succeeded but cancel_submitted persist failed after retries"
-                .to_string(),
-        )
-    }))
-}
+use chia_protocol::SpendBundle;
 
 /// Cancel target for on-chain offer reclaim.
 #[derive(Debug, Clone)]
 pub enum CancelOfferTarget {
-    /// Dexie-tracked offer id; lifecycle state is updated on successful submit.
+    /// Tracked offer id; lifecycle state is updated on successful submit.
     Tracked { offer_id: String, market_id: String },
     /// Local offer file or bech32; cancel spends without `SQLite` lifecycle updates.
     LocalFile {
@@ -92,9 +68,14 @@ impl CancelOfferTarget {
 pub struct CancelOfferOutcome {
     pub offer_id: String,
     pub market_id: String,
+    /// True when the cancel spend was broadcast successfully.
     pub success: bool,
     pub operation_id: String,
+    /// Hard failure (build/broadcast/rollback). Empty on success.
     pub error: String,
+    /// Non-fatal supplemental detail. Observe failures are hard outcomes because
+    /// the daemon must retry lifecycle ingestion.
+    pub warning: String,
 }
 
 #[derive(Debug, Clone)]
@@ -102,21 +83,38 @@ pub struct CancelOfferOnChainParams<'a> {
     pub offer_id: &'a str,
     pub signer_config: SignerConfig,
     pub operator_network: &'a str,
-    pub dexie: &'a DexieClient,
+    /// Optional Dexie client used only when Coinset/local metadata cannot supply
+    /// the offer file (legacy Dexie-posted rows without usable cancel metadata).
+    pub dexie: Option<&'a DexieClient>,
     pub fee_mojos: u64,
     pub offer_text: Option<String>,
     pub cancel_metadata: Option<StoredOfferCancelMetadata>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CancelOfferOnChainResult {
-    pub operation_id: String,
+fn outcome(
+    target: &CancelOfferTarget,
+    market_id: String,
+    success: bool,
+    operation_id: String,
+    error: impl Into<String>,
+) -> CancelOfferOutcome {
+    CancelOfferOutcome {
+        offer_id: target.offer_id().to_string(),
+        market_id,
+        success,
+        operation_id,
+        error: error.into(),
+        warning: String::new(),
+    }
 }
 
-async fn fetch_dexie_offer_text(dexie: &DexieClient, offer_id: &str) -> SignerResult<String> {
+async fn fetch_optional_dexie_offer_file_text(
+    dexie: &DexieClient,
+    offer_id: &str,
+) -> SignerResult<String> {
     let response = dexie.get_offer(offer_id).await?;
     if response.is_explicit_failure() {
-        return Err(SignerError::OfferCancelDexieOfferNotFound);
+        return Err(SignerError::OfferCancelOfferFileNotFound);
     }
     let payload = DexieOfferPayload::new(response.into_value());
     payload
@@ -125,111 +123,350 @@ async fn fetch_dexie_offer_text(dexie: &DexieClient, offer_id: &str) -> SignerRe
         .ok_or(SignerError::OfferCancelOfferFileMissing)
 }
 
-/// Cancel an offer on-chain by spending an offered input coin back to vault change.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn cancel_offer_on_chain(
-    params: CancelOfferOnChainParams<'_>,
-) -> SignerResult<CancelOfferOnChainResult> {
+async fn resolve_offer_file_text_for_cancel(
+    offer_id: &str,
+    offer_text: Option<String>,
+    dexie: Option<&DexieClient>,
+) -> SignerResult<Option<String>> {
+    if let Some(text) = offer_text {
+        return Ok(Some(text));
+    }
+    let Some(dexie) = dexie else {
+        return Ok(None);
+    };
+    Ok(Some(
+        fetch_optional_dexie_offer_file_text(dexie, offer_id).await?,
+    ))
+}
+
+async fn build_cancel_spend_bundle(
+    params: &CancelOfferOnChainParams<'_>,
+) -> SignerResult<(SpendBundle, String, chia_sdk_coinset::CoinsetClient)> {
     if params.fee_mojos > 0 {
         return Err(SignerError::Other(
             "offer cancel fee not supported yet".to_string(),
         ));
     }
-    let offer_text = if let Some(text) = params.offer_text {
-        text
+    // Resolve offer inputs before vault/KMS so Dexie/local failures surface without
+    // requiring signer credentials.
+    let offer_text = if let Some(text) = params.offer_text.clone() {
+        Some(text)
+    } else if metadata_sufficient_for_coinset_cancel(params.cancel_metadata.as_ref()) {
+        None
     } else {
-        fetch_dexie_offer_text(params.dexie, params.offer_id).await?
+        resolve_offer_file_text_for_cancel(params.offer_id, None, params.dexie).await?
     };
     let coinset_client =
         client_for_signer_on_network(&params.signer_config, params.operator_network)?;
     let backend = LiveCoinset(&coinset_client);
-    let mut vault_ctx = resolve_vault_spend_context(params.signer_config).await?;
-    let spend_bundle = build_offer_cancel_spend_bundle(
-        &mut vault_ctx,
-        &backend,
-        &offer_text,
-        params.cancel_metadata.as_ref(),
+    let mut vault_ctx = resolve_vault_spend_context(params.signer_config.clone()).await?;
+
+    let spend_bundle = if let Some(text) = offer_text.as_deref() {
+        build_offer_cancel_spend_bundle(
+            &mut vault_ctx,
+            &backend,
+            text,
+            params.cancel_metadata.as_ref(),
+        )
+        .await?
+    } else if let Some(metadata) = params
+        .cancel_metadata
+        .as_ref()
+        .filter(|meta| metadata_sufficient_for_coinset_cancel(Some(meta)))
+    {
+        build_offer_cancel_spend_bundle_from_metadata(&mut vault_ctx, &backend, metadata).await?
+    } else {
+        return Err(SignerError::Other(
+            "offer cancel requires local offer file, stored cancel metadata, or Dexie offer-file fallback"
+                .to_string(),
+        ));
+    };
+    let operation_id = spend_bundle_operation_id(&spend_bundle)?;
+    Ok((spend_bundle, operation_id, coinset_client))
+}
+
+fn prior_offer_state(store: &SqliteStore, offer_id: &str) -> SignerResult<Option<String>> {
+    Ok(store
+        .list_offer_states_for_ids(std::slice::from_ref(&offer_id.to_string()))?
+        .into_iter()
+        .next()
+        .map(|row| row.state))
+}
+
+enum CancelPersistPolicy<'a> {
+    Tracked {
+        store: &'a SqliteStore,
+        prior_state: Option<&'a str>,
+    },
+    Ephemeral,
+}
+
+async fn broadcast_cancel(
+    target: &CancelOfferTarget,
+    market_id: &str,
+    coinset_client: &chia_sdk_coinset::CoinsetClient,
+    spend_bundle: SpendBundle,
+    operation_id: String,
+    persist: CancelPersistPolicy<'_>,
+) -> CancelOfferOutcome {
+    match coinset::broadcast_spend_bundle(coinset_client, spend_bundle).await {
+        Ok(result) => match persist {
+            CancelPersistPolicy::Tracked { store, .. } => match store.ingest_tx_signals(
+                std::slice::from_ref(&result.operation_id),
+                TxSignalIngress::Mempool,
+            ) {
+                Ok(_) => outcome(
+                    target,
+                    market_id.to_string(),
+                    true,
+                    result.operation_id,
+                    String::new(),
+                ),
+                Err(err) => outcome(
+                    target,
+                    market_id.to_string(),
+                    false,
+                    result.operation_id,
+                    format!("cancel broadcast succeeded; observe cancel tx failed: {err}"),
+                ),
+            },
+            CancelPersistPolicy::Ephemeral => outcome(
+                target,
+                market_id.to_string(),
+                true,
+                result.operation_id,
+                String::new(),
+            ),
+        },
+        Err(err) => {
+            if let CancelPersistPolicy::Tracked { store, prior_state } = persist {
+                if let Err(rollback_err) = store.rollback_offer_cancel_submitted(
+                    target.offer_id(),
+                    market_id,
+                    prior_state.unwrap_or("open"),
+                ) {
+                    return outcome(
+                        target,
+                        market_id.to_string(),
+                        false,
+                        operation_id,
+                        format!(
+                            "cancel broadcast failed ({err}); rollback also failed: {rollback_err}"
+                        ),
+                    );
+                }
+            }
+            outcome(
+                target,
+                market_id.to_string(),
+                false,
+                operation_id,
+                err.to_string(),
+            )
+        }
+    }
+}
+
+/// Prepare tracked cancel state. Returns `Some(failure outcome)` on error.
+fn prepare_tracked_cancel_or_outcome(
+    store: &SqliteStore,
+    target: &CancelOfferTarget,
+    market_id: &str,
+    operation_id: &str,
+) -> Option<CancelOfferOutcome> {
+    store
+        .prepare_offer_cancel_submitted(target.offer_id(), market_id, operation_id, None)
+        .err()
+        .map(|err| {
+            outcome(
+                target,
+                market_id.to_string(),
+                false,
+                String::new(),
+                format!("cancel_submitted prepare failed before broadcast: {err}"),
+            )
+        })
+}
+
+async fn build_cancel_bundle_for_target(
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+    cancel_metadata: Option<StoredOfferCancelMetadata>,
+) -> SignerResult<(SpendBundle, String, String, chia_sdk_coinset::CoinsetClient)> {
+    let market_id = target.normalized_market_id();
+    let dexie_for_target = if target.offer_text().is_some()
+        || metadata_sufficient_for_coinset_cancel(cancel_metadata.as_ref())
+    {
+        None
+    } else {
+        dexie
+    };
+    let params = CancelOfferOnChainParams {
+        offer_id: target.offer_id(),
+        signer_config: signer_config.clone(),
+        operator_network,
+        dexie: dexie_for_target,
+        fee_mojos: 0,
+        offer_text: target.offer_text().map(str::to_string),
+        cancel_metadata,
+    };
+    let (spend_bundle, operation_id, coinset_client) = build_cancel_spend_bundle(&params).await?;
+    Ok((spend_bundle, operation_id, market_id, coinset_client))
+}
+
+async fn build_cancel_bundle_or_outcome(
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+    cancel_metadata: Option<StoredOfferCancelMetadata>,
+) -> Result<(SpendBundle, String, String, chia_sdk_coinset::CoinsetClient), CancelOfferOutcome> {
+    match build_cancel_bundle_for_target(
+        dexie,
+        signer_config,
+        operator_network,
+        target,
+        cancel_metadata,
     )
-    .await?;
-    let broadcast = coinset::broadcast_spend_bundle(&coinset_client, spend_bundle).await?;
-    Ok(CancelOfferOnChainResult {
-        operation_id: broadcast.operation_id,
-    })
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(err) => Err(outcome(
+            target,
+            target.normalized_market_id(),
+            false,
+            String::new(),
+            err.to_string(),
+        )),
+    }
+}
+
+async fn cancel_tracked_offer(
+    store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    let cancel_metadata = store.offer_cancel_metadata_for_id(target.offer_id())?;
+    let (spend_bundle, operation_id, market_id, coinset_client) =
+        match build_cancel_bundle_or_outcome(
+            dexie,
+            signer_config,
+            operator_network,
+            target,
+            cancel_metadata,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(out) => return Ok(out),
+        };
+    let prior_state = prior_offer_state(store, target.offer_id())?;
+    if let Some(out) = prepare_tracked_cancel_or_outcome(store, target, &market_id, &operation_id) {
+        return Ok(out);
+    }
+    Ok(broadcast_cancel(
+        target,
+        &market_id,
+        &coinset_client,
+        spend_bundle,
+        operation_id,
+        CancelPersistPolicy::Tracked {
+            store,
+            prior_state: prior_state.as_deref(),
+        },
+    )
+    .await)
+}
+
+async fn cancel_local_file_offer(
+    _store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    let (spend_bundle, operation_id, market_id, coinset_client) =
+        match build_cancel_bundle_or_outcome(dexie, signer_config, operator_network, target, None)
+            .await
+        {
+            Ok(value) => value,
+            Err(out) => return Ok(out),
+        };
+    Ok(broadcast_cancel(
+        target,
+        &market_id,
+        &coinset_client,
+        spend_bundle,
+        operation_id,
+        CancelPersistPolicy::Ephemeral,
+    )
+    .await)
+}
+
+async fn cancel_one_offer(
+    store: &SqliteStore,
+    dexie: Option<&DexieClient>,
+    signer_config: &SignerConfig,
+    operator_network: &str,
+    target: &CancelOfferTarget,
+) -> SignerResult<CancelOfferOutcome> {
+    match target {
+        CancelOfferTarget::Tracked { .. } => {
+            cancel_tracked_offer(store, dexie, signer_config, operator_network, target).await
+        }
+        CancelOfferTarget::LocalFile { .. } => {
+            cancel_local_file_offer(store, dexie, signer_config, operator_network, target).await
+        }
+    }
 }
 
 /// Cancel offers on-chain (spend an offered input coin back to vault change).
 ///
-/// Dexie is used only to fetch the offer file text; cancellation is submitted via Coinset.
-/// Successful submits record `cancel_submitted` and observe the cancel tx for reconcile.
+/// Tracked cancels: prepare `cancel_submitted` (state + tx id, watches kept) →
+/// `push_tx` → observe cancel tx (watches kept until terminal) on success, or roll
+/// state back on broadcast failure.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
 pub async fn cancel_offers_on_chain(
     store: &SqliteStore,
-    dexie: &DexieClient,
+    dexie: Option<&DexieClient>,
     signer_config: SignerConfig,
     operator_network: &str,
     targets: &[CancelOfferTarget],
 ) -> SignerResult<Vec<CancelOfferOutcome>> {
     let mut outcomes = Vec::with_capacity(targets.len());
     for target in targets {
-        let market_id = target.normalized_market_id();
-        let cancel_metadata = if target.persists_state() {
-            store.offer_cancel_metadata_for_id(target.offer_id())?
-        } else {
-            None
-        };
-        match cancel_offer_on_chain(CancelOfferOnChainParams {
-            offer_id: target.offer_id(),
-            signer_config: signer_config.clone(),
-            operator_network,
-            dexie,
-            fee_mojos: 0,
-            offer_text: target.offer_text().map(str::to_string),
-            cancel_metadata,
-        })
-        .await
-        {
-            Ok(result) => {
-                let mut error = String::new();
-                if target.persists_state() {
-                    if let Err(err) = persist_cancel_submitted_after_broadcast(
-                        store,
-                        target.offer_id(),
-                        &market_id,
-                        &result.operation_id,
-                        None,
-                    ) {
-                        error = format!(
-                            "cancel broadcast succeeded (tx {}) but state persist failed: {err}",
-                            result.operation_id
-                        );
-                    }
-                }
-                outcomes.push(CancelOfferOutcome {
-                    offer_id: target.offer_id().to_string(),
-                    market_id,
-                    success: error.is_empty(),
-                    operation_id: result.operation_id,
-                    error,
-                });
-            }
-            Err(err) => {
-                outcomes.push(CancelOfferOutcome {
-                    offer_id: target.offer_id().to_string(),
-                    market_id,
-                    success: false,
-                    operation_id: String::new(),
-                    error: err.to_string(),
-                });
-            }
-        }
+        outcomes
+            .push(cancel_one_offer(store, dexie, &signer_config, operator_network, target).await?);
     }
     Ok(outcomes)
+}
+
+/// Whether any tracked target needs Dexie offer-file fallback (no local text, incomplete metadata).
+///
+/// # Errors
+///
+/// Returns an error if cancel-metadata reads fail.
+pub fn cancel_targets_need_dexie_fallback(
+    store: &SqliteStore,
+    targets: &[CancelOfferTarget],
+) -> SignerResult<bool> {
+    for target in targets {
+        if target.offer_text().is_some() || !target.persists_state() {
+            continue;
+        }
+        let metadata = store.offer_cancel_metadata_for_id(target.offer_id())?;
+        if !metadata_sufficient_for_coinset_cancel(metadata.as_ref()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -261,11 +498,92 @@ mod tests {
         assert_eq!(target.offer_text(), Some("offer1qqq"));
     }
 
+    #[test]
+    fn prepare_keeps_watches_and_observe_does_not_clear() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "11".repeat(32);
+        let p2 = "22".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("seed");
+        store
+            .replace_offer_coin_watches(
+                &offer_id,
+                "m1",
+                std::slice::from_ref(&coin),
+                std::slice::from_ref(&p2),
+            )
+            .expect("watches");
+        store
+            .prepare_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("prepare");
+        let (coins, p2s) = store
+            .list_offer_coin_watches_for_offer(&offer_id)
+            .expect("still watched");
+        assert_eq!(coins, vec![coin.clone()]);
+        assert_eq!(p2s, vec![p2]);
+        store
+            .ingest_tx_signals(std::slice::from_ref(&cancel_tx), TxSignalIngress::Mempool)
+            .expect("observe");
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&coin)
+                .expect("watches kept after observe"),
+            vec![offer_id.clone()]
+        );
+        let signals = store
+            .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
+            .expect("tx");
+        assert!(signals
+            .get(&cancel_tx)
+            .is_some_and(|row| row.mempool_observed_at.is_some()));
+    }
+
+    #[test]
+    fn rollback_prepare_restores_prior_state_without_touching_watches() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "11".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("seed");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+            .expect("watches");
+        store
+            .prepare_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("prepare");
+        store
+            .rollback_offer_cancel_submitted(&offer_id, "m1", "open")
+            .expect("rollback");
+        assert_eq!(
+            store
+                .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+                .expect("rows")[0]
+                .state,
+            "open"
+        );
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&coin)
+                .expect("watches kept"),
+            vec![offer_id]
+        );
+        assert!(!store
+            .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
+            .expect("no observe yet")
+            .contains_key(&cancel_tx));
+    }
+
     #[tokio::test]
     async fn local_file_cancel_does_not_write_offer_state() {
         let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         store
             .upsert_offer_state("existing-offer", "m1", "open", Some(0))
             .expect("seed");
@@ -274,10 +592,9 @@ mod tests {
             market_id: "m1".to_string(),
             offer_text: "offer1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq".to_string(),
         };
-        let dexie = DexieClient::new("http://127.0.0.1:1");
         let outcomes = cancel_offers_on_chain(
             &store,
-            &dexie,
+            None,
             test_signer_config("http://127.0.0.1:1"),
             "mainnet",
             std::slice::from_ref(&target),
@@ -285,32 +602,24 @@ mod tests {
         .await
         .expect("cancel batch");
         assert_eq!(outcomes.len(), 1);
-        assert!(
-            !outcomes[0].success,
-            "invalid offer should fail before broadcast"
-        );
-        assert!(
-            store
-                .offer_state_for_id("local-offer-test")
-                .expect("lookup")
-                .is_none(),
-            "local file cancel must not upsert offer_state"
-        );
+        assert!(!outcomes[0].success);
+        assert!(store
+            .offer_state_for_id("local-offer-test")
+            .expect("lookup")
+            .is_none());
         assert_eq!(
             store
                 .offer_state_for_id("existing-offer")
                 .expect("lookup")
                 .as_deref(),
-            Some("open"),
-            "unrelated offer rows must be preserved"
+            Some("open")
         );
     }
 
     #[tokio::test]
     async fn tracked_cancel_failure_does_not_write_cancel_submitted() {
         let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         store
             .upsert_offer_state("offer-open", "m1", "open", Some(0))
             .expect("seed");
@@ -318,10 +627,9 @@ mod tests {
             offer_id: "offer-open".to_string(),
             market_id: "m1".to_string(),
         };
-        let dexie = DexieClient::new("http://127.0.0.1:1");
         let outcomes = cancel_offers_on_chain(
             &store,
-            &dexie,
+            None,
             test_signer_config("http://127.0.0.1:1"),
             "mainnet",
             std::slice::from_ref(&target),
@@ -335,8 +643,7 @@ mod tests {
                 .offer_state_for_id("offer-open")
                 .expect("lookup")
                 .as_deref(),
-            Some("open"),
-            "failed tracked cancel must not advance lifecycle state"
+            Some("open")
         );
     }
 }

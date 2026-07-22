@@ -43,7 +43,7 @@ async fn prepare_daemon_combine_inputs(
         &spendable,
         requested_count,
         target_coin_amount_mojos,
-        Some(&ctx.watched_coin_ids),
+        None,
         Some(capped_count),
     );
     if combine_input_coin_ids.len() < 2 {

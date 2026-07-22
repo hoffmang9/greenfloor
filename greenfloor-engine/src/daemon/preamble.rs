@@ -6,13 +6,15 @@ use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    LogContext, COINSET_MEMPOOL_ERROR, COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR,
-    MEMPOOL_OBSERVED, XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT,
+    LogContext, CANCEL_SUBMITTED_CONFIRM_POLL_ERROR, COINSET_MEMPOOL_ERROR,
+    COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR, MEMPOOL_OBSERVED, XCH_PRICE_ERROR,
+    XCH_PRICE_SNAPSHOT,
 };
 use crate::storage::SqliteStore;
 
-use super::coinset_ws::capture_coinset_websocket_once;
-use super::watchlist::cache::CoinWatchlistCache;
+use super::coinset_ws::{
+    capture_coinset_websocket_once, confirm_cancel_submitted_txs_via_http, CoinsetWsShared,
+};
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -26,7 +28,7 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
-    coin_watchlist: &CoinWatchlistCache,
+    coinset: &CoinsetWsShared,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
@@ -59,7 +61,7 @@ pub async fn run_cycle_preamble(
 
     if use_websocket_capture {
         if let Err(err) =
-            capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
+            capture_coinset_websocket_once(store, program, coinset_base_url, coinset).await
         {
             result.cycle_error_count += 1;
             LogContext::DAEMON_CYCLE.dual_audit(
@@ -85,6 +87,20 @@ pub async fn run_cycle_preamble(
         }
     }
 
+    if let Err(err) =
+        confirm_cancel_submitted_txs_via_http(store, &program.network, coinset_base_url).await
+    {
+        result.cycle_error_count += 1;
+        LogContext::DAEMON_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "cancel submitted confirmation poll failed",
+            CANCEL_SUBMITTED_CONFIRM_POLL_ERROR,
+            &json!({"error": err.to_string()}),
+            None,
+        )?;
+    }
+
     Ok(result)
 }
 
@@ -100,7 +116,7 @@ async fn poll_coinset_mempool_snapshot(
         Some(base_url)
     };
     let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
-    let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
+    let new_count = store.ingest_tx_signals(&tx_ids, crate::storage::TxSignalIngress::Mempool)?;
     LogContext::DAEMON_CYCLE.dual_audit(
         store,
         Level::DEBUG,
@@ -186,7 +202,6 @@ pub(crate) fn xch_price_from_env_override() -> SignerResult<Option<f64>> {
 mod tests {
     use super::*;
     use crate::daemon::test_support::{open_test_store, sample_mainnet_program};
-    use crate::daemon::watchlist::CoinWatchlistCache;
     use crate::operator_log::XCH_PRICE_SNAPSHOT;
     use crate::test_env::EnvRestoreGuard;
 
@@ -208,13 +223,12 @@ mod tests {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
-        let watchlist = CoinWatchlistCache::new();
 
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "",
-            &watchlist,
+            &CoinsetWsShared::empty(),
             false,
             false,
         )
@@ -234,13 +248,12 @@ mod tests {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
-        let watchlist = CoinWatchlistCache::new();
 
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
             "http://127.0.0.1:1",
-            &watchlist,
+            &CoinsetWsShared::empty(),
             true,
             false,
         )

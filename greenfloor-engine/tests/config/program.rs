@@ -27,7 +27,7 @@ fn parse_program_config_minimal_valid() {
     assert!(!cfg.runtime_offer_parallelism_enabled);
     assert_eq!(cfg.runtime_offer_parallelism_max_workers, 4);
     assert_eq!(cfg.runtime_reservation_ttl_seconds, 300);
-    assert_eq!(cfg.offer_publish_venue, "dexie");
+    assert_eq!(cfg.offer_publish_venue, "coinset");
     assert_eq!(cfg.coin_ops_minimum_fee_mojos, 0);
     assert_eq!(cfg.app_log_level, "INFO");
     assert!(!cfg.app_log_level_was_missing);

@@ -181,6 +181,27 @@ MCP operating rules: always check `success`; prefer confirmed block data over me
 pass `include_spent=true` when tracing coin history. Full catalog:
 `docs/COINSET_DOCS_AND_API.md` → **Coinset MCP Server**.
 
+### Offer publish + WS filters (operator)
+
+- Default publish venue is Coinset `POST /push_offer` (`venues.offer_publish.provider: coinset`).
+  Canonical offer id is the 64-hex spend-bundle hash (Dexie `trade_id`).
+- Daemon WS URL includes `events=transaction,offer&tx_status=pending,confirmed` plus stable
+  market `p2` filters (receive puzzle + CAT outer from cats ticker index / `InventoryP2Index`).
+  HTTP webhooks are not used. Operator `websocket_url` query strings are replaced with these
+  required filters. Loop and `greenfloord --once` both build the index; config reload rebuilds
+  it and reconnects WS so filters stay current.
+- Durable `offer_coin_watches` (maker coins + known maker p2s) are registered
+  atomically at post and cleared on terminal lifecycle. Schema migration backfills
+  missing watches from cancel metadata (`OfferCancelFields`). Shared market inventory p2s are not written
+  into per-offer watches. Optional coin-id fields on transaction frames are matched
+  when present. Offer-frame `p2s` must not drive watches. Dexie reconcile runs only
+  for Dexie-authoritative offers; Coinset/splash offers skip Dexie HTTP. Dexie list
+  matching uses `trade_id` ∪ bech32 `id`. Inventory freshness skips blind HTTP polls
+  within 90s when no relevant WS activity.
+- Cancel remains `POST /push_tx` + WS watch; do not submit spends over WebSocket.
+- Mainnet frame shape: documented `WsEnvelope` (`message.type` + `message.data`). Non-envelope
+  payloads are ignored.
+
 ## 7) Failure handling
 
 - If batched range support is false, run full-window scans without incremental mode.

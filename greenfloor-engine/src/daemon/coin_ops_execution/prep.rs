@@ -24,6 +24,7 @@ pub(crate) async fn list_spendable_coins_for_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<Vec<SpendableCoin>> {
+    // `list_spendable_coins` already excludes durable maker watches.
     skip_on_signer_err_for_plan(plan, ctx.list_spendable_coins().await)
 }
 
@@ -36,14 +37,4 @@ pub(crate) fn skip_if_spendable_empty(
         return Err(plan_skip(plan, empty_reason));
     }
     Ok(coins)
-}
-
-pub(crate) fn unwatched_spendable(
-    ctx: &CoinOpExecContext,
-    coins: impl IntoIterator<Item = SpendableCoin>,
-) -> Vec<SpendableCoin> {
-    coins
-        .into_iter()
-        .filter(|coin| !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
-        .collect()
 }
