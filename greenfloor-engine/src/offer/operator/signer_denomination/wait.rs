@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -17,7 +16,8 @@ use crate::offer::bootstrap::{
 use super::planning::bootstrap_coins_in_base_units;
 use super::BootstrapShapeContext;
 
-/// Sleep / timeout pacing for [`wait_for_bootstrap_shape_step`].
+/// Sleep pacing for [`wait_for_bootstrap_shape_step`] (same pattern as
+/// [`crate::daemon::coinset_ws::OnceCaptureTimings`]).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct BootstrapWaitTimings {
     pub initial_sleep_seconds: f64,
@@ -72,13 +72,9 @@ pub(super) struct BootstrapWaitConfig<'a> {
     pub network: &'a str,
     pub signer: &'a SignerConfig,
     pub ctx: &'a BootstrapShapeContext,
-    pub timeout_seconds: u64,
-    pub min_timeout_seconds: u64,
+    pub timeout: Duration,
     pub step: BootstrapWaitStepKind,
     pub timings: BootstrapWaitTimings,
-    /// When set (unit tests), use this atomic as elapsed seconds instead of wall clock.
-    /// Advanced by 1 after each sleep so timeout paths do not wait a real second.
-    pub test_elapsed_secs: Option<&'a AtomicI64>,
 }
 
 pub(super) async fn wait_for_bootstrap_shape_step(
@@ -88,32 +84,30 @@ pub(super) async fn wait_for_bootstrap_shape_step(
         network,
         signer,
         ctx,
-        timeout_seconds,
-        min_timeout_seconds,
+        timeout,
         step,
         timings,
-        test_elapsed_secs,
     } = config;
     let start = Instant::now();
-    let timeout = crate::config::u64_to_i64(
-        timeout_seconds.max(min_timeout_seconds.max(1)),
-        "runtime.offer_bootstrap_wait_timeout_seconds",
-    )?;
+    // Second-granularity schedule bound for [`poll_exponential_sleep_now`]; wall-clock
+    // deadline is [`timeout`] (supports sub-second unit-test deadlines).
+    let schedule_timeout = i64::try_from(timeout.as_secs().max(1)).map_err(|_| {
+        SignerError::Other("offer bootstrap wait timeout seconds overflow".to_string())
+    })?;
     let initial_sleep = timings.initial_sleep_seconds;
     let max_sleep = timings.max_sleep_seconds;
     let mut sleep_seconds = 0.0f64;
     let mut baseline_spendable: Option<Vec<BootstrapCoin>> = None;
     loop {
-        let elapsed_seconds = if let Some(elapsed) = test_elapsed_secs {
-            elapsed.load(Ordering::Relaxed)
-        } else {
-            i64::try_from(start.elapsed().as_secs()).map_err(|_| {
-                SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
-            })?
-        };
+        if start.elapsed() >= timeout {
+            return Err(SignerError::BootstrapShapeWaitTimeout);
+        }
+        let elapsed_seconds = i64::try_from(start.elapsed().as_secs()).map_err(|_| {
+            SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
+        })?;
         let Some(next_sleep) = poll_exponential_sleep_now(
             elapsed_seconds,
-            timeout,
+            schedule_timeout,
             sleep_seconds,
             initial_sleep,
             max_sleep,
@@ -164,10 +158,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
                 spendable_coins: spendable,
             });
         }
-        tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
-        if let Some(elapsed) = test_elapsed_secs {
-            let _ = elapsed.fetch_add(1, Ordering::Relaxed);
-        }
+        tokio::time::sleep(Duration::from_secs_f64(next_sleep)).await;
         sleep_seconds =
             poll_exponential_advance_sleep(sleep_seconds, initial_sleep, max_sleep, 1.5);
     }
@@ -175,7 +166,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicI64;
+    use std::time::Duration;
 
     use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig, BootstrapWaitTimings};
     use crate::error::SignerError;
@@ -189,25 +180,20 @@ mod tests {
     };
     use crate::test_support::signer_config::test_signer_config;
 
-    const TEST_MIN_TIMEOUT_SECONDS: u64 = 1;
-
     fn unit_test_wait_config<'a>(
         network: &'a str,
         signer: &'a crate::config::SignerConfig,
         ctx: &'a BootstrapShapeContext,
-        timeout_seconds: u64,
+        timeout: Duration,
         step: BootstrapWaitStepKind,
-        elapsed: &'a AtomicI64,
     ) -> BootstrapWaitConfig<'a> {
         BootstrapWaitConfig {
             network,
             signer,
             ctx,
-            timeout_seconds,
-            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
+            timeout,
             step,
             timings: BootstrapWaitTimings::UNIT_TEST,
-            test_elapsed_secs: Some(elapsed),
         }
     }
 
@@ -244,14 +230,12 @@ mod tests {
         }];
         let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let elapsed = AtomicI64::new(0);
         let completed = wait_for_bootstrap_shape_step(unit_test_wait_config(
             "mainnet",
             &signer,
             &ctx,
-            30,
+            Duration::from_secs(30),
             BootstrapWaitStepKind::AfterCombine,
-            &elapsed,
         ))
         .await
         .expect("combine wait should ignore change-only inventory");
@@ -286,14 +270,12 @@ mod tests {
         }];
         let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let elapsed = AtomicI64::new(0);
         let err = wait_for_bootstrap_shape_step(unit_test_wait_config(
             "mainnet",
             &signer,
             &ctx,
-            1,
+            Duration::from_millis(20),
             BootstrapWaitStepKind::AfterCombine,
-            &elapsed,
         ))
         .await
         .expect_err("timeout");
@@ -355,14 +337,12 @@ mod tests {
             test_overrides: crate::offer::operator::SignerDenominationTestOverrides::default(),
         };
 
-        let elapsed = AtomicI64::new(0);
         let completed = wait_for_bootstrap_shape_step(unit_test_wait_config(
             "mainnet",
             &signer,
             &ctx,
-            30,
+            Duration::from_secs(30),
             BootstrapWaitStepKind::AfterSplit,
-            &elapsed,
         ))
         .await
         .expect("split wait should finish on terminal still_needs_split");

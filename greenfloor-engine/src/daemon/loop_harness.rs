@@ -7,13 +7,12 @@ use std::time::Duration;
 use crate::daemon::run_once::DaemonCycleTestControls;
 
 /// Test-only controls for [`super::daemon_loop::run_daemon_loop_with_harness`].
+///
+/// The harness path never starts the background Coinset websocket thread.
 #[derive(Debug, Clone)]
 pub struct DaemonLoopTestHarness {
     pub max_cycles: usize,
     pub cycle_sleep: Duration,
-    /// When true (default), skip the background Coinset websocket thread so loop
-    /// lifecycle tests are not blocked on connect/DNS timeouts during teardown.
-    pub skip_websocket: bool,
     pub cycle_test_controls: DaemonCycleTestControls,
 }
 
@@ -22,7 +21,6 @@ impl Default for DaemonLoopTestHarness {
         Self {
             max_cycles: 1,
             cycle_sleep: Duration::ZERO,
-            skip_websocket: true,
             cycle_test_controls: DaemonCycleTestControls {
                 skip_strategy_execution: true,
                 ..DaemonCycleTestControls::default()
@@ -83,7 +81,7 @@ mod tests {
                 markets_path: markets,
                 testnet_markets_path: None,
                 state_db_override: Some(db_path.display().to_string()),
-                // Unused when harness.skip_websocket is true (default).
+                // Unused: harness path does not start the Coinset websocket loop.
                 coinset_base_url: "http://127.0.0.1:9".to_string(),
                 state_dir: state_dir.clone(),
                 allowed_key_ids: Vec::new(),

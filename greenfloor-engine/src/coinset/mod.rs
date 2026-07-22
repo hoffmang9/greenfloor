@@ -10,7 +10,7 @@ mod json_util;
 mod offer_assets;
 mod pagination;
 mod parse;
-mod poll;
+pub(crate) mod poll;
 mod presplit;
 pub mod probe;
 mod retry;
@@ -55,6 +55,7 @@ pub use parse::{
     coin_from_record, coin_id_from_record, coin_records_from_payload,
     coin_spend_from_solution_payload, record_from_payload,
 };
+pub(crate) use poll::PollConfig;
 pub use presplit::{fetch_offer_input_cat, fetch_unspent_offer_input_coin, wait_for_unspent_cat};
 pub use probe::{build_coinset_probe_report, run_coinset_probe_command, CoinsetProbeCliArgs};
 pub use retry::{
@@ -64,6 +65,7 @@ pub use retry::{
 pub use rpc_result::ensure_coinset_rpc_success;
 pub use scan_client::{DirectCoinsetScanClient, ResolvedDirectScanClient};
 pub use signer_client::{client_for_network, client_for_signer_on_network};
+pub(crate) use spent_verify::wait_until_coins_spent_poll;
 pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use vault_fetch::fetch_latest_vault;
 pub use wallet_io::{

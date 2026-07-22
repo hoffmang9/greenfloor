@@ -104,8 +104,7 @@ async fn coin_records_fails_on_success_false() {
 }
 
 #[tokio::test]
-async fn coin_records_retryable_transport_errors() {
-    // HTTP 503 through the real client + retry wrapper (unit-test backoff).
+async fn coin_records_surfaces_retryable_error_on_http_503() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
@@ -125,12 +124,6 @@ async fn coin_records_retryable_transport_errors() {
     .expect_err("503");
     assert!(matches!(err, SignerError::Coinset(_)));
     assert!(script_engine_error_retryable(&err));
-
-    // Connection-refused classification (no live dead-port wait; string path is
-    // covered in cli_util unit tests and exercised here via the same classifier).
-    assert!(script_engine_error_retryable(&SignerError::Coinset(
-        "error sending request for url (http://127.0.0.1:1/): connection refused".to_string(),
-    )));
 }
 
 #[tokio::test]

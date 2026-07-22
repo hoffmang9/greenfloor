@@ -62,14 +62,6 @@ fn loop_should_continue(
     true
 }
 
-fn loop_should_start_websocket(#[cfg(test)] harness: Option<&DaemonLoopTestHarness>) -> bool {
-    #[cfg(test)]
-    if let Some(harness) = harness {
-        return !harness.skip_websocket;
-    }
-    true
-}
-
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
@@ -111,19 +103,26 @@ async fn run_daemon_loop_inner(
     );
     #[cfg(test)]
     let harness_ref = harness.as_ref();
-    let _ws_handle = if loop_should_start_websocket(
-        #[cfg(test)]
-        harness_ref,
-    ) {
+    // In-process harness never starts the background WS thread (avoids connect/DNS
+    // teardown hangs). Production `run_daemon_loop` always starts it.
+    #[cfg(test)]
+    let _ws_handle = if harness_ref.is_some() {
+        None
+    } else {
         Some(start_coinset_websocket_loop(
             db_path,
             program,
             request.coinset_base_url.clone(),
             Arc::clone(&coinset),
         ))
-    } else {
-        None
     };
+    #[cfg(not(test))]
+    let _ws_handle = start_coinset_websocket_loop(
+        db_path,
+        program,
+        request.coinset_base_url.clone(),
+        Arc::clone(&coinset),
+    );
 
     let mut dispatch_state = DaemonDispatchState::default();
     let mut cycles_completed = 0usize;

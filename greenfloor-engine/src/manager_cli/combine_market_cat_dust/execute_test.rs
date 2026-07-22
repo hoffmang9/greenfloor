@@ -7,7 +7,7 @@ use crate::coinset::test_support::{
     coin_record_by_name_request_json, mock_get_coin_record_by_name_body,
     mock_unspent_coin_record_by_name_body,
 };
-use crate::coinset::CoinSpentVerifyConfig;
+use crate::coinset::{CoinSpentVerifyConfig, PollConfig};
 use crate::error::SignerError;
 use crate::vault_coinset_scan::{DustCombineBatch, ProvenDustCoin};
 
@@ -57,7 +57,8 @@ async fn combine_batch_executor_waits_until_inputs_are_spent() {
             .await;
     }
 
-    test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::unit_test())
+    test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::default())
+        .with_verify_poll(PollConfig::UNIT_TEST)
         .wait_for_batch_spent(&batch)
         .await
         .expect("inputs spent");
@@ -78,7 +79,8 @@ async fn combine_batch_executor_verify_times_out_when_inputs_stay_unspent() {
         .create_async()
         .await;
 
-    let err = test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::unit_test())
+    let err = test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::default())
+        .with_verify_poll(PollConfig::UNIT_TEST)
         .wait_for_batch_spent(&batch)
         .await
         .expect_err("verify timeout");

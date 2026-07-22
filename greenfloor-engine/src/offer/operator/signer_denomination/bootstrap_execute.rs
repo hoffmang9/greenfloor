@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::json;
 
 use crate::error::{SignerError, SignerResult};
@@ -13,10 +15,14 @@ use super::types::{
     BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure,
     BootstrapPhaseResult,
 };
-use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
+use super::wait::{wait_for_bootstrap_shape_step, BootstrapWaitConfig, BootstrapWaitTimings};
 use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 
 const BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS: u64 = 10;
+
+fn bootstrap_wait_timeout(timeout_seconds: u64) -> Duration {
+    Duration::from_secs(timeout_seconds.max(BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS))
+}
 
 pub(crate) struct BootstrapShapeContext {
     pub(crate) split_asset_id: String,
@@ -136,14 +142,13 @@ async fn execute_bootstrap_combine_step(
         network: &ctx.gated.operator_network,
         signer: &ctx.gated.signer,
         ctx: shape,
-        timeout_seconds: ctx
-            .gated
-            .program
-            .runtime_offer_bootstrap_wait_timeout_seconds,
-        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+        timeout: bootstrap_wait_timeout(
+            ctx.gated
+                .program
+                .runtime_offer_bootstrap_wait_timeout_seconds,
+        ),
         step: BootstrapWaitStepKind::AfterCombine,
-        timings: super::wait::BootstrapWaitTimings::PRODUCTION,
-        test_elapsed_secs: None,
+        timings: BootstrapWaitTimings::PRODUCTION,
     })
     .await
     .map_err(|err| {
@@ -256,14 +261,14 @@ pub(super) async fn execute_bootstrap_shape(
         network: &build_ctx.gated.operator_network,
         signer: &build_ctx.gated.signer,
         ctx: &shape,
-        timeout_seconds: build_ctx
-            .gated
-            .program
-            .runtime_offer_bootstrap_wait_timeout_seconds,
-        min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
+        timeout: bootstrap_wait_timeout(
+            build_ctx
+                .gated
+                .program
+                .runtime_offer_bootstrap_wait_timeout_seconds,
+        ),
         step: BootstrapWaitStepKind::AfterSplit,
-        timings: super::wait::BootstrapWaitTimings::PRODUCTION,
-        test_elapsed_secs: None,
+        timings: BootstrapWaitTimings::PRODUCTION,
     })
     .await
     {
