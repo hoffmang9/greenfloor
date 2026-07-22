@@ -7,7 +7,7 @@
 //! | [`CoinOpTestOverrides`](crate::coin_ops::execution::CoinOpTestOverrides) | coin ops | `CoinOpExecContext.test_overrides` | `run_coin_split_with_test_overrides`, `execute_managed_coin_op_plans_with_test_overrides` |
 //! | [`BuildOfferTestOverrides`](crate::offer::operator::BuildOfferTestOverrides) | offer operator | `BuildAndPostOfferRequest.test_overrides` | `run_command_with_test_overrides` |
 //! | [`DaemonDispatchTestInjections`](crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections) | daemon dispatch | `DaemonCycleTestControls.offer_dispatch` | `ParallelDispatchHarness::set_offer_dispatch` |
-//! | [`DaemonLoopTestHarness`](crate::daemon::loop_harness::DaemonLoopTestHarness) | daemon loop | in-process harness only | `run_daemon_loop_with_harness` |
+//! | [`DaemonLoopTestHarness`](crate::daemon::loop_harness::DaemonLoopTestHarness) | daemon loop | in-process harness only (`skip_websocket` default) | `run_daemon_loop_with_harness` |
 //!
 //! ## Rules
 //!

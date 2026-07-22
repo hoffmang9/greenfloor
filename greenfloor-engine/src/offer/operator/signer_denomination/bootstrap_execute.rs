@@ -142,6 +142,8 @@ async fn execute_bootstrap_combine_step(
             .runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterCombine,
+        timings: super::wait::BootstrapWaitTimings::PRODUCTION,
+        test_elapsed_secs: None,
     })
     .await
     .map_err(|err| {
@@ -260,6 +262,8 @@ pub(super) async fn execute_bootstrap_shape(
             .runtime_offer_bootstrap_wait_timeout_seconds,
         min_timeout_seconds: BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS,
         step: BootstrapWaitStepKind::AfterSplit,
+        timings: super::wait::BootstrapWaitTimings::PRODUCTION,
+        test_elapsed_secs: None,
     })
     .await
     {

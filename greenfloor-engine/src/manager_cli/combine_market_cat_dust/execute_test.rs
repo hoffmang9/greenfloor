@@ -19,7 +19,7 @@ async fn combine_batch_executor_rejects_zero_total_batch() {
         cat.coin.puzzle_hash,
         0,
     );
-    let err = test_combine_batch_executor("http://127.0.0.1:1", CoinSpentVerifyConfig::default())
+    let err = test_combine_batch_executor("http://coinset.test", CoinSpentVerifyConfig::default())
         .combine_batch(&DustCombineBatch {
             items: vec![ProvenDustCoin::from_cat(cat)],
         })
@@ -31,7 +31,7 @@ async fn combine_batch_executor_rejects_zero_total_batch() {
 #[tokio::test]
 async fn combine_batch_executor_rejects_invalid_cat_asset_id() {
     let err = test_combine_batch_executor_with_asset(
-        "http://127.0.0.1:1",
+        "http://coinset.test",
         "not-valid-hex",
         CoinSpentVerifyConfig::default(),
     )
@@ -57,16 +57,10 @@ async fn combine_batch_executor_waits_until_inputs_are_spent() {
             .await;
     }
 
-    test_combine_batch_executor(
-        &server.url(),
-        CoinSpentVerifyConfig {
-            timeout_seconds: 5,
-            poll_seconds: 1,
-        },
-    )
-    .wait_for_batch_spent(&batch)
-    .await
-    .expect("inputs spent");
+    test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::unit_test())
+        .wait_for_batch_spent(&batch)
+        .await
+        .expect("inputs spent");
 }
 
 #[tokio::test]
@@ -80,18 +74,13 @@ async fn combine_batch_executor_verify_times_out_when_inputs_stay_unspent() {
             coin_record_by_name_request_json(coin.coin_id()),
         ))
         .with_body(mock_unspent_coin_record_by_name_body(&coin))
+        .expect_at_least(1)
         .create_async()
         .await;
 
-    let err = test_combine_batch_executor(
-        &server.url(),
-        CoinSpentVerifyConfig {
-            timeout_seconds: 1,
-            poll_seconds: 1,
-        },
-    )
-    .wait_for_batch_spent(&batch)
-    .await
-    .expect_err("verify timeout");
+    let err = test_combine_batch_executor(&server.url(), CoinSpentVerifyConfig::unit_test())
+        .wait_for_batch_spent(&batch)
+        .await
+        .expect_err("verify timeout");
     assert!(matches!(err, SignerError::CombineInputVerifyTimeout));
 }

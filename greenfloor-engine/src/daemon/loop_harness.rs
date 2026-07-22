@@ -11,6 +11,9 @@ use crate::daemon::run_once::DaemonCycleTestControls;
 pub struct DaemonLoopTestHarness {
     pub max_cycles: usize,
     pub cycle_sleep: Duration,
+    /// When true (default), skip the background Coinset websocket thread so loop
+    /// lifecycle tests are not blocked on connect/DNS timeouts during teardown.
+    pub skip_websocket: bool,
     pub cycle_test_controls: DaemonCycleTestControls,
 }
 
@@ -19,6 +22,7 @@ impl Default for DaemonLoopTestHarness {
         Self {
             max_cycles: 1,
             cycle_sleep: Duration::ZERO,
+            skip_websocket: true,
             cycle_test_controls: DaemonCycleTestControls {
                 skip_strategy_execution: true,
                 ..DaemonCycleTestControls::default()
@@ -79,7 +83,8 @@ mod tests {
                 markets_path: markets,
                 testnet_markets_path: None,
                 state_db_override: Some(db_path.display().to_string()),
-                coinset_base_url: "http://coinset.local".to_string(),
+                // Unused when harness.skip_websocket is true (default).
+                coinset_base_url: "http://127.0.0.1:9".to_string(),
                 state_dir: state_dir.clone(),
                 allowed_key_ids: Vec::new(),
             };
@@ -130,8 +135,7 @@ mod tests {
             .len()
     }
 
-    #[tokio::test]
-    async fn loop_runs_configured_cycle_count_and_returns_last_exit_code() {
+    async fn fixture_with_dexie_offers() -> (mockito::ServerGuard, LoopFixture) {
         let mut server = mockito::Server::new_async().await;
         let _offers = server
             .mock(
@@ -143,6 +147,12 @@ mod tests {
             .create_async()
             .await;
         let fixture = LoopFixture::new(&server.url());
+        (server, fixture)
+    }
+
+    #[tokio::test]
+    async fn loop_runs_configured_cycle_count_and_returns_last_exit_code() {
+        let (_server, fixture) = fixture_with_dexie_offers().await;
         let exit_code = fixture.run(DaemonLoopTestHarness::with_cycles(2)).await;
         assert_eq!(exit_code, 0);
         let store = SqliteStore::open(&fixture.db_path).expect("open db");
@@ -151,17 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn loop_returns_non_zero_when_last_cycle_fails() {
-        let mut server = mockito::Server::new_async().await;
-        let _offers = server
-            .mock(
-                "GET",
-                mockito::Matcher::Regex(r"/v1/offers\?.*".to_string()),
-            )
-            .with_status(200)
-            .with_body(r#"{"success":true,"offers":[]}"#)
-            .create_async()
-            .await;
-        let fixture = LoopFixture::new(&server.url());
+        let (_server, fixture) = fixture_with_dexie_offers().await;
         let exit_code = fixture
             .run(DaemonLoopTestHarness {
                 max_cycles: 1,
@@ -178,17 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn loop_clears_reload_marker_during_cycle() {
-        let mut server = mockito::Server::new_async().await;
-        let _offers = server
-            .mock(
-                "GET",
-                mockito::Matcher::Regex(r"/v1/offers\?.*".to_string()),
-            )
-            .with_status(200)
-            .with_body(r#"{"success":true,"offers":[]}"#)
-            .create_async()
-            .await;
-        let fixture = LoopFixture::new(&server.url());
+        let (_server, fixture) = fixture_with_dexie_offers().await;
         std::fs::write(
             reload_marker_path(&fixture.state_dir),
             br#"{"reload_id":"reload-loop-1"}"#,

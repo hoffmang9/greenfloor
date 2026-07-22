@@ -62,6 +62,14 @@ fn loop_should_continue(
     true
 }
 
+fn loop_should_start_websocket(#[cfg(test)] harness: Option<&DaemonLoopTestHarness>) -> bool {
+    #[cfg(test)]
+    if let Some(harness) = harness {
+        return !harness.skip_websocket;
+    }
+    true
+}
+
 async fn run_one_loop_cycle(
     request: &DaemonLoopRequest,
     dispatch_state: &mut DaemonDispatchState,
@@ -101,17 +109,24 @@ async fn run_daemon_loop_inner(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     );
-    let _ws_handle = start_coinset_websocket_loop(
-        db_path,
-        program,
-        request.coinset_base_url.clone(),
-        Arc::clone(&coinset),
-    );
+    #[cfg(test)]
+    let harness_ref = harness.as_ref();
+    let _ws_handle = if loop_should_start_websocket(
+        #[cfg(test)]
+        harness_ref,
+    ) {
+        Some(start_coinset_websocket_loop(
+            db_path,
+            program,
+            request.coinset_base_url.clone(),
+            Arc::clone(&coinset),
+        ))
+    } else {
+        None
+    };
 
     let mut dispatch_state = DaemonDispatchState::default();
     let mut cycles_completed = 0usize;
-    #[cfg(test)]
-    let harness_ref = harness.as_ref();
 
     loop {
         let runtime = load_daemon_program_runtime(&request.program_path)?;

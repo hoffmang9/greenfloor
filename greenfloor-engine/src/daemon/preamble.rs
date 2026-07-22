@@ -246,13 +246,21 @@ mod tests {
     #[tokio::test]
     async fn run_cycle_preamble_mempool_poll_failure_increments_cycle_errors() {
         let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "33.0")]);
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_all_mempool_tx_ids")
+            .with_status(503)
+            .with_body("service unavailable")
+            .expect_at_least(1)
+            .create_async()
+            .await;
         let dir = tempfile::tempdir().expect("tempdir");
         let store = open_test_store(&dir.path().join("state.sqlite"));
 
         let result = run_cycle_preamble(
             &sample_mainnet_program(),
             &store,
-            "http://127.0.0.1:1",
+            &server.url(),
             &CoinsetWsShared::empty(),
             true,
             false,

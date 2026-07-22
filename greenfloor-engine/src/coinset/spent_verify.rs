@@ -7,6 +7,10 @@ use crate::error::{SignerError, SignerResult};
 const DEFAULT_VERIFY_TIMEOUT_SECS: u64 = 15 * 60;
 const DEFAULT_VERIFY_POLL_SECS: u64 = 8;
 
+/// Sentinel values for [`CoinSpentVerifyConfig::unit_test`] millisecond poll timings.
+#[cfg(test)]
+const UNIT_TEST_VERIFY_SENTINEL: u64 = u64::MAX;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoinSpentVerifyConfig {
     pub timeout_seconds: u64,
@@ -23,7 +27,26 @@ impl Default for CoinSpentVerifyConfig {
 }
 
 impl CoinSpentVerifyConfig {
+    /// Sub-second verify poll loop for unit tests.
+    #[cfg(test)]
+    #[must_use]
+    pub const fn unit_test() -> Self {
+        Self {
+            timeout_seconds: UNIT_TEST_VERIFY_SENTINEL,
+            poll_seconds: UNIT_TEST_VERIFY_SENTINEL,
+        }
+    }
+
     fn poll_config(self) -> PollConfig {
+        #[cfg(test)]
+        if self.timeout_seconds == UNIT_TEST_VERIFY_SENTINEL
+            && self.poll_seconds == UNIT_TEST_VERIFY_SENTINEL
+        {
+            return PollConfig {
+                timeout: std::time::Duration::from_millis(40),
+                interval: std::time::Duration::from_millis(1),
+            };
+        }
         PollConfig::from_seconds(self.timeout_seconds, self.poll_seconds)
     }
 }

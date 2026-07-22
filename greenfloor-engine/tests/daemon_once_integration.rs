@@ -87,7 +87,7 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
         markets: &markets,
         home: &home,
         db_path: &db_path,
-        coinset_base: "http://coinset.local",
+        coinset_base: "http://127.0.0.1:9",
         poll_coinset_mempool: false,
         test_controls: controls.clone(),
     });

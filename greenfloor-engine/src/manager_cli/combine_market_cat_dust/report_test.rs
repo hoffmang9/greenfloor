@@ -168,7 +168,7 @@ async fn finalize_execute_job_report_runs_combine_batches() {
         markets_path: &dir.path().join("markets.yaml"),
         testnet_markets_path: None,
         request_network: Some("mainnet"),
-        coinset_base_url: Some("http://127.0.0.1:1"),
+        coinset_base_url: Some("http://coinset.test"),
         preview_mode: false,
     })
     .expect("loaded resources");
@@ -246,6 +246,25 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
 
 #[tokio::test]
 async fn run_combine_preview_does_not_require_signer_bundle() {
+    let mut server = mockito::Server::new_async().await;
+    let _state = server
+        .mock("POST", "/get_blockchain_state")
+        .with_status(503)
+        .with_body("service unavailable")
+        .expect_at_least(0)
+        .create_async()
+        .await;
+    let _coins = server
+        .mock(
+            "POST",
+            mockito::Matcher::Regex(r"/get_coin_records.*".to_string()),
+        )
+        .with_status(503)
+        .with_body("service unavailable")
+        .expect_at_least(0)
+        .create_async()
+        .await;
+
     let dir = tempfile::tempdir().expect("tempdir");
     let cat_hex = "f".repeat(64);
     write_combine_test_configs(dir.path(), &cat_hex, false);
@@ -260,7 +279,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
     let _exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
         mgr: &harness.ctx,
         network: Some("mainnet"),
-        coinset_base_url: Some("http://127.0.0.1:1"),
+        coinset_base_url: Some(&server.url()),
         launcher_id: Some(&"aa".repeat(32)),
         launcher_id_file: None,
         dust_threshold_mojos: 1000,

@@ -88,10 +88,19 @@ mod tests {
 
     #[tokio::test]
     async fn build_coinset_probe_report_with_launcher_id_bypasses_program_config() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_blockchain_state")
+            .with_status(503)
+            .with_body("service unavailable")
+            .expect_at_least(1)
+            .create_async()
+            .await;
+
         let launcher = "ab".repeat(32);
         let args = CoinsetProbeCliArgs {
             network: "mainnet".to_string(),
-            coinset_base_url: "http://127.0.0.1:1".to_string(),
+            coinset_base_url: server.url(),
             launcher_id: launcher,
             launcher_id_file: String::new(),
             program_config: String::new(),
@@ -101,14 +110,15 @@ mod tests {
         };
         let err = build_coinset_probe_report(args)
             .await
-            .expect_err("unreachable coinset");
+            .expect_err("coinset probe failure");
         let message = err.to_string().to_ascii_lowercase();
         assert!(!message.contains("failed to read config"));
         assert!(
-            message.contains("127.0.0.1")
-                || message.contains("connection refused")
+            message.contains("coinset")
+                || message.contains("error decoding")
+                || message.contains("service unavailable")
                 || message.contains("error sending request"),
-            "expected fast coinset client failure, got: {message}"
+            "expected coinset client failure without program-config path, got: {message}"
         );
     }
 }
