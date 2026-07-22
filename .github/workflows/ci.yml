@@ -160,14 +160,16 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 8
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
-        os:
+        include:
           # ubuntu-latest Rust/Python tests run in the lint job (plain nextest or incremental llvm-cov).
-          - ubuntu-24.04-arm
-          - macos-14
+          - os: ubuntu-24.04-arm
+            timeout_minutes: 8
+          - os: macos-14
+            timeout_minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
