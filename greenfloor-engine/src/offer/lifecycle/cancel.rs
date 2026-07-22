@@ -580,6 +580,15 @@ mod tests {
             .contains_key(&cancel_tx));
     }
 
+    fn fast_fail_signer() -> crate::config::SignerConfig {
+        let mut signer = test_signer_config("http://coinset.test");
+        signer.kms_runtime = crate::kms::KmsRuntime::test(crate::kms::KmsOverrides {
+            public_key_compressed_hex: None,
+            fast_fail: true,
+        });
+        signer
+    }
+
     #[tokio::test]
     async fn local_file_cancel_does_not_write_offer_state() {
         let dir = tempdir().expect("tempdir");
@@ -595,7 +604,7 @@ mod tests {
         let outcomes = cancel_offers_on_chain(
             &store,
             None,
-            test_signer_config("http://127.0.0.1:1"),
+            fast_fail_signer(),
             "mainnet",
             std::slice::from_ref(&target),
         )
@@ -630,7 +639,7 @@ mod tests {
         let outcomes = cancel_offers_on_chain(
             &store,
             None,
-            test_signer_config("http://127.0.0.1:1"),
+            fast_fail_signer(),
             "mainnet",
             std::slice::from_ref(&target),
         )

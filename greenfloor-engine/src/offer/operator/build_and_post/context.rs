@@ -285,7 +285,7 @@ mod tests {
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         };
-        let signer = test_signer_config("http://127.0.0.1:1");
+        let signer = test_signer_config("http://coinset.test");
         let empty_index = crate::config::empty_cat_ticker_index();
         let resolver = OfferAssetResolver::new(&signer, &empty_index, "testnet11");
 

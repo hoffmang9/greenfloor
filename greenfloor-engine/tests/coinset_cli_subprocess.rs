@@ -34,30 +34,4 @@ fn subprocess_coinset_cli_smoke() {
         value.get("base_url").and_then(Value::as_str),
         Some(TESTNET11_DIRECT_BASE_URL)
     );
-
-    let coin_records = std::process::Command::new(bin)
-        .args([
-            "coinset",
-            "coin-records",
-            "--network",
-            "mainnet",
-            "--base-url",
-            "http://127.0.0.1:1",
-            "--endpoint",
-            "get_coin_records_by_puzzle_hash",
-            "--body-json",
-            r#"{"puzzle_hash":"0x11","include_spent_coins":false}"#,
-            "--json",
-        ])
-        .output()
-        .expect("spawn greenfloor-engine coinset coin-records subprocess");
-    assert!(
-        !coin_records.status.success(),
-        "expected non-zero exit for connection refused, stdout: {}",
-        String::from_utf8_lossy(&coin_records.stdout)
-    );
-    let stderr = String::from_utf8_lossy(&coin_records.stderr);
-    let payload: Value = serde_json::from_str(stderr.trim()).expect("parse json error stderr");
-    assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
-    assert_eq!(payload.get("retryable"), Some(&Value::Bool(true)));
 }

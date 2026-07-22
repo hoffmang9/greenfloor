@@ -10,8 +10,10 @@ use crate::error::{SignerError, SignerResult};
 
 /// Backoff policy for [`with_script_retries`].
 ///
-/// Production callers should use [`Self::PRODUCTION`]. Unit tests that exercise retry loops
-/// should pass [`Self::UNIT_TEST`] to [`with_script_retries_with_policy`].
+/// Production builds default to [`Self::PRODUCTION`]. Lib unit-test builds
+/// (`cfg(test)`) default to [`Self::UNIT_TEST`] so failure-path tests do not wait
+/// on multi-second production backoff. Pass an explicit policy when a test must
+/// exercise production timing or a custom attempt count.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptRetryPolicy {
     pub max_attempts: usize,
@@ -32,6 +34,20 @@ impl ScriptRetryPolicy {
         sleep_scale: 0.01,
         min_sleep_secs: 0.001,
     };
+
+    /// Default policy for [`with_script_retries`] / [`with_coinset_client_retries`].
+    #[cfg(test)]
+    #[must_use]
+    pub const fn default_for_build() -> Self {
+        Self::UNIT_TEST
+    }
+
+    /// Default policy for [`with_script_retries`] / [`with_coinset_client_retries`].
+    #[cfg(not(test))]
+    #[must_use]
+    pub const fn default_for_build() -> Self {
+        Self::PRODUCTION
+    }
 }
 
 fn retry_sleep_duration(policy: ScriptRetryPolicy, delay: f64) -> Duration {
@@ -40,7 +56,7 @@ fn retry_sleep_duration(policy: ScriptRetryPolicy, delay: f64) -> Duration {
     Duration::from_secs_f64(scaled)
 }
 
-/// With script retries using the production backoff policy.
+/// With script retries using [`ScriptRetryPolicy::default_for_build`].
 ///
 /// # Errors
 ///
@@ -50,7 +66,7 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = SignerResult<T>>,
 {
-    with_script_retries_with_policy(ScriptRetryPolicy::PRODUCTION, operation).await
+    with_script_retries_with_policy(ScriptRetryPolicy::default_for_build(), operation).await
 }
 
 /// With script retries using an explicit backoff policy.
@@ -82,7 +98,7 @@ where
     ))
 }
 
-/// Retry a [`CoinsetClient`] RPC using the production script backoff policy.
+/// Retry a [`CoinsetClient`] RPC using [`ScriptRetryPolicy::default_for_build`].
 ///
 /// # Errors
 ///
@@ -92,7 +108,7 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, reqwest::Error>>,
 {
-    with_coinset_client_retries_with_policy(ScriptRetryPolicy::PRODUCTION, operation).await
+    with_coinset_client_retries_with_policy(ScriptRetryPolicy::default_for_build(), operation).await
 }
 
 /// Retry a [`CoinsetClient`] RPC with an explicit backoff policy.
@@ -122,6 +138,10 @@ mod tests {
     #[test]
     fn production_policy_matches_operator_defaults() {
         assert_eq!(ScriptRetryPolicy::PRODUCTION.max_attempts, 4);
+        assert_eq!(
+            ScriptRetryPolicy::default_for_build().max_attempts,
+            ScriptRetryPolicy::UNIT_TEST.max_attempts
+        );
     }
 
     #[tokio::test]

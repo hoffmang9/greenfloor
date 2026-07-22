@@ -16,6 +16,14 @@ impl PollConfig {
             interval: Duration::from_secs(interval_seconds.max(1)),
         }
     }
+
+    /// Sub-second poll loop for unit tests (same pattern as
+    /// [`crate::daemon::coinset_ws::OnceCaptureTimings::UNIT_TEST`]).
+    #[cfg(test)]
+    pub(crate) const UNIT_TEST: Self = Self {
+        timeout: Duration::from_millis(40),
+        interval: Duration::from_millis(1),
+    };
 }
 
 pub(crate) async fn run_poll_loop<F, Fut, T>(

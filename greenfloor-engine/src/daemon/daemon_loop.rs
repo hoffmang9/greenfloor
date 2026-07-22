@@ -101,6 +101,22 @@ async fn run_daemon_loop_inner(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     );
+    #[cfg(test)]
+    let harness_ref = harness.as_ref();
+    // In-process harness never starts the background WS thread (avoids connect/DNS
+    // teardown hangs). Production `run_daemon_loop` always starts it.
+    #[cfg(test)]
+    let _ws_handle = if harness_ref.is_some() {
+        None
+    } else {
+        Some(start_coinset_websocket_loop(
+            db_path,
+            program,
+            request.coinset_base_url.clone(),
+            Arc::clone(&coinset),
+        ))
+    };
+    #[cfg(not(test))]
     let _ws_handle = start_coinset_websocket_loop(
         db_path,
         program,
@@ -110,8 +126,6 @@ async fn run_daemon_loop_inner(
 
     let mut dispatch_state = DaemonDispatchState::default();
     let mut cycles_completed = 0usize;
-    #[cfg(test)]
-    let harness_ref = harness.as_ref();
 
     loop {
         let runtime = load_daemon_program_runtime(&request.program_path)?;

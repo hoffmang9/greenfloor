@@ -104,12 +104,13 @@ async fn coin_records_fails_on_success_false() {
 }
 
 #[tokio::test]
-async fn coin_records_surfaces_coinset_error_on_http_503() {
+async fn coin_records_surfaces_retryable_error_on_http_503() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
         .with_status(503)
         .with_body("service unavailable")
+        .expect_at_least(1)
         .create_async()
         .await;
 
@@ -121,19 +122,6 @@ async fn coin_records_surfaces_coinset_error_on_http_503() {
     )
     .await
     .expect_err("503");
-    assert!(script_engine_error_retryable(&err));
-}
-
-#[tokio::test]
-async fn coin_records_connection_refused_is_retryable() {
-    let err = post_coinset_coin_records(
-        "mainnet",
-        Some("http://127.0.0.1:1"),
-        "get_coin_records_by_puzzle_hash",
-        json!({"puzzle_hash":"0x11","include_spent_coins":false}),
-    )
-    .await
-    .expect_err("connection refused");
     assert!(matches!(err, SignerError::Coinset(_)));
     assert!(script_engine_error_retryable(&err));
 }

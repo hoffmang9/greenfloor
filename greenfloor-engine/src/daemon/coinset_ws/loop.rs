@@ -78,8 +78,8 @@ async fn run_coinset_websocket_loop(
     let Ok(store) = SqliteStore::open(&db_path) else {
         return;
     };
-    let reconnect =
-        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
+    // Allow 0 in tests for immediate reconnect/stop; production config rejects values < 1.
+    let reconnect = Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds);
 
     while !stop.load(Ordering::SeqCst) {
         let params = WsSessionParams {

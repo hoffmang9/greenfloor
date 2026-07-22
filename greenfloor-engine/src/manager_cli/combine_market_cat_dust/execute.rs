@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::coinset::{
-    wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient, MIN_CAT_OUTPUT_MOJOS,
+    wait_until_coins_spent_poll, CoinSpentVerifyConfig, CoinsetClient, PollConfig,
+    MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -34,7 +35,7 @@ pub(crate) struct CombineBatchExecutor {
     receive_address: String,
     cat_asset_id: String,
     client: CoinsetClient,
-    verify: CoinSpentVerifyConfig,
+    verify_poll: PollConfig,
 }
 
 impl CombineBatchExecutor {
@@ -50,8 +51,14 @@ impl CombineBatchExecutor {
             receive_address,
             cat_asset_id,
             client,
-            verify,
+            verify_poll: verify.poll_config(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_verify_poll(mut self, poll: PollConfig) -> Self {
+        self.verify_poll = poll;
+        self
     }
 }
 
@@ -82,7 +89,7 @@ impl BatchPlanRunner for CombineBatchExecutor {
 
     async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()> {
         let coin_ids = batch.coin_ids()?;
-        wait_until_coins_spent(&self.client, &coin_ids, self.verify).await
+        wait_until_coins_spent_poll(&self.client, &coin_ids, self.verify_poll).await
     }
 }
 

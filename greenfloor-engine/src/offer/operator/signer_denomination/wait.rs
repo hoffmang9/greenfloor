@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use serde_json::{json, Value};
 
 use crate::coin_ops::execution::resolve_combine_input_cap;
@@ -13,6 +15,27 @@ use crate::offer::bootstrap::{
 
 use super::planning::bootstrap_coins_in_base_units;
 use super::BootstrapShapeContext;
+
+/// Sleep pacing for [`wait_for_bootstrap_shape_step`] (same pattern as
+/// [`crate::daemon::coinset_ws::OnceCaptureTimings`]).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BootstrapWaitTimings {
+    pub initial_sleep_seconds: f64,
+    pub max_sleep_seconds: f64,
+}
+
+impl BootstrapWaitTimings {
+    pub const PRODUCTION: Self = Self {
+        initial_sleep_seconds: 2.0,
+        max_sleep_seconds: 20.0,
+    };
+
+    #[cfg(test)]
+    pub const UNIT_TEST: Self = Self {
+        initial_sleep_seconds: 0.001,
+        max_sleep_seconds: 0.002,
+    };
+}
 
 fn normalized_spendable_snapshot(spendable: &[BootstrapCoin]) -> Vec<BootstrapCoin> {
     let mut snapshot = spendable.to_vec();
@@ -49,9 +72,9 @@ pub(super) struct BootstrapWaitConfig<'a> {
     pub network: &'a str,
     pub signer: &'a SignerConfig,
     pub ctx: &'a BootstrapShapeContext,
-    pub timeout_seconds: u64,
-    pub min_timeout_seconds: u64,
+    pub timeout: Duration,
     pub step: BootstrapWaitStepKind,
+    pub timings: BootstrapWaitTimings,
 }
 
 pub(super) async fn wait_for_bootstrap_shape_step(
@@ -61,26 +84,30 @@ pub(super) async fn wait_for_bootstrap_shape_step(
         network,
         signer,
         ctx,
-        timeout_seconds,
-        min_timeout_seconds,
+        timeout,
         step,
+        timings,
     } = config;
-    let start = std::time::Instant::now();
-    let timeout = crate::config::u64_to_i64(
-        timeout_seconds.max(min_timeout_seconds.max(1)),
-        "runtime.offer_bootstrap_wait_timeout_seconds",
-    )?;
-    let initial_sleep = 2.0f64;
-    let max_sleep = 20.0f64;
+    let start = Instant::now();
+    // Second-granularity schedule bound for [`poll_exponential_sleep_now`]; wall-clock
+    // deadline is [`timeout`] (supports sub-second unit-test deadlines).
+    let schedule_timeout = i64::try_from(timeout.as_secs().max(1)).map_err(|_| {
+        SignerError::Other("offer bootstrap wait timeout seconds overflow".to_string())
+    })?;
+    let initial_sleep = timings.initial_sleep_seconds;
+    let max_sleep = timings.max_sleep_seconds;
     let mut sleep_seconds = 0.0f64;
     let mut baseline_spendable: Option<Vec<BootstrapCoin>> = None;
     loop {
+        if start.elapsed() >= timeout {
+            return Err(SignerError::BootstrapShapeWaitTimeout);
+        }
         let elapsed_seconds = i64::try_from(start.elapsed().as_secs()).map_err(|_| {
             SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
         })?;
         let Some(next_sleep) = poll_exponential_sleep_now(
             elapsed_seconds,
-            timeout,
+            schedule_timeout,
             sleep_seconds,
             initial_sleep,
             max_sleep,
@@ -131,7 +158,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
                 spendable_coins: spendable,
             });
         }
-        tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
+        tokio::time::sleep(Duration::from_secs_f64(next_sleep)).await;
         sleep_seconds =
             poll_exponential_advance_sleep(sleep_seconds, initial_sleep, max_sleep, 1.5);
     }
@@ -139,7 +166,9 @@ pub(super) async fn wait_for_bootstrap_shape_step(
 
 #[cfg(test)]
 mod tests {
-    use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig};
+    use std::time::Duration;
+
+    use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig, BootstrapWaitTimings};
     use crate::error::SignerError;
     use crate::offer::bootstrap::{
         BaseUnits, BootstrapFundingSource, BootstrapPlan, BootstrapWaitStepKind, PlannerLadderRow,
@@ -151,7 +180,22 @@ mod tests {
     };
     use crate::test_support::signer_config::test_signer_config;
 
-    const TEST_MIN_TIMEOUT_SECONDS: u64 = 1;
+    fn unit_test_wait_config<'a>(
+        network: &'a str,
+        signer: &'a crate::config::SignerConfig,
+        ctx: &'a BootstrapShapeContext,
+        timeout: Duration,
+        step: BootstrapWaitStepKind,
+    ) -> BootstrapWaitConfig<'a> {
+        BootstrapWaitConfig {
+            network,
+            signer,
+            ctx,
+            timeout,
+            step,
+            timings: BootstrapWaitTimings::UNIT_TEST,
+        }
+    }
 
     #[tokio::test]
     async fn wait_after_combine_ignores_change_before_target_coin() {
@@ -186,14 +230,13 @@ mod tests {
         }];
         let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let completed = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-            network: "mainnet",
-            signer: &signer,
-            ctx: &ctx,
-            timeout_seconds: 30,
-            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
-            step: BootstrapWaitStepKind::AfterCombine,
-        })
+        let completed = wait_for_bootstrap_shape_step(unit_test_wait_config(
+            "mainnet",
+            &signer,
+            &ctx,
+            Duration::from_secs(30),
+            BootstrapWaitStepKind::AfterCombine,
+        ))
         .await
         .expect("combine wait should ignore change-only inventory");
 
@@ -227,14 +270,13 @@ mod tests {
         }];
         let ctx = eco181_cap_combine_shape_context(ladder);
 
-        let err = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-            network: "mainnet",
-            signer: &signer,
-            ctx: &ctx,
-            timeout_seconds: 1,
-            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
-            step: BootstrapWaitStepKind::AfterCombine,
-        })
+        let err = wait_for_bootstrap_shape_step(unit_test_wait_config(
+            "mainnet",
+            &signer,
+            &ctx,
+            Duration::from_millis(20),
+            BootstrapWaitStepKind::AfterCombine,
+        ))
         .await
         .expect_err("timeout");
         assert!(matches!(err, SignerError::BootstrapShapeWaitTimeout));
@@ -295,14 +337,13 @@ mod tests {
             test_overrides: crate::offer::operator::SignerDenominationTestOverrides::default(),
         };
 
-        let completed = wait_for_bootstrap_shape_step(BootstrapWaitConfig {
-            network: "mainnet",
-            signer: &signer,
-            ctx: &ctx,
-            timeout_seconds: 30,
-            min_timeout_seconds: TEST_MIN_TIMEOUT_SECONDS,
-            step: BootstrapWaitStepKind::AfterSplit,
-        })
+        let completed = wait_for_bootstrap_shape_step(unit_test_wait_config(
+            "mainnet",
+            &signer,
+            &ctx,
+            Duration::from_secs(30),
+            BootstrapWaitStepKind::AfterSplit,
+        ))
         .await
         .expect("split wait should finish on terminal still_needs_split");
 
