@@ -30,7 +30,7 @@ use rusqlite::Connection;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
 
-use super::schema::SCHEMA;
+use super::schema::schema_sql;
 
 #[derive(Debug, Clone)]
 pub struct OfferPostPersistRecord {
@@ -57,6 +57,10 @@ pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,
 };
+
+pub(crate) fn db_err(context: &str, err: impl std::fmt::Display) -> SignerError {
+    SignerError::Other(format!("{context}: {err}"))
+}
 
 pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {
     u64::try_from(changed).map_err(|_| {
@@ -174,7 +178,7 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to set busy_timeout pragma: {err}"))
             })?;
-        conn.execute_batch(SCHEMA).map_err(|err| {
+        conn.execute_batch(schema_sql()).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;
         migrations::apply_schema_migrations(&conn)?;

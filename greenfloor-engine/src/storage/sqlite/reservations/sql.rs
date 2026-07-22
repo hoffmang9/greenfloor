@@ -2,13 +2,10 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, Connection, Row, Rows};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 
+use super::super::db_err;
 use super::types::{normalize_asset_id, OfferReservationLeaseRow};
-
-pub(super) fn db_err(context: &str, err: impl std::fmt::Display) -> SignerError {
-    SignerError::Other(format!("{context}: {err}"))
-}
 
 const EXPIRE_STALE_LEASES_SQL: &str = r"
 UPDATE offer_reservation_lease
