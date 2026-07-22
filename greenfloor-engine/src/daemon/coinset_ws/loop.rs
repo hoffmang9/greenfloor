@@ -11,7 +11,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::process_context::CoinsetWsShared;
-use super::session::{run_ws_session, OnTextError, WsSessionAudits, WsSessionParams};
+use super::session::{run_ws_session, OnTextError, WsReadEnd, WsSessionAudits, WsSessionParams};
 use super::url::ensure_rustls_crypto_provider;
 
 pub struct CoinsetWebsocketLoopHandle {
@@ -97,14 +97,19 @@ async fn run_coinset_websocket_loop(
             on_text_error: OnTextError::LogContinue,
             strict_audit: false,
         };
-        let _ = run_ws_session(
+        let end = run_ws_session(
             &params,
-            || stop.load(Ordering::SeqCst) || coinset.take_reconnect_requested(),
+            || stop.load(Ordering::SeqCst),
             || Duration::from_secs(1),
         )
         .await;
         if stop.load(Ordering::SeqCst) {
             break;
+        }
+        // Filter expansion / explicit reconnect: rebuild URL immediately. Network
+        // drop and connect errors keep the configured backoff.
+        if matches!(end, Ok(WsReadEnd::Reconnect)) {
+            continue;
         }
         tokio::time::sleep(reconnect).await;
     }

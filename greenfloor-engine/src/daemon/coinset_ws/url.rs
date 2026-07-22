@@ -84,6 +84,17 @@ pub fn merge_ws_p2_filters(inventory_p2s: &[String], maker_p2s: &[String]) -> Ve
     out
 }
 
+/// True when `desired` contains any 64-hex p2 absent from the sorted `connected` filter set.
+///
+/// Used to drop a live WS session after new durable maker watches land so the next
+/// connect rebuilds URL `p2` filters (Coinset applies filters at subscribe time only).
+#[must_use]
+pub fn ws_p2_filters_expanded(connected: &[String], desired: &[String]) -> bool {
+    desired
+        .iter()
+        .any(|p2| connected.binary_search(p2).is_err())
+}
+
 /// Resolve the Coinset WS URL with required event filters and stable inventory p2s.
 #[must_use]
 pub fn resolve_coinset_ws_url_with_p2s(
@@ -119,5 +130,22 @@ mod tests {
         assert!(url.starts_with("wss://example.test/ws?events=transaction,offer"));
         assert!(!url.contains("events=peak"));
         assert!(url.contains(&format!("p2={p2}")));
+    }
+
+    #[test]
+    fn ws_p2_filters_expanded_detects_new_maker_p2() {
+        let connected = vec!["aa".repeat(32)];
+        let desired = merge_ws_p2_filters(&connected, &["bb".repeat(32)]);
+        assert!(ws_p2_filters_expanded(&connected, &desired));
+        assert!(!ws_p2_filters_expanded(&desired, &desired));
+        assert!(!ws_p2_filters_expanded(&desired, &connected));
+    }
+
+    #[test]
+    fn merge_keeps_sorted_deduped_filters() {
+        let a = "bb".repeat(32);
+        let b = "aa".repeat(32);
+        let merged = merge_ws_p2_filters(&[a.clone(), b.clone()], std::slice::from_ref(&a));
+        assert_eq!(merged, vec![b, a]);
     }
 }

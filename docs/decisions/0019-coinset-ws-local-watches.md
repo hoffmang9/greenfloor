@@ -22,7 +22,12 @@ never the operator transport.
    hash (Coinset `offer_id` / Dexie `trade_id`).
 2. **Inbound signals:** Coinset WebSocket (`events=transaction,offer` +
    `tx_status=pending,confirmed`) with `p2` filters equal to the union of stable
-   market inventory p2s and durable maker p2 watches. No HTTP webhooks / API keys.
+   market inventory p2s and durable maker p2 watches. Filters are applied at
+   subscribe time only; the WS session re-reads durable maker p2s each tick and
+   drops the connection (`WsReadEnd::Reconnect`, no backoff) when the desired
+   filter set expands (post, heal, or any watch writer). Markets reload still
+   uses `request_reconnect` for inventory replace/shrink. No HTTP webhooks /
+   API keys.
    HTTP `get_transaction` polling supplements WS by confirming prepared
    `cancel_submitted` transaction ids during recovery and every cycle preamble.
 3. **Watches:** durable SQLite `offer_coin_watches` registered atomically at post

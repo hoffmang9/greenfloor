@@ -16,7 +16,8 @@ use crate::error::SignerResult;
 pub struct CoinsetWsShared {
     pub inventory_p2s: RwLock<Arc<InventoryP2Index>>,
     pub inventory_freshness: Arc<InventoryFreshnessCache>,
-    /// Set when markets reload; WS loop breaks the current connection to rebuild URL filters.
+    /// Set when markets reload or durable maker p2 filters expand; WS loop drops the
+    /// current connection and reconnects immediately to rebuild URL `p2` filters.
     pub reconnect_requested: AtomicBool,
 }
 
