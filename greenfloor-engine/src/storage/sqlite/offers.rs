@@ -6,7 +6,9 @@ use rusqlite::params;
 
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
 
-fn read_offer_state_list_row(row: &rusqlite::Row<'_>) -> SignerResult<OfferStateListRow> {
+pub(crate) fn read_offer_state_list_row(
+    row: &rusqlite::Row<'_>,
+) -> SignerResult<OfferStateListRow> {
     Ok(OfferStateListRow {
         offer_id: row
             .get(0)
@@ -31,7 +33,16 @@ fn read_offer_state_list_row(row: &rusqlite::Row<'_>) -> SignerResult<OfferState
     })
 }
 
-const OFFER_STATE_LIST_COLUMNS: &str = "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id, cancel_submitted_at, publish_venue";
+pub(crate) const OFFER_STATE_LIST_COLUMNS: &str = "offer_id, market_id, state, last_seen_status, updated_at, cancel_submitted_tx_id, cancel_submitted_at, publish_venue";
+
+/// Qualify [`OFFER_STATE_LIST_COLUMNS`] with `alias.` for JOINs (same order as the reader).
+pub(crate) fn offer_state_list_columns_aliased(alias: &str) -> String {
+    OFFER_STATE_LIST_COLUMNS
+        .split(", ")
+        .map(|col| format!("{alias}.{col}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 impl SqliteStore {
     /// Upsert offer state.

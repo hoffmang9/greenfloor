@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use super::super::db_err;
+use super::super::{db_err, query_mapped as query_mapped_params};
 use crate::error::SignerResult;
 
 pub(super) fn column_exists(conn: &Connection, table: &str, column: &str) -> SignerResult<bool> {
@@ -64,7 +64,7 @@ pub(super) fn run_once(
     mark_schema_meta_applied(conn, key)
 }
 
-/// Prepare + `query_map` + collect with consistent error context.
+/// Parameterless convenience wrapper around sqlite [`super::super::query_mapped`].
 pub(super) fn query_mapped<T, F>(
     conn: &Connection,
     sql: &str,
@@ -74,14 +74,7 @@ pub(super) fn query_mapped<T, F>(
 where
     F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
 {
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|err| db_err(&format!("prepare {context}"), err))?;
-    let rows = stmt
-        .query_map([], map_row)
-        .map_err(|err| db_err(&format!("query {context}"), err))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|err| db_err(&format!("read {context}"), err))
+    query_mapped_params(conn, sql, [], context, map_row)
 }
 
 /// Canonical tx/coin id when it differs from the stored form.
