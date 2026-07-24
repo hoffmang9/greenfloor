@@ -233,19 +233,19 @@ fn list_open_offer_states_page_and_all_open_include_pending_visibility() {
 }
 
 #[test]
-fn list_offer_state_details_surfaces_cancel_submitted_state() {
+fn list_offer_states_surfaces_cancel_submitted_state() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("state.db"));
     let tx_id = "d".repeat(64);
     store
         .upsert_offer_cancel_submitted("offer-cancel", "m1", &tx_id, Some(0))
         .expect("cancel submitted");
-    let details = store.list_offer_state_details("m1", 10).expect("details");
+    let details = store.list_offer_states(Some("m1"), 10).expect("details");
     assert_eq!(details.len(), 1);
     assert_eq!(details[0].offer_id, "offer-cancel");
     assert_eq!(details[0].state, "cancel_submitted");
     assert!(store
-        .list_offer_state_details("m1", 0)
+        .list_offer_states(Some("m1"), 0)
         .expect("zero limit")
         .is_empty());
     let tracked = store

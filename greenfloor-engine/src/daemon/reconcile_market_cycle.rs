@@ -260,7 +260,7 @@ mod tests {
                 .await
                 .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-50")
@@ -321,7 +321,7 @@ mod tests {
                 .await
                 .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == offer_id)
@@ -368,7 +368,7 @@ mod tests {
                 .await
                 .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == offer_id)
@@ -421,7 +421,7 @@ mod tests {
                 .await
                 .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == trade_id)
@@ -464,7 +464,7 @@ mod tests {
                 .await
                 .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-confirmed")
@@ -544,7 +544,7 @@ mod tests {
             .await
             .expect("reconcile");
 
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-open")

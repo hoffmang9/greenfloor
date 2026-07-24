@@ -333,7 +333,7 @@ mod tests {
 
         assert_eq!(batch.reconciled_count, 2);
         assert_eq!(batch.changed_count, 2);
-        let rows = store.list_offer_state_details("m1", 20).expect("rows");
+        let rows = store.list_offer_states(Some("m1"), 20).expect("rows");
         let by_id: std::collections::HashMap<_, _> = rows
             .into_iter()
             .map(|row| (row.offer_id, row.state))

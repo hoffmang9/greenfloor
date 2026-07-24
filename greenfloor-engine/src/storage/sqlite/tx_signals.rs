@@ -5,7 +5,9 @@ use rusqlite::params;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{canonical_tx_id, extend_tx_id_lookup_candidates, tx_id_lookup_candidates};
 
-use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
+use super::{
+    in_placeholders, query_mapped, sqlite_rows_changed, utcnow_iso, SqliteStore, TxSignalStateRow,
+};
 
 /// How to ingest tx ids into `tx_signal_state`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,45 +53,31 @@ impl SqliteStore {
         if unique.is_empty() {
             return Ok(HashMap::default());
         }
-        let placeholders = unique
-            .iter()
-            .enumerate()
-            .map(|(index, _)| format!("?{}", index + 1))
-            .collect::<Vec<_>>()
-            .join(", ");
         let sql = format!(
             r"
             SELECT tx_id, mempool_observed_at, tx_block_confirmed_at
             FROM tx_signal_state
-            WHERE tx_id IN ({placeholders})
-            "
+            WHERE tx_id IN ({})
+            ",
+            in_placeholders(unique.len())
         );
-        let mut stmt = self.conn.prepare(&sql).map_err(|err| {
-            SignerError::Other(format!("failed to prepare tx_signal query: {err}"))
-        })?;
-        let params: Vec<&dyn rusqlite::ToSql> = unique
-            .iter()
-            .map(|value| value as &dyn rusqlite::ToSql)
-            .collect();
-        let mut rows = stmt
-            .query(params.as_slice())
-            .map_err(|err| SignerError::Other(format!("failed to query tx_signal_state: {err}")))?;
+        let rows: Vec<(String, Option<String>, Option<String>)> = query_mapped(
+            &self.conn,
+            &sql,
+            rusqlite::params_from_iter(unique.iter()),
+            "tx_signal_state",
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
         let mut out = HashMap::default();
-        while let Some(row) = rows
-            .next()
-            .map_err(|err| SignerError::Other(format!("failed to read tx_signal row: {err}")))?
-        {
-            let tx_id: String = row
-                .get(0)
-                .map_err(|err| SignerError::Other(format!("failed to read tx_id: {err}")))?;
+        for (tx_id, mempool_observed_at, tx_block_confirmed_at) in rows {
             let Some(key) = canonical_tx_id(&tx_id) else {
                 continue;
             };
             out.insert(
                 key,
                 TxSignalStateRow {
-                    mempool_observed_at: row.get(1).ok(),
-                    tx_block_confirmed_at: row.get(2).ok(),
+                    mempool_observed_at,
+                    tx_block_confirmed_at,
                 },
             );
         }
@@ -123,7 +111,7 @@ impl SqliteStore {
                 .map_err(|err| {
                     SignerError::Other(format!("failed to observe mempool tx id: {err}"))
                 })?;
-            inserted += super::sqlite_rows_changed(changed)?;
+            inserted += sqlite_rows_changed(changed)?;
         }
         Ok(inserted)
     }
@@ -161,7 +149,7 @@ impl SqliteStore {
                     params![now, candidate],
                 )
                 .map_err(|err| SignerError::Other(format!("failed to confirm tx id: {err}")))?;
-            let rows = super::sqlite_rows_changed(changed)?;
+            let rows = sqlite_rows_changed(changed)?;
             if rows > 0 {
                 return Ok(rows);
             }

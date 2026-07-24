@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 
 use super::offers::{offer_state_list_columns_aliased, read_offer_state_list_row};
-use super::{db_err, query_mapped, utcnow_iso, SqliteStore};
+use super::{db_err, in_placeholders, query_mapped, utcnow_iso, SqliteStore};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 
@@ -90,13 +90,6 @@ fn insert_entries(
             .map_err(|err| db_err(&format!("offer_coin_watches insert {}", kind.as_str()), err))?;
     }
     Ok(())
-}
-
-fn in_placeholders(count: usize) -> String {
-    (1..=count)
-        .map(|idx| format!("?{idx}"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// DELETE existing rows for the offer, then INSERT. Dedup. Error if all keys invalid.
@@ -412,7 +405,8 @@ impl SqliteStore {
             .next()
             .map_err(|err| db_err("offer_coin_watches match row", err))?
         {
-            let state = read_offer_state_list_row(row)?;
+            let state = read_offer_state_list_row(row)
+                .map_err(|err| db_err("offer_coin_watches match state", err))?;
             let kind_str: String = row
                 .get(8)
                 .map_err(|err| db_err("offer_coin_watches match kind", err))?;

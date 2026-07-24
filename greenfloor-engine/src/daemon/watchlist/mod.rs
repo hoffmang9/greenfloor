@@ -36,7 +36,7 @@ pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 /// Returns an error if the operation fails.
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let mut offer_ids = HashSet::default();
-    for row in store.list_offer_state_details(market_id, 500)? {
+    for row in store.list_offer_states(Some(market_id), 500)? {
         if ReconcileState::parse(&row.state).is_ok_and(|state| state.is_watched_for_reconcile()) {
             offer_ids.insert(row.offer_id);
         }
@@ -63,7 +63,7 @@ fn active_offer_state_summary(
     clock: DateTime<Utc>,
     limit: usize,
 ) -> SignerResult<ActiveOfferStateSummary> {
-    let offer_states = store.list_offer_state_details(market_id, limit)?;
+    let offer_states = store.list_offer_states(Some(market_id), limit)?;
     let mut state_counts: HashMap<String, i64> = HashMap::default();
     for row in &offer_states {
         let state = row.state.trim().to_ascii_lowercase();
