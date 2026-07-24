@@ -12,8 +12,8 @@ mod transition;
 mod ws_apply;
 
 pub use cancel::{
-    cancel_offers_on_chain, cancel_targets_need_dexie_fallback, CancelOfferOnChainParams,
-    CancelOfferOutcome, CancelOfferTarget,
+    cancel_offers_on_chain, cancel_targets_need_dexie_fallback, CancelOfferOutcome,
+    CancelOfferTarget,
 };
 pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliRequest, OffersCancelCliResult,

@@ -249,7 +249,6 @@ pub async fn offers_cancel_cli(
                 "success": outcome.success,
                 "operation_id": outcome.operation_id,
                 "error": outcome.error,
-                "warning": outcome.warning,
             }),
         });
     }

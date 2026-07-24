@@ -440,10 +440,12 @@ impl SqliteStore {
             super::offer_cancel::OfferCancelWrite::default(),
         )
     }
-}
 
-#[cfg(test)]
-impl SqliteStore {
+    /// Current lifecycle state for one offer id, if present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
     pub(crate) fn offer_state_for_id(&self, offer_id: &str) -> SignerResult<Option<String>> {
         let mut stmt = self
             .conn
