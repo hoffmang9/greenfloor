@@ -69,7 +69,6 @@ pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
 mod tests {
     use super::*;
     use crate::config::MarketConfig;
-    use serde_json::json;
     use std::collections::HashMap;
 
     fn sample_market(market_id: &str, enabled: bool) -> MarketConfig {
@@ -83,7 +82,7 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: "key-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: crate::config::MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         }

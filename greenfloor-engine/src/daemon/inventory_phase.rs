@@ -166,7 +166,6 @@ pub async fn run_inventory_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::collections::HashMap;
 
     fn sample_market(base_asset: &str) -> MarketConfig {
@@ -180,7 +179,7 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: "key-main-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: crate::config::MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         }

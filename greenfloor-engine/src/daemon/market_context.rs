@@ -173,7 +173,6 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
 
@@ -190,7 +189,7 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: "key-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: crate::config::MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         }

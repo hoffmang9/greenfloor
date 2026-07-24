@@ -1,7 +1,5 @@
 //! Deterministic signer ``create_offer`` leg math and request shaping (no IO).
 
-use serde_json::Value;
-
 use crate::error::{SignerError, SignerResult};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
@@ -129,7 +127,7 @@ pub fn compute_signer_offer_leg_amounts(
     resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
     action_side: &str,
-    pricing: &Value,
+    pricing: &crate::config::MarketPricing,
 ) -> SignerResult<SignerOfferLegAmounts> {
     let side = normalize_offer_side(action_side);
     let base_mult =
@@ -161,16 +159,17 @@ pub fn compute_signer_offer_leg_amounts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::config::MarketPricing;
 
     const BASE_ASSET: &str = "457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8";
     const QUOTE_XCH: &str = "xch";
 
-    fn pricing(base_mult: i64, quote_mult: i64) -> Value {
-        json!({
-            "base_unit_mojo_multiplier": base_mult,
-            "quote_unit_mojo_multiplier": quote_mult,
-        })
+    fn pricing(base_mult: i64, quote_mult: i64) -> MarketPricing {
+        MarketPricing {
+            base_unit_mojo_multiplier: Some(base_mult),
+            quote_unit_mojo_multiplier: Some(quote_mult),
+            ..MarketPricing::default()
+        }
     }
 
     #[test]

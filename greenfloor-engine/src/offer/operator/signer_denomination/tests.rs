@@ -381,10 +381,11 @@ async fn prepare_bootstrap_execution_plan_continues_eco181_after_combine_buffer_
 
     let mut market = market_with_eco181_sell_ladder(RECEIVE_ADDRESS);
     market.base_asset = "xch".to_string();
-    market.pricing = serde_json::json!({
-        "side": "sell",
-        "base_unit_mojo_multiplier": MOJO_MULTIPLIER,
-    });
+    market.pricing = crate::config::MarketPricing {
+        side: Some("sell".to_string()),
+        base_unit_mojo_multiplier: Some(MOJO_MULTIPLIER),
+        ..crate::config::MarketPricing::default()
+    };
     let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 

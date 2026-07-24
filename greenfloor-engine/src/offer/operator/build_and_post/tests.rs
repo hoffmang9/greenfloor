@@ -407,7 +407,10 @@ fn post_emit_target_skips_persist_for_dry_run() {
 
 #[test]
 fn resolve_action_side_prefers_explicit_override() {
-    let pricing = json!({"side": "sell"});
+    let pricing = crate::config::MarketPricing {
+        side: Some("sell".to_string()),
+        ..crate::config::MarketPricing::default()
+    };
     assert_eq!(
         resolve_action_side(Some("buy"), &pricing),
         "buy".to_string()

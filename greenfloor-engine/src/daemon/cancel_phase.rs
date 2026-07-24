@@ -2,10 +2,7 @@ use serde_json::{json, Value};
 use tracing::Level;
 
 use crate::adapters::DexieClient;
-use crate::config::{
-    cancel_policy_stable_vs_unstable, is_signer_execution_soft_skip, signer_execution_skip_reason,
-    MarketConfig,
-};
+use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{
     evaluate_cancel_policy_decision, CancelPolicyDecision, MarketCycleResultState, ReconcileState,
 };
@@ -143,7 +140,7 @@ fn evaluate_market_cancel_decision(
         .filter(|value| *value > 0);
     evaluate_cancel_policy_decision(
         &market.quote_asset_type,
-        cancel_policy_stable_vs_unstable(&market.pricing),
+        market.pricing.cancel_policy_stable_vs_unstable,
         current_xch_price_usd,
         previous_xch_price_usd,
         market.cancel_move_threshold_bps,

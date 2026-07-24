@@ -331,13 +331,3 @@ pub fn resolve_offer_publish_settings(
     let splash_base = resolve_splash_base_url(splash_base_url, &program.splash_api_base);
     Ok((venue, dexie_base, splash_base))
 }
-
-pub fn action_side_from_pricing(pricing: &Value) -> String {
-    pricing
-        .get("side")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("sell")
-        .to_string()
-}
