@@ -347,3 +347,93 @@ mod venue_authority_tests {
         )));
     }
 }
+
+#[cfg(test)]
+mod cancel_submit_persist_tests {
+    use tempfile::tempdir;
+
+    use super::SqliteStore;
+    use crate::storage::TxSignalIngress;
+
+    #[test]
+    fn prepare_keeps_watches_and_observe_does_not_clear() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "11".repeat(32);
+        let p2 = "22".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("seed");
+        store
+            .replace_offer_coin_watches(
+                &offer_id,
+                "m1",
+                std::slice::from_ref(&coin),
+                std::slice::from_ref(&p2),
+            )
+            .expect("watches");
+        store
+            .prepare_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("prepare");
+        let (coins, p2s) = store
+            .list_offer_coin_watches_for_offer(&offer_id)
+            .expect("still watched");
+        assert_eq!(coins, vec![coin.clone()]);
+        assert_eq!(p2s, vec![p2]);
+        store
+            .ingest_tx_signals(std::slice::from_ref(&cancel_tx), TxSignalIngress::Mempool)
+            .expect("observe");
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&coin)
+                .expect("watches kept after observe"),
+            vec![offer_id.clone()]
+        );
+        let signals = store
+            .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
+            .expect("tx");
+        assert!(signals
+            .get(&cancel_tx)
+            .is_some_and(|row| row.mempool_observed_at.is_some()));
+    }
+
+    #[test]
+    fn rollback_prepare_restores_prior_state_without_touching_watches() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "11".repeat(32);
+        let cancel_tx = "cd".repeat(32);
+        store
+            .upsert_offer_state(&offer_id, "m1", "open", None)
+            .expect("seed");
+        store
+            .replace_offer_coin_watches(&offer_id, "m1", std::slice::from_ref(&coin), &[])
+            .expect("watches");
+        store
+            .prepare_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)
+            .expect("prepare");
+        store
+            .rollback_offer_cancel_submitted(&offer_id, "m1", "open")
+            .expect("rollback");
+        assert_eq!(
+            store
+                .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
+                .expect("rows")[0]
+                .state,
+            "open"
+        );
+        assert_eq!(
+            store
+                .list_offer_ids_for_watched_coin(&coin)
+                .expect("watches kept"),
+            vec![offer_id]
+        );
+        assert!(!store
+            .get_tx_signal_state(std::slice::from_ref(&cancel_tx))
+            .expect("no observe yet")
+            .contains_key(&cancel_tx));
+    }
+}

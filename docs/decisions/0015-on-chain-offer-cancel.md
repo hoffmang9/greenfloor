@@ -28,7 +28,7 @@ cancel time (wrong `offer_nonce`), which broke presplit-existing production offe
    - `build_offer_cancel_spend_bundle_from_metadata` — Coinset coin + stored cancel
      metadata (no offer blob).
    - `build_vault_cat_reclaim_spend_bundle` — direct vault vs presplit-offer inner spend modes.
-   - Lifecycle orchestration (`offer/lifecycle/cancel.rs`) handles Coinset-primary cancel,
+   - Lifecycle orchestration (`offer/lifecycle/cancel/`) handles Coinset-primary cancel,
      optional Dexie offer-file fallback, broadcast, DB updates, and mempool tx observation.
 
 3. **Presplit cancel binding is extracted from the offer input spend**, not replanned.

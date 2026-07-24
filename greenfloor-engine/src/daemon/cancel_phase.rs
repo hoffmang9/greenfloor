@@ -84,39 +84,38 @@ async fn execute_on_chain_cancellations(
     };
     let outcomes =
         cancel_offers_on_chain(store, dexie, signer_config, operator_network, &targets).await?;
+    Ok(audit_items_from_cancel_outcomes(&outcomes))
+}
+
+fn audit_items_from_cancel_outcomes(
+    outcomes: &[crate::offer::lifecycle::CancelOfferOutcome],
+) -> (i64, Vec<Value>) {
     let mut cancel_executed = 0_i64;
     let mut items = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
-        if outcome.success {
+        if outcome.is_success() {
             cancel_executed += 1;
-            let mut item = json!({
-                "offer_id": outcome.offer_id,
+            items.push(json!({
+                "offer_id": outcome.offer_id(),
                 "status": ReconcileState::CancelSubmitted.as_str(),
                 "reason": "cancel_submitted_on_strong_unstable_move",
-                "operation_id": outcome.operation_id,
+                "operation_id": outcome.operation_id(),
                 "attempts": 1,
-            });
-            if !outcome.warning.is_empty() {
-                if let Some(obj) = item.as_object_mut() {
-                    obj.insert("warning".to_string(), json!(outcome.warning));
-                }
-            }
-            items.push(item);
+            }));
         } else {
-            let error = if outcome.error.is_empty() {
-                "cancel_failed"
-            } else {
-                outcome.error.as_str()
-            };
+            let error = outcome
+                .error()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("cancel_failed");
             items.push(json!({
-                "offer_id": outcome.offer_id,
+                "offer_id": outcome.offer_id(),
                 "status": "skipped",
                 "reason": format!("cancel_failed:{error}"),
                 "attempts": 1,
             }));
         }
     }
-    Ok((cancel_executed, items))
+    (cancel_executed, items)
 }
 
 fn cancel_target_offer_ids(
@@ -244,4 +243,40 @@ pub async fn run_market_cancel_phase(
     )?;
     state.merge_cancel_policy(true, cancel_planned, cancel_executed);
     Ok(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offer::lifecycle::CancelOfferOutcome;
+
+    #[test]
+    fn audit_items_map_submitted_and_failed_outcomes() {
+        let outcomes = [
+            CancelOfferOutcome::Submitted {
+                offer_id: "offer-ok".to_string(),
+                market_id: "m1".to_string(),
+                operation_id: "aa".repeat(32),
+            },
+            CancelOfferOutcome::Failed {
+                offer_id: "offer-bad".to_string(),
+                market_id: "m1".to_string(),
+                operation_id: String::new(),
+                error: "build failed".to_string(),
+            },
+            CancelOfferOutcome::Failed {
+                offer_id: "offer-empty-err".to_string(),
+                market_id: "m1".to_string(),
+                operation_id: String::new(),
+                error: String::new(),
+            },
+        ];
+        let (executed, items) = audit_items_from_cancel_outcomes(&outcomes);
+        assert_eq!(executed, 1);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0]["status"], "cancel_submitted");
+        assert_eq!(items[0]["operation_id"], "aa".repeat(32));
+        assert_eq!(items[1]["reason"], "cancel_failed:build failed");
+        assert_eq!(items[2]["reason"], "cancel_failed:cancel_failed");
+    }
 }
