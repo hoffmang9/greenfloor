@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 
+use super::offers::{offer_state_list_columns_aliased, read_offer_state_list_row};
 use super::{db_err, query_mapped, utcnow_iso, SqliteStore};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
@@ -70,25 +71,6 @@ fn collect_watch_entries(coin_ids: &[String], p2s: &[String]) -> Vec<(String, Wa
     out
 }
 
-fn warn_invalid_watch_keys(offer_id: &str, market_id: &str, coin_ids: &[String], p2s: &[String]) {
-    for (kind, keys) in [(WatchKind::Coin, coin_ids), (WatchKind::P2, p2s)] {
-        for key in keys {
-            let normalized = normalize_hex_id(key);
-            if normalized.len() == 64 {
-                continue;
-            }
-            tracing::warn!(
-                offer_id,
-                market_id,
-                kind = kind.as_str(),
-                raw_len = key.trim().len(),
-                normalized_len = normalized.len(),
-                "skipping non-64-char watch key for offer_coin_watches"
-            );
-        }
-    }
-}
-
 fn insert_entries(
     conn: &Connection,
     offer_id: &str,
@@ -126,8 +108,27 @@ pub(crate) fn replace_watch_rows(
     p2s: &[String],
 ) -> SignerResult<()> {
     let (clean_offer, clean_market) = require_offer_market(offer_id, market_id)?;
-    warn_invalid_watch_keys(clean_offer, clean_market, coin_ids, p2s);
-    let entries = collect_watch_entries(coin_ids, p2s);
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    for (kind, keys) in [(WatchKind::Coin, coin_ids), (WatchKind::P2, p2s)] {
+        for key in keys {
+            let normalized = normalize_hex_id(key);
+            if normalized.len() != 64 {
+                tracing::warn!(
+                    offer_id = clean_offer,
+                    market_id = clean_market,
+                    kind = kind.as_str(),
+                    raw_len = key.trim().len(),
+                    normalized_len = normalized.len(),
+                    "skipping non-64-char watch key for offer_coin_watches"
+                );
+                continue;
+            }
+            if seen.insert((normalized.clone(), kind)) {
+                entries.push((normalized, kind));
+            }
+        }
+    }
     conn.execute(
         "DELETE FROM offer_coin_watches WHERE offer_id = ?1",
         params![clean_offer],
@@ -339,8 +340,8 @@ impl SqliteStore {
     pub fn list_watched_p2s(&self) -> SignerResult<Vec<String>> {
         let rows: Vec<String> = query_mapped(
             &self.conn,
-            "SELECT DISTINCT coin_id FROM offer_coin_watches WHERE kind = 'p2'",
-            [],
+            "SELECT DISTINCT coin_id FROM offer_coin_watches WHERE kind = ?1",
+            params![WatchKind::P2.as_str()],
             "offer_coin_watches p2 list",
             |row| row.get(0),
         )?;
@@ -385,59 +386,54 @@ impl SqliteStore {
     ///
     /// Returns an error if `SQLite` reads fail.
     pub fn match_watch_keys(&self, keys: &[String]) -> SignerResult<Vec<WatchHitRow>> {
-        let kind_by_offer = self.query_offer_watch_kinds(keys)?;
-        if kind_by_offer.is_empty() {
-            return Ok(Vec::new());
-        }
-        let offer_ids: Vec<String> = kind_by_offer.keys().cloned().collect();
-        let rows = self.list_offer_states_for_ids(&offer_ids)?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|row| {
-                kind_by_offer
-                    .get(&row.offer_id)
-                    .copied()
-                    .map(|kind| WatchHitRow { row, kind })
-            })
-            .collect())
-    }
-
-    fn query_offer_watch_kinds(
-        &self,
-        keys: &[String],
-    ) -> SignerResult<HashMap<String, WatchMatchKind>> {
         let normalized = unique_watch_keys(keys);
         if normalized.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(Vec::new());
         }
         let sql = format!(
-            "SELECT DISTINCT offer_id, kind FROM offer_coin_watches WHERE coin_id IN ({})",
-            in_placeholders(normalized.len())
+            r"
+            SELECT DISTINCT {state_cols}, w.kind
+            FROM offer_coin_watches w
+            INNER JOIN offer_state s ON s.offer_id = w.offer_id
+            WHERE w.coin_id IN ({placeholders})
+            ",
+            state_cols = offer_state_list_columns_aliased("s"),
+            placeholders = in_placeholders(normalized.len()),
         );
-        let rows: Vec<(String, String)> = query_mapped(
-            &self.conn,
-            &sql,
-            rusqlite::params_from_iter(normalized.iter()),
-            "offer_coin_watches kind",
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        let mut kind_by_offer: HashMap<String, WatchMatchKind> = HashMap::new();
-        for (offer_id, kind_str) in rows {
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|err| db_err("offer_coin_watches match prepare", err))?;
+        let mut rows = stmt
+            .query(rusqlite::params_from_iter(normalized.iter()))
+            .map_err(|err| db_err("offer_coin_watches match query", err))?;
+        let mut by_offer: HashMap<String, WatchHitRow> = HashMap::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| db_err("offer_coin_watches match row", err))?
+        {
+            let state = read_offer_state_list_row(row)?;
+            let kind_str: String = row
+                .get(8)
+                .map_err(|err| db_err("offer_coin_watches match kind", err))?;
             let Some(kind) = WatchKind::parse(&kind_str) else {
                 tracing::warn!(
-                    offer_id = %offer_id,
+                    offer_id = %state.offer_id,
                     kind = %kind_str,
                     "skipping unknown offer_coin_watches kind in match query"
                 );
                 continue;
             };
             let match_kind = WatchMatchKind::from_watch_kind(kind);
-            kind_by_offer
-                .entry(offer_id)
-                .and_modify(|existing| *existing = existing.merge(match_kind))
-                .or_insert(match_kind);
+            by_offer
+                .entry(state.offer_id.clone())
+                .and_modify(|hit| hit.kind = hit.kind.merge(match_kind))
+                .or_insert(WatchHitRow {
+                    row: state,
+                    kind: match_kind,
+                });
         }
-        Ok(kind_by_offer)
+        Ok(by_offer.into_values().collect())
     }
 
     /// List offer ids watching a given coin id or p2.
