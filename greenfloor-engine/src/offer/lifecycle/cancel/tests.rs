@@ -202,10 +202,18 @@ fn prepare_cancel_persist_ephemeral_skips_store() {
         market_id: "m1".to_string(),
         offer_text: "offer1qqq".to_string(),
     };
-    let policy = prepare_cancel_persist(&store, &target, "m1", &"cd".repeat(32), false)
-        .expect("infra")
-        .expect("ephemeral");
-    assert!(matches!(policy, CancelPersistPolicy::Ephemeral));
+    let prep = prepare_cancel_persist(
+        &store,
+        &target,
+        "m1",
+        &"cd".repeat(32),
+        &CancelRun::Ephemeral,
+    )
+    .expect("infra");
+    assert!(matches!(
+        prep,
+        PersistPrep::Ready(CancelPersistPolicy::Ephemeral)
+    ));
 }
 
 #[test]
@@ -220,10 +228,13 @@ fn prepare_cancel_persist_tracked_success_and_invalid_tx_soft_fail() {
         offer_id: offer_id.clone(),
         market_id: "m1".to_string(),
     };
-    let policy = prepare_cancel_persist(&store, &target, "m1", &"cd".repeat(32), true)
-        .expect("infra")
-        .expect("prepared");
-    assert!(matches!(policy, CancelPersistPolicy::Tracked { .. }));
+    let run = CancelRun::Tracked { metadata: None };
+    let prep =
+        prepare_cancel_persist(&store, &target, "m1", &"cd".repeat(32), &run).expect("infra");
+    assert!(matches!(
+        prep,
+        PersistPrep::Ready(CancelPersistPolicy::Tracked { .. })
+    ));
     assert_eq!(
         store
             .offer_state_for_id(&offer_id)
@@ -232,13 +243,16 @@ fn prepare_cancel_persist_tracked_success_and_invalid_tx_soft_fail() {
         Some("cancel_submitted")
     );
 
-    let soft = prepare_cancel_persist(&store, &target, "m1", "not-a-tx-id", true)
-        .expect("infra")
-        .expect_err("invalid tx");
-    assert!(!soft.is_success());
-    assert!(soft
-        .error()
-        .is_some_and(|e| e.contains("cancel_submitted prepare failed")));
+    let soft = prepare_cancel_persist(&store, &target, "m1", "not-a-tx-id", &run).expect("infra");
+    match soft {
+        PersistPrep::SoftFail(out) => {
+            assert!(!out.is_success());
+            assert!(out
+                .error()
+                .is_some_and(|e| e.contains("cancel_submitted prepare failed")));
+        }
+        PersistPrep::Ready(_) => panic!("expected soft fail for invalid tx id"),
+    }
 }
 
 #[tokio::test]

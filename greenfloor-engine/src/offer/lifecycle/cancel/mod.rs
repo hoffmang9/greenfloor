@@ -19,9 +19,17 @@ use target::failed;
 
 pub use target::{CancelOfferOutcome, CancelOfferTarget};
 
-/// Tracked-path context loaded once from [`CancelOfferTarget::Tracked`].
-struct TrackedCancelCtx {
-    metadata: Option<StoredOfferCancelMetadata>,
+/// Cancel execution mode derived once from [`CancelOfferTarget`].
+enum CancelRun {
+    Tracked {
+        metadata: Option<StoredOfferCancelMetadata>,
+    },
+    Ephemeral,
+}
+
+enum PersistPrep<'a> {
+    Ready(CancelPersistPolicy<'a>),
+    SoftFail(CancelOfferOutcome),
 }
 
 async fn cancel_one_offer(
@@ -32,11 +40,15 @@ async fn cancel_one_offer(
     target: &CancelOfferTarget,
 ) -> SignerResult<CancelOfferOutcome> {
     let market_id = target.normalized_market_id();
-    let tracked = match target {
-        CancelOfferTarget::Tracked { offer_id, .. } => Some(TrackedCancelCtx {
+    let run = match target {
+        CancelOfferTarget::Tracked { offer_id, .. } => CancelRun::Tracked {
             metadata: store.offer_cancel_metadata_for_id(offer_id)?,
-        }),
-        CancelOfferTarget::LocalFile { .. } => None,
+        },
+        CancelOfferTarget::LocalFile { .. } => CancelRun::Ephemeral,
+    };
+    let metadata = match &run {
+        CancelRun::Tracked { metadata } => metadata.as_ref(),
+        CancelRun::Ephemeral => None,
     };
 
     let (spend_bundle, operation_id, coinset_client) = match build_cancel_spend_bundle(
@@ -44,7 +56,7 @@ async fn cancel_one_offer(
         operator_network,
         target.offer_id(),
         target.offer_text(),
-        tracked.as_ref().and_then(|ctx| ctx.metadata.as_ref()),
+        metadata,
         dexie,
     )
     .await
@@ -53,15 +65,9 @@ async fn cancel_one_offer(
         Err(err) => return Ok(failed(target, market_id, "", err.to_string())),
     };
 
-    let persist = match prepare_cancel_persist(
-        store,
-        target,
-        &market_id,
-        &operation_id,
-        tracked.is_some(),
-    )? {
-        Ok(policy) => policy,
-        Err(out) => return Ok(out),
+    let persist = match prepare_cancel_persist(store, target, &market_id, &operation_id, &run)? {
+        PersistPrep::Ready(policy) => policy,
+        PersistPrep::SoftFail(out) => return Ok(out),
     };
 
     Ok(broadcast_cancel(
@@ -80,23 +86,31 @@ fn prepare_cancel_persist<'a>(
     target: &CancelOfferTarget,
     market_id: &str,
     operation_id: &str,
-    tracked: bool,
-) -> SignerResult<Result<CancelPersistPolicy<'a>, CancelOfferOutcome>> {
-    if !tracked {
-        return Ok(Ok(CancelPersistPolicy::Ephemeral));
+    run: &CancelRun,
+) -> SignerResult<PersistPrep<'a>> {
+    match run {
+        CancelRun::Ephemeral => Ok(PersistPrep::Ready(CancelPersistPolicy::Ephemeral)),
+        CancelRun::Tracked { .. } => {
+            let prior_state = store.offer_state_for_id(target.offer_id())?;
+            if let Err(err) = store.prepare_offer_cancel_submitted(
+                target.offer_id(),
+                market_id,
+                operation_id,
+                None,
+            ) {
+                return Ok(PersistPrep::SoftFail(failed(
+                    target,
+                    market_id,
+                    "",
+                    format!("cancel_submitted prepare failed before broadcast: {err}"),
+                )));
+            }
+            Ok(PersistPrep::Ready(CancelPersistPolicy::Tracked {
+                store,
+                prior_state,
+            }))
+        }
     }
-    let prior_state = store.offer_state_for_id(target.offer_id())?;
-    if let Err(err) =
-        store.prepare_offer_cancel_submitted(target.offer_id(), market_id, operation_id, None)
-    {
-        return Ok(Err(failed(
-            target,
-            market_id,
-            "",
-            format!("cancel_submitted prepare failed before broadcast: {err}"),
-        )));
-    }
-    Ok(Ok(CancelPersistPolicy::Tracked { store, prior_state }))
 }
 
 /// Cancel offers on-chain (spend an offered input coin back to vault change).
