@@ -62,6 +62,14 @@ pub(crate) fn db_err(context: &str, err: impl std::fmt::Display) -> SignerError 
     SignerError::Other(format!("{context}: {err}"))
 }
 
+/// Numbered `?1, ?2, …` placeholders for `IN (...)` clauses.
+pub(crate) fn in_placeholders(count: usize) -> String {
+    (1..=count)
+        .map(|idx| format!("?{idx}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Prepare + `query_map` + collect with consistent error context.
 pub(crate) fn query_mapped<T, P, F>(
     conn: &Connection,
@@ -129,15 +137,6 @@ pub struct OfferStateListRow {
     pub cancel_submitted_at: Option<String>,
     /// Publish venue at post time (`coinset` / `dexie` / `splash`); `None` for legacy rows.
     pub publish_venue: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct OfferStateDetailRow {
-    pub offer_id: String,
-    pub market_id: String,
-    pub state: String,
-    pub last_seen_status: Option<i64>,
-    pub updated_at: String,
 }
 
 pub use tx_signals::TxSignalIngress;

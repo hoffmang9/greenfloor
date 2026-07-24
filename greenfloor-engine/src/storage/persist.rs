@@ -105,7 +105,7 @@ mod tests {
         .expect("persist");
 
         let state = store
-            .list_offer_state_details("m1", 10)
+            .list_offer_states(Some("m1"), 10)
             .expect("states")
             .into_iter()
             .find(|row| row.offer_id == "offer-123")

@@ -28,8 +28,8 @@ pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
     CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
-    OfferReservationRejectReason, OfferStateDetailRow, OfferStateListRow, SqliteStore,
-    StoredAlertState, TxSignalIngress, TxSignalStateRow, WatchHitRow, WatchMatchKind,
+    OfferReservationRejectReason, OfferStateListRow, SqliteStore, StoredAlertState,
+    TxSignalIngress, TxSignalStateRow, WatchHitRow, WatchMatchKind,
 };
 
 #[cfg(test)]
