@@ -25,7 +25,7 @@ use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::Utc;
-use rusqlite::Connection;
+use rusqlite::{Connection, Row};
 
 use crate::error::{SignerError, SignerResult};
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
@@ -60,6 +60,28 @@ pub use reservations::{
 
 pub(crate) fn db_err(context: &str, err: impl std::fmt::Display) -> SignerError {
     SignerError::Other(format!("{context}: {err}"))
+}
+
+/// Prepare + `query_map` + collect with consistent error context.
+pub(crate) fn query_mapped<T, P, F>(
+    conn: &Connection,
+    sql: &str,
+    params: P,
+    context: &str,
+    map_row: F,
+) -> SignerResult<Vec<T>>
+where
+    P: rusqlite::Params,
+    F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
+{
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|err| db_err(&format!("prepare {context}"), err))?;
+    let rows = stmt
+        .query_map(params, map_row)
+        .map_err(|err| db_err(&format!("query {context}"), err))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|err| db_err(&format!("read {context}"), err))
 }
 
 pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {

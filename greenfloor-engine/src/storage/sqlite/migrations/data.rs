@@ -3,7 +3,7 @@
 use rusqlite::{params, Connection};
 
 use super::super::db_err;
-use super::super::offer_coin_watches::{insert_watch_rows, WatchInsertMode};
+use super::super::offer_coin_watches::ensure_watch_rows;
 use super::helpers::{query_mapped, rewritten_tx_id};
 use crate::error::SignerResult;
 use crate::hex::canonical_tx_id;
@@ -80,14 +80,7 @@ fn backfill_missing_offer_coin_watches(conn: &Connection) -> SignerResult<()> {
     for (offer_id, market_id, input_coin, maker_p2) in rows {
         let coins: Vec<String> = input_coin.into_iter().collect();
         let p2s: Vec<String> = maker_p2.into_iter().collect();
-        insert_watch_rows(
-            conn,
-            &offer_id,
-            &market_id,
-            &coins,
-            &p2s,
-            WatchInsertMode::Ensure,
-        )?;
+        ensure_watch_rows(conn, &offer_id, &market_id, &coins, &p2s)?;
     }
     Ok(())
 }
