@@ -298,8 +298,7 @@ fn walk_chain(
     path.push(node.to_string());
     let children = coins_by_id
         .get(node)
-        .map(|coin| coin.child_coin_ids.as_slice())
-        .unwrap_or(&[]);
+        .map_or(&[][..], |coin| coin.child_coin_ids.as_slice());
     if children.is_empty() {
         if let Some(chain) = terminal_chain(path, coins_by_id) {
             chains.push(chain);
