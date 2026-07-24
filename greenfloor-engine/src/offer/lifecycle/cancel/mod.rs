@@ -53,25 +53,15 @@ async fn cancel_one_offer(
         Err(err) => return Ok(failed(target, market_id, "", err.to_string())),
     };
 
-    let persist = match tracked {
-        Some(_) => {
-            let prior_state = store.offer_state_for_id(target.offer_id())?;
-            if let Err(err) = store.prepare_offer_cancel_submitted(
-                target.offer_id(),
-                &market_id,
-                &operation_id,
-                None,
-            ) {
-                return Ok(failed(
-                    target,
-                    market_id,
-                    "",
-                    format!("cancel_submitted prepare failed before broadcast: {err}"),
-                ));
-            }
-            CancelPersistPolicy::Tracked { store, prior_state }
-        }
-        None => CancelPersistPolicy::Ephemeral,
+    let persist = match prepare_cancel_persist(
+        store,
+        target,
+        &market_id,
+        &operation_id,
+        tracked.is_some(),
+    )? {
+        Ok(policy) => policy,
+        Err(out) => return Ok(out),
     };
 
     Ok(broadcast_cancel(
@@ -83,6 +73,30 @@ async fn cancel_one_offer(
         persist,
     )
     .await)
+}
+
+fn prepare_cancel_persist<'a>(
+    store: &'a SqliteStore,
+    target: &CancelOfferTarget,
+    market_id: &str,
+    operation_id: &str,
+    tracked: bool,
+) -> SignerResult<Result<CancelPersistPolicy<'a>, CancelOfferOutcome>> {
+    if !tracked {
+        return Ok(Ok(CancelPersistPolicy::Ephemeral));
+    }
+    let prior_state = store.offer_state_for_id(target.offer_id())?;
+    if let Err(err) =
+        store.prepare_offer_cancel_submitted(target.offer_id(), market_id, operation_id, None)
+    {
+        return Ok(Err(failed(
+            target,
+            market_id,
+            "",
+            format!("cancel_submitted prepare failed before broadcast: {err}"),
+        )));
+    }
+    Ok(Ok(CancelPersistPolicy::Tracked { store, prior_state }))
 }
 
 /// Cancel offers on-chain (spend an offered input coin back to vault change).

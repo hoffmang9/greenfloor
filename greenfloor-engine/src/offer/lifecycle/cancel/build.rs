@@ -11,6 +11,7 @@ use crate::offer::types::StoredOfferCancelMetadata;
 use crate::vault::session::resolve_vault_spend_context;
 use chia_protocol::SpendBundle;
 
+#[derive(Debug)]
 enum CancelInput<'a> {
     OfferFile(String),
     StoredMetadata(&'a StoredOfferCancelMetadata),
@@ -94,4 +95,57 @@ pub(super) async fn build_cancel_spend_bundle(
     };
     let operation_id = spend_bundle_operation_id(&spend_bundle)?;
     Ok((spend_bundle, operation_id, coinset_client))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
+
+    fn sufficient_metadata() -> StoredOfferCancelMetadata {
+        StoredOfferCancelMetadata {
+            fields: OfferCancelFields::from_direct_build("11".repeat(32), "22".repeat(32)),
+            execution_mode: Some(OfferExecutionMode::Direct),
+        }
+    }
+
+    #[test]
+    fn needs_dexie_false_with_local_text_or_sufficient_metadata() {
+        let meta = sufficient_metadata();
+        assert!(!needs_dexie_offer_file(Some("offer1abc"), None));
+        assert!(!needs_dexie_offer_file(None, Some(&meta)));
+        assert!(needs_dexie_offer_file(None, None));
+    }
+
+    #[tokio::test]
+    async fn resolve_prefers_local_text_then_metadata() {
+        let meta = sufficient_metadata();
+        match resolve_cancel_input("offer-1", Some("offer1local"), Some(&meta), None)
+            .await
+            .expect("resolve")
+        {
+            CancelInput::OfferFile(text) => assert_eq!(text, "offer1local"),
+            CancelInput::StoredMetadata(_) => panic!("expected offer file"),
+        }
+        match resolve_cancel_input("offer-1", None, Some(&meta), None)
+            .await
+            .expect("resolve")
+        {
+            CancelInput::StoredMetadata(stored) => {
+                assert_eq!(
+                    stored.fields.input_coin_id.as_deref(),
+                    Some(&*"11".repeat(32))
+                );
+            }
+            CancelInput::OfferFile(_) => panic!("expected metadata"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_errors_when_dexie_fallback_unavailable() {
+        let err = resolve_cancel_input("offer-1", None, None, None)
+            .await
+            .expect_err("missing inputs");
+        assert!(err.to_string().contains("offer cancel requires"));
+    }
 }
