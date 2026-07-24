@@ -50,30 +50,82 @@ impl CancelOfferTarget {
     }
 }
 
-/// Per-target cancel result. Soft orchestration failures use `success: false` (see
+/// Per-target cancel result. Soft orchestration failures are [`Self::Failed`] (see
 /// [`super::cancel_offers_on_chain`]); they are not `Err`.
 #[derive(Debug, Clone)]
-pub struct CancelOfferOutcome {
-    pub offer_id: String,
-    pub market_id: String,
-    /// True when the cancel spend was broadcast successfully.
-    pub success: bool,
-    pub operation_id: String,
-    /// Hard failure detail (build/prepare/broadcast/observe/rollback). Empty on success.
-    pub error: String,
+pub enum CancelOfferOutcome {
+    Submitted {
+        offer_id: String,
+        market_id: String,
+        operation_id: String,
+    },
+    Failed {
+        offer_id: String,
+        market_id: String,
+        operation_id: String,
+        error: String,
+    },
 }
 
-pub(super) fn outcome(
+impl CancelOfferOutcome {
+    #[must_use]
+    pub fn offer_id(&self) -> &str {
+        match self {
+            Self::Submitted { offer_id, .. } | Self::Failed { offer_id, .. } => offer_id,
+        }
+    }
+
+    #[must_use]
+    pub fn market_id(&self) -> &str {
+        match self {
+            Self::Submitted { market_id, .. } | Self::Failed { market_id, .. } => market_id,
+        }
+    }
+
+    #[must_use]
+    pub fn operation_id(&self) -> &str {
+        match self {
+            Self::Submitted { operation_id, .. } | Self::Failed { operation_id, .. } => {
+                operation_id
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Submitted { .. })
+    }
+
+    #[must_use]
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Submitted { .. } => None,
+            Self::Failed { error, .. } => Some(error.as_str()),
+        }
+    }
+}
+
+pub(super) fn submitted(
     target: &CancelOfferTarget,
     market_id: impl Into<String>,
-    success: bool,
+    operation_id: impl Into<String>,
+) -> CancelOfferOutcome {
+    CancelOfferOutcome::Submitted {
+        offer_id: target.offer_id().to_string(),
+        market_id: market_id.into(),
+        operation_id: operation_id.into(),
+    }
+}
+
+pub(super) fn failed(
+    target: &CancelOfferTarget,
+    market_id: impl Into<String>,
     operation_id: impl Into<String>,
     error: impl Into<String>,
 ) -> CancelOfferOutcome {
-    CancelOfferOutcome {
+    CancelOfferOutcome::Failed {
         offer_id: target.offer_id().to_string(),
         market_id: market_id.into(),
-        success,
         operation_id: operation_id.into(),
         error: error.into(),
     }

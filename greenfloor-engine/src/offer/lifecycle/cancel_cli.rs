@@ -238,7 +238,7 @@ pub async fn offers_cancel_cli(
     let selected_count = crate::metrics::metric_collection_len_to_u64(selections.len());
     let mut failures = 0u64;
     for (outcome, selection) in outcomes.into_iter().zip(selections.drain(..)) {
-        if !outcome.success {
+        if !outcome.is_success() {
             failures += 1;
         }
         items.push(OffersCancelCliItem {
@@ -246,9 +246,9 @@ pub async fn offers_cancel_cli(
             market_id: selection.target.normalized_market_id(),
             state: selection.state,
             result: json!({
-                "success": outcome.success,
-                "operation_id": outcome.operation_id,
-                "error": outcome.error,
+                "success": outcome.is_success(),
+                "operation_id": outcome.operation_id(),
+                "error": outcome.error().unwrap_or(""),
             }),
         });
     }

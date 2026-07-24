@@ -87,23 +87,22 @@ async fn execute_on_chain_cancellations(
     let mut cancel_executed = 0_i64;
     let mut items = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
-        if outcome.success {
+        if outcome.is_success() {
             cancel_executed += 1;
             items.push(json!({
-                "offer_id": outcome.offer_id,
+                "offer_id": outcome.offer_id(),
                 "status": ReconcileState::CancelSubmitted.as_str(),
                 "reason": "cancel_submitted_on_strong_unstable_move",
-                "operation_id": outcome.operation_id,
+                "operation_id": outcome.operation_id(),
                 "attempts": 1,
             }));
         } else {
-            let error = if outcome.error.is_empty() {
-                "cancel_failed"
-            } else {
-                outcome.error.as_str()
-            };
+            let error = outcome
+                .error()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("cancel_failed");
             items.push(json!({
-                "offer_id": outcome.offer_id,
+                "offer_id": outcome.offer_id(),
                 "status": "skipped",
                 "reason": format!("cancel_failed:{error}"),
                 "attempts": 1,

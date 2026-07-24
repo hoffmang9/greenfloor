@@ -56,7 +56,7 @@ async fn local_file_cancel_does_not_write_offer_state() {
     .await
     .expect("cancel batch");
     assert_eq!(outcomes.len(), 1);
-    assert!(!outcomes[0].success);
+    assert!(!outcomes[0].is_success());
     assert!(store
         .offer_state_for_id("local-offer-test")
         .expect("lookup")
@@ -91,7 +91,7 @@ async fn tracked_cancel_failure_does_not_write_cancel_submitted() {
     .await
     .expect("cancel batch");
     assert_eq!(outcomes.len(), 1);
-    assert!(!outcomes[0].success);
+    assert!(!outcomes[0].is_success());
     assert_eq!(
         store
             .offer_state_for_id("offer-open")

@@ -51,12 +51,12 @@ async fn resolve_cancel_input<'a>(
     cancel_metadata: Option<&'a StoredOfferCancelMetadata>,
     dexie: Option<&DexieClient>,
 ) -> SignerResult<CancelInput<'a>> {
-    if !needs_dexie_offer_file(local_text, cancel_metadata) {
-        if let Some(text) = local_text {
-            return Ok(CancelInput::OfferFile(text.to_string()));
-        }
-        // `needs_dexie` is false without local text ⇒ metadata is sufficient.
-        let metadata = cancel_metadata.ok_or_else(missing_cancel_input_error)?;
+    if let Some(text) = local_text {
+        return Ok(CancelInput::OfferFile(text.to_string()));
+    }
+    if let Some(metadata) =
+        cancel_metadata.filter(|meta| metadata_sufficient_for_coinset_cancel(Some(meta)))
+    {
         return Ok(CancelInput::StoredMetadata(metadata));
     }
     match dexie {

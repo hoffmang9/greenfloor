@@ -10,13 +10,19 @@ mod tests;
 use crate::adapters::DexieClient;
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
+use crate::offer::types::StoredOfferCancelMetadata;
 use crate::storage::SqliteStore;
 
 use broadcast::{broadcast_cancel, CancelPersistPolicy};
 use build::{build_cancel_spend_bundle, needs_dexie_offer_file};
-use target::outcome;
+use target::failed;
 
 pub use target::{CancelOfferOutcome, CancelOfferTarget};
+
+/// Tracked-path context loaded once from [`CancelOfferTarget::Tracked`].
+struct TrackedCancelCtx {
+    metadata: Option<StoredOfferCancelMetadata>,
+}
 
 async fn cancel_one_offer(
     store: &SqliteStore,
@@ -26,10 +32,10 @@ async fn cancel_one_offer(
     target: &CancelOfferTarget,
 ) -> SignerResult<CancelOfferOutcome> {
     let market_id = target.normalized_market_id();
-    let cancel_metadata = match target {
-        CancelOfferTarget::Tracked { offer_id, .. } => {
-            store.offer_cancel_metadata_for_id(offer_id)?
-        }
+    let tracked = match target {
+        CancelOfferTarget::Tracked { offer_id, .. } => Some(TrackedCancelCtx {
+            metadata: store.offer_cancel_metadata_for_id(offer_id)?,
+        }),
         CancelOfferTarget::LocalFile { .. } => None,
     };
 
@@ -38,17 +44,17 @@ async fn cancel_one_offer(
         operator_network,
         target.offer_id(),
         target.offer_text(),
-        cancel_metadata.as_ref(),
+        tracked.as_ref().and_then(|ctx| ctx.metadata.as_ref()),
         dexie,
     )
     .await
     {
         Ok(value) => value,
-        Err(err) => return Ok(outcome(target, market_id, false, "", err.to_string())),
+        Err(err) => return Ok(failed(target, market_id, "", err.to_string())),
     };
 
-    let persist = match target {
-        CancelOfferTarget::Tracked { .. } => {
+    let persist = match tracked {
+        Some(_) => {
             let prior_state = store.offer_state_for_id(target.offer_id())?;
             if let Err(err) = store.prepare_offer_cancel_submitted(
                 target.offer_id(),
@@ -56,17 +62,16 @@ async fn cancel_one_offer(
                 &operation_id,
                 None,
             ) {
-                return Ok(outcome(
+                return Ok(failed(
                     target,
                     market_id,
-                    false,
                     "",
                     format!("cancel_submitted prepare failed before broadcast: {err}"),
                 ));
             }
             CancelPersistPolicy::Tracked { store, prior_state }
         }
-        CancelOfferTarget::LocalFile { .. } => CancelPersistPolicy::Ephemeral,
+        None => CancelPersistPolicy::Ephemeral,
     };
 
     Ok(broadcast_cancel(
@@ -89,8 +94,8 @@ async fn cancel_one_offer(
 /// # Failure model
 ///
 /// Per-target orchestration failures (build, prepare, broadcast, observe, rollback)
-/// are returned as [`CancelOfferOutcome`] with `success: false` so the batch can
-/// continue. Infrastructure failures that prevent evaluating a target (for example
+/// are returned as [`CancelOfferOutcome::Failed`] so the batch can continue.
+/// Infrastructure failures that prevent evaluating a target (for example
 /// `SQLite` metadata/state reads before soft handling) propagate as `Err`.
 ///
 /// # Errors

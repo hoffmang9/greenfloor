@@ -2,7 +2,7 @@ use crate::coinset;
 use crate::storage::{SqliteStore, TxSignalIngress};
 use chia_protocol::SpendBundle;
 
-use super::target::{outcome, CancelOfferOutcome, CancelOfferTarget};
+use super::target::{failed, submitted, CancelOfferOutcome, CancelOfferTarget};
 
 pub(super) enum CancelPersistPolicy<'a> {
     Tracked {
@@ -27,16 +27,15 @@ pub(super) async fn broadcast_cancel(
                     std::slice::from_ref(&result.operation_id),
                     TxSignalIngress::Mempool,
                 ) {
-                    return outcome(
+                    return failed(
                         target,
                         market_id,
-                        false,
                         result.operation_id,
                         format!("cancel broadcast succeeded; observe cancel tx failed: {err}"),
                     );
                 }
             }
-            outcome(target, market_id, true, result.operation_id, "")
+            submitted(target, market_id, result.operation_id)
         }
         Err(err) => {
             if let CancelPersistPolicy::Tracked { store, prior_state } = persist {
@@ -45,10 +44,9 @@ pub(super) async fn broadcast_cancel(
                     market_id,
                     prior_state.as_deref().unwrap_or("open"),
                 ) {
-                    return outcome(
+                    return failed(
                         target,
                         market_id,
-                        false,
                         operation_id,
                         format!(
                             "cancel broadcast failed ({err}); rollback also failed: {rollback_err}"
@@ -56,7 +54,7 @@ pub(super) async fn broadcast_cancel(
                     );
                 }
             }
-            outcome(target, market_id, false, operation_id, err.to_string())
+            failed(target, market_id, operation_id, err.to_string())
         }
     }
 }
