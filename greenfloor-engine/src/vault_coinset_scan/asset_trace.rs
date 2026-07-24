@@ -78,27 +78,10 @@ pub struct AssetTraceResult {
 
 struct NormalizedRow<'a> {
     coin_id: String,
+    /// Normalized parent coin id; empty when absent.
+    parent: String,
+    puzzle_hash: String,
     row: &'a CoinRow,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CoinTraceMeta {
-    is_reception: bool,
-    is_unspent: bool,
-    has_children: bool,
-}
-
-#[must_use]
-fn classify_role(meta: CoinTraceMeta) -> AssetTraceRole {
-    if meta.is_reception {
-        AssetTraceRole::Reception
-    } else if meta.is_unspent {
-        AssetTraceRole::Current
-    } else if meta.has_children {
-        AssetTraceRole::Internal
-    } else {
-        AssetTraceRole::Exit
-    }
 }
 
 /// Build per-asset lineage graph and chains from vault scan rows (already asset-filtered).
@@ -109,50 +92,33 @@ pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> 
         .iter()
         .map(|entry| entry.coin_id.clone())
         .collect();
-
     let children_by_parent = build_children_index(&normalized, &coin_ids);
-    let (merges, co_inputs_by_coin) = build_merge_groups(&normalized, &children_by_parent);
+    let merges = build_merges(&normalized, &children_by_parent);
 
     let mut coins = Vec::with_capacity(normalized.len());
-    let mut reception_ids = Vec::new();
-    let mut unspent_count = 0usize;
-    let mut unspent_amount = 0u64;
+    let mut unspent_coin_count = 0usize;
+    let mut unspent_amount_mojos = 0u64;
 
     for entry in &normalized {
-        let parent = normalize_hex_id(&entry.row.parent_coin_info);
-        let parent_in_set = !parent.is_empty() && coin_ids.contains(&parent);
-        let parent_coin_id = (!parent.is_empty()).then_some(parent);
+        let is_reception = entry.parent.is_empty() || !coin_ids.contains(&entry.parent);
         let child_coin_ids = children_by_parent
             .get(&entry.coin_id)
             .cloned()
             .unwrap_or_default();
-        let co_input_coin_ids = co_inputs_by_coin
-            .get(&entry.coin_id)
-            .cloned()
-            .unwrap_or_default();
+        let has_children = !child_coin_ids.is_empty();
         let is_unspent = entry.row.spent_block_index == 0;
-        let is_reception = !parent_in_set;
         if is_unspent {
-            unspent_count += 1;
-            unspent_amount = unspent_amount.saturating_add(entry.row.amount);
-        }
-        let meta = CoinTraceMeta {
-            is_reception,
-            is_unspent,
-            has_children: !child_coin_ids.is_empty(),
-        };
-        let role = classify_role(meta);
-        if is_reception {
-            reception_ids.push(entry.coin_id.clone());
+            unspent_coin_count += 1;
+            unspent_amount_mojos = unspent_amount_mojos.saturating_add(entry.row.amount);
         }
 
         coins.push(AssetTraceCoin {
             coin_id: entry.coin_id.clone(),
             amount: entry.row.amount,
-            parent_coin_id,
+            parent_coin_id: (!entry.parent.is_empty()).then(|| entry.parent.clone()),
             child_coin_ids,
-            co_input_coin_ids,
-            role,
+            co_input_coin_ids: co_inputs_for(&entry.coin_id, &merges),
+            role: classify_role(is_reception, is_unspent, has_children),
             confirmed_block_index: entry.row.confirmed_block_index,
             spent_block_index: entry.row.spent_block_index,
             puzzle_hash: entry.row.puzzle_hash.clone(),
@@ -165,34 +131,18 @@ pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> 
             .cmp(&right.confirmed_block_index)
             .then_with(|| left.coin_id.cmp(&right.coin_id))
     });
-    reception_ids.sort_unstable();
-    reception_ids.dedup();
 
-    let role_by_id: HashMap<String, AssetTraceRole> = coins
-        .iter()
-        .map(|coin| (coin.coin_id.clone(), coin.role))
-        .collect();
-    let amount_by_id: HashMap<String, u64> = coins
-        .iter()
-        .map(|coin| (coin.coin_id.clone(), coin.amount))
-        .collect();
-    let chains = build_chains(
-        &reception_ids,
-        &children_by_parent,
-        &role_by_id,
-        &amount_by_id,
-    );
-
+    let (chains, reception_count) = build_chains(&coins);
     AssetTraceResult {
         asset_id: asset_id.to_string(),
         asset_type: asset_type.to_string(),
         lineage_model: "parent_tree_with_same_block_merge_edges",
         coin_count: coins.len(),
-        reception_count: reception_ids.len(),
+        reception_count,
         merge_count: merges.len(),
         current_balance: AssetTraceBalance {
-            unspent_coin_count: unspent_count,
-            unspent_amount_mojos: unspent_amount,
+            unspent_coin_count,
+            unspent_amount_mojos,
         },
         coins,
         chains,
@@ -200,11 +150,28 @@ pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> 
     }
 }
 
+fn classify_role(is_reception: bool, is_unspent: bool, has_children: bool) -> AssetTraceRole {
+    if is_reception {
+        AssetTraceRole::Reception
+    } else if is_unspent {
+        AssetTraceRole::Current
+    } else if has_children {
+        AssetTraceRole::Internal
+    } else {
+        AssetTraceRole::Exit
+    }
+}
+
 fn normalize_rows(rows: &[CoinRow]) -> Vec<NormalizedRow<'_>> {
     rows.iter()
         .filter_map(|row| {
             let coin_id = normalize_hex_id(&row.coin_id);
-            (!coin_id.is_empty()).then_some(NormalizedRow { coin_id, row })
+            (!coin_id.is_empty()).then(|| NormalizedRow {
+                coin_id,
+                parent: normalize_hex_id(&row.parent_coin_info),
+                puzzle_hash: normalize_hex_id(&row.puzzle_hash),
+                row,
+            })
         })
         .collect()
 }
@@ -215,12 +182,11 @@ fn build_children_index(
 ) -> HashMap<String, Vec<String>> {
     let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
     for entry in normalized {
-        let parent = normalize_hex_id(&entry.row.parent_coin_info);
-        if parent.is_empty() || !coin_ids.contains(&parent) {
+        if entry.parent.is_empty() || !coin_ids.contains(&entry.parent) {
             continue;
         }
         children_by_parent
-            .entry(parent)
+            .entry(entry.parent.clone())
             .or_default()
             .push(entry.coin_id.clone());
     }
@@ -230,54 +196,44 @@ fn build_children_index(
     children_by_parent
 }
 
-fn build_merge_groups(
+fn build_merges(
     normalized: &[NormalizedRow<'_>],
     children_by_parent: &HashMap<String, Vec<String>>,
-) -> (Vec<AssetTraceMerge>, HashMap<String, Vec<String>>) {
+) -> Vec<AssetTraceMerge> {
     let mut spent_clusters: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
     for entry in normalized {
         if entry.row.spent_block_index == 0 {
             continue;
         }
-        let puzzle_hash = normalize_hex_id(&entry.row.puzzle_hash);
         spent_clusters
-            .entry((entry.row.spent_block_index, puzzle_hash))
+            .entry((entry.row.spent_block_index, entry.puzzle_hash.clone()))
             .or_default()
             .push(entry.coin_id.clone());
     }
 
     let mut merges = Vec::new();
-    let mut co_inputs_by_coin = HashMap::new();
-
     for ((spent_block_index, puzzle_hash), mut cluster) in spent_clusters {
         cluster.sort_unstable();
         if cluster.len() < 2 {
             continue;
         }
-        let mut output_ids = BTreeSet::new();
-        for input_id in &cluster {
-            if let Some(children) = children_by_parent.get(input_id) {
-                output_ids.extend(children.iter().cloned());
-            }
-        }
-        if output_ids.is_empty() {
+        let output_coin_ids: Vec<String> = cluster
+            .iter()
+            .filter_map(|input_id| children_by_parent.get(input_id))
+            .flatten()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if output_coin_ids.is_empty() {
             continue;
         }
-        let output_coin_ids: Vec<String> = output_ids.into_iter().collect();
         merges.push(AssetTraceMerge {
             spent_block_index,
             puzzle_hash,
-            input_coin_ids: cluster.clone(),
+            input_coin_ids: cluster,
             output_coin_ids,
         });
-        for input_id in &cluster {
-            let siblings: Vec<String> = cluster
-                .iter()
-                .filter(|id| *id != input_id)
-                .cloned()
-                .collect();
-            co_inputs_by_coin.insert(input_id.clone(), siblings);
-        }
     }
 
     merges.sort_by(|left, right| {
@@ -285,26 +241,43 @@ fn build_merge_groups(
             .cmp(&right.spent_block_index)
             .then_with(|| left.input_coin_ids.cmp(&right.input_coin_ids))
     });
-    (merges, co_inputs_by_coin)
+    merges
 }
 
-fn build_chains(
-    reception_ids: &[String],
-    children_by_parent: &HashMap<String, Vec<String>>,
-    role_by_id: &HashMap<String, AssetTraceRole>,
-    amount_by_id: &HashMap<String, u64>,
-) -> Vec<AssetTraceChain> {
+/// Co-spend siblings from the merge that contains `coin_id` (merges are the sole source).
+fn co_inputs_for(coin_id: &str, merges: &[AssetTraceMerge]) -> Vec<String> {
+    merges
+        .iter()
+        .find(|merge| merge.input_coin_ids.iter().any(|id| id == coin_id))
+        .map(|merge| {
+            merge
+                .input_coin_ids
+                .iter()
+                .filter(|id| id.as_str() != coin_id)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn build_chains(coins: &[AssetTraceCoin]) -> (Vec<AssetTraceChain>, usize) {
+    let mut reception_ids: Vec<&str> = coins
+        .iter()
+        .filter(|coin| coin.role == AssetTraceRole::Reception)
+        .map(|coin| coin.coin_id.as_str())
+        .collect();
+    reception_ids.sort_unstable();
+    reception_ids.dedup();
+
+    let coins_by_id: HashMap<&str, &AssetTraceCoin> = coins
+        .iter()
+        .map(|coin| (coin.coin_id.as_str(), coin))
+        .collect();
+
     let mut chains = Vec::new();
-    for reception_id in reception_ids {
-        let mut path = Vec::new();
-        walk_chain(
-            reception_id,
-            &mut path,
-            children_by_parent,
-            role_by_id,
-            amount_by_id,
-            &mut chains,
-        );
+    let mut path = Vec::new();
+    for reception_id in &reception_ids {
+        walk_chain(reception_id, &mut path, &coins_by_id, &mut chains);
     }
     chains.sort_by(|left, right| {
         left.reception_coin_id
@@ -312,62 +285,44 @@ fn build_chains(
             .then_with(|| left.path.len().cmp(&right.path.len()))
             .then_with(|| left.path.cmp(&right.path))
     });
-    chains
+
+    (chains, reception_ids.len())
 }
 
 fn walk_chain(
     node: &str,
     path: &mut Vec<String>,
-    children_by_parent: &HashMap<String, Vec<String>>,
-    role_by_id: &HashMap<String, AssetTraceRole>,
-    amount_by_id: &HashMap<String, u64>,
+    coins_by_id: &HashMap<&str, &AssetTraceCoin>,
     chains: &mut Vec<AssetTraceChain>,
 ) {
     path.push(node.to_string());
-    let Some(children) = children_by_parent.get(node) else {
-        push_terminal_chain(path, role_by_id, amount_by_id, chains);
-        path.pop();
-        return;
-    };
+    let children = coins_by_id
+        .get(node)
+        .map_or(&[][..], |coin| coin.child_coin_ids.as_slice());
     if children.is_empty() {
-        push_terminal_chain(path, role_by_id, amount_by_id, chains);
-        path.pop();
-        return;
-    }
-    for child in children {
-        walk_chain(
-            child,
-            path,
-            children_by_parent,
-            role_by_id,
-            amount_by_id,
-            chains,
-        );
+        if let Some(chain) = terminal_chain(path, coins_by_id) {
+            chains.push(chain);
+        }
+    } else {
+        for child in children {
+            walk_chain(child, path, coins_by_id, chains);
+        }
     }
     path.pop();
 }
 
-fn push_terminal_chain(
+fn terminal_chain(
     path: &[String],
-    role_by_id: &HashMap<String, AssetTraceRole>,
-    amount_by_id: &HashMap<String, u64>,
-    chains: &mut Vec<AssetTraceChain>,
-) {
-    let Some(terminal_id) = path.last() else {
-        return;
-    };
-    let Some(&terminal_role) = role_by_id.get(terminal_id) else {
-        return;
-    };
-    let Some(&terminal_amount) = amount_by_id.get(terminal_id) else {
-        return;
-    };
-    chains.push(AssetTraceChain {
-        reception_coin_id: path.first().cloned().unwrap_or_else(|| terminal_id.clone()),
+    coins_by_id: &HashMap<&str, &AssetTraceCoin>,
+) -> Option<AssetTraceChain> {
+    let terminal_id = path.last()?;
+    let terminal = coins_by_id.get(terminal_id.as_str())?;
+    Some(AssetTraceChain {
+        reception_coin_id: path.first()?.clone(),
         path: path.to_vec(),
-        terminal_role,
-        terminal_amount_mojos: terminal_amount,
-    });
+        terminal_role: terminal.role,
+        terminal_amount_mojos: terminal.amount,
+    })
 }
 
 #[cfg(test)]
