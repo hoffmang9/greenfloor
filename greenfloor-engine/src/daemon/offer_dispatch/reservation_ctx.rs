@@ -21,16 +21,10 @@ pub async fn parallel_reservation_context(
 ) -> SignerResult<ParallelReservationContext> {
     let assets = resolver.resolve_market_assets(market).await?;
     let fee_asset_id = resolver.resolve_fee_asset(&assets).await?;
-    let base_unit_mojo_multiplier = market
-        .pricing
-        .get("base_unit_mojo_multiplier")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(1000);
-    let quote_unit_mojo_multiplier = market
-        .pricing
-        .get("quote_unit_mojo_multiplier")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(1000);
+    // Match pre-typed pricing: missing multipliers default to 1000 (CAT unit), not the
+    // XCH trillion fallback used by offer-leg helpers.
+    let base_unit_mojo_multiplier = market.pricing.base_unit_mojo_multiplier.unwrap_or(1000);
+    let quote_unit_mojo_multiplier = market.pricing.quote_unit_mojo_multiplier.unwrap_or(1000);
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     Ok(ParallelReservationContext {
         base_asset_id: assets.base_asset_id.trim().to_string(),

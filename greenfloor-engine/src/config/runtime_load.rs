@@ -17,23 +17,13 @@ use serde_json::Value;
 
 use super::cat_ticker_index::{build_cat_ticker_index_lenient, CatTickerIndex};
 use super::{
-    ensure_market_receive_address_for_network, load_markets_config_with_overlay,
-    load_program_bundle_gated, parse_program_config, parse_signer_config, read_program_yaml,
-    resolve_market_for_build, select_coin_list_market, CycleProgramConfig, ManagerProgramConfig,
-    MarketConfig, MarketsConfig, SignerConfig,
+    load_markets_config_with_overlay, load_program_bundle_gated, parse_program_config,
+    parse_signer_config, read_program_yaml, resolve_operator_market, CycleProgramConfig,
+    ManagerProgramConfig, MarketConfig, MarketsConfig, OperatorMarketCommand, SignerConfig,
 };
 use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint, DEFAULT_COINSET_BASE_URL};
 use crate::error::SignerResult;
 use crate::paths::resolve_cats_config_path;
-
-/// Which market-resolution rules apply when loading a single operator market row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperatorMarketCommand {
-    /// `build-and-post-offer`, coin-split/combine: require exactly one of `--market-id` or `--pair`.
-    Build,
-    /// `coins-list` / `coin-status`: allow default market for the operator network.
-    CoinList,
-}
 
 /// Gated program bundle plus one resolved market row (manager CLI operator commands).
 #[derive(Debug, Clone)]
@@ -155,25 +145,6 @@ pub fn load_gated_operator_market(
         ticker_index,
         network,
     ))
-}
-
-fn resolve_operator_market(
-    markets: &MarketsConfig,
-    network: &str,
-    market_id: Option<&str>,
-    pair: Option<&str>,
-    command: OperatorMarketCommand,
-) -> SignerResult<MarketConfig> {
-    let market = match command {
-        OperatorMarketCommand::Build => {
-            resolve_market_for_build(markets, market_id, pair, network)?
-        }
-        OperatorMarketCommand::CoinList => {
-            select_coin_list_market(markets, network, market_id, pair)?
-        }
-    };
-    ensure_market_receive_address_for_network(&market, network)?;
-    Ok(market)
 }
 
 /// Load daemon cycle program and markets config (soft signer parse).

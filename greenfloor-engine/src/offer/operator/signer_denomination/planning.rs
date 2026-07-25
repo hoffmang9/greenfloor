@@ -1,8 +1,6 @@
-use serde_json::Value;
-
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
-use crate::config::{LadderEntry, SignerConfig};
+use crate::config::{LadderEntry, MarketPricing, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{BaseUnits, BootstrapCoin, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
@@ -12,7 +10,7 @@ use crate::offer::request::normalize_offer_side;
 pub(super) fn bootstrap_ladder_entries_for_side(
     side: &str,
     side_ladder: &[LadderEntry],
-    pricing: &Value,
+    pricing: &MarketPricing,
     quote_price: f64,
     resolved_quote_asset_id: &str,
 ) -> SignerResult<Vec<PlannerLadderRow>> {
@@ -104,13 +102,11 @@ pub(super) fn bootstrap_coins_in_base_units(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::{
         bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
     };
     use crate::coinset::WalletUnspentCoin;
-    use crate::config::LadderEntry;
+    use crate::config::{LadderEntry, MarketPricing};
     use crate::test_support::signer_config::test_signer_config;
 
     #[test]
@@ -121,8 +117,14 @@ mod tests {
             split_buffer_count: 1,
             combine_when_excess_factor: 2.0,
         }];
-        let entries = bootstrap_ladder_entries_for_side("sell", &ladder, &json!({}), 1.0, "xch")
-            .expect("entries");
+        let entries = bootstrap_ladder_entries_for_side(
+            "sell",
+            &ladder,
+            &MarketPricing::default(),
+            1.0,
+            "xch",
+        )
+        .expect("entries");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].size_base_units, 25);
         assert_eq!(entries[0].target_count, 3);
@@ -136,7 +138,10 @@ mod tests {
             split_buffer_count: 0,
             combine_when_excess_factor: 2.0,
         }];
-        let pricing = json!({"quote_unit_mojo_multiplier": 1000});
+        let pricing = MarketPricing {
+            quote_unit_mojo_multiplier: Some(1000),
+            ..MarketPricing::default()
+        };
         let entries = bootstrap_ladder_entries_for_side(
             "buy",
             &ladder,

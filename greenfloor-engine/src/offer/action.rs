@@ -3,11 +3,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::coinset::parse_coin_ids;
-use crate::config::CatTickerIndex;
-use crate::config::SignerConfig;
+use crate::config::{CatTickerIndex, MarketPricing, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
@@ -24,7 +22,7 @@ pub struct BuildOfferForActionRequest {
     pub quote_asset: String,
     pub size_base_units: u64,
     pub action_side: String,
-    pub pricing: Value,
+    pub pricing: MarketPricing,
     #[serde(default)]
     pub quote_price: Option<f64>,
     #[serde(default = "default_true")]
@@ -56,7 +54,7 @@ pub struct BuildOfferForActionResult {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub fn expires_at_unix_from_pricing(pricing: &Value) -> SignerResult<u64> {
+pub fn expires_at_unix_from_pricing(pricing: &MarketPricing) -> SignerResult<u64> {
     let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
     let secs = minutes.saturating_mul(60);
     let secs_u64 =
@@ -150,7 +148,7 @@ fn create_offer_request_from_leg(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::config::MarketPricing;
 
     #[test]
     fn expires_at_from_minutes_pricing() {
@@ -158,8 +156,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_secs();
-        let expires = expires_at_unix_from_pricing(&json!({"strategy_offer_expiry_minutes": 5}))
-            .expect("expiry");
+        let pricing = MarketPricing {
+            strategy_offer_expiry_minutes: Some(5),
+            ..MarketPricing::default()
+        };
+        let expires = expires_at_unix_from_pricing(&pricing).expect("expiry");
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
     }

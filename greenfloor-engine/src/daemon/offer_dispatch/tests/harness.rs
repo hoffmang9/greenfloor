@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
 use tempfile::TempDir;
 
 use super::super::OfferDispatchOutput;
@@ -63,10 +62,11 @@ pub(super) fn sample_market() -> MarketConfig {
 
 pub(super) fn sample_market_with_pricing() -> MarketConfig {
     MarketConfig {
-        pricing: json!({
-            "min_price_quote_per_base": 0.0031,
-            "max_price_quote_per_base": 0.0038,
-        }),
+        pricing: crate::config::MarketPricing {
+            min_price_quote_per_base: Some(0.0031),
+            max_price_quote_per_base: Some(0.0038),
+            ..crate::config::MarketPricing::default()
+        },
         ..sample_market()
     }
 }

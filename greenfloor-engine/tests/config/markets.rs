@@ -1,7 +1,7 @@
 use greenfloor_engine::config::{
     ensure_market_receive_address_for_network, load_markets_config_with_overlay,
-    parse_markets_config, resolve_coin_list_market, resolve_market_for_build, MarketConfig,
-    MarketsConfig,
+    parse_markets_config, resolve_market_for_build, resolve_operator_market, MarketConfig,
+    MarketsConfig, OperatorMarketCommand,
 };
 use greenfloor_engine::error::SignerResult;
 use serde_json::{json, Value};
@@ -62,10 +62,7 @@ fn parse_markets_config_accepts_valid_strategy_controls() {
         "strategy_max_xch_price_usd": 60.0,
     });
     let market = parse_single_market(&row).expect("valid strategy controls");
-    assert_eq!(
-        market.pricing["strategy_target_spread_bps"].as_i64(),
-        Some(120)
-    );
+    assert_eq!(market.pricing.strategy_target_spread_bps, Some(120));
 }
 
 #[test]
@@ -97,10 +94,7 @@ fn parse_markets_config_accepts_strategy_expiry_override() {
     row["quote_asset_type"] = json!("stable");
     row["pricing"] = json!({"strategy_offer_expiry_minutes": 120});
     let market = parse_single_market(&row).expect("strategy expiry override");
-    assert_eq!(
-        market.pricing["strategy_offer_expiry_minutes"].as_i64(),
-        Some(120)
-    );
+    assert_eq!(market.pricing.strategy_offer_expiry_minutes, Some(120));
 }
 
 #[test]
@@ -108,10 +102,7 @@ fn parse_markets_config_accepts_unstable_expiry_above_15_minutes() {
     let mut row = base_market_row();
     row["pricing"] = json!({"strategy_offer_expiry_minutes": 30});
     let market = parse_single_market(&row).expect("unstable expiry above 15 minutes");
-    assert_eq!(
-        market.pricing["strategy_offer_expiry_minutes"].as_i64(),
-        Some(30)
-    );
+    assert_eq!(market.pricing.strategy_offer_expiry_minutes, Some(30));
 }
 
 #[test]
@@ -160,7 +151,6 @@ fn parse_markets_config_accepts_cancel_move_threshold_bps() {
     let mut row = base_market_row();
     row["pricing"] = json!({"cancel_move_threshold_bps": 250});
     let market = parse_single_market(&row).expect("cancel threshold");
-    assert!(market.pricing.get("cancel_move_threshold_bps").is_none());
     assert_eq!(market.cancel_move_threshold_bps, Some(250));
 }
 
@@ -183,26 +173,17 @@ fn parse_markets_config_defaults_cat_unit_multipliers_to_1000() {
     row["base_asset"] = json!("BYC");
     row["quote_asset"] = json!("wUSDC.b");
     let market = parse_single_market(&row).expect("cat multipliers");
-    assert_eq!(
-        market.pricing["base_unit_mojo_multiplier"].as_i64(),
-        Some(1000)
-    );
-    assert_eq!(
-        market.pricing["quote_unit_mojo_multiplier"].as_i64(),
-        Some(1000)
-    );
+    assert_eq!(market.pricing.base_unit_mojo_multiplier, Some(1000));
+    assert_eq!(market.pricing.quote_unit_mojo_multiplier, Some(1000));
 }
 
 #[test]
 fn parse_markets_config_defaults_xch_quote_multiplier_to_one_trillion() {
     let row = base_market_row();
     let market = parse_single_market(&row).expect("xch quote multiplier");
+    assert_eq!(market.pricing.base_unit_mojo_multiplier, Some(1000));
     assert_eq!(
-        market.pricing["base_unit_mojo_multiplier"].as_i64(),
-        Some(1000)
-    );
-    assert_eq!(
-        market.pricing["quote_unit_mojo_multiplier"].as_i64(),
+        market.pricing.quote_unit_mojo_multiplier,
         Some(1_000_000_000_000)
     );
 }
@@ -235,7 +216,7 @@ fn parse_markets_config_preserves_xch_multiplier_override() {
     row["pricing"] = json!({"quote_unit_mojo_multiplier": 1_000_000_000_000_i64});
     let market = parse_single_market(&row).expect("xch multiplier override");
     assert_eq!(
-        market.pricing["quote_unit_mojo_multiplier"].as_i64(),
+        market.pricing.quote_unit_mojo_multiplier,
         Some(1_000_000_000_000)
     );
 }
@@ -266,7 +247,7 @@ fn rejects_testnet_receive_address_in_base_file() {
 }
 
 #[test]
-fn resolve_coin_list_market_defaults_to_smallest_mainnet_receive_address() {
+fn resolve_operator_market_coin_list_defaults_to_smallest_mainnet_receive_address() {
     let markets = parse_markets_config(&json!({
         "markets": [
             {
@@ -298,15 +279,28 @@ fn resolve_coin_list_market_defaults_to_smallest_mainnet_receive_address() {
         ]
     }))
     .expect("markets");
-    let market = resolve_coin_list_market(&markets, "mainnet", None, None).expect("default market");
+    let market = resolve_operator_market(
+        &markets,
+        "mainnet",
+        None,
+        None,
+        OperatorMarketCommand::CoinList,
+    )
+    .expect("default market");
     assert_eq!(market.market_id, "a-main");
 }
 
 #[test]
-fn resolve_coin_list_market_rejects_explicit_market_on_wrong_network() {
+fn resolve_operator_market_coin_list_rejects_explicit_market_on_wrong_network() {
     let markets = sample_markets();
-    let err = resolve_coin_list_market(&markets, "testnet11", Some("m1"), None)
-        .expect_err("mainnet receive_address on testnet11");
+    let err = resolve_operator_market(
+        &markets,
+        "testnet11",
+        Some("m1"),
+        None,
+        OperatorMarketCommand::CoinList,
+    )
+    .expect_err("mainnet receive_address on testnet11");
     assert!(
         err.to_string()
             .contains("receive_address does not match operator network testnet11"),

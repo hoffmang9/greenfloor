@@ -1,7 +1,7 @@
 use crate::coinset::get_conservative_fee_estimate_for_signer;
 use crate::config::{
-    action_side_from_pricing, load_gated_operator_market, resolve_offer_publish_settings,
-    GatedOperatorMarket, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
+    load_gated_operator_market, resolve_offer_publish_settings, GatedOperatorMarket,
+    GatedOperatorMarketLoadRequest, MarketPricing, OperatorMarketCommand,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
@@ -99,7 +99,7 @@ pub(super) async fn resolve_build_and_post_context(
 
 pub(super) fn resolve_action_side(
     action_side_override: Option<&str>,
-    pricing: &serde_json::Value,
+    pricing: &MarketPricing,
 ) -> String {
     if let Some(side) = action_side_override
         .map(str::trim)
@@ -107,7 +107,7 @@ pub(super) fn resolve_action_side(
     {
         return normalize_offer_side(side).to_string();
     }
-    action_side_from_pricing(pricing)
+    normalize_offer_side(pricing.action_side()).to_string()
 }
 
 async fn resolve_maker_offer_fee(
@@ -131,15 +131,10 @@ pub(crate) fn signer_denomination_test_context(
 ) -> ResolvedBuildAndPostContext {
     use crate::config::resolve_quote_asset_for_offer;
     use crate::offer::ResolvedMarketOfferAssets;
-    use serde_json::json;
 
     let mut market_row = market_row.clone();
     if resolve_quote_price_for_pricing(&market_row.pricing).is_err() {
-        if let Some(pricing) = market_row.pricing.as_object_mut() {
-            pricing.insert("fixed_quote_per_base".to_string(), json!(1.0));
-        } else {
-            market_row.pricing = json!({"fixed_quote_per_base": 1.0});
-        }
+        market_row.pricing.fixed_quote_per_base = Some(1.0);
     }
     let quote_asset_for_offer =
         resolve_quote_asset_for_offer(market_row.quote_asset.trim(), "mainnet");
@@ -161,7 +156,6 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
     use std::collections::HashMap;
 
     use chia_protocol::Bytes32;
-    use serde_json::json;
 
     use crate::config::{empty_cat_ticker_index, ManagerProgramConfig, MarketConfig};
     use crate::vault::context::VaultCustodySnapshot;
@@ -199,7 +193,10 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
                 receive_address: "xch1".to_string(),
                 signer_key_id: "key-main-1".to_string(),
                 mode: "sell_only".to_string(),
-                pricing: json!({"fixed_quote_per_base": 1.0}),
+                pricing: MarketPricing {
+                    fixed_quote_per_base: Some(1.0),
+                    ..MarketPricing::default()
+                },
                 cancel_move_threshold_bps: None,
                 ladders: HashMap::default(),
             },
@@ -264,9 +261,7 @@ mod tests {
     async fn resolve_build_and_post_offer_assets_normalize_xch_on_testnet11() {
         use std::collections::HashMap;
 
-        use serde_json::json;
-
-        use crate::config::MarketConfig;
+        use crate::config::{MarketConfig, MarketPricing};
         use crate::offer::OfferAssetResolver;
         use crate::test_support::signer_config::test_signer_config;
 
@@ -281,7 +276,7 @@ mod tests {
             receive_address: "xch1".to_string(),
             signer_key_id: "key-main-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         };

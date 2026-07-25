@@ -35,8 +35,4 @@ fn parse_markets_config_parses_cancel_move_threshold_bps() {
     }))
     .expect("markets");
     assert_eq!(markets.markets[0].cancel_move_threshold_bps, Some(250));
-    assert!(markets.markets[0]
-        .pricing
-        .get("cancel_move_threshold_bps")
-        .is_none());
 }

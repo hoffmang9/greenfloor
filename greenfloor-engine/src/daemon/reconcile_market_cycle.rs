@@ -199,7 +199,6 @@ mod tests {
     use std::collections::HashMap;
 
     use mockito::Matcher;
-    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
@@ -218,7 +217,7 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: "key-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: crate::config::MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         }

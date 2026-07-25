@@ -105,15 +105,15 @@ fn strategy_config_for_ladder(
         tens_target: *normalized.get(&10).unwrap_or(&0),
         hundreds_target: *normalized.get(&100).unwrap_or(&0),
         target_spread_bps: include_pricing_bounds
-            .then(|| pricing_int(pricing, "strategy_target_spread_bps"))
+            .then_some(pricing.strategy_target_spread_bps)
             .flatten(),
         min_xch_price_usd: include_pricing_bounds
-            .then(|| pricing_float(pricing, "strategy_min_xch_price_usd"))
+            .then_some(pricing.strategy_min_xch_price_usd)
             .flatten(),
         max_xch_price_usd: include_pricing_bounds
-            .then(|| pricing_float(pricing, "strategy_max_xch_price_usd"))
+            .then_some(pricing.strategy_max_xch_price_usd)
             .flatten(),
-        offer_expiry_minutes: pricing_int(pricing, "strategy_offer_expiry_minutes"),
+        offer_expiry_minutes: pricing.strategy_offer_expiry_minutes,
         target_counts_by_size: Some(normalized),
     }
 }
@@ -167,23 +167,10 @@ fn market_mode_label(market: &MarketConfig) -> String {
     market.mode.trim().to_ascii_lowercase()
 }
 
-fn pricing_int(pricing: &serde_json::Value, key: &str) -> Option<i64> {
-    pricing.get(key).and_then(|value| {
-        value
-            .as_i64()
-            .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
-    })
-}
-
-fn pricing_float(pricing: &serde_json::Value, key: &str) -> Option<f64> {
-    pricing.get(key).and_then(serde_json::Value::as_f64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LadderEntry;
-    use serde_json::json;
+    use crate::config::{LadderEntry, MarketPricing};
     use std::collections::HashMap;
 
     fn sample_market() -> MarketConfig {
@@ -207,7 +194,10 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: "key-main-1".to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({"cancel_policy_stable_vs_unstable": true}),
+            pricing: MarketPricing {
+                cancel_policy_stable_vs_unstable: true,
+                ..MarketPricing::default()
+            },
             cancel_move_threshold_bps: None,
             ladders,
         }

@@ -2,9 +2,7 @@
 
 use std::collections::HashMap;
 
-use serde_json::json;
-
-use crate::config::MarketConfig;
+use crate::config::{MarketConfig, MarketPricing};
 
 #[must_use]
 pub fn sample_market(receive_address: impl AsRef<str>) -> MarketConfig {
@@ -18,7 +16,7 @@ pub fn sample_market(receive_address: impl AsRef<str>) -> MarketConfig {
         receive_address: receive_address.as_ref().to_string(),
         signer_key_id: "key-1".to_string(),
         mode: "sell_only".to_string(),
-        pricing: json!({}),
+        pricing: MarketPricing::default(),
         cancel_move_threshold_bps: None,
         ladders: HashMap::default(),
     }

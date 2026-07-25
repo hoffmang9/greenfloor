@@ -32,7 +32,6 @@ pub fn enforce_market_key_allowlist(
 mod tests {
     use super::*;
     use crate::config::MarketConfig;
-    use serde_json::json;
     use std::collections::HashMap;
 
     fn sample_market(key_id: &str) -> MarketConfig {
@@ -46,7 +45,7 @@ mod tests {
             receive_address: "xch1test".to_string(),
             signer_key_id: key_id.to_string(),
             mode: "sell_only".to_string(),
-            pricing: json!({}),
+            pricing: crate::config::MarketPricing::default(),
             cancel_move_threshold_bps: None,
             ladders: HashMap::default(),
         }
