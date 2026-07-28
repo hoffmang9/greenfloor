@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tempfile::TempDir;
 
 use super::*;
 use crate::coinset::puzzle_hash_hex_for_receive_address;
+use crate::daemon::coinset_ws::{CoinsetWsShared, InventoryP2Index};
 use crate::hex::normalize_hex_id;
 use crate::operator_log::CONFIG_RELOADED;
+use crate::storage::SqliteStore;
 
 const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
 
@@ -177,6 +180,29 @@ fn handle_reload_marker_skips_reaudit_when_reload_id_already_recorded() {
     h.call();
     assert_eq!(h.reload_events(10).len(), 1);
     assert!(!reload_marker_present(h.state_dir()));
+}
+
+#[test]
+fn handle_reload_marker_applies_index_when_reload_id_already_recorded() {
+    // Simulates crash after durable audit but before live filter install.
+    let h = Harness::new();
+    let coinset = CoinsetWsShared::empty();
+    assert!(coinset.p2_index().p2s().is_empty());
+    record_config_reloaded(
+        &h.open_store(),
+        "reload_marker",
+        "reload-apply-recover",
+        InventoryP2RebuildStatus::Ok,
+    )
+    .expect("seed audit");
+    h.write_marker("reload-apply-recover");
+    h.call_with_coinset(&coinset, &h.markets_path);
+
+    let expected = expected_receive_p2();
+    assert_eq!(coinset.p2_index().p2s(), std::slice::from_ref(&expected));
+    assert!(coinset.take_reconnect_requested());
+    assert!(!reload_marker_present(h.state_dir()));
+    assert_eq!(h.reload_events(10).len(), 1);
 }
 
 #[test]
