@@ -6,21 +6,17 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::adapters::DexieClient;
-use crate::cycle::{
-    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-    unchanged_offer_transition,
-};
+use crate::cycle::{is_dexie_offer_missing_error_text, unchanged_offer_transition};
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::cancel_context::{
-    cancel_submitted_context_for_offer, preload_cancel_submitted_contexts,
-};
+use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::ReconcilePersistOptions;
-use super::signal_apply::{apply_watched_offer_signals, persist_resolved_watched_transition};
-use super::transition::{
-    coinset_signals_from_dexie_offer_payload, missing_offer_error_from_payload,
+use super::signal_apply::{
+    apply_watched_offer_from_dexie_payload, persist_missing_watched_offer,
+    persist_resolved_watched_transition,
 };
+use super::transition::{missing_offer_error_from_payload, WatchedOfferTransitionEnv};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcileBatchItem {
@@ -141,6 +137,33 @@ pub async fn reconcile_offers_batch(
     })
 }
 
+fn batch_persist_options(
+    venue: crate::config::Venue,
+    dexie_error: Option<&str>,
+) -> ReconcilePersistOptions<'_> {
+    ReconcilePersistOptions {
+        action: "offers_reconcile",
+        venue: Some(venue),
+        dexie_error,
+    }
+}
+
+fn persist_batch_missing(
+    store: &SqliteStore,
+    venue: crate::config::Venue,
+    row: &crate::storage::OfferStateListRow,
+    error_text: &str,
+) -> SignerResult<(crate::cycle::CycleOfferTransition, Option<i64>)> {
+    let transition = persist_missing_watched_offer(
+        store,
+        &row.market_id,
+        &row.offer_id,
+        &row.state,
+        &batch_persist_options(venue, Some(error_text)),
+    )?;
+    Ok((transition, None))
+}
+
 async fn reconcile_one_dexie_offer(
     store: &SqliteStore,
     dexie: &DexieClient,
@@ -155,87 +178,34 @@ async fn reconcile_one_dexie_offer(
         Ok(response) => {
             let payload = response.body();
             if let Some(error_text) = missing_offer_error_from_payload(payload) {
-                let resolved = resolve_missing_watched_offer_transition(&row.state)
-                    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-                let options = ReconcilePersistOptions {
-                    action: "offers_reconcile",
-                    venue: Some(venue),
-                    dexie_error: Some(error_text.as_str()),
-                };
-                persist_resolved_watched_transition(
-                    store,
-                    &row.market_id,
-                    &row.offer_id,
-                    &resolved,
-                    None,
-                    &options,
-                )?;
-                return Ok((resolved, None));
+                return persist_batch_missing(store, venue, row, &error_text);
             }
-            let offer_body = payload.get("offer").unwrap_or(payload);
-            let (status, signals) = coinset_signals_from_dexie_offer_payload(store, offer_body)?;
-            let cancel_submitted = cancel_submitted_context_for_offer(
-                store,
-                &row.offer_id,
-                &row.state,
-                cancel_by_offer,
-            )?;
-            let options = ReconcilePersistOptions {
-                action: "offers_reconcile",
-                venue: Some(venue),
-                dexie_error: None,
-            };
-            let transition = apply_watched_offer_signals(
+            apply_watched_offer_from_dexie_payload(
                 store,
                 &row.market_id,
                 &row.offer_id,
                 &row.state,
-                status,
-                signals,
-                cancel_submitted.as_ref(),
-                &options,
-                status,
-                now,
-            )?;
-            Ok((transition, status))
+                payload.get("offer").unwrap_or(payload),
+                WatchedOfferTransitionEnv::new(now, cancel_by_offer),
+                &batch_persist_options(venue, None),
+            )
         }
         Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
-            let error_text = err.to_string();
-            let resolved = resolve_missing_watched_offer_transition(&row.state)
-                .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
-            let options = ReconcilePersistOptions {
-                action: "offers_reconcile",
-                venue: Some(venue),
-                dexie_error: Some(error_text.as_str()),
-            };
-            persist_resolved_watched_transition(
-                store,
-                &row.market_id,
-                &row.offer_id,
-                &resolved,
-                None,
-                &options,
-            )?;
-            Ok((resolved, None))
+            persist_batch_missing(store, venue, row, &err.to_string())
         }
         Err(err) => {
-            let resolved =
+            let transition =
                 unchanged_offer_transition(&row.state, format!("dexie_lookup_error:{err}"))
                     .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
-            let options = ReconcilePersistOptions {
-                action: "offers_reconcile",
-                venue: Some(venue),
-                dexie_error: None,
-            };
             persist_resolved_watched_transition(
                 store,
                 &row.market_id,
                 &row.offer_id,
-                &resolved,
+                &transition,
                 None,
-                &options,
+                &batch_persist_options(venue, None),
             )?;
-            Ok((resolved, None))
+            Ok((transition, None))
         }
     }
 }

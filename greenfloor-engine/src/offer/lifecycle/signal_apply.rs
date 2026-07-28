@@ -3,11 +3,12 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 
 use crate::cycle::reconcile::{
     resolve_watched_offer_transition_from_signals, CancelSubmittedContext, CoinsetTxSignals,
 };
-use crate::cycle::CycleOfferTransition;
+use crate::cycle::{resolve_missing_watched_offer_transition, CycleOfferTransition};
 use crate::error::SignerResult;
 use crate::storage::{OfferStateListRow, SqliteStore};
 
@@ -16,6 +17,7 @@ use super::cancel_context::{
     preload_cancel_submitted_contexts,
 };
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+use super::transition::{transition_from_offer_body, WatchedOfferTransitionEnv};
 
 /// Persist an already-resolved watched-offer transition when it changes state or
 /// carries a venue status touch.
@@ -85,6 +87,50 @@ pub fn apply_watched_offer_signals(
         last_seen_status,
         options,
     )?;
+    Ok(transition)
+}
+
+/// Resolve + persist lifecycle from an already-fetched Dexie offer payload.
+///
+/// Composes the canonical [`transition_from_offer_body`] resolve spine with persist.
+/// Shared by daemon market-cycle reconcile and CLI batch reconcile.
+///
+/// # Errors
+///
+/// Returns an error if signal extraction or `SQLite` persist fails.
+pub fn apply_watched_offer_from_dexie_payload(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    current_state: &str,
+    offer_payload: &Value,
+    env: WatchedOfferTransitionEnv<'_>,
+    options: &ReconcilePersistOptions<'_>,
+) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
+    let (transition, status) =
+        transition_from_offer_body(store, offer_id, current_state, offer_payload, env)?;
+    persist_resolved_watched_transition(store, market_id, offer_id, &transition, status, options)?;
+    Ok((transition, status))
+}
+
+/// Resolve + persist a missing Dexie watched offer (404 / not-found).
+///
+/// Shared by CLI batch reconcile and daemon watchlist augment.
+/// Callers put the Dexie error text on `options.dexie_error`.
+///
+/// # Errors
+///
+/// Returns an error if transition resolve or `SQLite` persist fails.
+pub fn persist_missing_watched_offer(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    current_state: &str,
+    options: &ReconcilePersistOptions<'_>,
+) -> SignerResult<CycleOfferTransition> {
+    let transition = resolve_missing_watched_offer_transition(current_state)
+        .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+    persist_resolved_watched_transition(store, market_id, offer_id, &transition, None, options)?;
     Ok(transition)
 }
 
