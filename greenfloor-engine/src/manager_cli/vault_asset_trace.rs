@@ -11,9 +11,7 @@ use crate::manager_cli::vault_scan::{
 };
 use crate::offer::OfferAssetResolver;
 use crate::offer::VaultTraceAssetKind;
-use crate::vault_coinset_scan::asset_trace::{
-    AssetTraceBalance, AssetTraceChain, AssetTraceCoin, AssetTraceMerge, AssetTraceResult,
-};
+use crate::vault_coinset_scan::asset_trace::AssetTraceResult;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 use crate::vault_coinset_scan::{build_asset_trace, ScanResult};
 
@@ -62,27 +60,13 @@ struct VaultAssetTraceScanMeta {
 }
 
 #[derive(Serialize)]
-struct VaultAssetTraceLineage<'a> {
-    resolved_asset_id: &'a str,
-    asset_type: &'a str,
-    lineage_model: &'static str,
-    current_balance: &'a AssetTraceBalance,
-    reception_count: usize,
-    merge_count: usize,
-    lineage_coin_count: usize,
-    coins: &'a [AssetTraceCoin],
-    chains: &'a [AssetTraceChain],
-    merges: &'a [AssetTraceMerge],
-}
-
-#[derive(Serialize)]
 struct VaultAssetTracePayload<'a> {
     status: &'static str,
     network: String,
     launcher_id: String,
     requested_asset: String,
     #[serde(flatten)]
-    lineage: VaultAssetTraceLineage<'a>,
+    lineage: &'a AssetTraceResult,
     scan: VaultAssetTraceScanMeta,
 }
 
@@ -93,18 +77,7 @@ impl<'a> VaultAssetTracePayload<'a> {
             network: scan.network.clone(),
             launcher_id: scan.launcher_id.clone(),
             requested_asset: requested_asset.trim().to_string(),
-            lineage: VaultAssetTraceLineage {
-                resolved_asset_id: &trace.asset_id,
-                asset_type: &trace.asset_type,
-                lineage_model: trace.lineage_model,
-                current_balance: &trace.current_balance,
-                reception_count: trace.reception_count,
-                merge_count: trace.merge_count,
-                lineage_coin_count: trace.coin_count,
-                coins: &trace.coins,
-                chains: &trace.chains,
-                merges: &trace.merges,
-            },
+            lineage: trace,
             scan: VaultAssetTraceScanMeta {
                 scanned_row_count: scan.count,
                 max_nonce_scanned: scan.max_nonce_scanned,
@@ -248,5 +221,20 @@ mod tests {
         assert!(payload.get("coins").and_then(|v| v.as_array()).is_some());
         assert!(payload.get("chains").and_then(|v| v.as_array()).is_some());
         assert!(payload.get("merges").and_then(|v| v.as_array()).is_some());
+        assert!(payload.get("coin_count").is_none());
+        let coins = payload
+            .get("coins")
+            .and_then(|v| v.as_array())
+            .expect("coins");
+        assert!(coins
+            .iter()
+            .all(|coin| coin.get("co_input_coin_ids").is_none()));
+        let chains = payload
+            .get("chains")
+            .and_then(|v| v.as_array())
+            .expect("chains");
+        assert!(chains
+            .iter()
+            .all(|chain| chain.get("reception_coin_id").is_none()));
     }
 }
