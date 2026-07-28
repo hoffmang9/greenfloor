@@ -109,14 +109,7 @@ pub fn apply_watched_offer_from_dexie_payload(
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
     let (transition, status) =
         transition_from_offer_body(store, offer_id, current_state, offer_payload, env)?;
-    persist_resolved_watched_transition(
-        store,
-        market_id,
-        offer_id,
-        &transition,
-        status,
-        options,
-    )?;
+    persist_resolved_watched_transition(store, market_id, offer_id, &transition, status, options)?;
     Ok((transition, status))
 }
 
@@ -137,14 +130,7 @@ pub fn persist_missing_watched_offer(
 ) -> SignerResult<CycleOfferTransition> {
     let transition = resolve_missing_watched_offer_transition(current_state)
         .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-    persist_resolved_watched_transition(
-        store,
-        market_id,
-        offer_id,
-        &transition,
-        None,
-        options,
-    )?;
+    persist_resolved_watched_transition(store, market_id, offer_id, &transition, None, options)?;
     Ok(transition)
 }
 

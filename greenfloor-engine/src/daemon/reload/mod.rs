@@ -219,8 +219,7 @@ fn complete_reload_marker(
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
 ) -> Result<(), ReloadDefer> {
-    let reload_id =
-        reload_id_from_marker(marker).map_err(ReloadDefer::MarkerUnreadable)?;
+    let reload_id = reload_id_from_marker(marker).map_err(ReloadDefer::MarkerUnreadable)?;
     let store = SqliteStore::open(db_path).map_err(|_| ReloadDefer::DbOpenFailed)?;
     let already_recorded = store
         .recent_audit_payload_matches(CONFIG_RELOADED, "reload_id", &reload_id, 50)
