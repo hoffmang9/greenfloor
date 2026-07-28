@@ -98,23 +98,6 @@ pub fn coinset_signals_from_dexie_offer_payload(
     ))
 }
 
-/// Transition from dexie offer payload (resolve only; no persist).
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub fn transition_from_dexie_offer_payload(
-    store: &SqliteStore,
-    offer_id: &str,
-    current_state: &str,
-    offer_payload: &Value,
-    env: WatchedOfferTransitionEnv<'_>,
-) -> SignerResult<CycleOfferTransition> {
-    let (transition, _) =
-        transition_from_offer_body(store, offer_id, current_state, offer_payload, env)?;
-    Ok(transition)
-}
-
 pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
     if payload.get("success") != Some(&Value::Bool(false)) {
         return None;

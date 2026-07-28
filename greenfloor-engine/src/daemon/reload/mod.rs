@@ -183,32 +183,14 @@ pub fn record_config_reloaded(
     )
 }
 
-fn refresh_inventory_p2s_after_reload(
-    coinset: &CoinsetWsShared,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-) -> InventoryP2RebuildStatus {
-    match InventoryP2Index::from_markets(markets_path, testnet_markets_path) {
-        Ok(index) => {
-            let p2_count = index.p2s().len();
-            coinset.replace_p2_index(index);
-            coinset.request_reconnect();
-            tracing::info!(
-                p2_count,
-                markets_path = %markets_path.display(),
-                "refreshed inventory p2 index after config reload; websocket reconnect requested"
-            );
-            InventoryP2RebuildStatus::Ok
-        }
-        Err(err) => {
-            tracing::warn!(
-                markets_path = %markets_path.display(),
-                error = %err,
-                "config reload recorded but inventory p2 rebuild failed; keeping prior filters"
-            );
-            InventoryP2RebuildStatus::Failed
-        }
-    }
+fn apply_inventory_p2_index(coinset: &CoinsetWsShared, index: Arc<InventoryP2Index>) {
+    let p2_count = index.p2s().len();
+    coinset.replace_p2_index(index);
+    coinset.request_reconnect();
+    tracing::info!(
+        p2_count,
+        "applied inventory p2 index after config reload audit; websocket reconnect requested"
+    );
 }
 
 fn complete_reload_marker(
@@ -233,8 +215,19 @@ fn complete_reload_marker(
         return Ok(());
     }
 
-    let rebuild_status =
-        refresh_inventory_p2s_after_reload(coinset, markets_path, testnet_markets_path);
+    // Build only — do not mutate live filters until the reload audit is durable.
+    let (rebuild_status, pending_index) =
+        match InventoryP2Index::from_markets(markets_path, testnet_markets_path) {
+            Ok(index) => (InventoryP2RebuildStatus::Ok, Some(index)),
+            Err(err) => {
+                tracing::warn!(
+                    markets_path = %markets_path.display(),
+                    error = %err,
+                    "inventory p2 rebuild failed during config reload; keeping prior filters"
+                );
+                (InventoryP2RebuildStatus::Failed, None)
+            }
+        };
     record_config_reloaded(&store, "reload_marker", &reload_id, rebuild_status).map_err(
         |err| ReloadDefer::AuditInsertFailed {
             reload_id,
@@ -242,15 +235,19 @@ fn complete_reload_marker(
             err,
         },
     )?;
+    if let Some(index) = pending_index {
+        apply_inventory_p2_index(coinset, index);
+    }
     warn_remove_reload_marker(state_dir);
     Ok(())
 }
 
 /// Best-effort reload marker handling for the daemon loop.
 ///
-/// Rebuilds the inventory p2 index from markets and asks the Coinset WS loop to
-/// reconnect with the new filters. Audit payload includes `inventory_p2_rebuild`
-/// (`ok` or `failed`); a failed rebuild keeps prior filters.
+/// Builds a new inventory p2 index from markets, records `config_reloaded` (with
+/// `inventory_p2_rebuild` = `ok`/`failed`), then applies the index and requests a
+/// Coinset WS reconnect only after that audit is durable. A failed build keeps
+/// prior filters.
 pub fn handle_reload_marker_if_present(
     state_dir: &Path,
     db_path: &Path,
