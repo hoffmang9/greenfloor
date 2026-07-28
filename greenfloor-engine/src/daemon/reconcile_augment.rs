@@ -6,8 +6,8 @@ use serde_json::Value;
 use tracing::Level;
 
 use crate::adapters::DexieClient;
-use crate::cycle::{is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition};
-use crate::error::{SignerError, SignerResult};
+use crate::cycle::is_dexie_offer_missing_error_text;
+use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
@@ -17,7 +17,7 @@ use super::reconcile_transition::{
 };
 use super::watch_plan::ensure_watches_from_dexie_payload;
 use crate::offer::lifecycle::{
-    missing_offer_error_from_payload, persist_resolved_watched_transition, ReconcilePersistOptions,
+    missing_offer_error_from_payload, persist_missing_watched_offer, ReconcilePersistOptions,
 };
 
 pub struct AugmentedDexieOffers {
@@ -36,14 +36,11 @@ fn apply_missing_watched_offer(
     let current_state = state_by_offer_id
         .get(watched_offer_id)
         .map_or("open", String::as_str);
-    let transition = resolve_missing_watched_offer_transition(current_state)
-        .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
-    persist_resolved_watched_transition(
+    let transition = persist_missing_watched_offer(
         store,
         market_id,
         watched_offer_id,
-        &transition,
-        None,
+        current_state,
         &ReconcilePersistOptions {
             action: "reconcile_coins_and_offers",
             venue: Some(crate::config::Venue::Dexie),

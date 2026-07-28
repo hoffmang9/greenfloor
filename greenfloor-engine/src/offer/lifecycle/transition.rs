@@ -98,7 +98,7 @@ pub fn coinset_signals_from_dexie_offer_payload(
     ))
 }
 
-/// Transition from dexie offer payload.
+/// Transition from dexie offer payload (resolve only; no persist).
 ///
 /// # Errors
 ///
@@ -110,27 +110,9 @@ pub fn transition_from_dexie_offer_payload(
     offer_payload: &Value,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<CycleOfferTransition> {
-    let (status, signals) = coinset_signals_from_dexie_offer_payload(store, offer_payload)?;
-    let cancel_submitted = cancel_submitted_context_for_offer(
-        store,
-        offer_id,
-        current_state,
-        env.cancel_submitted_by_offer,
-    )?;
-    let chain_confirmed_tx_ids = chain_confirmed_tx_ids_for_transition(
-        store,
-        cancel_submitted.as_ref(),
-        &signals.confirmed_tx_ids,
-    )?;
-    resolve_watched_offer_transition_from_signals(
-        current_state,
-        status,
-        signals,
-        &chain_confirmed_tx_ids,
-        cancel_submitted.as_ref(),
-        env.now,
-    )
-    .map_err(|err| crate::error::SignerError::Other(err.to_string()))
+    let (transition, _) =
+        transition_from_offer_body(store, offer_id, current_state, offer_payload, env)?;
+    Ok(transition)
 }
 
 pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
@@ -150,16 +132,39 @@ fn missing_watched_offer_transition(current_state: &str) -> SignerResult<CycleOf
         .map_err(|err| crate::error::SignerError::Other(err.to_string()))
 }
 
-fn transition_from_offer_body(
+/// Resolve lifecycle + Dexie status from an offer body (list row or `get_offer.offer`).
+///
+/// # Errors
+///
+/// Returns an error if signal extraction or transition resolve fails.
+pub(crate) fn transition_from_offer_body(
     store: &SqliteStore,
     offer_id: &str,
     current_state: &str,
     offer_body: &Value,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
-    let status = dexie_offer_status(offer_body);
-    let transition =
-        transition_from_dexie_offer_payload(store, offer_id, current_state, offer_body, env)?;
+    let (status, signals) = coinset_signals_from_dexie_offer_payload(store, offer_body)?;
+    let cancel_submitted = cancel_submitted_context_for_offer(
+        store,
+        offer_id,
+        current_state,
+        env.cancel_submitted_by_offer,
+    )?;
+    let chain_confirmed_tx_ids = chain_confirmed_tx_ids_for_transition(
+        store,
+        cancel_submitted.as_ref(),
+        &signals.confirmed_tx_ids,
+    )?;
+    let transition = resolve_watched_offer_transition_from_signals(
+        current_state,
+        status,
+        signals,
+        &chain_confirmed_tx_ids,
+        cancel_submitted.as_ref(),
+        env.now,
+    )
+    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
     Ok((transition, status))
 }
 
