@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
 use crate::hex::normalize_hex_id;
 use crate::vault_coinset_scan::types::CoinRow;
@@ -27,12 +28,10 @@ pub struct AssetTraceCoin {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_coin_id: Option<String>,
     pub child_coin_ids: Vec<String>,
-    /// Other inputs spent in the same block/puzzle merge as this coin (excludes self).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub co_input_coin_ids: Vec<String>,
     pub role: AssetTraceRole,
     pub confirmed_block_index: u64,
     pub spent_block_index: u64,
+    /// Canonical 64-char lowercase hex (same normalization as merge clustering).
     pub puzzle_hash: String,
     pub discovered_nonces: Vec<u32>,
 }
@@ -45,8 +44,7 @@ pub struct AssetTraceBalance {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AssetTraceChain {
-    pub reception_coin_id: String,
-    /// Coin ids from reception through terminal (inclusive).
+    /// Coin ids from reception through terminal (inclusive). Reception is `path[0]`.
     pub path: Vec<String>,
     pub terminal_role: AssetTraceRole,
     pub terminal_amount_mojos: u64,
@@ -61,19 +59,44 @@ pub struct AssetTraceMerge {
     pub output_coin_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// Lineage graph for one asset. JSON field names match manager `vault-asset-trace` output
+/// (`resolved_asset_id`, derived counts) so the CLI can flatten this struct directly.
+#[derive(Debug, Clone)]
 pub struct AssetTraceResult {
     pub asset_id: String,
     pub asset_type: String,
-    /// Parent-link tree plus same-block co-spend merge edges.
     pub lineage_model: &'static str,
-    pub coin_count: usize,
-    pub reception_count: usize,
-    pub merge_count: usize,
     pub current_balance: AssetTraceBalance,
     pub coins: Vec<AssetTraceCoin>,
     pub chains: Vec<AssetTraceChain>,
     pub merges: Vec<AssetTraceMerge>,
+}
+
+impl AssetTraceResult {
+    #[must_use]
+    pub fn reception_count(&self) -> usize {
+        self.coins
+            .iter()
+            .filter(|coin| coin.role == AssetTraceRole::Reception)
+            .count()
+    }
+}
+
+impl Serialize for AssetTraceResult {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("AssetTraceResult", 10)?;
+        state.serialize_field("resolved_asset_id", &self.asset_id)?;
+        state.serialize_field("asset_type", &self.asset_type)?;
+        state.serialize_field("lineage_model", &self.lineage_model)?;
+        state.serialize_field("current_balance", &self.current_balance)?;
+        state.serialize_field("reception_count", &self.reception_count())?;
+        state.serialize_field("merge_count", &self.merges.len())?;
+        state.serialize_field("lineage_coin_count", &self.coins.len())?;
+        state.serialize_field("coins", &self.coins)?;
+        state.serialize_field("chains", &self.chains)?;
+        state.serialize_field("merges", &self.merges)?;
+        state.end()
+    }
 }
 
 struct NormalizedRow<'a> {
@@ -84,15 +107,16 @@ struct NormalizedRow<'a> {
     row: &'a CoinRow,
 }
 
+fn parent_in_set(parent: &str, coin_ids: &HashSet<&str>) -> bool {
+    !parent.is_empty() && coin_ids.contains(parent)
+}
+
 /// Build per-asset lineage graph and chains from vault scan rows (already asset-filtered).
 #[must_use]
 pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> AssetTraceResult {
     let normalized = normalize_rows(rows);
-    let coin_ids: HashSet<String> = normalized
-        .iter()
-        .map(|entry| entry.coin_id.clone())
-        .collect();
-    let children_by_parent = build_children_index(&normalized, &coin_ids);
+    let coin_ids: HashSet<&str> = normalized.iter().map(|e| e.coin_id.as_str()).collect();
+    let mut children_by_parent = build_children_index(&normalized, &coin_ids);
     let merges = build_merges(&normalized, &children_by_parent);
 
     let mut coins = Vec::with_capacity(normalized.len());
@@ -100,28 +124,29 @@ pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> 
     let mut unspent_amount_mojos = 0u64;
 
     for entry in &normalized {
-        let is_reception = entry.parent.is_empty() || !coin_ids.contains(&entry.parent);
         let child_coin_ids = children_by_parent
-            .get(&entry.coin_id)
-            .cloned()
+            .remove(entry.coin_id.as_str())
             .unwrap_or_default();
-        let has_children = !child_coin_ids.is_empty();
         let is_unspent = entry.row.spent_block_index == 0;
         if is_unspent {
             unspent_coin_count += 1;
             unspent_amount_mojos = unspent_amount_mojos.saturating_add(entry.row.amount);
         }
+        let role = classify_role(
+            !parent_in_set(&entry.parent, &coin_ids),
+            is_unspent,
+            !child_coin_ids.is_empty(),
+        );
 
         coins.push(AssetTraceCoin {
             coin_id: entry.coin_id.clone(),
             amount: entry.row.amount,
             parent_coin_id: (!entry.parent.is_empty()).then(|| entry.parent.clone()),
             child_coin_ids,
-            co_input_coin_ids: co_inputs_for(&entry.coin_id, &merges),
-            role: classify_role(is_reception, is_unspent, has_children),
+            role,
             confirmed_block_index: entry.row.confirmed_block_index,
             spent_block_index: entry.row.spent_block_index,
-            puzzle_hash: entry.row.puzzle_hash.clone(),
+            puzzle_hash: entry.puzzle_hash.clone(),
             discovered_nonces: entry.row.discovered_nonces.clone(),
         });
     }
@@ -132,14 +157,11 @@ pub fn build_asset_trace(asset_id: &str, asset_type: &str, rows: &[CoinRow]) -> 
             .then_with(|| left.coin_id.cmp(&right.coin_id))
     });
 
-    let (chains, reception_count) = build_chains(&coins);
+    let chains = build_chains(&coins);
     AssetTraceResult {
         asset_id: asset_id.to_string(),
         asset_type: asset_type.to_string(),
         lineage_model: "parent_tree_with_same_block_merge_edges",
-        coin_count: coins.len(),
-        reception_count,
-        merge_count: merges.len(),
         current_balance: AssetTraceBalance {
             unspent_coin_count,
             unspent_amount_mojos,
@@ -176,17 +198,17 @@ fn normalize_rows(rows: &[CoinRow]) -> Vec<NormalizedRow<'_>> {
         .collect()
 }
 
-fn build_children_index(
-    normalized: &[NormalizedRow<'_>],
-    coin_ids: &HashSet<String>,
-) -> HashMap<String, Vec<String>> {
-    let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
+fn build_children_index<'a>(
+    normalized: &'a [NormalizedRow<'_>],
+    coin_ids: &HashSet<&str>,
+) -> HashMap<&'a str, Vec<String>> {
+    let mut children_by_parent: HashMap<&str, Vec<String>> = HashMap::new();
     for entry in normalized {
-        if entry.parent.is_empty() || !coin_ids.contains(&entry.parent) {
+        if !parent_in_set(&entry.parent, coin_ids) {
             continue;
         }
         children_by_parent
-            .entry(entry.parent.clone())
+            .entry(entry.parent.as_str())
             .or_default()
             .push(entry.coin_id.clone());
     }
@@ -198,17 +220,17 @@ fn build_children_index(
 
 fn build_merges(
     normalized: &[NormalizedRow<'_>],
-    children_by_parent: &HashMap<String, Vec<String>>,
+    children_by_parent: &HashMap<&str, Vec<String>>,
 ) -> Vec<AssetTraceMerge> {
-    let mut spent_clusters: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
+    let mut spent_clusters: BTreeMap<(u64, &str), Vec<&str>> = BTreeMap::new();
     for entry in normalized {
         if entry.row.spent_block_index == 0 {
             continue;
         }
         spent_clusters
-            .entry((entry.row.spent_block_index, entry.puzzle_hash.clone()))
+            .entry((entry.row.spent_block_index, entry.puzzle_hash.as_str()))
             .or_default()
-            .push(entry.coin_id.clone());
+            .push(entry.coin_id.as_str());
     }
 
     let mut merges = Vec::new();
@@ -230,8 +252,8 @@ fn build_merges(
         }
         merges.push(AssetTraceMerge {
             spent_block_index,
-            puzzle_hash,
-            input_coin_ids: cluster,
+            puzzle_hash: puzzle_hash.to_string(),
+            input_coin_ids: cluster.into_iter().map(str::to_string).collect(),
             output_coin_ids,
         });
     }
@@ -244,23 +266,7 @@ fn build_merges(
     merges
 }
 
-/// Co-spend siblings from the merge that contains `coin_id` (merges are the sole source).
-fn co_inputs_for(coin_id: &str, merges: &[AssetTraceMerge]) -> Vec<String> {
-    merges
-        .iter()
-        .find(|merge| merge.input_coin_ids.iter().any(|id| id == coin_id))
-        .map(|merge| {
-            merge
-                .input_coin_ids
-                .iter()
-                .filter(|id| id.as_str() != coin_id)
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn build_chains(coins: &[AssetTraceCoin]) -> (Vec<AssetTraceChain>, usize) {
+fn build_chains(coins: &[AssetTraceCoin]) -> Vec<AssetTraceChain> {
     let mut reception_ids: Vec<&str> = coins
         .iter()
         .filter(|coin| coin.role == AssetTraceRole::Reception)
@@ -280,13 +286,13 @@ fn build_chains(coins: &[AssetTraceCoin]) -> (Vec<AssetTraceChain>, usize) {
         walk_chain(reception_id, &mut path, &coins_by_id, &mut chains);
     }
     chains.sort_by(|left, right| {
-        left.reception_coin_id
-            .cmp(&right.reception_coin_id)
+        left.path
+            .first()
+            .cmp(&right.path.first())
             .then_with(|| left.path.len().cmp(&right.path.len()))
             .then_with(|| left.path.cmp(&right.path))
     });
-
-    (chains, reception_ids.len())
+    chains
 }
 
 fn walk_chain(
@@ -295,34 +301,22 @@ fn walk_chain(
     coins_by_id: &HashMap<&str, &AssetTraceCoin>,
     chains: &mut Vec<AssetTraceChain>,
 ) {
+    let Some(coin) = coins_by_id.get(node) else {
+        return;
+    };
     path.push(node.to_string());
-    let children = coins_by_id
-        .get(node)
-        .map_or(&[][..], |coin| coin.child_coin_ids.as_slice());
-    if children.is_empty() {
-        if let Some(chain) = terminal_chain(path, coins_by_id) {
-            chains.push(chain);
-        }
+    if coin.child_coin_ids.is_empty() {
+        chains.push(AssetTraceChain {
+            path: path.clone(),
+            terminal_role: coin.role,
+            terminal_amount_mojos: coin.amount,
+        });
     } else {
-        for child in children {
+        for child in &coin.child_coin_ids {
             walk_chain(child, path, coins_by_id, chains);
         }
     }
     path.pop();
-}
-
-fn terminal_chain(
-    path: &[String],
-    coins_by_id: &HashMap<&str, &AssetTraceCoin>,
-) -> Option<AssetTraceChain> {
-    let terminal_id = path.last()?;
-    let terminal = coins_by_id.get(terminal_id.as_str())?;
-    Some(AssetTraceChain {
-        reception_coin_id: path.first()?.clone(),
-        path: path.to_vec(),
-        terminal_role: terminal.role,
-        terminal_amount_mojos: terminal.amount,
-    })
 }
 
 #[cfg(test)]
@@ -362,6 +356,14 @@ mod tests {
         format!("{byte:064x}")
     }
 
+    fn coin<'a>(trace: &'a AssetTraceResult, coin_id: &str) -> &'a AssetTraceCoin {
+        trace
+            .coins
+            .iter()
+            .find(|coin| coin.coin_id == coin_id)
+            .unwrap_or_else(|| panic!("missing coin {coin_id}"))
+    }
+
     #[test]
     fn trace_identifies_reception_split_and_current_leaves() {
         let reception = id(1);
@@ -377,36 +379,22 @@ mod tests {
             row(&exit_child, &split_b, 400, 0, 201, &ph),
         ];
         let trace = build_asset_trace("aa".repeat(64).as_str(), "cat", &rows);
-        assert_eq!(trace.reception_count, 1);
+        assert_eq!(trace.reception_count(), 1);
         assert_eq!(trace.current_balance.unspent_coin_count, 2);
         assert_eq!(trace.current_balance.unspent_amount_mojos, 1000);
         assert_eq!(trace.chains.len(), 2);
-        assert_eq!(trace.merge_count, 0);
+        assert!(trace.merges.is_empty());
 
-        let reception_coin = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == reception)
-            .expect("reception");
+        let reception_coin = coin(&trace, &reception);
         assert_eq!(reception_coin.role, AssetTraceRole::Reception);
         assert_eq!(
             reception_coin.child_coin_ids,
             vec![split_a.clone(), split_b.clone()]
         );
-
-        let split_a_coin = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == split_a)
-            .expect("split_a");
-        assert_eq!(split_a_coin.role, AssetTraceRole::Current);
-
-        let split_b_row = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == split_b)
-            .expect("split_b");
-        assert_eq!(split_b_row.role, AssetTraceRole::Internal);
+        assert_eq!(coin(&trace, &split_a).role, AssetTraceRole::Current);
+        assert_eq!(coin(&trace, &split_b).role, AssetTraceRole::Internal);
+        assert_eq!(trace.chains[0].path[0], reception);
+        assert_eq!(trace.chains[1].path[0], reception);
     }
 
     #[test]
@@ -422,38 +410,25 @@ mod tests {
         assert_eq!(trace.current_balance.unspent_coin_count, 0);
         assert_eq!(trace.chains.len(), 1);
         assert_eq!(trace.chains[0].terminal_role, AssetTraceRole::Exit);
-        let exit_coin = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == exit)
-            .expect("exit");
-        assert_eq!(exit_coin.role, trace.chains[0].terminal_role);
+        assert_eq!(coin(&trace, &exit).role, AssetTraceRole::Exit);
     }
 
     #[test]
-    fn trace_treats_missing_parent_in_set_as_reception() {
+    fn trace_treats_missing_parent_in_set_as_reception_and_counts_unspent_balance() {
         let solo = id(1);
         let external = id(0xee);
         let rows = vec![row(&solo, &external, 100, 0, 5, &puzzle(1))];
         let trace = build_asset_trace("xch", "xch", &rows);
-        assert_eq!(trace.reception_count, 1);
+        assert_eq!(trace.reception_count(), 1);
         assert_eq!(trace.coins[0].role, AssetTraceRole::Reception);
         assert_eq!(
             trace.coins[0].parent_coin_id.as_deref(),
             Some(external.as_str())
         );
         assert_eq!(trace.coins[0].role, trace.chains[0].terminal_role);
-    }
-
-    #[test]
-    fn trace_counts_unspent_reception_toward_current_balance() {
-        let solo = id(1);
-        let external = id(0xee);
-        let rows = vec![row(&solo, &external, 100, 0, 5, &puzzle(1))];
-        let trace = build_asset_trace("xch", "xch", &rows);
         assert_eq!(trace.current_balance.unspent_coin_count, 1);
         assert_eq!(trace.current_balance.unspent_amount_mojos, 100);
-        assert_eq!(trace.chains[0].terminal_role, AssetTraceRole::Reception);
+        assert_eq!(trace.chains[0].path.as_slice(), [solo.as_str()]);
     }
 
     #[test]
@@ -469,19 +444,12 @@ mod tests {
             row(&combined, &input_a, 3000, 0, 51, &ph),
         ];
         let trace = build_asset_trace("aa".repeat(64).as_str(), "cat", &rows);
-        assert_eq!(trace.merge_count, 1);
+        assert_eq!(trace.merges.len(), 1);
         assert_eq!(
             trace.merges[0].input_coin_ids,
-            vec![input_a.clone(), input_b]
+            vec![input_a.clone(), input_b.clone()]
         );
-        assert_eq!(trace.merges[0].output_coin_ids, vec![combined.clone()]);
-        let input_a_coin = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == input_a)
-            .expect("input_a");
-        assert_eq!(input_a_coin.co_input_coin_ids, vec![id(2)]);
-        assert_eq!(combined, trace.merges[0].output_coin_ids[0]);
+        assert_eq!(trace.merges[0].output_coin_ids, vec![combined]);
     }
 
     #[test]
@@ -495,26 +463,48 @@ mod tests {
             row(&input_b, &external, 2000, 50, 2, &ph),
         ];
         let trace = build_asset_trace("aa".repeat(64).as_str(), "cat", &rows);
-        assert_eq!(trace.merge_count, 0);
         assert!(trace.merges.is_empty());
-        let input_a_coin = trace
-            .coins
-            .iter()
-            .find(|coin| coin.coin_id == input_a)
-            .expect("input_a");
-        assert!(input_a_coin.co_input_coin_ids.is_empty());
     }
 
     #[test]
-    fn trace_emits_manager_json_shape_smoke() {
+    fn trace_normalizes_puzzle_hash_on_coins_and_merges() {
+        let input_a = id(1);
+        let input_b = id(2);
+        let combined = id(3);
+        let external = id(0xee);
+        let ph = puzzle(0x22);
+        let prefixed = format!("0x{ph}");
+        let rows = vec![
+            row(&input_a, &external, 1000, 50, 1, &prefixed),
+            row(&input_b, &external, 2000, 50, 2, &prefixed),
+            row(&combined, &input_a, 3000, 0, 51, &prefixed),
+        ];
+        let trace = build_asset_trace("aa".repeat(64).as_str(), "cat", &rows);
+        assert_eq!(coin(&trace, &input_a).puzzle_hash, ph);
+        assert_eq!(trace.merges[0].puzzle_hash, ph);
+    }
+
+    #[test]
+    fn trace_json_shape_matches_manager_lineage_contract() {
         let trace = build_asset_trace("xch", "xch", &[]);
         let payload = serde_json::to_value(&trace).expect("json");
+        assert_eq!(
+            payload.get("resolved_asset_id"),
+            Some(&serde_json::json!("xch"))
+        );
         assert_eq!(
             payload.get("lineage_model"),
             Some(&serde_json::json!(
                 "parent_tree_with_same_block_merge_edges"
             ))
         );
+        assert_eq!(
+            payload.get("lineage_coin_count"),
+            Some(&serde_json::json!(0))
+        );
+        assert_eq!(payload.get("merge_count"), Some(&serde_json::json!(0)));
+        assert_eq!(payload.get("reception_count"), Some(&serde_json::json!(0)));
+        assert!(payload.get("coin_count").is_none());
         assert!(payload
             .get("merges")
             .and_then(serde_json::Value::as_array)

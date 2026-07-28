@@ -85,7 +85,7 @@ to the requested asset, then builds:
 
 - a **parent→child tree** within the scanned coin set (`parent_coin_id` / `child_coin_ids`)
 - **merge edges** for combine spends: inputs co-spent at the same block with the same
-  vault puzzle hash (`merges[]`, plus `co_input_coin_ids` on each coin)
+  vault puzzle hash (`merges[]` with `input_coin_ids` / `output_coin_ids`)
 
 Output includes `lineage_model: "parent_tree_with_same_block_merge_edges"`.
 
@@ -94,20 +94,21 @@ Output includes `lineage_model: "parent_tree_with_same_block_merge_edges"`.
 | Field                                  | Meaning                                                                        |
 | -------------------------------------- | ------------------------------------------------------------------------------ |
 | `lineage_model`                        | Graph semantics for clients (`parent_tree_with_same_block_merge_edges`)        |
-| `lineage_coin_count`                   | Coins in the lineage graph (after row normalization)                           |
+| `lineage_coin_count`                   | Coins in the lineage graph (after row normalization); derived from `coins[]`   |
 | `scan.scanned_row_count`               | Raw vault scan rows returned for this asset filter                             |
 | `current_balance.unspent_coin_count`   | Live unspent coins for this asset in the scan                                  |
 | `current_balance.unspent_amount_mojos` | Sum of unspent amounts (mojos; 1000 mojos = 1 CAT unit)                        |
 | `reception_count`                      | Coins whose parent is outside this asset’s scanned set (external entry)        |
-| `merge_count`                          | Same-block multi-input combine events detected in the scan                     |
-| `coins[]`                              | Every matching vault coin with lineage and merge metadata                      |
-| `chains[]`                             | Paths from each reception coin to a terminal coin (`path` is ordered coin ids) |
+| `merge_count`                          | Same-block multi-input combine events; derived from `merges[]`                 |
+| `coins[]`                              | Every matching vault coin with parent/child lineage metadata                   |
+| `chains[]`                             | Paths from each reception coin to a terminal coin (`path[0]` is the reception) |
 | `merges[]`                             | Combine events: `input_coin_ids` co-spent → `output_coin_ids`                  |
 
 **Coin fields** in `coins[]`:
 
 - `parent_coin_id` / `child_coin_ids` — parent-link tree edges
-- `co_input_coin_ids` — sibling inputs in the same combine (same spent block + puzzle hash)
+- `puzzle_hash` — canonical 64-char lowercase hex (normalized; not a raw `0x` pass-through)
+- Co-spend siblings are on `merges[].input_coin_ids` only (not duplicated per coin)
 
 **Coin roles** in `coins[].role` (same value on matching `chains[].terminal_role`):
 
