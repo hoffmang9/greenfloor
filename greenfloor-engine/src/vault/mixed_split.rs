@@ -60,9 +60,32 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
     Ok(())
 }
 
-enum CatSelection {
+/// How CAT inputs are resolved for a vault mixed-split submit.
+#[derive(Debug, Clone)]
+pub(crate) enum CatSelection {
+    /// Select CATs from Coinset for the request asset / coin ids.
     FetchFromCoinset,
+    /// Spend lineage-proven CATs (dust combine).
     Preselected(Vec<Cat>),
+}
+
+/// Single vault CAT mixed-split entrypoint for coin-ops, bootstrap, dust, and CLI.
+///
+/// # Errors
+///
+/// Returns an error if validation, selection, signing, or broadcast fails.
+pub(crate) async fn submit_vault_cat_mixed_split(
+    config: SignerConfig,
+    request: MixedSplitRequest,
+    selection: CatSelection,
+    client: &CoinsetClient,
+    broadcast: bool,
+) -> SignerResult<MixedSplitResult> {
+    // Box once at the vault submit boundary (Clippy `large_futures`).
+    Box::pin(build_vault_cat_mixed_split_with_selection(
+        config, request, broadcast, selection, client,
+    ))
+    .await
 }
 
 async fn build_vault_cat_mixed_split_with_selection(
@@ -147,37 +170,12 @@ pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     broadcast: bool,
 ) -> SignerResult<MixedSplitResult> {
     let client = coinset::client_for_signer_on_network(&config, operator_network)?;
-    build_vault_cat_mixed_split_with_selection(
+    submit_vault_cat_mixed_split(
         config,
         request,
-        broadcast,
         CatSelection::FetchFromCoinset,
         &client,
-    )
-    .await
-}
-
-/// Build and optionally broadcast a vault mixed split using lineage-proven CAT inputs.
-///
-/// Used by dust combine after lineage preflight; callers must pass cats that match
-/// `request.coin_ids` (enforced at selection time).
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub(crate) async fn build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats(
-    config: SignerConfig,
-    request: MixedSplitRequest,
-    preselected_cats: Vec<Cat>,
-    broadcast: bool,
-    client: &CoinsetClient,
-) -> SignerResult<MixedSplitResult> {
-    build_vault_cat_mixed_split_with_selection(
-        config,
-        request,
         broadcast,
-        CatSelection::Preselected(preselected_cats),
-        client,
     )
     .await
 }

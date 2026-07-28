@@ -1,23 +1,14 @@
 //! Section parsers for `program.yaml` (extracted from `program.rs`).
 
-mod coin_ops;
-mod guards;
-mod helpers;
-mod runtime;
-mod signer_vault;
-mod storage;
-mod tx_block;
-mod venue;
+mod sections;
 
 use serde_json::Value;
 
-use coin_ops::parse_coin_ops_config;
-use guards::{parse_dev_python_min_version, reject_cloud_wallet, require_pushover_provider};
-use runtime::parse_runtime_config;
-use signer_vault::parse_signer_vault_ids;
-use storage::parse_storage_config;
-use tx_block::parse_tx_block_config;
-use venue::parse_venue_config;
+use sections::{
+    parse_coin_ops_config, parse_dev_python_min_version, parse_runtime_config,
+    parse_signer_vault_ids, parse_storage_config, parse_tx_block_config, parse_venue_config,
+    reject_cloud_wallet, require_pushover_provider,
+};
 
 use super::keys_registry::parse_signer_key_registry;
 use super::program::ManagerProgramConfig;

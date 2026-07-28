@@ -1,7 +1,7 @@
 //! Bootstrap plan domain model and coin row helpers.
 
 use super::amounts::BaseUnits;
-use super::combine_inputs::BootstrapCombineInputs;
+use super::amounts::BootstrapCombineInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {

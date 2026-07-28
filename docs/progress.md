@@ -16,6 +16,19 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-07-28 — Three ownership simplifications
+
+1. **Inventory shaping submit** — Single vault entrypoint `submit_vault_cat_mixed_split` +
+   `CatSelection`. `CoinOpExecContext::submit_mixed_split` is the market-gated wrapper used
+   by bootstrap, dust, managed plans, and CLI. Managed plan runners live in
+   `coin_ops::execution::managed` (`execute_managed_*`).
+2. **Offer reconcile spine** — Market reconcile prepare/augment/Dexie apply in
+   `offer::lifecycle::market_reconcile`. Immediate-requeue merge is
+   `MarketCycleResultState::merge_immediate_requeue_from_reconcile` in `cycle/`. Daemon
+   owns schedule, WS, and market phase orchestration (not a pure thin shell).
+3. **Reverse micro-decomposition** — Collapsed bootstrap combine micro-modules; merged
+   `config/program_parse` section files into `sections.rs`.
+
 ### 2026-07-08 — Coinset WS local watches and inventory p2 index
 
 Default offer publish is Coinset `POST /push_offer`. Daemon WS uses

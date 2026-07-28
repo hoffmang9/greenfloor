@@ -1,16 +1,46 @@
+use std::collections::HashSet;
+
 use serde_json::{json, Value};
 
-use crate::config::SignerConfig;
+use crate::coin_ops::execution::CoinOpExecContext;
 use crate::error::SignerResult;
 use crate::offer::bootstrap::{
     bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits,
     BootstrapFundingSource, BootstrapPlan,
 };
-use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
+use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
+use crate::vault::MixedSplitResult;
+
+fn mixed_split_result_json(result: &MixedSplitResult) -> Value {
+    json!({
+        "offered_total": result.offered_total,
+        "target_total": result.target_total,
+        "change_amount": result.change_amount,
+        "selected_coin_ids": result.selected_coin_ids,
+        "broadcast_status": result.broadcast_status,
+        "spend_bundle_hex": result.spend_bundle_hex,
+    })
+}
+
+fn bootstrap_exec_context(
+    build_ctx: &ResolvedBuildAndPostContext,
+    split_asset_id: &str,
+    receive_address: &str,
+) -> CoinOpExecContext {
+    let mut gated = build_ctx.gated.clone();
+    gated.market_row.receive_address = receive_address.to_string();
+    CoinOpExecContext::with_resolved_asset(
+        gated,
+        split_asset_id.to_string(),
+        HashSet::new(),
+        HashSet::new(),
+        #[cfg(test)]
+        crate::coin_ops::execution::CoinOpTestOverrides::default(),
+    )
+}
 
 async fn submit_bootstrap_vault_mixed_split(
-    signer_config: &SignerConfig,
-    operator_network: &str,
+    build_ctx: &ResolvedBuildAndPostContext,
     split_asset_id: &str,
     receive_address: &str,
     coin_ids: &[String],
@@ -22,43 +52,18 @@ async fn submit_bootstrap_vault_mixed_split(
         test_overrides,
         &output_amounts_mojos,
     ) {
-        let _ = (
-            signer_config,
-            operator_network,
-            split_asset_id,
-            receive_address,
-            coin_ids,
-            output_amounts_mojos,
-        );
+        let _ = (build_ctx, split_asset_id, receive_address, coin_ids);
         return Ok(stub);
     }
-    let result = build_and_optionally_broadcast_vault_cat_mixed_split(
-        signer_config.clone(),
-        operator_network,
-        MixedSplitRequest {
-            receive_address: receive_address.to_string(),
-            asset_id: crate::hex::hex_to_bytes32(split_asset_id)?,
-            output_amounts: output_amounts_mojos,
-            coin_ids: crate::coinset::parse_coin_ids(coin_ids)?,
-            allow_sub_cat_output: false,
-            fee_mojos: 0,
-        },
-        true,
-    )
-    .await?;
-    Ok(json!({
-        "offered_total": result.offered_total,
-        "target_total": result.target_total,
-        "change_amount": result.change_amount,
-        "selected_coin_ids": result.selected_coin_ids,
-        "broadcast_status": result.broadcast_status,
-        "spend_bundle_hex": result.spend_bundle_hex,
-    }))
+    let exec = bootstrap_exec_context(build_ctx, split_asset_id, receive_address);
+    let result = exec
+        .submit_mixed_split(output_amounts_mojos, coin_ids, 0, false, None)
+        .await?;
+    Ok(mixed_split_result_json(&result))
 }
 
 pub(super) async fn submit_bootstrap_combine(
-    signer_config: &SignerConfig,
-    operator_network: &str,
+    build_ctx: &ResolvedBuildAndPostContext,
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
@@ -71,8 +76,7 @@ pub(super) async fn submit_bootstrap_combine(
     let output_amounts =
         bootstrap_combine_vault_outputs(inputs, split_asset_mojo_multiplier.max(1))?;
     let mut result = submit_bootstrap_vault_mixed_split(
-        signer_config,
-        operator_network,
+        build_ctx,
         split_asset_id,
         receive_address,
         &inputs.input_coin_ids,
@@ -91,8 +95,7 @@ pub(super) async fn submit_bootstrap_combine(
 }
 
 pub(super) async fn submit_bootstrap_mixed_split(
-    signer_config: &SignerConfig,
-    operator_network: &str,
+    build_ctx: &ResolvedBuildAndPostContext,
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
@@ -111,8 +114,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
         split_asset_mojo_multiplier.max(1),
     )?;
     submit_bootstrap_vault_mixed_split(
-        signer_config,
-        operator_network,
+        build_ctx,
         split_asset_id,
         receive_address,
         std::slice::from_ref(coin_id),
@@ -132,10 +134,10 @@ mod tests {
         bootstrap_combine_vault_outputs, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
         BootstrapPlan,
     };
+    use crate::offer::operator::build_and_post::sample_resolved_build_and_post_context;
     use crate::offer::operator::signer_denomination::test_overrides::{
         sample_vault_mixed_split_stub, SignerDenominationTestOverrides,
     };
-    use crate::test_support::signer_config::test_signer_config;
 
     fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
         let selected_total = inputs.selected_total.get();
@@ -172,10 +174,9 @@ mod tests {
             exact_match: false,
             cap_applied: true,
         });
-        let signer = test_signer_config("https://example.test");
+        let build_ctx = sample_resolved_build_and_post_context();
         let result = submit_bootstrap_combine(
-            &signer,
-            "mainnet",
+            &build_ctx,
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
@@ -206,12 +207,11 @@ mod tests {
 
     #[tokio::test]
     async fn submit_bootstrap_mixed_split_rejects_invalid_asset_hex() {
-        let signer = test_signer_config("https://example.test");
+        let build_ctx = sample_resolved_build_and_post_context();
         let plan = sample_split_plan(&"aa".repeat(64));
 
         let err = submit_bootstrap_mixed_split(
-            &signer,
-            "mainnet",
+            &build_ctx,
             &plan,
             "not-a-valid-asset-id",
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
@@ -226,12 +226,11 @@ mod tests {
 
     #[tokio::test]
     async fn submit_bootstrap_mixed_split_rejects_invalid_source_coin_id() {
-        let signer = test_signer_config("https://example.test");
+        let build_ctx = sample_resolved_build_and_post_context();
         let plan = sample_split_plan("not-a-valid-coin-id");
 
         let err = submit_bootstrap_mixed_split(
-            &signer,
-            "mainnet",
+            &build_ctx,
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",

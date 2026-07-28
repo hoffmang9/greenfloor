@@ -1,16 +1,18 @@
+use std::collections::{HashMap, HashSet};
+
 use serde_json::Value;
 
+use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coinset::{
     wait_until_coins_spent_poll, CoinSpentVerifyConfig, CoinsetClient, PollConfig,
     MIN_CAT_OUTPUT_MOJOS,
 };
-use crate::config::SignerConfig;
-use crate::error::{SignerError, SignerResult};
-use crate::hex::hex_to_bytes32;
-use crate::vault::mixed_split::{
-    build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats, MixedSplitRequest,
-    MixedSplitResult,
+use crate::config::{
+    empty_cat_ticker_index, GatedOperatorMarket, ManagerProgramConfig, MarketConfig, MarketPricing,
 };
+use crate::error::{SignerError, SignerResult};
+use crate::hex::bytes32_to_hex;
+use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
 use super::batches::{
@@ -31,25 +33,50 @@ pub(crate) trait BatchPlanRunner {
 }
 
 pub(crate) struct CombineBatchExecutor {
-    signer_config: SignerConfig,
-    receive_address: String,
-    cat_asset_id: String,
+    exec: CoinOpExecContext,
     client: CoinsetClient,
     verify_poll: PollConfig,
 }
 
 impl CombineBatchExecutor {
     pub(crate) fn new(
-        signer_config: SignerConfig,
+        signer_config: crate::config::SignerConfig,
         receive_address: String,
         cat_asset_id: String,
         client: CoinsetClient,
         verify: CoinSpentVerifyConfig,
+        operator_network: impl Into<String>,
     ) -> Self {
-        Self {
+        let network = operator_network.into();
+        let gated = GatedOperatorMarket::assemble(
+            ManagerProgramConfig::default(),
             signer_config,
-            receive_address,
-            cat_asset_id,
+            MarketConfig {
+                market_id: "dust-combine".to_string(),
+                enabled: true,
+                base_asset: cat_asset_id.clone(),
+                base_symbol: String::new(),
+                quote_asset: String::new(),
+                quote_asset_type: String::new(),
+                receive_address,
+                signer_key_id: String::new(),
+                mode: String::new(),
+                pricing: MarketPricing::default(),
+                cancel_move_threshold_bps: None,
+                ladders: HashMap::default(),
+            },
+            empty_cat_ticker_index(),
+            network,
+        );
+        Self {
+            exec: CoinOpExecContext::with_resolved_asset(
+                gated,
+                cat_asset_id,
+                HashSet::new(),
+                HashSet::new(),
+                #[cfg(test)]
+                crate::coin_ops::execution::CoinOpTestOverrides::default(),
+            ),
             client,
             verify_poll: verify.poll_config(),
         }
@@ -68,23 +95,16 @@ impl BatchPlanRunner for CombineBatchExecutor {
         if total == 0 {
             return Err(SignerError::Other("dust batch total is zero".to_string()));
         }
-        let coin_ids = batch.coin_ids()?;
-        let request = MixedSplitRequest {
-            receive_address: self.receive_address.clone(),
-            asset_id: hex_to_bytes32(&self.cat_asset_id)?,
-            output_amounts: vec![total],
-            coin_ids,
-            allow_sub_cat_output: total < MIN_CAT_OUTPUT_MOJOS,
-            fee_mojos: 0,
-        };
-        build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats(
-            self.signer_config.clone(),
-            request,
-            batch.cats(),
-            true,
-            &self.client,
-        )
-        .await
+        let coin_ids: Vec<String> = batch.coin_ids()?.into_iter().map(bytes32_to_hex).collect();
+        self.exec
+            .submit_mixed_split(
+                vec![total],
+                &coin_ids,
+                0,
+                total < MIN_CAT_OUTPUT_MOJOS,
+                Some((&self.client, batch.cats())),
+            )
+            .await
     }
 
     async fn wait_for_batch_spent(&self, batch: &DustCombineBatch) -> SignerResult<()> {
@@ -142,7 +162,7 @@ pub(crate) async fn run_batch_plan<R: BatchPlanRunner>(
 
 #[allow(clippy::large_futures)]
 pub async fn execute_combine_batches(
-    signer_config: &SignerConfig,
+    signer_config: &crate::config::SignerConfig,
     client: &CoinsetClient,
     receive_address: &str,
     cat_asset_id: &str,
@@ -156,6 +176,7 @@ pub async fn execute_combine_batches(
             cat_asset_id.to_string(),
             client.clone(),
             verify,
+            signer_config.network.clone(),
         ),
         selection,
     )

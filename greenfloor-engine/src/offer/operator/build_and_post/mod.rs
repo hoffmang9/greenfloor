@@ -22,9 +22,11 @@ use crate::storage::{
 };
 
 use context::resolve_build_and_post_context;
-#[cfg(test)]
-pub(crate) use context::signer_denomination_test_context;
 pub(crate) use context::ResolvedBuildAndPostContext;
+#[cfg(test)]
+pub(crate) use context::{
+    sample_resolved_build_and_post_context, signer_denomination_test_context,
+};
 use iteration::run_post_iteration;
 use post_batch::{
     apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostIterationBatch,

@@ -11,14 +11,12 @@ use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::index_list_offers_by_local_ids;
-use super::reconcile_transition::{
-    note_reconcile_transition_side_effects, ReconcileMarketCycleMetrics,
-};
-use super::watch_plan::ensure_watches_from_dexie_payload;
-use crate::offer::lifecycle::{
+use super::super::dexie_index::index_list_offers_by_local_ids;
+use super::super::{
     missing_offer_error_from_payload, persist_missing_watched_offer, ReconcilePersistOptions,
 };
+use super::transition::{note_reconcile_transition_side_effects, ReconcileMarketCycleMetrics};
+use super::watch_plan::ensure_watches_from_dexie_payload;
 
 pub struct AugmentedDexieOffers {
     /// Dexie payloads keyed by local `offer_state.offer_id` (already matched).
@@ -104,7 +102,7 @@ async fn fetch_missing_watched_offers(
                         metrics,
                     )?;
                 } else if let Some(single_offer) = payload.get("offer") {
-                    if crate::daemon::dexie_size::offer_matches_local_id(
+                    if super::super::dexie_index::offer_matches_local_id(
                         single_offer,
                         watched_offer_id,
                     ) {
@@ -150,6 +148,10 @@ async fn fetch_missing_watched_offers(
 /// Callers must pass the Dexie-authoritative subset. Their payloads also heal any
 /// missing durable watches. Heal-only NULL-venue rows use
 /// [`super::watch_plan::fetch_and_ensure_watches`] without lifecycle authority.
+///
+/// # Errors
+///
+/// Returns an error if Dexie HTTP or `SQLite` writes fail.
 pub async fn augment_dexie_offers_for_watchlist(
     dexie: &DexieClient,
     store: &SqliteStore,

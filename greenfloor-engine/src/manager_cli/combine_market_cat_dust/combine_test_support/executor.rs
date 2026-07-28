@@ -24,5 +24,6 @@ pub(in crate::manager_cli::combine_market_cat_dust) fn test_combine_batch_execut
         cat_asset_id.to_string(),
         CoinsetClient::new(coinset_url.to_string()),
         verify,
+        "mainnet",
     )
 }

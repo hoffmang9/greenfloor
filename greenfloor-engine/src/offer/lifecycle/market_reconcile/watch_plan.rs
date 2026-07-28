@@ -17,9 +17,10 @@ use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOffe
 use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::{index_list_offers_by_local_ids, offer_matches_local_id};
-use super::reconcile_transition::ReconcileMarketCycleMetrics;
 use crate::storage::OfferStateListRow;
+
+use super::super::dexie_index::{index_list_offers_by_local_ids, offer_matches_local_id};
+use super::transition::ReconcileMarketCycleMetrics;
 
 /// Dexie HTTP roles after local metadata heal (pure classify result).
 #[derive(Debug, Clone, Default)]

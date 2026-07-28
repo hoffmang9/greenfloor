@@ -20,13 +20,12 @@ use super::market_dispatch::{
     aggregate_market_dispatch_metrics, record_market_worker_error, SingleMarketCycleOutput,
 };
 use super::preamble::run_cycle_preamble;
-use super::reconcile_market_cycle::run_reconcile_market_cycle;
-use super::reconcile_transition::merge_reconcile_immediate_requeue;
 use super::run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonDispatchState, DaemonRunOnceRequest,
     MarketDispatchMetrics,
 };
+use crate::offer::lifecycle::run_reconcile_market_cycle;
 use crate::storage::resolve_state_db_path;
 
 /// Daemon cycles always process markets sequentially on one `SQLite` store.
@@ -77,7 +76,10 @@ async fn process_one_market(
         reconcile: &reconcile,
     };
     let mut state = run_post_reconcile_market_phases(write_store, &phase_context, market).await?;
-    merge_reconcile_immediate_requeue(&mut state, &reconcile.metrics);
+    state.merge_immediate_requeue_from_reconcile(
+        reconcile.metrics.immediate_requeue_requested,
+        &reconcile.metrics.immediate_requeue_signals,
+    );
 
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),

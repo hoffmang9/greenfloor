@@ -13,8 +13,8 @@ use crate::storage::{CycleWriteStore, SqliteStore};
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
-use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
+use crate::offer::lifecycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 
 pub fn open_test_store(path: &Path) -> SqliteStore {
     SqliteStore::open(path).expect("open sqlite store")

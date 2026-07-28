@@ -1,17 +1,23 @@
 use std::collections::HashSet;
 
 use chia_protocol::Bytes32;
+use chia_sdk_driver::Cat;
 
 use crate::coin_ops::{
     coin_op_non_negative_u64, combine_output_amounts, total_for_coin_ids, SpendableCoin,
     COMBINE_SINGLE_OUTPUT_COUNT,
 };
-use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
+use crate::coinset::{
+    client_for_signer_on_network, list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex,
+    CoinsetClient,
+};
 use crate::config::{GatedOperatorMarket, MarketConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
 use crate::offer::OfferAssetResolver;
-use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
+use crate::vault::{
+    submit_vault_cat_mixed_split, CatSelection, MixedSplitRequest, MixedSplitResult,
+};
 
 use super::cap::resolve_combine_input_cap;
 use super::helpers::{
@@ -58,6 +64,25 @@ impl CoinOpExecContext {
         ))
     }
 
+    /// Build context for an already-resolved asset id (offer bootstrap / dust).
+    #[must_use]
+    pub fn with_resolved_asset(
+        gated: GatedOperatorMarket,
+        resolved_asset_id: impl Into<String>,
+        watched_coin_ids: HashSet<String>,
+        watched_p2s: HashSet<String>,
+        #[cfg(test)] test_overrides: CoinOpTestOverrides,
+    ) -> Self {
+        Self::assemble(
+            gated,
+            resolved_asset_id.into(),
+            watched_coin_ids,
+            watched_p2s,
+            #[cfg(test)]
+            test_overrides,
+        )
+    }
+
     /// Submit a combine: merge `input_coin_ids` into a single output coin.
     ///
     /// When `spendable` is `None`, wallet coins are fetched from Coinset.
@@ -87,9 +112,6 @@ impl CoinOpExecContext {
 
     /// List spendable coins, excluding durable maker coin-id and p2 watches.
     ///
-    /// Manager CLI and daemon both select from this set so open-offer maker coins
-    /// cannot be split/combined accidentally.
-    ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
@@ -118,11 +140,6 @@ impl CoinOpExecContext {
 
     /// Refuse explicit coin-op inputs that are durable maker coin watches.
     ///
-    /// Auto-select already excludes via [`Self::list_spendable_coins`]; this gates
-    /// CLI `--coin-id` / explicit combine inputs so open-offer makers cannot be
-    /// spent by accident. P2-only watches still protect auto-select; post/heal
-    /// register maker coin ids alongside p2s.
-    ///
     /// # Errors
     ///
     /// Returns an error when any `coin_ids` entry is a watched maker coin.
@@ -137,7 +154,7 @@ impl CoinOpExecContext {
         )))
     }
 
-    /// Execute mixed split.
+    /// Execute mixed split and return the spend-bundle hash (CLI / managed coin-ops).
     ///
     /// # Errors
     ///
@@ -158,6 +175,28 @@ impl CoinOpExecContext {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());
         }
+        let result = self
+            .submit_mixed_split(output_amounts, coin_ids, fee_mojos, false, None)
+            .await?;
+        spend_bundle_hash_from_hex(&result.spend_bundle_hex)
+    }
+
+    /// Submit a vault mixed split and return the full result (bootstrap / dust).
+    ///
+    /// When `preselected` is `None`, CATs are fetched from Coinset. When `Some`, the
+    /// provided client and lineage-proven CATs are used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub async fn submit_mixed_split(
+        &self,
+        output_amounts: Vec<u64>,
+        coin_ids: &[String],
+        fee_mojos: u64,
+        allow_sub_cat_output: bool,
+        preselected: Option<(&CoinsetClient, Vec<Cat>)>,
+    ) -> SignerResult<MixedSplitResult> {
         let asset_id = hex_to_bytes32(&self.resolved_base_asset_id)?;
         let parsed_coin_ids: Vec<Bytes32> = coin_ids
             .iter()
@@ -168,18 +207,31 @@ impl CoinOpExecContext {
             asset_id,
             output_amounts,
             coin_ids: parsed_coin_ids,
-            allow_sub_cat_output: false,
+            allow_sub_cat_output,
             fee_mojos,
         };
-        let result = build_and_optionally_broadcast_vault_cat_mixed_split(
-            self.gated.signer.clone(),
-            &self.gated.operator_network,
-            request,
-            true,
-        )
-        .await
-        .map_err(SignerError::normalize_mixed_split_error)?;
-        spend_bundle_hash_from_hex(&result.spend_bundle_hex)
+        let result = if let Some((client, cats)) = preselected {
+            submit_vault_cat_mixed_split(
+                self.gated.signer.clone(),
+                request,
+                CatSelection::Preselected(cats),
+                client,
+                true,
+            )
+            .await
+        } else {
+            let client =
+                client_for_signer_on_network(&self.gated.signer, &self.gated.operator_network)?;
+            submit_vault_cat_mixed_split(
+                self.gated.signer.clone(),
+                request,
+                CatSelection::FetchFromCoinset,
+                &client,
+                true,
+            )
+            .await
+        };
+        result.map_err(SignerError::normalize_mixed_split_error)
     }
 
     fn assemble(

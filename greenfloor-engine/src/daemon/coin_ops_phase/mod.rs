@@ -17,10 +17,10 @@ use crate::operator_log::{
 };
 use crate::storage::SqliteStore;
 
-use super::coin_ops_execution::{
+use super::market_context::MarketCycleContext;
+use crate::coin_ops::execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecItem, CoinOpExecutionResult,
 };
-use super::market_context::MarketCycleContext;
 
 mod ladder;
 

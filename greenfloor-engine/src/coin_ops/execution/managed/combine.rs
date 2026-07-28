@@ -1,7 +1,7 @@
 use crate::coin_ops::{i64_to_usize, plan_exact_amount_combine_inputs, CoinOpPlan, SpendableCoin};
 
 use super::items::{
-    execute_daemon_coin_op_plan, executed_item_for_plan, plan_skip, skip_item_for_plan,
+    execute_managed_coin_op_plan, executed_item_for_plan, plan_skip, skip_item_for_plan,
     skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult,
 };
 use super::prep::{list_spendable_coins_for_plan, validate_plan_target_amount};
@@ -9,18 +9,18 @@ use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::CoinOpExecContext;
 
 #[allow(clippy::large_futures)]
-pub(crate) async fn execute_daemon_combine_plan(
+pub(crate) async fn execute_managed_combine_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    execute_daemon_coin_op_plan(execute_daemon_combine_plan_inner(ctx, plan)).await
+    execute_managed_coin_op_plan(execute_managed_combine_plan_inner(ctx, plan)).await
 }
 struct CombineInputSelection {
     combine_input_coin_ids: Vec<String>,
     spendable: Vec<SpendableCoin>,
 }
 
-async fn prepare_daemon_combine_inputs(
+async fn prepare_managed_combine_inputs(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<CombineInputSelection> {
@@ -56,7 +56,7 @@ async fn prepare_daemon_combine_inputs(
     })
 }
 
-async fn submit_daemon_combine_plan(
+async fn submit_managed_combine_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
     selection: &CombineInputSelection,
@@ -86,10 +86,10 @@ async fn submit_daemon_combine_plan(
     }
 }
 
-async fn execute_daemon_combine_plan_inner(
+async fn execute_managed_combine_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
-    let selection = prepare_daemon_combine_inputs(ctx, plan).await?;
-    submit_daemon_combine_plan(ctx, plan, &selection).await
+    let selection = prepare_managed_combine_inputs(ctx, plan).await?;
+    submit_managed_combine_plan(ctx, plan, &selection).await
 }

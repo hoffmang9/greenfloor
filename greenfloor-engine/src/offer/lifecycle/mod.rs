@@ -4,6 +4,8 @@ mod cancel;
 mod cancel_cli;
 mod cancel_context;
 mod cancel_eligibility;
+pub(crate) mod dexie_index;
+pub mod market_reconcile;
 mod persist;
 mod reconcile_watched_offers;
 mod signal_apply;
@@ -24,6 +26,10 @@ pub(crate) use cancel_context::{
 };
 pub use cancel_eligibility::{
     collect_market_cancel_target_offer_ids, filter_cancel_target_offer_ids, row_cancel_eligible,
+};
+pub use dexie_index::build_dexie_size_by_offer_id;
+pub use market_reconcile::{
+    run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,
 };
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reconcile_watched_offers::{

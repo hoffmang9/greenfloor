@@ -9,9 +9,9 @@ use crate::error::SignerResult;
 use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
-use super::combine::execute_daemon_combine_plan;
+use super::combine::execute_managed_combine_plan;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
-use super::split::execute_daemon_split_plan;
+use super::split::execute_managed_split_plan;
 use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
@@ -154,10 +154,10 @@ async fn execute_managed_coin_op_plans_async(
         }
         let (plan_items, plan_executed) = match plan.op_type {
             crate::coin_ops::CoinOpKind::Split => {
-                Box::pin(execute_daemon_split_plan(&ctx, plan)).await
+                Box::pin(execute_managed_split_plan(&ctx, plan)).await
             }
             crate::coin_ops::CoinOpKind::Combine => {
-                Box::pin(execute_daemon_combine_plan(&ctx, plan)).await
+                Box::pin(execute_managed_combine_plan(&ctx, plan)).await
             }
         };
         items.extend(plan_items);

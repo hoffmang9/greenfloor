@@ -5,8 +5,8 @@ use tracing::Level;
 
 use crate::metrics::{metric_collection_len_to_u64, metric_non_negative_u64};
 
-use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::MarketDispatchMetrics;
+use crate::offer::lifecycle::ReconcileMarketCycleResult;
 
 #[derive(Debug, Clone)]
 pub struct SingleMarketCycleOutput {
@@ -70,7 +70,7 @@ pub fn record_market_worker_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::reconcile_market_cycle::ReconcileMarketCycleMetrics;
+    use crate::offer::lifecycle::ReconcileMarketCycleMetrics;
     use crate::operator_log::{TraceCapture, MARKET_CYCLE_ERROR};
 
     fn sample_output(immediate_requeue: bool) -> SingleMarketCycleOutput {

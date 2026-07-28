@@ -20,7 +20,8 @@
 //! | `daemon/offer_dispatch/mod.rs` | strategy action dispatch |
 //! | `daemon/offer_dispatch/managed_post.rs` | single managed offer post |
 //! | `daemon/market_cycle.rs` | post-reconcile market phases |
-//! | `daemon/coin_ops_execution/runner.rs` | managed coin-op plan execution |
+//! | `coin_ops/execution/managed/runner.rs` | managed coin-op plan execution |
+//! | `vault/mixed_split.rs` (`submit_vault_cat_mixed_split`) | vault mixed-split submit |
 //! | `main.rs` | daemon / create-offer CLI arms only |
 //!
 //! Production batch combine and sequential orchestration live in `combine_market_cat_dust/execute.rs`.

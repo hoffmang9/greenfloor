@@ -1,9 +1,7 @@
 //! Bootstrap mixed-output planner and phase policy for offer denomination preflight.
 
 mod amounts;
-mod combine_inputs;
 mod combine_plan;
-mod combine_submit;
 mod gate;
 mod ladder;
 mod phase;
@@ -15,13 +13,12 @@ mod shape_policy;
 #[cfg(test)]
 mod test_fixtures;
 
+pub(crate) use amounts::bootstrap_combine_vault_outputs;
 pub use amounts::{
     base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
-    BaseUnits, Mojos,
+    BaseUnits, BootstrapCombineInputs, Mojos,
 };
-pub use combine_inputs::BootstrapCombineInputs;
 pub use combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
-pub(crate) use combine_submit::bootstrap_combine_vault_outputs;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
 pub use gate::bootstrap_phase_snapshot_block_error;
 pub use phase::{

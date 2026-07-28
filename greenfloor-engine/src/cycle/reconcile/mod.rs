@@ -1,7 +1,7 @@
 //! Offer transition policy for daemon cycle signals (taker detection, venue rules).
 //!
 //! Batch DB reconcile lives in `offer::lifecycle::reconcile_watched_offers`; per-market
-//! cycle reconcile lives in `daemon::reconcile_market_cycle`.
+//! cycle reconcile lives in `offer::lifecycle::market_reconcile`.
 
 mod audit_preserve;
 mod builders;

@@ -1,5 +1,9 @@
 use std::collections::HashSet;
 
+use crate::coin_ops::execution::managed::{
+    execute_managed_coin_op_plans, execute_managed_coin_op_plans_with_test_overrides,
+    CoinOpExecutionResult,
+};
 use crate::coin_ops::execution::{
     resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides,
 };
@@ -8,23 +12,19 @@ use crate::config::{
     empty_cat_ticker_index, load_program_bundle, GatedOperatorMarket, ManagerProgramConfig,
     SignerConfig,
 };
-use crate::daemon::coin_ops_execution::{
-    execute_managed_coin_op_plans, execute_managed_coin_op_plans_with_test_overrides,
-    CoinOpExecutionResult,
-};
 use crate::test_support::market_config::sample_market;
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
 };
 
-use super::combine::execute_daemon_combine_plan;
-use super::split::execute_daemon_split_plan;
+use super::combine::execute_managed_combine_plan;
+use super::split::execute_managed_split_plan;
 
-async fn run_daemon_split_plan(
+async fn run_managed_split_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
-) -> (Vec<crate::daemon::coin_ops_execution::CoinOpExecItem>, u64) {
-    Box::pin(execute_daemon_split_plan(ctx, plan)).await
+) -> (Vec<crate::coin_ops::execution::CoinOpExecItem>, u64) {
+    Box::pin(execute_managed_split_plan(ctx, plan)).await
 }
 
 fn sample_plan(op_type: CoinOpKind) -> CoinOpPlan {
@@ -340,7 +340,7 @@ async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watche
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
+async fn run_managed_split_plan_defers_single_output_to_bootstrap() {
     let mut market = sample_market("xch1test");
     market.base_asset = "b".repeat(64);
     let ctx = test_exec_context(
@@ -360,7 +360,7 @@ async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
         reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
     };
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
@@ -368,7 +368,7 @@ async fn run_daemon_split_plan_defers_single_output_to_bootstrap() {
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_uses_ninety_bu_remnant_for_john_deere_buffer_deficit() {
+async fn run_managed_split_plan_uses_ninety_bu_remnant_for_john_deere_buffer_deficit() {
     use crate::test_support::eco181_bootstrap_inventory::john_deere_after_combine_inventory_rows;
     use crate::test_support::ladder::market_with_eco181_sell_ladder;
 
@@ -387,7 +387,7 @@ async fn run_daemon_split_plan_uses_ninety_bu_remnant_for_john_deere_buffer_defi
         reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
     };
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 1);
     assert_eq!(items[0].reason, "signer_split_submitted");
@@ -407,14 +407,14 @@ async fn run_daemon_low_watermark_split_skips_protection_when_sell_ladder_empty(
         reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
     };
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 1);
     assert_eq!(items[0].reason, "signer_split_submitted");
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_submits_single_output_when_source_is_larger() {
+async fn run_managed_split_plan_submits_single_output_when_source_is_larger() {
     let mut market = sample_market("xch1test");
     market.base_asset = "b".repeat(64);
     let ctx = test_exec_context(
@@ -429,18 +429,18 @@ async fn run_daemon_split_plan_submits_single_output_when_source_is_larger() {
         reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
     };
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 1);
     assert_eq!(items[0].reason, "signer_split_submitted");
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_skips_when_no_spendable_coins() {
+async fn run_managed_split_plan_skips_when_no_spendable_coins() {
     let ctx = test_exec_context(sample_market("xch1test"), Vec::new(), None);
     let plan = sample_plan(CoinOpKind::Split);
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
@@ -448,7 +448,7 @@ async fn run_daemon_split_plan_skips_when_no_spendable_coins() {
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_skips_when_amount_below_minimum() {
+async fn run_managed_split_plan_skips_when_amount_below_minimum() {
     let mut market = sample_market("xch1test");
     market.base_asset = "b".repeat(64);
     let ctx = test_exec_context(
@@ -463,7 +463,7 @@ async fn run_daemon_split_plan_skips_when_amount_below_minimum() {
         reason: CoinOpPlanReason::ExcessOnlyPolicy,
     };
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
@@ -471,7 +471,7 @@ async fn run_daemon_split_plan_skips_when_amount_below_minimum() {
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_submits_when_spendable_coin_available() {
+async fn run_managed_split_plan_submits_when_spendable_coin_available() {
     let mut market = sample_market("xch1test");
     market.base_asset = test_coin_id('f');
     let ctx = test_exec_context(
@@ -481,7 +481,7 @@ async fn run_daemon_split_plan_submits_when_spendable_coin_available() {
     );
     let plan = sample_plan(CoinOpKind::Split);
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 1);
     assert_eq!(items.len(), 1);
@@ -491,7 +491,7 @@ async fn run_daemon_split_plan_submits_when_spendable_coin_available() {
 }
 
 #[tokio::test]
-async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
+async fn run_managed_split_plan_retries_after_stale_selected_coin() {
     let mut market = sample_market("xch1test");
     market.base_asset = test_coin_id('f');
     let ctx = {
@@ -508,7 +508,7 @@ async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
     };
     let plan = sample_plan(CoinOpKind::Split);
 
-    let (items, executed) = run_daemon_split_plan(&ctx, &plan).await;
+    let (items, executed) = run_managed_split_plan(&ctx, &plan).await;
 
     assert_eq!(executed, 1);
     assert_eq!(items.len(), 1);
@@ -518,7 +518,7 @@ async fn run_daemon_split_plan_retries_after_stale_selected_coin() {
 }
 
 #[tokio::test]
-async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
+async fn execute_managed_combine_plan_skips_when_insufficient_inputs() {
     let ctx = test_exec_context(
         sample_market("xch1test"),
         vec![SpendableCoin::new(test_coin_id('d'), 10_000)],
@@ -526,7 +526,7 @@ async fn execute_daemon_combine_plan_skips_when_insufficient_inputs() {
     );
     let plan = sample_plan(CoinOpKind::Combine);
 
-    let (items, executed) = Box::pin(execute_daemon_combine_plan(&ctx, &plan)).await;
+    let (items, executed) = Box::pin(execute_managed_combine_plan(&ctx, &plan)).await;
 
     assert_eq!(executed, 0);
     assert_eq!(items.len(), 1);
