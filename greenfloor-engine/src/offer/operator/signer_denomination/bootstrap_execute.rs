@@ -119,14 +119,13 @@ async fn execute_bootstrap_combine_step(
     BootstrapPhaseResult,
 > {
     let combine_result = submit_bootstrap_combine(
-        &ctx.gated.signer,
-        &ctx.gated.operator_network,
+        ctx,
         &shape.bootstrap_plan,
         &shape.split_asset_id,
         &shape.receive_address,
         shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&shape.test_overrides),
+        &shape.test_overrides,
     )
     .await
     .map_err(|err| {
@@ -232,14 +231,13 @@ pub(super) async fn execute_bootstrap_shape(
 
     let bootstrap_plan = shape.bootstrap_plan.clone();
     let split_result = match submit_bootstrap_mixed_split(
-        &build_ctx.gated.signer,
-        &build_ctx.gated.operator_network,
+        build_ctx,
         &bootstrap_plan,
         &shape.split_asset_id,
         &shape.receive_address,
         shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&shape.test_overrides),
+        &shape.test_overrides,
     )
     .await
     {

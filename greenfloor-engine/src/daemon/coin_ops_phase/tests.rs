@@ -4,9 +4,9 @@ use super::ladder::build_valid_sell_ladder;
 use super::ladder::classify_sell_ladder_entries;
 use super::ladder::record_sub_minimum_sell_ladder_skips;
 use super::{apply_overflow_plan_skips, skipped_coin_ops_result};
+use crate::coin_ops::execution::CoinOpExecutionResult;
 use crate::coin_ops::{CoinOpKind, CoinOpPlan, CoinOpPlanReason};
 use crate::config::{LadderEntry, ManagerProgramConfig};
-use crate::daemon::coin_ops_execution::CoinOpExecutionResult;
 use crate::daemon::CoinOpsPhaseHarness;
 use crate::operator_log::{
     COIN_OPS_NO_PLANS, COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN,

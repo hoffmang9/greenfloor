@@ -86,6 +86,19 @@ impl MarketCycleResultState {
             }
         }
     }
+
+    /// Merge reconcile apply outcomes into this cycle's immediate-requeue flags.
+    pub fn merge_immediate_requeue_from_reconcile(&mut self, requested: bool, signals: &[String]) {
+        if !requested {
+            return;
+        }
+        for signal in signals {
+            self.request_immediate_requeue(Some(signal.clone()));
+        }
+        if signals.is_empty() {
+            self.request_immediate_requeue(None);
+        }
+    }
 }
 
 #[must_use]
@@ -285,6 +298,25 @@ mod tests {
         assert!(state.cancel_triggered);
         assert_eq!(state.cancel_planned, 3);
         assert_eq!(state.cancel_executed, 1);
+    }
+
+    #[test]
+    fn merge_immediate_requeue_from_reconcile_populates_signals() {
+        let mut state = MarketCycleResultState::default();
+        state.merge_immediate_requeue_from_reconcile(true, &["taker_fill".to_string()]);
+        assert!(state.immediate_requeue_requested);
+        assert_eq!(
+            state.immediate_requeue_signals,
+            vec!["taker_fill".to_string()]
+        );
+    }
+
+    #[test]
+    fn merge_immediate_requeue_from_reconcile_without_signal_still_flags() {
+        let mut state = MarketCycleResultState::default();
+        state.merge_immediate_requeue_from_reconcile(true, &[]);
+        assert!(state.immediate_requeue_requested);
+        assert!(state.immediate_requeue_signals.is_empty());
     }
 
     #[test]

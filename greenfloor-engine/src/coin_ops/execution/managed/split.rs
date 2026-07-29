@@ -9,8 +9,8 @@ use crate::coin_ops::{
 };
 
 use super::items::{
-    execute_daemon_coin_op_plan, executed_item, executed_item_for_plan, plan_skip,
-    skip_item_for_plan, skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult, PlanSkip,
+    executed_item, executed_item_for_plan, plan_skip, skip_item_for_plan,
+    skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult, PlanSkip,
 };
 use super::prep::{
     list_spendable_coins_for_plan, skip_if_spendable_empty, validate_plan_target_amount,
@@ -137,7 +137,7 @@ async fn split_candidate_spendable(
         .collect())
 }
 
-async fn submit_daemon_split_for_coin(
+async fn submit_managed_split_for_coin(
     ctx: &CoinOpExecContext,
     attempt: &SplitAttemptContext<'_>,
     selected_coin_id: String,
@@ -171,7 +171,7 @@ async fn submit_daemon_split_for_coin(
     }
 }
 
-async fn attempt_daemon_split(
+async fn attempt_managed_split(
     ctx: &CoinOpExecContext,
     attempt: &SplitAttemptContext<'_>,
 ) -> Result<SplitAttemptFlow, PlanSkip> {
@@ -204,21 +204,24 @@ async fn attempt_daemon_split(
             )]))
         }
         SplitAutoSelectPlan::Coin(selected) => {
-            submit_daemon_split_for_coin(ctx, attempt, selected.coin_id).await
+            submit_managed_split_for_coin(ctx, attempt, selected.coin_id).await
         }
     }
 }
 
 #[allow(clippy::large_futures)]
-pub(crate) async fn execute_daemon_split_plan(
+pub(crate) async fn execute_managed_split_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    execute_daemon_coin_op_plan(execute_daemon_split_plan_inner(ctx, plan)).await
+    match execute_managed_split_plan_inner(ctx, plan).await {
+        Ok(result) => result,
+        Err(skip) => skip,
+    }
 }
 
 #[allow(clippy::large_futures)]
-async fn execute_daemon_split_plan_inner(
+async fn execute_managed_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
@@ -249,7 +252,7 @@ async fn execute_daemon_split_plan_inner(
             first_attempt,
             attempted_coin_ids: &attempted_coin_ids,
         };
-        match attempt_daemon_split(ctx, &attempt).await {
+        match attempt_managed_split(ctx, &attempt).await {
             Ok(SplitAttemptFlow::Executed(items)) => return Ok((items, 1)),
             Ok(SplitAttemptFlow::Skipped(items)) => return Ok((items, 0)),
             Ok(SplitAttemptFlow::Retry(coin_id)) => {

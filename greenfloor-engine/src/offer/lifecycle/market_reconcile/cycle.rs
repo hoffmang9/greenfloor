@@ -1,4 +1,4 @@
-//! Per-market daemon-cycle reconcile: Dexie list fetch and lifecycle transitions.
+//! Per-market reconcile: Dexie list fetch and lifecycle transitions.
 
 use std::collections::HashMap;
 
@@ -9,19 +9,14 @@ use tracing::Level;
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
 use crate::error::SignerResult;
-use crate::offer::lifecycle::{apply_cancel_submitted_rows, ReconcilePersistOptions};
 use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
-use super::dexie_size::{build_dexie_size_by_offer_id, dexie_status_index};
-use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::reconcile_transition::apply_dexie_lifecycle_transitions;
+use super::super::dexie_index::{build_dexie_size_by_offer_id, dexie_status_index};
+use super::super::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+use super::augment::augment_dexie_offers_for_watchlist;
+use super::transition::{apply_dexie_lifecycle_transitions, ReconcileMarketCycleMetrics};
 use super::watch_plan::{fetch_and_ensure_watches, prepare_market_reconcile_local};
-
-#[cfg(test)]
-mod tests;
-
-pub use super::reconcile_transition::ReconcileMarketCycleMetrics;
 
 #[derive(Debug, Clone)]
 pub struct ReconcileMarketCycleResult {
@@ -51,6 +46,11 @@ impl ReconcileMarketCycleResult {
     }
 }
 
+/// Run one market's Dexie list fetch + lifecycle apply for the daemon cycle.
+///
+/// # Errors
+///
+/// Returns an error if local prepare, Dexie augment, or lifecycle persist fails.
 pub async fn run_reconcile_market_cycle(
     store: &SqliteStore,
     dexie: &DexieClient,

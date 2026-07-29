@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use chia_protocol::Bytes32;
-
 use crate::coin_ops::{
     coin_op_non_negative_u64, combine_output_amounts, total_for_coin_ids, SpendableCoin,
     COMBINE_SINGLE_OUTPUT_COUNT,
@@ -9,7 +7,7 @@ use crate::coin_ops::{
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
 use crate::config::{GatedOperatorMarket, MarketConfig};
 use crate::error::{SignerError, SignerResult};
-use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32};
+use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32, parse_coin_ids};
 use crate::offer::OfferAssetResolver;
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
@@ -48,14 +46,18 @@ impl CoinOpExecContext {
         let resolver = gated.asset_resolver();
         let resolved_base_asset_id =
             resolve_base_asset_id(&resolver, &gated.market_row, canonical_base_asset).await?;
-        Ok(Self::assemble(
+        Ok(Self {
+            base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(
+                gated.market_row.base_asset.trim(),
+            ),
+            combine_input_cap: resolve_combine_input_cap(),
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
             watched_p2s,
             #[cfg(test)]
             test_overrides,
-        ))
+        })
     }
 
     /// Submit a combine: merge `input_coin_ids` into a single output coin.
@@ -87,9 +89,6 @@ impl CoinOpExecContext {
 
     /// List spendable coins, excluding durable maker coin-id and p2 watches.
     ///
-    /// Manager CLI and daemon both select from this set so open-offer maker coins
-    /// cannot be split/combined accidentally.
-    ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
@@ -118,11 +117,6 @@ impl CoinOpExecContext {
 
     /// Refuse explicit coin-op inputs that are durable maker coin watches.
     ///
-    /// Auto-select already excludes via [`Self::list_spendable_coins`]; this gates
-    /// CLI `--coin-id` / explicit combine inputs so open-offer makers cannot be
-    /// spent by accident. P2-only watches still protect auto-select; post/heal
-    /// register maker coin ids alongside p2s.
-    ///
     /// # Errors
     ///
     /// Returns an error when any `coin_ids` entry is a watched maker coin.
@@ -137,7 +131,7 @@ impl CoinOpExecContext {
         )))
     }
 
-    /// Execute mixed split.
+    /// Execute mixed split and return the spend-bundle hash (managed coin-ops / manager CLI).
     ///
     /// # Errors
     ///
@@ -158,16 +152,11 @@ impl CoinOpExecContext {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());
         }
-        let asset_id = hex_to_bytes32(&self.resolved_base_asset_id)?;
-        let parsed_coin_ids: Vec<Bytes32> = coin_ids
-            .iter()
-            .map(|coin_id| hex_to_bytes32(coin_id))
-            .collect::<SignerResult<Vec<_>>>()?;
         let request = MixedSplitRequest {
             receive_address: self.gated.market_row.receive_address.clone(),
-            asset_id,
+            asset_id: hex_to_bytes32(&self.resolved_base_asset_id)?,
             output_amounts,
-            coin_ids: parsed_coin_ids,
+            coin_ids: parse_coin_ids(coin_ids)?,
             allow_sub_cat_output: false,
             fee_mojos,
         };
@@ -180,27 +169,6 @@ impl CoinOpExecContext {
         .await
         .map_err(SignerError::normalize_mixed_split_error)?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
-    }
-
-    fn assemble(
-        gated: GatedOperatorMarket,
-        resolved_base_asset_id: String,
-        watched_coin_ids: HashSet<String>,
-        watched_p2s: HashSet<String>,
-        #[cfg(test)] test_overrides: CoinOpTestOverrides,
-    ) -> Self {
-        Self {
-            base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(
-                gated.market_row.base_asset.trim(),
-            ),
-            combine_input_cap: resolve_combine_input_cap(),
-            gated,
-            resolved_base_asset_id,
-            watched_coin_ids,
-            watched_p2s,
-            #[cfg(test)]
-            test_overrides,
-        }
     }
 }
 

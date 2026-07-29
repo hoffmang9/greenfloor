@@ -1,8 +1,12 @@
-//! Daemon cycle orchestration (native Rust). Reconcile, `inventory/strategy/coin_ops` planning, and cancel run in Rust.
+//! Daemon cycle orchestration: schedule, WS transport, and market phase glue.
+//!
+//! Offer reconcile apply lives in `offer::lifecycle::market_reconcile`.
+//! Managed coin-op execution lives in `coin_ops::execution::managed`.
+//! Daemon still owns cancel, strategy, inventory, coin-ops, and offer-dispatch phase
+//! orchestration.
 
 mod cancel_phase;
 mod cli;
-mod coin_ops_execution;
 mod coin_ops_phase;
 mod coinset_spendable;
 mod coinset_ws;
@@ -10,7 +14,6 @@ mod cycle_entry;
 mod cycle_paths;
 mod cycle_store;
 mod daemon_loop;
-mod dexie_size;
 mod disabled_markets;
 #[cfg(test)]
 mod dispatch_test_controls;
@@ -28,9 +31,6 @@ mod markets;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
-mod reconcile_augment;
-mod reconcile_market_cycle;
-mod reconcile_transition;
 mod reload;
 mod run_once;
 mod stale_sweep;
@@ -38,23 +38,14 @@ mod strategy_phase;
 mod strategy_support;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod watch_plan;
 #[cfg(test)]
 pub use coin_ops_phase::harness::CoinOpsPhaseHarness;
 pub mod watchlist;
 
-pub use crate::coin_ops::execution::CoinOpExecContext;
-pub use crate::offer::lifecycle::{
-    cancel_offers_on_chain, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
-    ReconcileBatchItem, ReconcileBatchResult, ReconcileCliResult,
-};
 pub use cancel_phase::run_market_cancel_phase;
 pub use cli::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
     run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
-};
-pub use coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecutionResult,
 };
 pub use coinset_ws::{
     resolve_coinset_ws_url_with_p2s, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
@@ -63,7 +54,6 @@ pub use coinset_ws::{
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use cycle_paths::DaemonCyclePaths;
 pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
-pub use dexie_size::build_dexie_size_by_offer_id;
 pub use inventory_freshness::{InventoryFreshnessCache, INVENTORY_MAX_STALENESS};
 pub use inventory_phase::{assert_inventory_asset_resolution_matches_config, run_inventory_phase};
 pub use lock::DaemonInstanceLock;

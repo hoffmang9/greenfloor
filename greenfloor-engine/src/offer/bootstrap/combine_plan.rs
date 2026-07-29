@@ -2,8 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits};
-use super::combine_inputs::BootstrapCombineInputs;
+use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits, BootstrapCombineInputs};
 use super::ladder::ladder_shape_context_for_bootstrap;
 use super::plan::{spendable_bootstrap_coins, BootstrapCoin, PlannerLadderRow};
 use crate::coin_ops::cat_overshoot_change_would_be_dust;

@@ -7,9 +7,8 @@ use crate::coinset::{
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::hex_to_bytes32;
-use crate::vault::mixed_split::{
-    build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats, MixedSplitRequest,
-    MixedSplitResult,
+use crate::vault::{
+    submit_vault_cat_mixed_split, CatSelection, MixedSplitRequest, MixedSplitResult,
 };
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
@@ -77,12 +76,12 @@ impl BatchPlanRunner for CombineBatchExecutor {
             allow_sub_cat_output: total < MIN_CAT_OUTPUT_MOJOS,
             fee_mojos: 0,
         };
-        build_and_optionally_broadcast_vault_cat_mixed_split_with_preselected_cats(
+        submit_vault_cat_mixed_split(
             self.signer_config.clone(),
             request,
-            batch.cats(),
-            true,
+            CatSelection::Preselected(batch.cats()),
             &self.client,
+            true,
         )
         .await
     }

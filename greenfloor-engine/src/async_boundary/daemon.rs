@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::daemon::{CoinOpExecutionResult, OfferDispatchOutput};
+use crate::coin_ops::execution::CoinOpExecutionResult;
+use crate::daemon::OfferDispatchOutput;
 use crate::error::SignerResult;
 
 /// Boxed future for daemon strategy offer dispatch.

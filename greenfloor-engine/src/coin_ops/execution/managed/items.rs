@@ -102,12 +102,3 @@ pub(crate) fn skip_on_signer_err_for_plan<T>(
         )
     })
 }
-
-pub(crate) async fn execute_daemon_coin_op_plan(
-    inner: impl std::future::Future<Output = CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)>>,
-) -> (Vec<CoinOpExecItem>, u64) {
-    match inner.await {
-        Ok(result) => result,
-        Err(skip) => skip,
-    }
-}

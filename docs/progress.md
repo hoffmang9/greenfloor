@@ -16,6 +16,22 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-07-28 — Three ownership simplifications
+
+1. **Inventory shaping submit** — Crate-private `submit_vault_cat_mixed_split` +
+   `CatSelection` is the executor; public `build_and_optionally_broadcast_*` is the
+   FetchFromCoinset convenience. Bootstrap and managed/manager coin-ops use the
+   convenience (via `CoinOpExecContext::execute_mixed_split` for market-gated paths);
+   dust uses `submit_*` with `Preselected`. Managed plan runners live in
+   `coin_ops::execution::managed` (`execute_managed_*`).
+2. **Offer reconcile spine** — Daemon market-cycle reconcile prepare/augment/Dexie apply
+   in `offer::lifecycle::market_reconcile` (CLI offer-id reconcile remains separate).
+   Immediate-requeue merge is
+   `MarketCycleResultState::merge_immediate_requeue_from_reconcile` in `cycle/`. Daemon
+   owns schedule, WS, and market phase orchestration (not a pure thin shell).
+3. **Reverse micro-decomposition** — Collapsed bootstrap combine micro-modules; merged
+   `config/program_parse` section files into `sections.rs`.
+
 ### 2026-07-08 — Coinset WS local watches and inventory p2 index
 
 Default offer publish is Coinset `POST /push_offer`. Daemon WS uses

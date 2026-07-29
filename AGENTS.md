@@ -48,7 +48,8 @@ Severity tags:
 - `[MUST]` Operator binaries are native Rust: `greenfloor-manager`, `greenfloord`, `greenfloor-engine`
   (`manager_cli/`, `daemon/`). No PyO3 or Python orchestration entrypoints.
 - `[MUST]` Shared offer orchestration: `offer/operator/` and `offer/lifecycle/` (manager + daemon).
-- `[MUST]` Coin-op policy and execution: `coin_ops/` and `daemon/coin_ops_execution/`.
+- `[MUST]` Coin-op policy and execution: `coin_ops/` (including
+  `coin_ops/execution/managed/` for managed plan runners).
 - `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer`
   (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Offer-payload ID extraction and conservative-fee parsing are Rust-only

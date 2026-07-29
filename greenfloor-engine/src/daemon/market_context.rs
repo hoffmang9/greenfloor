@@ -10,8 +10,8 @@ use crate::storage::CycleWriteStore;
 
 use super::coinset_ws::CoinsetWsShared;
 use super::cycle_paths::DaemonCyclePaths;
-use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
+use crate::offer::lifecycle::ReconcileMarketCycleResult;
 
 /// Config and clients loaded once per daemon cycle.
 #[derive(Debug, Clone)]

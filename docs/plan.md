@@ -14,7 +14,8 @@
 Operators                greenfloor-engine (Rust)
 ─────────                ─────────────────────────
 greenfloor-manager  ──►  manager_cli/ → offer/operator, offer/lifecycle, coin_ops/…
-greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops/execution/…
+greenfloord         ──►  daemon/ (schedule, WS, market phases) → cycle/,
+                         offer/lifecycle, coin_ops/execution/managed
 
 Dev / scripts            scripts/ (Python adapters)
 ─────────                ───────────────────────────
@@ -23,6 +24,15 @@ adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
 ```
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + direct Coinset HTTP API).
+- **Shared vault mixed-split submit:** crate-private
+  `vault::submit_vault_cat_mixed_split` with `CatSelection` (selection, client,
+  broadcast). Public `build_and_optionally_broadcast_vault_cat_mixed_split` is the
+  FetchFromCoinset convenience (bootstrap, managed/manager coin-ops via
+  `CoinOpExecContext::execute_mixed_split`). Dust uses `submit_*` with
+  `CatSelection::Preselected`.
+- **Daemon market-cycle reconcile:** `offer::lifecycle::market_reconcile` (CLI offer-id
+  reconcile stays in `reconcile_watched_offers`). Daemon still owns market phase
+  orchestration; cycle requeue merge lives on `MarketCycleResultState`.
 - **Config policy for operators:** Rust (`config/program.rs`, `config/markets.rs`, `config/signer.rs`).
 - **Script-facing config reads:** `greenfloor-manager program-fields`, `markets-fields`,
   `cats-fields` (via `greenfloor-manager`); not direct YAML policy walks.
