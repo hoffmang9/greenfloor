@@ -7,8 +7,6 @@ mod bootstrap_execute;
 mod futures;
 mod planning;
 mod split_submit;
-#[cfg(test)]
-mod test_overrides;
 mod types;
 mod wait;
 
@@ -28,9 +26,6 @@ use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
 pub(crate) use bootstrap_execute::BootstrapShapeContext;
 pub use types::BootstrapPhaseResult;
-
-#[cfg(test)]
-pub(crate) use test_overrides::SignerDenominationTestOverrides;
 
 use bootstrap_execute::execute_bootstrap_shape;
 use futures::SignerDenominationPhaseFuture;
@@ -223,7 +218,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         fee_source,
         fee_lookup_error,
         #[cfg(test)]
-        test_overrides: test_overrides::SignerDenominationTestOverrides::default(),
+        test_overrides: crate::coin_ops::execution::CoinOpTestOverrides::default(),
     }))
 }
 

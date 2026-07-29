@@ -62,7 +62,7 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
 
 /// How CAT inputs are resolved for a vault mixed-split submit.
 #[derive(Debug, Clone)]
-pub(crate) enum CatSelection {
+pub enum CatSelection {
     /// Select CATs from Coinset for the request asset / coin ids.
     FetchFromCoinset,
     /// Spend lineage-proven CATs (dust combine).

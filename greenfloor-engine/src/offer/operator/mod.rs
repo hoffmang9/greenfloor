@@ -22,6 +22,4 @@ pub use signer_denomination::BootstrapPhaseResult;
 #[cfg(test)]
 pub(crate) use signer_denomination::BootstrapShapeContext;
 #[cfg(test)]
-pub(crate) use signer_denomination::SignerDenominationTestOverrides;
-#[cfg(test)]
 pub use test_overrides::BuildOfferTestOverrides;

@@ -4,7 +4,6 @@ use crate::test_support::bootstrap_shape::{
 };
 use crate::test_support::signer_config::test_signer_config;
 
-use super::super::test_overrides::sample_vault_mixed_split_stub;
 use super::execute_bootstrap_shape;
 use crate::offer::operator::build_and_post::signer_denomination_test_context;
 
@@ -129,12 +128,8 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
         .expect("plan result")
         .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
-    shape_ctx
-        .test_overrides
-        .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
-    shape_ctx
-        .test_overrides
-        .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
+    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
+    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
 
     let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await
@@ -171,9 +166,7 @@ async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split()
         .expect("plan result")
         .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
-    shape_ctx
-        .test_overrides
-        .enqueue_vault_mixed_split_stub(sample_vault_mixed_split_stub());
+    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
 
     let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await

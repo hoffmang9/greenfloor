@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use chia_protocol::Bytes32;
-use chia_sdk_driver::Cat;
 
 use crate::coin_ops::{
     coin_op_non_negative_u64, combine_output_amounts, total_for_coin_ids, SpendableCoin,
@@ -64,7 +63,7 @@ impl CoinOpExecContext {
         ))
     }
 
-    /// Build context for an already-resolved asset id (offer bootstrap / dust).
+    /// Build context for an already-resolved asset id (offer bootstrap).
     #[must_use]
     pub fn with_resolved_asset(
         gated: GatedOperatorMarket,
@@ -154,7 +153,7 @@ impl CoinOpExecContext {
         )))
     }
 
-    /// Execute mixed split and return the spend-bundle hash (CLI / managed coin-ops).
+    /// Execute mixed split and return the spend-bundle hash (managed coin-ops / manager CLI).
     ///
     /// # Errors
     ///
@@ -175,16 +174,24 @@ impl CoinOpExecContext {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.to_string());
         }
+        let client =
+            client_for_signer_on_network(&self.gated.signer, &self.gated.operator_network)?;
         let result = self
-            .submit_mixed_split(output_amounts, coin_ids, fee_mojos, false, None)
+            .submit_mixed_split(
+                output_amounts,
+                coin_ids,
+                fee_mojos,
+                false,
+                CatSelection::FetchFromCoinset,
+                &client,
+            )
             .await?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
     }
 
-    /// Submit a vault mixed split and return the full result (bootstrap / dust).
+    /// Submit a vault mixed split and return the full result (offer bootstrap).
     ///
-    /// When `preselected` is `None`, CATs are fetched from Coinset. When `Some`, the
-    /// provided client and lineage-proven CATs are used.
+    /// Caller supplies [`CatSelection`] and the Coinset client used for selection/broadcast.
     ///
     /// # Errors
     ///
@@ -195,8 +202,23 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
         allow_sub_cat_output: bool,
-        preselected: Option<(&CoinsetClient, Vec<Cat>)>,
+        selection: CatSelection,
+        client: &CoinsetClient,
     ) -> SignerResult<MixedSplitResult> {
+        #[cfg(test)]
+        if let Some(stub) = self
+            .test_overrides
+            .take_mixed_split_result_stub(&output_amounts)
+        {
+            let _ = (
+                coin_ids,
+                fee_mojos,
+                allow_sub_cat_output,
+                &selection,
+                client,
+            );
+            return Ok(stub);
+        }
         let asset_id = hex_to_bytes32(&self.resolved_base_asset_id)?;
         let parsed_coin_ids: Vec<Bytes32> = coin_ids
             .iter()
@@ -210,28 +232,9 @@ impl CoinOpExecContext {
             allow_sub_cat_output,
             fee_mojos,
         };
-        let result = if let Some((client, cats)) = preselected {
-            submit_vault_cat_mixed_split(
-                self.gated.signer.clone(),
-                request,
-                CatSelection::Preselected(cats),
-                client,
-                true,
-            )
+        submit_vault_cat_mixed_split(self.gated.signer.clone(), request, selection, client, true)
             .await
-        } else {
-            let client =
-                client_for_signer_on_network(&self.gated.signer, &self.gated.operator_network)?;
-            submit_vault_cat_mixed_split(
-                self.gated.signer.clone(),
-                request,
-                CatSelection::FetchFromCoinset,
-                &client,
-                true,
-            )
-            .await
-        };
-        result.map_err(SignerError::normalize_mixed_split_error)
+            .map_err(SignerError::normalize_mixed_split_error)
     }
 
     fn assemble(

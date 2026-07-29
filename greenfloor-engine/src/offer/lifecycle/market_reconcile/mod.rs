@@ -1,7 +1,8 @@
 //! Market reconcile apply spine shared by daemon cycle and CLI paths.
 //!
 //! Owns Dexie list matching, local watch prepare/heal, augment, and lifecycle
-//! transition apply. Daemon keeps only schedule + WS transport.
+//! transition apply. Daemon still owns schedule, WS transport, and market phase
+//! orchestration that invokes this spine.
 
 mod augment;
 mod cycle;

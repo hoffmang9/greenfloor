@@ -19,9 +19,10 @@ Pre-Rust migration detail lives in git history and
 ### 2026-07-28 — Three ownership simplifications
 
 1. **Inventory shaping submit** — Single vault entrypoint `submit_vault_cat_mixed_split` +
-   `CatSelection`. `CoinOpExecContext::submit_mixed_split` is the market-gated wrapper used
-   by bootstrap, dust, managed plans, and CLI. Managed plan runners live in
-   `coin_ops::execution::managed` (`execute_managed_*`).
+   `CatSelection`. `CoinOpExecContext::submit_mixed_split` wraps that for market-gated
+   bootstrap and managed/manager coin-ops (`CatSelection` + caller-supplied Coinset client).
+   Dust combine calls the vault with `CatSelection::Preselected`. Managed plan runners live
+   in `coin_ops::execution::managed` (`execute_managed_*`).
 2. **Offer reconcile spine** — Market reconcile prepare/augment/Dexie apply in
    `offer::lifecycle::market_reconcile`. Immediate-requeue merge is
    `MarketCycleResultState::merge_immediate_requeue_from_reconcile` in `cycle/`. Daemon

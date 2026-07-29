@@ -334,7 +334,7 @@ mod tests {
             fee_source: String::new(),
             fee_lookup_error: None,
             #[cfg(test)]
-            test_overrides: crate::offer::operator::SignerDenominationTestOverrides::default(),
+            test_overrides: crate::coin_ops::execution::CoinOpTestOverrides::default(),
         };
 
         let completed = wait_for_bootstrap_shape_step(unit_test_wait_config(
