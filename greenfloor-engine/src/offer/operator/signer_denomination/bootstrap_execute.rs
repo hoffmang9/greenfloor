@@ -125,7 +125,7 @@ async fn execute_bootstrap_combine_step(
         &shape.receive_address,
         shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&shape.test_overrides),
+        &shape.test_overrides,
     )
     .await
     .map_err(|err| {
@@ -237,7 +237,7 @@ pub(super) async fn execute_bootstrap_shape(
         &shape.receive_address,
         shape.split_asset_mojo_multiplier,
         #[cfg(test)]
-        Some(&shape.test_overrides),
+        &shape.test_overrides,
     )
     .await
     {
