@@ -11,10 +11,9 @@ pub use context::{
     compute_vault_context, compute_vault_context_from_hashes, compute_vault_hashes,
     VaultComputedHashes, VaultContext, VaultCustodySnapshot,
 };
-pub(crate) use mixed_split::submit_vault_cat_mixed_split;
 pub use mixed_split::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, CatSelection, MixedSplitRequest,
-    MixedSplitResult,
+    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };
+pub(crate) use mixed_split::{submit_vault_cat_mixed_split, CatSelection};
 pub use spend::{build_vault_spend_context_from_hashes, KmsSigner, VaultSpendContext};
 pub use threshold::validate_vault_threshold;

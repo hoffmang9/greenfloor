@@ -3,6 +3,9 @@
 //! Owns Dexie list matching, local watch prepare/heal, augment, and lifecycle
 //! transition apply. Daemon still owns schedule, WS transport, and market phase
 //! orchestration that invokes this spine.
+//!
+//! Callers should use [`run_reconcile_market_cycle`] and the result types; prepare /
+//! augment / watch helpers stay crate-private to this module.
 
 mod augment;
 mod cycle;
@@ -13,9 +16,5 @@ mod watch_plan;
 #[path = "cycle_tests.rs"]
 mod cycle_tests;
 
-pub use augment::augment_dexie_offers_for_watchlist;
 pub use cycle::{run_reconcile_market_cycle, ReconcileMarketCycleResult};
 pub use transition::ReconcileMarketCycleMetrics;
-pub use watch_plan::{
-    fetch_and_ensure_watches, prepare_market_reconcile_local, DexieWatchRoles, MarketReconcileLocal,
-};

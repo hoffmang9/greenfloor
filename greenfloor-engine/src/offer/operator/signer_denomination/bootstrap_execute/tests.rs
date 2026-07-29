@@ -128,8 +128,12 @@ async fn execute_bootstrap_shape_runs_combine_then_split() {
         .expect("plan result")
         .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
-    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
-    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
+    shape_ctx
+        .test_overrides
+        .enqueue_sample_vault_mixed_split_stub();
+    shape_ctx
+        .test_overrides
+        .enqueue_sample_vault_mixed_split_stub();
 
     let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await
@@ -166,7 +170,9 @@ async fn execute_bootstrap_shape_eco181_combine_only_marks_ready_without_split()
         .expect("plan result")
         .expect("shape context");
     assert!(shape_ctx.bootstrap_plan.requires_combine_first());
-    shape_ctx.test_overrides.enqueue_sample_mixed_split_result();
+    shape_ctx
+        .test_overrides
+        .enqueue_sample_vault_mixed_split_stub();
 
     let result = Box::pin(execute_bootstrap_shape(&phase_ctx, shape_ctx))
         .await

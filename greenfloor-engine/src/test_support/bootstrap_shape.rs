@@ -1,11 +1,10 @@
 //! Shared bootstrap shape / coinset fixtures for signer denomination tests.
 
-use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::offer::bootstrap::{
     plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
     BootstrapPlanOutcome, PlannerLadderRow,
 };
-use crate::offer::operator::BootstrapShapeContext;
+use crate::offer::operator::{BootstrapShapeContext, SignerDenominationTestOverrides};
 
 pub const BOOTSTRAP_TEST_RECEIVE: &str =
     "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
@@ -95,7 +94,7 @@ pub fn combine_first_shape_context(
         fee_source: String::new(),
         fee_lookup_error: None,
         #[cfg(test)]
-        test_overrides: CoinOpTestOverrides::default(),
+        test_overrides: SignerDenominationTestOverrides::default(),
     }
 }
 

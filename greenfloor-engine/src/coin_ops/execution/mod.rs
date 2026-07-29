@@ -1,7 +1,8 @@
-//! Shared coin-op execution for manager CLI, daemon, and offer bootstrap.
+//! Shared market-gated coin-op execution for manager CLI and daemon.
 //!
-//! Dust combine submits via `vault::submit_vault_cat_mixed_split` with
-//! `CatSelection::Preselected` (outside this market-gated context).
+//! Offer bootstrap and dust combine call the vault submitter directly
+//! (`build_and_optionally_broadcast_vault_cat_mixed_split` /
+//! `submit_vault_cat_mixed_split` + `CatSelection`).
 
 mod cap;
 pub mod context;

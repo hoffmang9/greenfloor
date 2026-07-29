@@ -35,7 +35,7 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
     #[cfg(test)]
-    pub(crate) test_overrides: crate::coin_ops::execution::CoinOpTestOverrides,
+    pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
 }
 
 impl BootstrapShapeContext {

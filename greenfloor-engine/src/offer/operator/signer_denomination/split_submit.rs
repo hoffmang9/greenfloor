@@ -1,18 +1,17 @@
-use std::collections::HashSet;
-
 use serde_json::{json, Value};
 
-use crate::coin_ops::execution::CoinOpExecContext;
 #[cfg(test)]
-use crate::coin_ops::execution::CoinOpTestOverrides;
-use crate::coinset::client_for_signer_on_network;
+use super::test_overrides::SignerDenominationTestOverrides;
 use crate::error::SignerResult;
+use crate::hex::{hex_to_bytes32, parse_coin_ids};
 use crate::offer::bootstrap::{
     bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits,
     BootstrapFundingSource, BootstrapPlan,
 };
 use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
-use crate::vault::{CatSelection, MixedSplitResult};
+use crate::vault::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
+};
 
 fn mixed_split_result_json(result: &MixedSplitResult) -> Value {
     json!({
@@ -25,51 +24,37 @@ fn mixed_split_result_json(result: &MixedSplitResult) -> Value {
     })
 }
 
-fn bootstrap_exec_context(
-    build_ctx: &ResolvedBuildAndPostContext,
-    split_asset_id: &str,
-    receive_address: &str,
-    #[cfg(test)] test_overrides: CoinOpTestOverrides,
-) -> CoinOpExecContext {
-    let mut gated = build_ctx.gated.clone();
-    gated.market_row.receive_address = receive_address.to_string();
-    CoinOpExecContext::with_resolved_asset(
-        gated,
-        split_asset_id.to_string(),
-        HashSet::new(),
-        HashSet::new(),
-        #[cfg(test)]
-        test_overrides,
-    )
-}
-
 async fn submit_bootstrap_vault_mixed_split(
     build_ctx: &ResolvedBuildAndPostContext,
     split_asset_id: &str,
     receive_address: &str,
     coin_ids: &[String],
     output_amounts_mojos: Vec<u64>,
-    #[cfg(test)] test_overrides: Option<&CoinOpTestOverrides>,
+    #[cfg(test)] test_overrides: Option<&SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
-    let exec = bootstrap_exec_context(
-        build_ctx,
-        split_asset_id,
-        receive_address,
-        #[cfg(test)]
-        test_overrides.cloned().unwrap_or_default(),
-    );
-    let client =
-        client_for_signer_on_network(&build_ctx.gated.signer, &build_ctx.gated.operator_network)?;
-    let result = exec
-        .submit_mixed_split(
-            output_amounts_mojos,
-            coin_ids,
-            0,
-            false,
-            CatSelection::FetchFromCoinset,
-            &client,
-        )
-        .await?;
+    #[cfg(test)]
+    if let Some(overrides) = test_overrides {
+        if let Some(stub) = overrides.take_vault_mixed_split_stub(&output_amounts_mojos) {
+            let _ = (build_ctx, split_asset_id, receive_address, coin_ids);
+            return Ok(mixed_split_result_json(&stub));
+        }
+    }
+    let request = MixedSplitRequest {
+        receive_address: receive_address.to_string(),
+        asset_id: hex_to_bytes32(split_asset_id)?,
+        output_amounts: output_amounts_mojos,
+        coin_ids: parse_coin_ids(coin_ids)?,
+        allow_sub_cat_output: false,
+        fee_mojos: 0,
+    };
+    let result = build_and_optionally_broadcast_vault_cat_mixed_split(
+        build_ctx.gated.signer.clone(),
+        &build_ctx.gated.operator_network,
+        request,
+        true,
+    )
+    .await
+    .map_err(crate::error::SignerError::normalize_mixed_split_error)?;
     Ok(mixed_split_result_json(&result))
 }
 
@@ -79,7 +64,7 @@ pub(super) async fn submit_bootstrap_combine(
     split_asset_id: &str,
     receive_address: &str,
     split_asset_mojo_multiplier: i64,
-    #[cfg(test)] test_overrides: Option<&CoinOpTestOverrides>,
+    #[cfg(test)] test_overrides: Option<&SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
     let BootstrapFundingSource::CombineFirst(inputs) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
@@ -111,7 +96,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
     split_asset_id: &str,
     receive_address: &str,
     split_asset_mojo_multiplier: i64,
-    #[cfg(test)] test_overrides: Option<&CoinOpTestOverrides>,
+    #[cfg(test)] test_overrides: Option<&SignerDenominationTestOverrides>,
 ) -> SignerResult<Value> {
     let BootstrapFundingSource::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
@@ -141,12 +126,12 @@ mod tests {
     #![allow(clippy::large_futures)]
 
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-    use crate::coin_ops::execution::CoinOpTestOverrides;
     use crate::offer::bootstrap::{
         bootstrap_combine_vault_outputs, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
         BootstrapPlan,
     };
     use crate::offer::operator::build_and_post::sample_resolved_build_and_post_context;
+    use crate::offer::operator::signer_denomination::test_overrides::SignerDenominationTestOverrides;
 
     fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
         let selected_total = inputs.selected_total.get();
@@ -174,8 +159,8 @@ mod tests {
 
     #[tokio::test]
     async fn submit_bootstrap_combine_delegates_to_vault_outputs() {
-        let overrides = CoinOpTestOverrides::default();
-        overrides.enqueue_sample_mixed_split_result();
+        let overrides = SignerDenominationTestOverrides::default();
+        overrides.enqueue_sample_vault_mixed_split_stub();
         let plan = combine_first_plan(BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
             selected_total: BaseUnits::new(105),

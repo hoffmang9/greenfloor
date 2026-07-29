@@ -1,8 +1,8 @@
 use crate::coin_ops::{i64_to_usize, plan_exact_amount_combine_inputs, CoinOpPlan, SpendableCoin};
 
 use super::items::{
-    execute_managed_coin_op_plan, executed_item_for_plan, plan_skip, skip_item_for_plan,
-    skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult,
+    executed_item_for_plan, plan_skip, skip_item_for_plan, skip_on_signer_err_for_plan,
+    CoinOpExecItem, CoinOpSkipResult,
 };
 use super::prep::{list_spendable_coins_for_plan, validate_plan_target_amount};
 use super::COIN_OP_ERROR_PREFIX;
@@ -13,7 +13,10 @@ pub(crate) async fn execute_managed_combine_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    execute_managed_coin_op_plan(execute_managed_combine_plan_inner(ctx, plan)).await
+    match execute_managed_combine_plan_inner(ctx, plan).await {
+        Ok(result) => result,
+        Err(skip) => skip,
+    }
 }
 struct CombineInputSelection {
     combine_input_coin_ids: Vec<String>,

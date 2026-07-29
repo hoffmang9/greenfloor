@@ -25,9 +25,10 @@ adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + direct Coinset HTTP API).
 - **Shared vault mixed-split submit:** `vault::submit_vault_cat_mixed_split` + `CatSelection`.
-  Market-gated paths (offer bootstrap, managed coin-ops, manager CLI coin-ops) use
-  `CoinOpExecContext::submit_mixed_split`. Dust combine calls the vault with
-  `CatSelection::Preselected` (no synthetic market).
+  Offer bootstrap and dust combine call the vault directly (FetchFromCoinset /
+  Preselected). Market-gated managed/manager coin-ops use
+  `CoinOpExecContext::execute_mixed_split` (hash-returning convenience over the same
+  vault path).
 - **Offer reconcile apply spine:** `offer::lifecycle::market_reconcile`. Daemon still owns
   market phase orchestration (cancel/strategy/inventory/coin_ops/offer_dispatch); cycle
   requeue merge lives on `MarketCycleResultState`.

@@ -9,8 +9,8 @@ use crate::coin_ops::{
 };
 
 use super::items::{
-    execute_managed_coin_op_plan, executed_item, executed_item_for_plan, plan_skip,
-    skip_item_for_plan, skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult, PlanSkip,
+    executed_item, executed_item_for_plan, plan_skip, skip_item_for_plan,
+    skip_on_signer_err_for_plan, CoinOpExecItem, CoinOpSkipResult, PlanSkip,
 };
 use super::prep::{
     list_spendable_coins_for_plan, skip_if_spendable_empty, validate_plan_target_amount,
@@ -214,7 +214,10 @@ pub(crate) async fn execute_managed_split_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    execute_managed_coin_op_plan(execute_managed_split_plan_inner(ctx, plan)).await
+    match execute_managed_split_plan_inner(ctx, plan).await {
+        Ok(result) => result,
+        Err(skip) => skip,
+    }
 }
 
 #[allow(clippy::large_futures)]
