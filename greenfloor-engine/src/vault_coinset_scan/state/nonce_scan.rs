@@ -52,7 +52,12 @@ impl ScanState {
             } else {
                 empty_batch_count = 0;
             }
-            if empty_batch_count >= empty_batch_stop_count {
+            if should_stop_after_empty_batch(
+                batch_end,
+                empty_batch_count,
+                empty_batch_stop_count,
+                self.window.effective_start_height,
+            ) {
                 self.stop_reason = ScanStopReason::EmptyNonceBatches;
                 if self.checkpoint_ctx.enabled {
                     self.write_checkpoint(batch_end)?;
@@ -97,6 +102,15 @@ impl ScanState {
         }
         Ok(batch_nonce_p2)
     }
+}
+
+fn should_stop_after_empty_batch(
+    batch_end: u32,
+    empty_batch_count: u32,
+    empty_batch_stop_count: u32,
+    start_height: Option<u64>,
+) -> bool {
+    start_height.is_none() && batch_end > 0 && empty_batch_count >= empty_batch_stop_count
 }
 
 fn coinset_p2_hashes(batch_nonce_p2: &HashMap<u32, String>) -> Vec<String> {
@@ -164,6 +178,96 @@ pub(super) fn ingest_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coinset::test_support::mock_get_coin_records_by_puzzle_hash_body;
+    use crate::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
+    use crate::vault_coinset_scan::types::AssetTypeFilter;
+    use chia_protocol::{Bytes32, Coin};
+    use mockito::Matcher;
+    use std::path::PathBuf;
+
+    fn scan_request(base_url: String, launcher_id: &str, start_height: Option<u64>) -> ScanRequest {
+        ScanRequest {
+            network: "mainnet".to_string(),
+            coinset_base_url: Some(base_url),
+            launcher_id: launcher_id.to_string(),
+            max_nonce: 63,
+            include_spent: false,
+            asset_type: AssetTypeFilter::Xch,
+            requested_cat_ids: HashSet::new(),
+            requested_cat_tickers: Vec::new(),
+            checkpoint_file: None,
+            checkpoint_save_interval: 1,
+            checkpoint: ScanCheckpointControl {
+                no_resume_checkpoint: true,
+                incremental_from_checkpoint: false,
+                auto_increment: false,
+            },
+            nonce_batch_size: 32,
+            empty_batch_stop_count: 1,
+            parent_lookup_batch_size: 64,
+            start_height,
+            end_height: Some(200),
+            cats_config: PathBuf::new(),
+            markets_config: PathBuf::new(),
+            testnet_markets_config: None,
+            cache_clear: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn height_filtered_scan_reaches_later_nonce_after_empty_batch() {
+        let mut server = mockito::Server::new_async().await;
+        let launcher_id = "11".repeat(32);
+        let launcher_bytes = hex_to_bytes32(&launcher_id).expect("launcher id");
+        let first_p2 =
+            nonce_member_puzzle_hash_hex(launcher_bytes, 0).expect("first nonce puzzle hash");
+        let later_p2 =
+            nonce_member_puzzle_hash_hex(launcher_bytes, 32).expect("later nonce puzzle hash");
+        let later_coin = Coin::new(
+            Bytes32::new([0x22; 32]),
+            hex_to_bytes32(&later_p2).expect("later puzzle hash"),
+            123,
+        );
+
+        for endpoint in [
+            "/get_coin_records_by_puzzle_hashes",
+            "/get_coin_records_by_hints",
+        ] {
+            server
+                .mock("POST", endpoint)
+                .match_body(Matcher::Regex(first_p2.clone()))
+                .with_status(200)
+                .with_body(r#"{"success":true,"coin_records":[]}"#)
+                .create();
+            server
+                .mock("POST", endpoint)
+                .match_body(Matcher::Regex(later_p2.clone()))
+                .with_status(200)
+                .with_body(mock_get_coin_records_by_puzzle_hash_body(&[later_coin]))
+                .create();
+        }
+
+        let mut state = ScanState::prepare(scan_request(server.url(), &launcher_id, Some(100)))
+            .await
+            .expect("prepare scan");
+        state.scan_nonces().await.expect("scan nonces");
+
+        assert_eq!(state.stop_reason, ScanStopReason::MaxNonceReached);
+        assert!(state
+            .checkpoint
+            .by_coin_id
+            .contains_key(&normalize_hex_id(&hex::encode(later_coin.coin_id()))));
+    }
+
+    #[test]
+    fn height_filtered_scan_does_not_stop_on_empty_nonce_batch() {
+        assert!(!should_stop_after_empty_batch(32, 1, 1, Some(8_376_742)));
+    }
+
+    #[test]
+    fn unfiltered_scan_stops_on_configured_empty_nonce_batches() {
+        assert!(should_stop_after_empty_batch(32, 1, 1, None));
+    }
 
     #[test]
     fn ingest_records_marks_discovery_sources() {

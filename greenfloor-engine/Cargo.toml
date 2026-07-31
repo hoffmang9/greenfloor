@@ -10,7 +10,7 @@ keywords = ["chia", "greenfloor", "market-making"]
 categories = ["command-line-utilities"]
 
 [features]
-test-support = []
+test = []
 
 [lib]
 name = "greenfloor_engine"
