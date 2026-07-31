@@ -80,6 +80,25 @@ greenfloor-manager vault-asset-trace --asset <64-char-cat-asset-id-hex>
 `--asset` accepts `xch` / `txch`, a CAT ticker from `cats.yaml`, or a CAT asset id
 hex string (same resolution as `coins-list --asset`).
 
+Use `--start-height` to begin the trace at a known-good balance. The scan
+includes coins confirmed at or after that height and continues through the
+current chain peak. `current_balance` is therefore current for the scanned
+window, but it is not guaranteed to be the complete vault balance: any coin
+created before the start height and still unspent is omitted. This is a
+lower-bound optimization and lineage boundary, not a balance snapshot at the
+start height:
+
+```bash
+greenfloor-manager vault-asset-trace \
+  --asset <64-char-cat-asset-id-hex> \
+  --start-height 8376742
+```
+
+Because coins before the start height are intentionally omitted, a coin whose
+parent predates the start can appear as a `reception` at the scan boundary.
+Use the reported `scan.start_height` to make that boundary explicit when
+interpreting `reception_count`, `chains`, and the first coins in a chain.
+
 The command runs an internal vault Coinset scan with **`include_spent: true`**, filtered
 to the requested asset, then builds:
 

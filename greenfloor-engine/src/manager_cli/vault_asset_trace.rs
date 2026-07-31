@@ -48,6 +48,7 @@ pub struct VaultAssetTraceRequest<'a> {
     pub launcher_id: Option<&'a str>,
     pub launcher_id_file: Option<&'a str>,
     pub max_nonce: u32,
+    pub start_height: Option<u64>,
     pub asset: &'a str,
 }
 
@@ -55,6 +56,7 @@ pub struct VaultAssetTraceRequest<'a> {
 struct VaultAssetTraceScanMeta {
     scanned_row_count: usize,
     max_nonce_scanned: u32,
+    start_height: Option<u64>,
     scan_stop_reason: crate::vault_coinset_scan::types::ScanStopReason,
     include_spent: bool,
 }
@@ -81,6 +83,7 @@ impl<'a> VaultAssetTracePayload<'a> {
             scan: VaultAssetTraceScanMeta {
                 scanned_row_count: scan.count,
                 max_nonce_scanned: scan.max_nonce_scanned,
+                start_height: scan.scan_window.start_height,
                 scan_stop_reason: scan.scan_stop_reason,
                 include_spent: true,
             },
@@ -120,7 +123,7 @@ pub async fn run_vault_asset_trace(request: VaultAssetTraceRequest<'_>) -> Signe
     let launcher =
         resolve_manager_vault_launcher(mgr, request.launcher_id, request.launcher_id_file)?;
 
-    let scan = run_manager_vault_scan(manager_vault_scan_params(
+    let mut scan_params = manager_vault_scan_params(
         mgr,
         &coinset,
         &launcher.launcher_id,
@@ -130,8 +133,9 @@ pub async fn run_vault_asset_trace(request: VaultAssetTraceRequest<'_>) -> Signe
         resolved_asset
             .kind
             .scan_cat_asset_id(&resolved_asset.asset_id),
-    ))
-    .await?;
+    );
+    scan_params.start_height = request.start_height;
+    let scan = run_manager_vault_scan(scan_params).await?;
 
     let trace = build_asset_trace(
         &resolved_asset.asset_id,
@@ -153,6 +157,7 @@ pub async fn run_vault_asset_trace_command(
         launcher_id,
         launcher_id_file,
         max_nonce,
+        start_height,
         asset,
     } = command
     else {
@@ -166,6 +171,7 @@ pub async fn run_vault_asset_trace_command(
         launcher_id: optional_str(&launcher_id),
         launcher_id_file: optional_str(&launcher_id_file),
         max_nonce,
+        start_height,
         asset: asset.as_str(),
     }))
     .await

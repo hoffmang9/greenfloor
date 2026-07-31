@@ -43,6 +43,7 @@ pub fn manager_vault_scan_params<'a>(
         coinset_base_url: Some(coinset.base_url()),
         launcher_id,
         max_nonce,
+        start_height: None,
         include_spent,
         asset_type,
         cat_asset_id,

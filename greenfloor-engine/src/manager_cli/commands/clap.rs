@@ -325,6 +325,9 @@ pub enum ManagerCommands {
         launcher_id_file: String,
         #[arg(long, default_value_t = 100)]
         max_nonce: u32,
+        /// Begin a partial lineage trace at this height; the balance still runs to chain peak.
+        #[arg(long)]
+        start_height: Option<u64>,
     },
     #[command(hide = true, about = "Emit global/subcommand CLI flag groups as JSON")]
     FlagGroups {

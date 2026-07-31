@@ -60,6 +60,7 @@ pub struct VaultScanParams<'a> {
     pub coinset_base_url: Option<&'a str>,
     pub launcher_id: &'a str,
     pub max_nonce: u32,
+    pub start_height: Option<u64>,
     pub include_spent: bool,
     pub asset_type: AssetTypeFilter,
     pub cat_asset_id: Option<&'a str>,
@@ -84,6 +85,7 @@ pub fn build_vault_scan_request(params: &VaultScanParams<'_>) -> ScanRequest {
             .map(str::to_string),
         launcher_id: params.launcher_id.to_string(),
         max_nonce: params.max_nonce,
+        start_height: params.start_height,
         include_spent: params.include_spent,
         asset_type: params.asset_type,
         requested_cat_ids,
@@ -98,7 +100,6 @@ pub fn build_vault_scan_request(params: &VaultScanParams<'_>) -> ScanRequest {
         nonce_batch_size: tuning.nonce_batch_size,
         empty_batch_stop_count: tuning.empty_batch_stop_count,
         parent_lookup_batch_size: tuning.parent_lookup_batch_size,
-        start_height: None,
         end_height: None,
         cats_config: params.cats_config.to_path_buf(),
         markets_config: params.markets_config.to_path_buf(),
@@ -118,6 +119,7 @@ mod tests {
             coinset_base_url: Some("https://api.coinset.org"),
             launcher_id: "aa",
             max_nonce: 100,
+            start_height: None,
             include_spent,
             asset_type,
             cat_asset_id: Some("bb"),
@@ -137,10 +139,13 @@ mod tests {
 
     #[test]
     fn build_vault_scan_request_sets_include_spent_for_trace() {
-        let request = build_vault_scan_request(&sample_params(true, AssetTypeFilter::Cat));
+        let mut params = sample_params(true, AssetTypeFilter::Cat);
+        params.start_height = Some(8_376_742);
+        let request = build_vault_scan_request(&params);
         assert!(request.include_spent);
         assert_eq!(request.asset_type, AssetTypeFilter::Cat);
         assert_eq!(request.requested_cat_ids.len(), 1);
+        assert_eq!(request.start_height, Some(8_376_742));
     }
 
     #[test]
