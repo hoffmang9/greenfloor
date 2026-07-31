@@ -4,4 +4,4 @@ set -euo pipefail
 
 manifest="${CARGO_MANIFEST:?CARGO_MANIFEST is required}"
 
-cargo nextest run --manifest-path "${manifest}" --features test-support
+cargo nextest run --manifest-path "${manifest}" --features test

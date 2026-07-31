@@ -4,7 +4,7 @@
 # restores `shared-key: coverage` before incremental llvm-cov when diff coverage is in scope.
 # Cross-platform plain nextest uses `shared-key: test` on arm/macos.
 # Full operator safety net before push:
-#   cargo test --manifest-path greenfloor-engine/Cargo.toml --features test-support
+#   cargo test --manifest-path greenfloor-engine/Cargo.toml --features test
 #
 # Speed tips:
 #   export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs (CI caches this path)
@@ -25,7 +25,7 @@ repos:
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
         entry: >-
           cargo clippy --manifest-path greenfloor-engine/Cargo.toml
-          --lib --bins --tests --no-deps --features test-support
+          --lib --bins --tests --no-deps --features test
         language: system
         pass_filenames: false
         files: ^greenfloor-engine/

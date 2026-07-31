@@ -39,7 +39,7 @@ if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
   # -E is a nextest runner flag; do not place it after `--` (that forwards it to test binaries).
   cargo llvm-cov nextest \
     --manifest-path "${manifest}" \
-    --features test-support \
+    --features test \
     --ignore-filename-regex "${llvm_cov_ignore_regex}" \
     -E "${filter}"
   cargo llvm-cov report \
@@ -50,7 +50,7 @@ if [[ "${INCREMENTAL:-0}" == "1" || "${INCREMENTAL:-0}" == "true" ]]; then
 else
   cargo llvm-cov nextest \
     --manifest-path "${manifest}" \
-    --features test-support \
+    --features test \
     --ignore-filename-regex "${llvm_cov_ignore_regex}"
   cargo llvm-cov report \
     --manifest-path "${manifest}" \
