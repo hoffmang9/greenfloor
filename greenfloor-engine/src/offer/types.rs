@@ -50,6 +50,20 @@ pub struct PresplitMakerReuse {
     pub offer_nonce: String,
 }
 
+impl PresplitMakerReuse {
+    /// Non-empty coin id and nonce — same gate create uses before `PreferExisting`.
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        !self.coin_id.trim().is_empty() && !self.offer_nonce.trim().is_empty()
+    }
+}
+
+/// Maker reuse that create will actually apply (non-empty coin id + nonce).
+#[must_use]
+pub fn effective_maker_reuse(reuse: Option<&PresplitMakerReuse>) -> Option<&PresplitMakerReuse> {
+    reuse.filter(|r| r.is_usable())
+}
+
 /// Shared offer fields parsed from CLI/API input.
 #[derive(Debug, Clone)]
 pub(crate) struct OfferTerms {

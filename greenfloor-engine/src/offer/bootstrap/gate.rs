@@ -2,7 +2,11 @@
 
 use super::phase::{BootstrapPhaseSnapshot, BootstrapPhaseStatus};
 
-const SKIP_CONTINUE_REASONS: &[&str] = &["already_ready", "dry_run"];
+/// Skipped bootstrap reasons that must not block offer creation.
+///
+/// `maker_reuse`: `PresplitExisting` re-offers fund from an unreturned maker coin, not receive
+/// inventory — denomination bootstrap (receive-only) must not abort ADR 0020 rotation.
+const SKIP_CONTINUE_REASONS: &[&str] = &["already_ready", "dry_run", "maker_reuse"];
 
 fn normalized_reason(reason: &str) -> String {
     let trimmed = reason.trim();

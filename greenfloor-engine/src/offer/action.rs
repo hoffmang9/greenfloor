@@ -16,7 +16,9 @@ use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
-use crate::offer::types::{CreateOfferRequest, CreateOfferResult, OfferTerms, PresplitMakerReuse};
+use crate::offer::types::{
+    effective_maker_reuse, CreateOfferRequest, CreateOfferResult, OfferTerms, PresplitMakerReuse,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildOfferForActionRequest {
@@ -195,10 +197,7 @@ fn create_offer_request_from_leg(
     leg: &crate::offer::request::SignerOfferLegAmounts,
     expires_at_unix: u64,
 ) -> SignerResult<CreateOfferRequest> {
-    let reuse = request
-        .maker_reuse
-        .as_ref()
-        .filter(|reuse| !reuse.coin_id.trim().is_empty() && !reuse.offer_nonce.trim().is_empty());
+    let reuse = effective_maker_reuse(request.maker_reuse.as_ref());
     let presplit_coin_ids = if let Some(reuse) = reuse {
         parse_coin_ids(std::slice::from_ref(&reuse.coin_id))?
     } else {

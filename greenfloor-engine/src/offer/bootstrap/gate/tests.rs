@@ -91,6 +91,11 @@ fn block_error_allows_ready_skip_reasons() {
             .block_error(),
         None
     );
+    assert_eq!(
+        bootstrap_offer_gate_for_status(BootstrapPhaseStatus::Skipped, "maker_reuse", false)
+            .block_error(),
+        None
+    );
 }
 
 #[test]

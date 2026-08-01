@@ -19,6 +19,7 @@ use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
     run_signer_denomination_phase, BootstrapPhaseResult,
 };
+use crate::offer::types::effective_maker_reuse;
 
 async fn run_bootstrap_phase(
     request: &BuildAndPostOfferRequest,
@@ -26,6 +27,9 @@ async fn run_bootstrap_phase(
 ) -> SignerResult<(Value, Option<BootstrapPhaseResult>)> {
     let bootstrap_result = if request.run.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
+    } else if effective_maker_reuse(request.maker_reuse.as_ref()).is_some() {
+        // PresplitExisting funds from the reused maker, not receive inventory.
+        BootstrapPhaseResult::skipped("maker_reuse")
     } else {
         run_signer_denomination_phase(ctx).await?
     };
@@ -212,6 +216,8 @@ pub(super) async fn run_post_iteration(
 mod tests {
     use std::time::Instant;
 
+    use serde_json::Value;
+
     use super::create_offer_for_post;
     use super::PostIterationOutcome;
     use crate::offer::codec::verify_offer_for_dexie;
@@ -277,6 +283,61 @@ mod tests {
                 assert!(failure.create_phase_ms.is_none());
             }
             _ => panic!("expected bootstrap block failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_post_iteration_skips_bootstrap_for_maker_reuse() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        // Stub reaches create; verify_offer_for_dexie fails — proves we passed bootstrap.
+        let offer_text = "not-an-offer";
+        ctx.test_overrides.offer_text = Some(offer_text.to_string());
+        let mut request = unused_post_iteration_request(false, Some(offer_text));
+        request.maker_reuse = Some(crate::offer::types::PresplitMakerReuse {
+            coin_id: "aa".repeat(32),
+            offer_nonce: "bb".repeat(32),
+        });
+        let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
+
+        let (bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
+            .await
+            .expect("iteration");
+
+        assert_eq!(
+            bootstrap_action.get("reason").and_then(Value::as_str),
+            Some("maker_reuse")
+        );
+        // Without usable maker_reuse this fixture blocks on missing_sell_ladder.
+        match outcome {
+            PostIterationOutcome::Failure(failure) => {
+                assert_eq!(failure.error, expected_verify_error);
+            }
+            _ => panic!("expected post-bootstrap verify failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_post_iteration_bootstraps_when_maker_reuse_unusable() {
+        let ctx = sample_resolved_build_and_post_context();
+        let mut request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        request.maker_reuse = Some(crate::offer::types::PresplitMakerReuse {
+            coin_id: String::new(),
+            offer_nonce: "bb".repeat(32),
+        });
+
+        let (_bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
+            .await
+            .expect("iteration");
+
+        match outcome {
+            PostIterationOutcome::Failure(failure) => {
+                assert!(
+                    failure.error.contains("missing_sell_ladder"),
+                    "empty coin_id must not skip bootstrap: {}",
+                    failure.error
+                );
+            }
+            _ => panic!("expected bootstrap block for unusable maker_reuse"),
         }
     }
 }
