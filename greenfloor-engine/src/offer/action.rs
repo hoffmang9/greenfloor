@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::coinset::parse_coin_ids;
-use crate::config::{CatTickerIndex, MarketPricing, SignerConfig};
+use crate::config::{
+    bake_expiry_into_conditions_for_quote, CatTickerIndex, MarketPricing, SignerConfig,
+};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
@@ -13,7 +15,7 @@ use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
-use crate::offer::types::{CreateOfferRequest, CreateOfferResult};
+use crate::offer::types::{CreateOfferRequest, CreateOfferResult, PresplitMakerReuse};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildOfferForActionRequest {
@@ -31,6 +33,12 @@ pub struct BuildOfferForActionRequest {
     pub broadcast_split: bool,
     #[serde(default)]
     pub offer_coin_ids: Vec<String>,
+    /// Market `quote_asset_type`; stable omits on-chain expiry from presplit CONDITIONS.
+    #[serde(default)]
+    pub quote_asset_type: String,
+    /// When set, builds `PresplitExisting` against this maker (no new split).
+    #[serde(default)]
+    pub maker_reuse: Option<PresplitMakerReuse>,
 }
 
 fn default_true() -> bool {
@@ -131,6 +139,19 @@ fn create_offer_request_from_leg(
     leg: &crate::offer::request::SignerOfferLegAmounts,
     expires_at_unix: u64,
 ) -> SignerResult<CreateOfferRequest> {
+    let reuse = request
+        .maker_reuse
+        .as_ref()
+        .filter(|reuse| !reuse.coin_id.trim().is_empty() && !reuse.offer_nonce.trim().is_empty());
+    let presplit_coin_ids = if let Some(reuse) = reuse {
+        parse_coin_ids(std::slice::from_ref(&reuse.coin_id))?
+    } else {
+        Vec::new()
+    };
+    let offer_nonce = match reuse {
+        Some(reuse) => Some(crate::hex::hex_to_bytes32(&reuse.offer_nonce)?),
+        None => None,
+    };
     Ok(CreateOfferRequest {
         receive_address: request.receive_address.clone(),
         offer_asset_id: leg.offer_asset_id.clone(),
@@ -138,10 +159,14 @@ fn create_offer_request_from_leg(
         request_asset_id: leg.request_asset_id.clone(),
         request_amount: leg.request_amount_mojos,
         offer_coin_ids: parse_coin_ids(&request.offer_coin_ids)?,
-        presplit_coin_ids: Vec::new(),
-        split_input_coins: request.split_input_coins,
-        broadcast_split: request.broadcast_split,
+        presplit_coin_ids,
+        split_input_coins: request.split_input_coins && reuse.is_none(),
+        broadcast_split: request.broadcast_split && reuse.is_none(),
         expires_at: Some(expires_at_unix),
+        bake_expiry_into_conditions: bake_expiry_into_conditions_for_quote(
+            &request.quote_asset_type,
+        ),
+        offer_nonce,
     })
 }
 

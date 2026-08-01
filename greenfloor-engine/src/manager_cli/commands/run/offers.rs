@@ -1,8 +1,9 @@
 use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::offers::{
-    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
-    OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+    run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
+    run_offers_status_command, OffersCancelCliArgs, OffersReclaimPresplitCliArgs,
+    OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 
 use super::super::clap::ManagerCommands;
@@ -51,6 +52,21 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                     market_id,
                     cancel_open,
                     venue,
+                },
+            ))
+            .await
+        }
+        ManagerCommands::OffersReclaimPresplit {
+            coin_id,
+            fixed_delegated_puzzle_hash,
+            dry_run,
+        } => {
+            Box::pin(run_offers_reclaim_presplit_command(
+                ctx,
+                OffersReclaimPresplitCliArgs {
+                    coin_id,
+                    fixed_delegated_puzzle_hash,
+                    dry_run,
                 },
             ))
             .await

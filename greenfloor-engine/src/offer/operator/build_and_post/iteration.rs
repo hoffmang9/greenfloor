@@ -39,7 +39,9 @@ async fn create_offer_for_post(
     started: Instant,
 ) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
-    let created = match create_offer(ctx, request.size_base_units).await {
+    let created = match create_offer(ctx, request.size_base_units, request.maker_reuse.clone())
+        .await
+    {
         Ok(result) => result,
         Err(err) => {
             return Ok(Err(PostIterationOutcome::Failure(PostFailure {
@@ -123,6 +125,7 @@ async fn publish_created_offer(
         &created.execution_mode,
         ctx,
         request.size_base_units,
+        Some(created.expires_at_unix),
         created.create_result.as_ref(),
     );
     let publish_success = publish.success;

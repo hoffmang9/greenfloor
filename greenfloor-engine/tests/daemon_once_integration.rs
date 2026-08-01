@@ -44,7 +44,7 @@ fn seed_dexie_offer(db_path: &std::path::Path, offer_id: &str, market_id: &str) 
             Some(0),
             &chrono::Utc::now().to_rfc3339(),
             greenfloor_engine::storage::OfferCancelWrite {
-                publish_venue: Some("dexie"),
+                listing: greenfloor_engine::storage::OfferListingWrite::venue(Some("dexie")),
                 ..Default::default()
             },
         )

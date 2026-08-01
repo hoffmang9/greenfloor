@@ -1,6 +1,7 @@
 //! Shared operator orchestration for manager CLI and daemon offer dispatch.
 
 mod build_and_post;
+mod ensure_size;
 mod logging;
 mod signer_denomination;
 #[cfg(test)]
@@ -14,6 +15,10 @@ pub use build_and_post::{
 };
 pub(crate) use build_and_post::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
+};
+pub use ensure_size::{
+    ensure_size_n_offer, reclaim_expired_maker_if_unspent, EnsureSizeConfigPaths,
+    EnsureSizeNOfferRequest, EnsureSizeOutcome,
 };
 pub use logging::{
     initialize_manager_file_logging, sync_manager_file_logging, warn_if_log_level_auto_healed,

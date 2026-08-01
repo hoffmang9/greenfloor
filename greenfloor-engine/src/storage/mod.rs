@@ -26,10 +26,11 @@ pub use persist::{
 pub mod test_support;
 pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
-    CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferPostPersistRecord,
-    OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
-    OfferReservationRejectReason, OfferStateListRow, SqliteStore, StoredAlertState,
-    TxSignalIngress, TxSignalStateRow, WatchHitRow, WatchMatchKind,
+    CoinOpLedgerEntry, CycleWriteStore, OfferCancelWrite, OfferListingWrite,
+    OfferPostPersistRecord, OfferReservationAcquireOutcome, OfferReservationLeaseRequest,
+    OfferReservationLeaseRow, OfferReservationRejectReason, OfferStateListRow,
+    ReusablePresplitMakerRow, SqliteStore, StoredAlertState, TxSignalIngress, TxSignalStateRow,
+    WatchHitRow, WatchMatchKind,
 };
 
 #[cfg(test)]

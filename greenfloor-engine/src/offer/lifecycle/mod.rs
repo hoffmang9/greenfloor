@@ -7,6 +7,7 @@ mod cancel_eligibility;
 pub(crate) mod dexie_index;
 pub mod market_reconcile;
 mod persist;
+mod reclaim_cli;
 mod reconcile_watched_offers;
 mod signal_apply;
 mod status_cli;
@@ -32,6 +33,10 @@ pub use market_reconcile::{
     run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,
 };
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+pub use reclaim_cli::{
+    offers_reclaim_presplit_cli, parse_presplit_reclaim_pairs, OffersReclaimPresplitCliItem,
+    OffersReclaimPresplitCliResult, PresplitReclaimPair,
+};
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,

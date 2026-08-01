@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum MarketCyclePhase {
     Reconcile,
+    SoftExpire,
     Inventory,
     Strategy,
     Cancel,
@@ -17,6 +18,7 @@ impl MarketCyclePhase {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Reconcile => "reconcile",
+            Self::SoftExpire => "soft_expire",
             Self::Inventory => "inventory",
             Self::Strategy => "strategy",
             Self::Cancel => "cancel",
@@ -29,6 +31,7 @@ impl MarketCyclePhase {
 pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
     &[
         MarketCyclePhase::Reconcile,
+        MarketCyclePhase::SoftExpire,
         MarketCyclePhase::Inventory,
         MarketCyclePhase::Strategy,
         MarketCyclePhase::Cancel,
@@ -40,6 +43,7 @@ pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
 #[must_use]
 pub fn post_reconcile_market_cycle_phases() -> &'static [MarketCyclePhase] {
     &[
+        MarketCyclePhase::SoftExpire,
         MarketCyclePhase::Inventory,
         MarketCyclePhase::Strategy,
         MarketCyclePhase::Cancel,
@@ -271,9 +275,11 @@ mod tests {
     #[test]
     fn market_cycle_and_action_helpers() {
         assert_eq!(MarketCyclePhase::Reconcile.as_str(), "reconcile");
-        assert_eq!(market_cycle_phases().len(), 5);
-        assert_eq!(post_reconcile_market_cycle_phases().len(), 4);
+        assert_eq!(MarketCyclePhase::SoftExpire.as_str(), "soft_expire");
+        assert_eq!(market_cycle_phases().len(), 6);
+        assert_eq!(post_reconcile_market_cycle_phases().len(), 5);
         assert!(!post_reconcile_market_cycle_phases().contains(&MarketCyclePhase::Reconcile));
+        assert!(post_reconcile_market_cycle_phases().contains(&MarketCyclePhase::SoftExpire));
 
         for (mode, expected) in [
             ("two_sided", true),

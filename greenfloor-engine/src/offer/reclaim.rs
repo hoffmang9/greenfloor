@@ -9,18 +9,24 @@ use chia_sdk_driver::{Cat, CatSpend, Offer, SpendContext, Vault};
 use clvm_utils::TreeHash;
 
 use crate::bech32m::decode_offer;
-use crate::coinset::OfferCoinsetBackend;
+use crate::coinset::{
+    broadcast_spend_bundle, client_for_signer_on_network, spend_bundle_operation_id, LiveCoinset,
+    OfferCoinsetBackend,
+};
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex_id;
 use crate::offer::cancel_input::{
     classify_cancellable_maker_input, classify_maker_input_from_stored_metadata,
     CancellableMakerInput,
 };
 use crate::offer::presplit::{build_presplit_offer_cancel_inner_spend, vault_change_puzzle_hash};
-use crate::offer::types::StoredOfferCancelMetadata;
+use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
 use crate::vault::materialize::{
     append_vault_p2_reclaim_spend, build_vault_change_delegated_spend,
     build_vault_change_inner_spend, finalize_vault_reclaim_spend_bundle,
 };
+use crate::vault::session::resolve_vault_spend_context;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
 pub use crate::offer::cancel_input::OfferReclaimMode;
@@ -212,4 +218,44 @@ pub async fn build_offer_cancel_spend_bundle_from_metadata<C: OfferCoinsetBacken
         async move { signer.sign(message).await }
     })
     .await
+}
+
+fn metadata_for_presplit_maker(coin_id: &str, fixed_hash: &str) -> StoredOfferCancelMetadata {
+    StoredOfferCancelMetadata {
+        fields: OfferCancelFields::from_presplit_build(
+            normalize_hex_id(coin_id),
+            normalize_hex_id(fixed_hash),
+            // Unused by metadata reclaim; Coinset coin lookup is authoritative.
+            String::new(),
+        ),
+        execution_mode: Some(OfferExecutionMode::PresplitExisting),
+    }
+}
+
+/// Reclaim one unspent presplit maker coin to vault change (build, optionally `push_tx`).
+///
+/// Returns the spend-bundle operation id (available in dry-run after signing).
+///
+/// # Errors
+///
+/// Returns an error when vault context, spend build, or broadcast fails.
+pub async fn reclaim_presplit_maker_coin(
+    signer: SignerConfig,
+    network: &str,
+    coin_id: &str,
+    fixed_delegated_puzzle_hash: &str,
+    dry_run: bool,
+) -> SignerResult<String> {
+    let coinset_client = client_for_signer_on_network(&signer, network)?;
+    let backend = LiveCoinset(&coinset_client);
+    let mut vault_ctx = resolve_vault_spend_context(signer).await?;
+    let metadata = metadata_for_presplit_maker(coin_id, fixed_delegated_puzzle_hash);
+    let bundle =
+        build_offer_cancel_spend_bundle_from_metadata(&mut vault_ctx, &backend, &metadata).await?;
+    let operation_id = spend_bundle_operation_id(&bundle)?;
+    if dry_run {
+        return Ok(operation_id);
+    }
+    let broadcast = broadcast_spend_bundle(&coinset_client, bundle).await?;
+    Ok(broadcast.operation_id)
 }

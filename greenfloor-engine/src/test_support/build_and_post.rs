@@ -36,6 +36,7 @@ pub fn post_iteration_request(
             persist_results: false,
         },
         action_side: None,
+        maker_reuse: None,
         test_overrides: BuildOfferTestOverrides {
             offer_text: offer_text.map(str::to_string),
         },

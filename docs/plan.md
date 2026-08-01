@@ -53,11 +53,13 @@ Core trading/runtime (V1):
 6. `offers-status` — offer states and recent audit events
 7. `offers-reconcile` — refresh states from venue + Coinset tx signals
 8. `offers-cancel` — on-chain cancel by offer id or `--cancel-open` (Dexie fetch + Coinset submit)
-9. `coins-list` / `coin-status` — vault coin inventory via Coinset
-10. `coin-split` / `coin-combine` — denomination shaping (default waits for confirmation)
+9. `coins-list` / `coin-status` — receive-address vault coin inventory via Coinset
+10. `coins-balance` — vault-controlled CAT total (receive + known unreturned makers)
+11. `coin-split` / `coin-combine` — denomination shaping (default waits for confirmation)
 
 Adjunct operator commands:
 
+- `offers-reclaim-presplit` — reclaim orphaned/idle presplit makers by coin id + fixed hash
 - `vault-asset-trace` — per-asset vault lineage from reception to current balance (XCH or CAT)
 - `combine-market-cat-dust` — batch merge sub-unit CAT dust for enabled markets
 - `cats-add`, `cats-list`, `cats-delete` — CAT catalog in `cats.yaml`
@@ -82,12 +84,19 @@ Coin-op notes:
 
 ## Offer policy
 
-- All posted offers include expiry; stable-vs-unstable pairs use shorter expiries.
+- All posted offers include listing expiry; stable-vs-unstable pairs use shorter expiries.
+- **Stable soft makers (ADR 0020):** `quote_asset_type: stable` omits on-chain
+  `AssertBeforeSecondsAbsolute` from presplit fixed CONDITIONS. Listing expiry is
+  operator/SQLite (`listing_expires_at`); on expire, `ensure_size_n_offer` re-offers the
+  same maker when the ladder still wants that size and CONDITIONS still match, else
+  reclaim. Unstable keeps hard on-chain expiry.
 - Cancellation is exceptional: stable-vs-unstable only, on strong unstable-leg moves
   (`pricing.cancel_policy_stable_vs_unstable`).
-- Normal rotation is expiry-driven, not cancel/repost churn.
+- Normal rotation is expiry-driven; stable size refresh prefers PresplitExisting (no chain
+  move) over cancel/repost churn.
 - Offer files are Bech32m `offer1...` strings; Rust validates structure before Dexie post.
 - Reconciliation prefers Coinset tx-signal evidence over venue-status heuristics.
+- Vault-controlled CAT balance (receive + known makers): `coins-balance --asset …`.
 
 ### On-chain cancel (ADR 0015)
 
@@ -102,6 +111,9 @@ Coin-op notes:
   offer file (fixed delegated puzzle hash), not by replanning with source-coin nonce.
 - Daemon cancel audit items use `status: "cancel_submitted"` and
   `reason: "cancel_submitted_on_strong_unstable_move"` on successful submit.
+- Orphaned / unwanted-size presplit makers: daemon soft-expire reclaim, or ops
+  `offers-reclaim-presplit --coin-id … --fixed-delegated-puzzle-hash …` (also for legacy
+  coins without `offer_state`). `--cancel-open` does not target `expired` rows.
 
 ## Delivery constraints
 

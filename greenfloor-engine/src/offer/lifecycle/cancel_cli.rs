@@ -359,7 +359,7 @@ mod tests {
                 Some(0),
                 &chrono::Utc::now().to_rfc3339(),
                 crate::storage::OfferCancelWrite {
-                    publish_venue: Some("coinset"),
+                    listing: crate::storage::OfferListingWrite::venue(Some("coinset")),
                     ..Default::default()
                 },
             )
@@ -372,7 +372,7 @@ mod tests {
                 Some(0),
                 &chrono::Utc::now().to_rfc3339(),
                 crate::storage::OfferCancelWrite {
-                    publish_venue: Some("dexie"),
+                    listing: crate::storage::OfferListingWrite::venue(Some("dexie")),
                     ..Default::default()
                 },
             )

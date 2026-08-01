@@ -94,7 +94,11 @@ This file summarizes the public API docs at `https://dexie.space/api` and relate
   - `drop_only` (faster response, primarily offer id)
   - `claim_rewards` (maker liquidity rewards automation)
 - For GreenFloor integration, the `offer` body value is an Offer-file string (`offer1...`) produced by `chia-wallet-sdk` offer encoding.
-- GreenFloor offer strategy is expiry-first: all offers expire, with shorter expiries on stable-vs-unstable pairs.
+- GreenFloor offer strategy is expiry-first: all offers have listing expiry, with shorter
+  expiries on stable-vs-unstable pairs. Stable-quote (`quote_asset_type: stable`) makers
+  use soft listing expiry (no on-chain `AssertBeforeSecondsAbsolute` in presplit
+  CONDITIONS; see ADR 0020). Unstable makers keep hard on-chain expiry that Dexie status
+  `6` observes.
 - GreenFloor cancel path is intentionally rare and policy-gated (stable-vs-unstable pairs only; triggered by strong unstable-leg price movement).
 - Dexie does **not** expose a public cancel API. Cancelling an offer means spending an offered input coin on-chain (typically back to vault change). GreenFloor:
   1. Prefers local `--offer-file` or Coinset coin lookup + stored `OfferCancelFields`

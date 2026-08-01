@@ -40,7 +40,7 @@ impl Harness {
                 Some(0),
                 &chrono::Utc::now().to_rfc3339(),
                 OfferCancelWrite {
-                    publish_venue: venue,
+                    listing: crate::storage::OfferListingWrite::venue(venue),
                     ..Default::default()
                 },
             )

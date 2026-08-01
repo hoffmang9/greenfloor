@@ -1,9 +1,37 @@
+//! Offer-state cancel metadata upsert and cancel-submit persistence.
+
 use crate::error::{SignerError, SignerResult};
 use crate::hex::canonical_tx_id;
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
+
+/// Post-time listing / soft-expiry fields written with cancel metadata.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OfferListingWrite<'a> {
+    /// Publish venue (`coinset` / `dexie` / `splash`); set at post time only.
+    pub publish_venue: Option<&'a str>,
+    /// Soft listing expiry (unix seconds); set at post time for stable markets.
+    pub listing_expires_at: Option<i64>,
+    pub size_base_units: Option<i64>,
+    pub offer_nonce: Option<&'a str>,
+    pub offer_side: Option<&'a str>,
+}
+
+impl<'a> OfferListingWrite<'a> {
+    /// Listing write that only sets publish venue (common in tests / heal paths).
+    #[must_use]
+    pub const fn venue(publish_venue: Option<&'a str>) -> Self {
+        Self {
+            publish_venue,
+            listing_expires_at: None,
+            size_base_units: None,
+            offer_nonce: None,
+            offer_side: None,
+        }
+    }
+}
 
 /// Cancel metadata written alongside an offer state upsert.
 #[derive(Debug, Clone, Copy, Default)]
@@ -12,8 +40,7 @@ pub struct OfferCancelWrite<'a> {
     pub execution_mode: Option<OfferExecutionMode>,
     pub cancel_submitted_tx_id: Option<&'a str>,
     pub cancel_submitted_at: Option<&'a str>,
-    /// Publish venue (`coinset` / `dexie` / `splash`); set at post time only.
-    pub publish_venue: Option<&'a str>,
+    pub listing: OfferListingWrite<'a>,
 }
 
 pub(crate) fn cancel_metadata_params(
@@ -101,9 +128,13 @@ impl SqliteStore {
                   execution_mode,
                   cancel_submitted_tx_id,
                   cancel_submitted_at,
-                  publish_venue
+                  publish_venue,
+                  listing_expires_at,
+                  size_base_units,
+                  offer_nonce,
+                  offer_side
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                 ON CONFLICT(offer_id) DO UPDATE SET
                   market_id = excluded.market_id,
                   state = excluded.state,
@@ -123,7 +154,11 @@ impl SqliteStore {
                       THEN COALESCE(excluded.cancel_submitted_at, offer_state.cancel_submitted_at)
                     ELSE NULL
                   END,
-                  publish_venue = COALESCE(excluded.publish_venue, offer_state.publish_venue)
+                  publish_venue = COALESCE(excluded.publish_venue, offer_state.publish_venue),
+                  listing_expires_at = COALESCE(excluded.listing_expires_at, offer_state.listing_expires_at),
+                  size_base_units = COALESCE(excluded.size_base_units, offer_state.size_base_units),
+                  offer_nonce = COALESCE(excluded.offer_nonce, offer_state.offer_nonce),
+                  offer_side = COALESCE(excluded.offer_side, offer_state.offer_side)
                 ",
                 params![
                     offer_id,
@@ -137,7 +172,11 @@ impl SqliteStore {
                     execution_mode_str.as_deref(),
                     cancel.cancel_submitted_tx_id,
                     cancel_submitted_at,
-                    cancel.publish_venue,
+                    cancel.listing.publish_venue,
+                    cancel.listing.listing_expires_at,
+                    cancel.listing.size_base_units,
+                    cancel.listing.offer_nonce,
+                    cancel.listing.offer_side,
                 ],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;

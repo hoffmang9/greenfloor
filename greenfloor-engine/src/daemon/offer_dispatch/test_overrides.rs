@@ -79,6 +79,10 @@ mod tests {
         let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = ManagedPostContext {
             program: ManagerProgramConfig::default(),
+            signer: crate::test_support::signer_config::test_signer_config(
+                "https://api.coinset.org",
+            ),
+            ticker_index: crate::config::CatTickerIndex::default(),
             operator_network: "mainnet".to_string(),
             paths: crate::daemon::cycle_paths::DaemonCyclePaths::new(
                 dir.path().join("program.yaml"),

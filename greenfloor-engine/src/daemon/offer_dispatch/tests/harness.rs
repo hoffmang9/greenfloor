@@ -141,6 +141,7 @@ impl ParallelDispatchHarness {
         super::super::managed_post::ManagedPostContext::from_market_cycle(
             &self.test_ctx.cycle_context(),
         )
+        .expect("managed post context")
     }
 }
 

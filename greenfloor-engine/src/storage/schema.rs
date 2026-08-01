@@ -33,6 +33,11 @@ pub(crate) const OFFER_STATE_ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("cancel_submitted_tx_id", "TEXT NULL"),
     ("cancel_submitted_at", "TEXT NULL"),
     ("publish_venue", "TEXT NULL"),
+    // Soft listing expiry (unix seconds); stable makers omit on-chain CONDITIONS expiry.
+    ("listing_expires_at", "INTEGER NULL"),
+    ("size_base_units", "INTEGER NULL"),
+    ("offer_nonce", "TEXT NULL"),
+    ("offer_side", "TEXT NULL"),
 ];
 
 pub(crate) const OFFER_COIN_WATCHES_COLUMNS_DDL: &str = r"

@@ -126,6 +126,16 @@ pub enum ManagerCommands {
         #[arg(long)]
         venue: Option<String>,
     },
+    /// Reclaim orphaned presplit maker coins (coin id + fixed delegated hash; no offer row).
+    OffersReclaimPresplit {
+        #[arg(long, action = clap::ArgAction::Append, required = true)]
+        coin_id: Vec<String>,
+        #[arg(long, action = clap::ArgAction::Append, required = true)]
+        fixed_delegated_puzzle_hash: Vec<String>,
+        /// Build and sign reclaim spends but do not broadcast (`push_tx`).
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     BootstrapHome {
         #[arg(long, default_value = "~/.greenfloor")]
         home_dir: PathBuf,
@@ -206,6 +216,27 @@ pub enum ManagerCommands {
         asset: String,
         #[arg(long, default_value = "")]
         cat_id: String,
+    },
+    /// Vault-controlled CAT balance: receive inventory plus known unreturned maker coins.
+    CoinsBalance {
+        /// Market row id (exactly one of `--market-id` or `--pair` when set).
+        #[arg(long)]
+        market_id: Option<String>,
+        /// Pair selector `base:quote` or `base/quote`.
+        #[arg(long)]
+        pair: Option<String>,
+        #[arg(
+            long,
+            default_value = "mainnet",
+            help = "Operator network for Coinset and receive-address filtering"
+        )]
+        network: String,
+        #[arg(
+            long,
+            default_value = "",
+            help = "Asset ticker or asset id (defaults to market base)"
+        )]
+        asset: String,
     },
     /// Summarize spendable coin counts for a market row (same market selection as [`CoinsList`]).
     CoinStatus {

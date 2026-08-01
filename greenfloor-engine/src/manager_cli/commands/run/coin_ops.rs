@@ -33,6 +33,21 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             )
             .await
         }
+        ManagerCommands::CoinsBalance {
+            market_id,
+            pair,
+            network,
+            asset,
+        } => {
+            crate::manager_cli::coins_balance::run_coins_balance(
+                ctx,
+                &network,
+                market_id.as_deref(),
+                pair.as_deref(),
+                optional_str(&asset),
+            )
+            .await
+        }
         ManagerCommands::CoinStatus {
             market_id,
             pair,

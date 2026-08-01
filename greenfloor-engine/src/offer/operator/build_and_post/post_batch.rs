@@ -329,6 +329,8 @@ mod tests {
             execution_mode: Some(OfferExecutionMode::Direct),
             watched_coin_ids: Vec::new(),
             watched_p2s: Vec::new(),
+            listing_expires_at: None,
+            offer_nonce: None,
         };
         let payload = strategy_offer_execution_payload(&record);
         assert_eq!(

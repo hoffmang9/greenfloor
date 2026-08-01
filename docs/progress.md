@@ -16,6 +16,13 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-07-31 — Soft-expiry stable maker coins (ADR 0020)
+
+Stable-quote markets omit on-chain expiry from presplit CONDITIONS; listing expiry is
+soft (`listing_expires_at`). Shared `ensure_size_n_offer` reuses matching makers via
+PresplitExisting (or reclaim+rebuild on price change). Soft-expire phase runs before
+strategy. `coins-balance` reports vault-controlled totals including unreturned makers.
+
 ### 2026-07-28 — Three ownership simplifications
 
 1. **Inventory shaping submit** — Crate-private `submit_vault_cat_mixed_split` +

@@ -154,4 +154,29 @@ mod tests {
                     if create.puzzle_hash == SETTLEMENT_PAYMENT_HASH.into() && create.amount == 1000))
         );
     }
+
+    #[test]
+    fn soft_expiry_omits_assert_before_seconds_from_fixed_conditions() {
+        let mut ctx = SpendContext::new();
+        let payments = OfferPaymentBundle {
+            requested_payments: RequestedPayments::new(),
+            requested_asset_info: AssetInfo::new(),
+        };
+        let with_expiry =
+            build_fixed_presplit_conditions_spend(&mut ctx, &payments, 1000, Some(4_000_000_000))
+                .expect("with expiry");
+        let soft =
+            build_fixed_presplit_conditions_spend(&mut ctx, &payments, 1000, None).expect("soft");
+        assert_ne!(
+            ctx.tree_hash(with_expiry.puzzle),
+            ctx.tree_hash(soft.puzzle),
+            "baking AssertBeforeSecondsAbsolute must change fixed CONDITIONS hash"
+        );
+        let soft_out = run_puzzle(&mut ctx, soft.puzzle, soft.solution).expect("run soft puzzle");
+        let soft_conditions =
+            Conditions::<NodePtr>::from_clvm(&ctx, soft_out).expect("soft conditions");
+        assert!(soft_conditions
+            .iter()
+            .all(|condition| { !matches!(condition, Condition::AssertBeforeSecondsAbsolute(_)) }));
+    }
 }

@@ -82,6 +82,9 @@ pub struct BuildAndPostOfferRequest {
     pub run: BuildAndPostRunOptions,
     /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
     pub action_side: Option<String>,
+    /// Reuse an unspent soft-expiry maker via `PresplitExisting`.
+    #[serde(default)]
+    pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
     #[cfg(test)]
     #[serde(default, skip)]
     pub test_overrides: crate::offer::operator::BuildOfferTestOverrides,
@@ -105,6 +108,7 @@ pub struct BuildAndPostOfferRequestParts {
     pub venue: BuildAndPostVenueOptions,
     pub run: BuildAndPostRunOptions,
     pub action_side: Option<String>,
+    pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
 }
 
 impl BuildAndPostOfferRequest {
@@ -126,6 +130,7 @@ impl BuildAndPostOfferRequest {
             venue: parts.venue,
             run: parts.run,
             action_side: parts.action_side,
+            maker_reuse: parts.maker_reuse,
             #[cfg(test)]
             test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
         }
