@@ -6,8 +6,8 @@ use rusqlite::params;
 
 use super::super::{query_mapped, SqliteStore};
 use super::{
-    paginate_all, read_reusable_presplit_maker_row, state_in_placeholders, REUSABLE_PAGE_SIZE,
-    UNRETURNED_PAGE_SIZE,
+    paginate_all, read_reusable_presplit_maker_row, state_in_placeholders,
+    DURABLE_MAKER_CANCEL_METADATA_SQL, REUSABLE_PAGE_SIZE, UNRETURNED_PAGE_SIZE,
 };
 
 /// Presplit maker row with cancel metadata used for soft-expire reuse / reclaim / balance.
@@ -82,21 +82,20 @@ impl SqliteStore {
         limit: i64,
         offset: i64,
     ) -> SignerResult<Vec<ReusablePresplitMakerRow>> {
-        let sql = r"
+        let sql = format!(
+            r"
             SELECT offer_id, market_id, state, size_base_units, offer_side,
                    cancel_input_coin_id, fixed_delegated_puzzle_hash, offer_nonce, listing_expires_at
             FROM offer_state
-            WHERE cancel_input_coin_id IS NOT NULL
-              AND TRIM(cancel_input_coin_id) != ''
-              AND fixed_delegated_puzzle_hash IS NOT NULL
-              AND TRIM(fixed_delegated_puzzle_hash) != ''
-              AND (?1 IS NULL OR market_id = ?1)
+            WHERE (?1 IS NULL OR market_id = ?1)
+              {DURABLE_MAKER_CANCEL_METADATA_SQL}
             ORDER BY updated_at DESC, offer_id DESC
             LIMIT ?2 OFFSET ?3
-        ";
+            "
+        );
         query_mapped(
             &self.conn,
-            sql,
+            &sql,
             params![market_filter, limit, offset],
             "unreturned presplit makers",
             read_reusable_presplit_maker_row,
@@ -139,10 +138,7 @@ impl SqliteStore {
                    cancel_input_coin_id, fixed_delegated_puzzle_hash, offer_nonce, listing_expires_at
             FROM offer_state
             WHERE market_id = ?1
-              AND cancel_input_coin_id IS NOT NULL
-              AND TRIM(cancel_input_coin_id) != ''
-              AND fixed_delegated_puzzle_hash IS NOT NULL
-              AND TRIM(fixed_delegated_puzzle_hash) != ''
+              {DURABLE_MAKER_CANCEL_METADATA_SQL}
               AND (?2 IS NULL OR size_base_units = ?2)
               AND (
                     ?3 IS NULL

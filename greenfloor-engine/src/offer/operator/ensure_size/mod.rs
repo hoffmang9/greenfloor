@@ -6,9 +6,7 @@ use chia_protocol::Bytes32;
 use tracing::{info, warn};
 
 use crate::bech32m::decode_address;
-use crate::coinset::{
-    client_for_signer_on_network, coin_id_is_unspent, LiveCoinset, OfferCoinsetBackend,
-};
+use crate::coinset::{client_for_signer_on_network, coin_id_is_unspent, LiveCoinset};
 use crate::config::{market_wants_ladder_size, MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id, tree_hash_to_hex};
@@ -17,11 +15,11 @@ use crate::offer::lifecycle::{restore_stale_maker_claims_synced, ExpiredMakerLea
 use crate::offer::presplit::PresplitOfferBinding;
 use crate::offer::reclaim::reclaim_presplit_maker_coin;
 use crate::offer::request::effective_offer_side;
-use crate::offer::types::{OfferTerms, PresplitMakerReuse};
+use crate::offer::types::{effective_maker_reuse, OfferTerms, PresplitMakerReuse};
 use crate::storage::{upsert_offer_post_record, CycleWriteStore, ReusablePresplitMakerRow};
 use crate::vault::session::resolve_vault_spend_context;
 
-use self::selection::{decide_ensure_candidate, EnsureCandidateDecision};
+use self::selection::{decide_ensure_reuse, EnsureReuseKind};
 use super::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
     BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
@@ -34,26 +32,11 @@ struct EnsurePlan {
     launcher_id: Bytes32,
 }
 
-/// How to use a claimed reusable maker after remote classification.
+/// How to use a claimed reusable maker after Coinset confirms unspent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReuseKind {
     Reoffer,
     ReclaimAndPost,
-}
-
-/// Explicit ensure action after remote candidate classification.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CandidateAction {
-    /// Spent maker coin(s) — claim+finalize without reclaim/post.
-    RetireSpent {
-        indices: Vec<usize>,
-    },
-    Reuse {
-        idx: usize,
-        candidate: ReusablePresplitMakerRow,
-        kind: ReuseKind,
-    },
-    PostNew,
 }
 
 async fn plan_ensure(
@@ -92,14 +75,11 @@ fn with_maker_reuse(
 ) -> BuildAndPostOfferRequestParts {
     let mut next = parts.clone();
     next.maker_reuse = reuse.and_then(|row| {
-        let nonce = row.offer_nonce.as_deref()?.trim();
-        if nonce.is_empty() {
-            return None;
-        }
-        Some(PresplitMakerReuse {
+        let candidate = PresplitMakerReuse {
             coin_id: row.cancel_input_coin_id.clone(),
-            offer_nonce: nonce.to_string(),
-        })
+            offer_nonce: row.offer_nonce.clone().unwrap_or_default(),
+        };
+        effective_maker_reuse(Some(&candidate)).cloned()
     });
     next
 }
@@ -123,12 +103,10 @@ async fn post_offer(
     Ok(response.exit_code == 0)
 }
 
-async fn candidate_decision<C: OfferCoinsetBackend>(
-    backend: &C,
+fn local_reuse_kind(
     plan: &EnsurePlan,
     candidate: &ReusablePresplitMakerRow,
-) -> SignerResult<EnsureCandidateDecision> {
-    let unspent = coin_id_is_unspent(backend, &candidate.cancel_input_coin_id).await?;
+) -> SignerResult<ReuseKind> {
     let has_nonce = candidate.offer_nonce.is_some();
     let planned = if let Some(nonce_hex) = candidate.offer_nonce.as_deref() {
         let offer_nonce = hex_to_bytes32(nonce_hex)?;
@@ -142,52 +120,28 @@ async fn candidate_decision<C: OfferCoinsetBackend>(
         String::new()
     };
     let stored = normalize_hex_id(&candidate.fixed_delegated_puzzle_hash);
-    Ok(decide_ensure_candidate(
-        unspent, has_nonce, &planned, &stored,
-    ))
+    Ok(match decide_ensure_reuse(has_nonce, &planned, &stored) {
+        EnsureReuseKind::PreferExisting => ReuseKind::Reoffer,
+        EnsureReuseKind::ReclaimThenNew => ReuseKind::ReclaimAndPost,
+    })
 }
 
-/// Classify remaining candidates once; retire spent in batch, else pick reoffer/reclaim/new.
-async fn select_candidate_action<C: OfferCoinsetBackend>(
-    backend: &C,
+/// Prefer hash-match reoffer, else first reclaim — no Coinset yet.
+fn pick_local_reuse(
     plan: &EnsurePlan,
     candidates: &[ReusablePresplitMakerRow],
-) -> SignerResult<CandidateAction> {
-    let mut retire_indices = Vec::new();
-    let mut reoffer_idx = None;
-    let mut reclaim_idx = None;
+) -> SignerResult<Option<(usize, ReuseKind)>> {
+    let mut reclaim = None;
     for (idx, candidate) in candidates.iter().enumerate() {
-        match candidate_decision(backend, plan, candidate).await? {
-            EnsureCandidateDecision::RetireSpent => retire_indices.push(idx),
-            EnsureCandidateDecision::PreferExisting if reoffer_idx.is_none() => {
-                reoffer_idx = Some(idx);
+        match local_reuse_kind(plan, candidate)? {
+            ReuseKind::Reoffer => return Ok(Some((idx, ReuseKind::Reoffer))),
+            ReuseKind::ReclaimAndPost if reclaim.is_none() => {
+                reclaim = Some((idx, ReuseKind::ReclaimAndPost));
             }
-            EnsureCandidateDecision::ReclaimThenNew if reclaim_idx.is_none() => {
-                reclaim_idx = Some(idx);
-            }
-            EnsureCandidateDecision::PreferExisting | EnsureCandidateDecision::ReclaimThenNew => {}
+            ReuseKind::ReclaimAndPost => {}
         }
     }
-    if !retire_indices.is_empty() {
-        return Ok(CandidateAction::RetireSpent {
-            indices: retire_indices,
-        });
-    }
-    if let Some(idx) = reoffer_idx {
-        return Ok(CandidateAction::Reuse {
-            idx,
-            candidate: candidates[idx].clone(),
-            kind: ReuseKind::Reoffer,
-        });
-    }
-    if let Some(idx) = reclaim_idx {
-        return Ok(CandidateAction::Reuse {
-            idx,
-            candidate: candidates[idx].clone(),
-            kind: ReuseKind::ReclaimAndPost,
-        });
-    }
-    Ok(CandidateAction::PostNew)
+    Ok(reclaim)
 }
 
 /// Prefer an existing matching maker for size N; reclaim+rebuild on hash mismatch; else `PresplitNew`.
@@ -232,60 +186,40 @@ pub async fn ensure_size_n_offer(
         store.list_reusable_presplit_makers_for_size(&market_id, size_i64, Some(&side))
     })?;
 
-    // CAS-claim before PreferExisting/reclaim/retire I/O so parallel workers cannot share one maker.
-    // Lost reuse claim: drop that maker and continue (other candidates or PresplitNew). Each
-    // ensure call still owes one listing — with parallel gap fill, a peer winning this maker
-    // does not mean this worker's slot is covered.
+    // Claim the locally chosen PreferExisting/reclaim candidate, then Coinset-verify unspent.
+    // Spent pirates are retired without blocking PreferExisting of another coin. Lost CAS:
+    // drop and continue so parallel gap fill still fills this worker's slot.
     loop {
-        let action = select_candidate_action(&backend, &plan, &candidates).await?;
-        match action {
-            CandidateAction::PostNew => return post_offer(&parts, write_store, None).await,
-            CandidateAction::RetireSpent { indices } => {
-                // Retire every spent maker classified in this pass (high→low index) without
-                // re-scanning Coinset between each removal.
-                for idx in indices.into_iter().rev() {
-                    let row = candidates.remove(idx);
-                    let Some(lease) = ExpiredMakerLease::try_claim(
-                        write_store,
-                        &market_id,
-                        &row.offer_id,
-                        parts.run.dry_run,
-                    )?
-                    else {
-                        continue;
-                    };
-                    info!(
-                        offer_id = %row.offer_id,
-                        "ensure_size_n_offer: retiring spent expired maker"
-                    );
-                    lease.commit()?;
-                }
-            }
-            CandidateAction::Reuse {
-                idx,
-                candidate,
-                kind,
-            } => {
-                let Some(lease) = ExpiredMakerLease::try_claim(
-                    write_store,
-                    &market_id,
-                    &candidate.offer_id,
-                    parts.run.dry_run,
-                )?
-                else {
-                    candidates.remove(idx);
-                    continue;
-                };
-                return match kind {
-                    ReuseKind::Reoffer => {
-                        apply_reoffer(write_store, &parts, &candidate, lease).await
-                    }
-                    ReuseKind::ReclaimAndPost => {
-                        apply_reclaim_and_post(write_store, signer, &parts, &candidate, lease).await
-                    }
-                };
-            }
+        let Some((idx, kind)) = pick_local_reuse(&plan, &candidates)? else {
+            return post_offer(&parts, write_store, None).await;
+        };
+        let candidate = candidates[idx].clone();
+        let Some(lease) = ExpiredMakerLease::try_claim(
+            write_store,
+            &market_id,
+            &candidate.offer_id,
+            parts.run.dry_run,
+        )?
+        else {
+            candidates.remove(idx);
+            continue;
+        };
+        let unspent = coin_id_is_unspent(&backend, &candidate.cancel_input_coin_id).await?;
+        if !unspent {
+            info!(
+                offer_id = %candidate.offer_id,
+                "ensure_size_n_offer: retiring spent expired maker"
+            );
+            lease.commit()?;
+            candidates.remove(idx);
+            continue;
         }
+        return match kind {
+            ReuseKind::Reoffer => apply_reoffer(write_store, &parts, &candidate, lease).await,
+            ReuseKind::ReclaimAndPost => {
+                apply_reclaim_and_post(write_store, signer, &parts, &candidate, lease).await
+            }
+        };
     }
 }
 
@@ -393,7 +327,10 @@ mod tests {
             .await
             .expect("spent");
         assert!(!spent);
+    }
 
+    #[test]
+    fn pick_local_reuse_prefers_hash_match_over_reclaim() {
         let terms = OfferTerms {
             receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w".into(),
             offer_asset_id: "bb".repeat(32),
@@ -403,26 +340,41 @@ mod tests {
             expires_at: Some(4_000_000_000),
             bake_expiry_into_conditions: false,
         };
-        let row = ReusablePresplitMakerRow {
-            offer_id: "o1".into(),
+        let plan = EnsurePlan {
+            terms: terms.clone(),
+            receive_puzzle_hash: Bytes32::new([0x22; 32]),
+            launcher_id: Bytes32::new([0x11; 32]),
+        };
+        let nonce = Bytes32::new([0x33; 32]);
+        let match_hash = planned_fixed_hash(
+            plan.launcher_id,
+            &plan.terms,
+            plan.receive_puzzle_hash,
+            nonce,
+        )
+        .expect("hash");
+        let mismatch = ReusablePresplitMakerRow {
+            offer_id: "o-reclaim".into(),
             market_id: "m1".into(),
             state: "expired".into(),
             size_base_units: Some(10),
             offer_side: Some("sell".into()),
             cancel_input_coin_id: "aa".repeat(32),
             fixed_delegated_puzzle_hash: "cc".repeat(32),
-            offer_nonce: Some("dd".repeat(32)),
+            offer_nonce: Some(hex::encode(nonce)),
             listing_expires_at: None,
         };
-        let plan = EnsurePlan {
-            terms,
-            receive_puzzle_hash: Bytes32::new([0x22; 32]),
-            launcher_id: Bytes32::new([0x11; 32]),
+        let matched = ReusablePresplitMakerRow {
+            offer_id: "o-match".into(),
+            cancel_input_coin_id: "ee".repeat(32),
+            fixed_delegated_puzzle_hash: match_hash,
+            ..mismatch.clone()
         };
-        let action = select_candidate_action(&SpentFlagCoinset { spent: true }, &plan, &[row])
-            .await
-            .expect("pick");
-        assert_eq!(action, CandidateAction::RetireSpent { indices: vec![0] });
+        let (idx, kind) = pick_local_reuse(&plan, &[mismatch, matched])
+            .expect("pick")
+            .expect("some");
+        assert_eq!(idx, 1);
+        assert_eq!(kind, ReuseKind::Reoffer);
     }
 
     #[tokio::test]
@@ -462,9 +414,9 @@ mod tests {
         assert!(!posted);
     }
 
-    #[tokio::test]
-    async fn lost_reuse_claim_drop_then_select_reaches_post_new() {
-        // Mirrors the ensure loop after a lost CAS: remove the Reuse idx, re-select.
+    #[test]
+    fn lost_reuse_claim_drop_then_select_reaches_post_new() {
+        // Mirrors the ensure loop after a lost CAS: remove the reuse idx, re-select.
         // With no remaining candidates the worker must PresplitNew (not abort).
         let terms = OfferTerms {
             receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w".into(),
@@ -492,22 +444,17 @@ mod tests {
             launcher_id: Bytes32::new([0x11; 32]),
         };
         let mut candidates = vec![row];
-        let action =
-            select_candidate_action(&SpentFlagCoinset { spent: false }, &plan, &candidates)
-                .await
-                .expect("pick reuse");
-        let CandidateAction::Reuse { idx, .. } = action else {
-            panic!("expected Reuse, got {action:?}");
-        };
+        let (idx, _) = pick_local_reuse(&plan, &candidates)
+            .expect("pick")
+            .expect("reuse");
         candidates.remove(idx);
-        let next = select_candidate_action(&SpentFlagCoinset { spent: false }, &plan, &candidates)
-            .await
-            .expect("re-pick");
-        assert_eq!(next, CandidateAction::PostNew);
+        assert!(pick_local_reuse(&plan, &candidates)
+            .expect("re-pick")
+            .is_none());
     }
 
-    #[tokio::test]
-    async fn lost_reuse_claim_drop_then_select_keeps_other_candidate() {
+    #[test]
+    fn lost_reuse_claim_drop_then_select_keeps_other_candidate() {
         let terms = OfferTerms {
             receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w".into(),
             offer_asset_id: "bb".repeat(32),
@@ -534,30 +481,15 @@ mod tests {
             launcher_id: Bytes32::new([0x11; 32]),
         };
         let mut candidates = vec![row("o1", "aa"), row("o2", "ee")];
-        let action =
-            select_candidate_action(&SpentFlagCoinset { spent: false }, &plan, &candidates)
-                .await
-                .expect("pick first");
-        let CandidateAction::Reuse {
-            idx,
-            candidate: first,
-            ..
-        } = action
-        else {
-            panic!("expected Reuse, got {action:?}");
-        };
-        assert_eq!(first.offer_id, "o1");
+        let (idx, _) = pick_local_reuse(&plan, &candidates)
+            .expect("pick first")
+            .expect("reuse");
+        assert_eq!(candidates[idx].offer_id, "o1");
         candidates.remove(idx);
-        let next = select_candidate_action(&SpentFlagCoinset { spent: false }, &plan, &candidates)
-            .await
-            .expect("pick second");
-        let CandidateAction::Reuse {
-            candidate: second, ..
-        } = next
-        else {
-            panic!("expected second Reuse, got {next:?}");
-        };
-        assert_eq!(second.offer_id, "o2");
+        let (idx2, _) = pick_local_reuse(&plan, &candidates)
+            .expect("pick second")
+            .expect("second reuse");
+        assert_eq!(candidates[idx2].offer_id, "o2");
     }
 
     #[test]
@@ -592,9 +524,16 @@ mod tests {
         assert_eq!(reuse.offer_nonce, "cc".repeat(32));
         let empty_nonce = ReusablePresplitMakerRow {
             offer_nonce: Some("   ".into()),
-            ..row
+            ..row.clone()
         };
         assert!(with_maker_reuse(&parts, Some(&empty_nonce))
+            .maker_reuse
+            .is_none());
+        let empty_coin = ReusablePresplitMakerRow {
+            cancel_input_coin_id: String::new(),
+            ..row
+        };
+        assert!(with_maker_reuse(&parts, Some(&empty_coin))
             .maker_reuse
             .is_none());
         assert!(with_maker_reuse(&parts, None).maker_reuse.is_none());

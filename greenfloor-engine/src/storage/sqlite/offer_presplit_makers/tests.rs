@@ -90,6 +90,61 @@ fn soft_listing_expiry_and_expired_maker_queries() {
 }
 
 #[test]
+fn soft_expire_mark_list_skips_rows_without_presplit_cancel_metadata() {
+    let dir = tempdir().expect("tempdir");
+    let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+    store
+        .upsert_offer_state_with_metadata_at(
+            "offer-direct",
+            "m1",
+            "open",
+            None,
+            "2026-01-01T00:00:00Z",
+            OfferCancelWrite {
+                fields: None,
+                execution_mode: Some(OfferExecutionMode::Direct),
+                listing: OfferListingWrite {
+                    publish_venue: Some("dexie"),
+                    listing_expires_at: Some(1_700_000_000),
+                    size_base_units: Some(10),
+                    offer_nonce: Some(&"dd".repeat(32)),
+                    offer_side: Some("sell"),
+                },
+                ..OfferCancelWrite::default()
+            },
+        )
+        .expect("upsert direct");
+    let fields =
+        OfferCancelFields::from_presplit_build("aa".repeat(32), "bb".repeat(32), "cc".repeat(32));
+    store
+        .upsert_offer_state_with_metadata_at(
+            "offer-presplit",
+            "m1",
+            "open",
+            None,
+            "2026-01-01T00:00:00Z",
+            OfferCancelWrite {
+                fields: Some(&fields),
+                execution_mode: Some(OfferExecutionMode::PresplitNew),
+                listing: OfferListingWrite {
+                    publish_venue: Some("dexie"),
+                    listing_expires_at: Some(1_700_000_000),
+                    size_base_units: Some(10),
+                    offer_nonce: Some(&"dd".repeat(32)),
+                    offer_side: Some("sell"),
+                },
+                ..OfferCancelWrite::default()
+            },
+        )
+        .expect("upsert presplit");
+    let past = store
+        .list_open_offers_past_listing_expiry("m1", 1_700_000_001)
+        .expect("past");
+    assert_eq!(past.len(), 1);
+    assert_eq!(past[0].offer_id, "offer-presplit");
+}
+
+#[test]
 fn soft_expire_mark_includes_mempool_observed_past_listing_expiry() {
     let dir = tempdir().expect("tempdir");
     let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");

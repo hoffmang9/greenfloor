@@ -145,7 +145,7 @@ pub(crate) async fn run_soft_expire_phase_inner(
     let _ = restore_stale_maker_claims_synced(write_store, now, dry_run)?;
     let market_id = market.market_id.clone();
     let expired = write_store.sync(|store| {
-        let _ = mark_listings_soft_expired(store, &market_id, now)?;
+        let _ = mark_listings_soft_expired(store, &market_id, now, dry_run)?;
         store.list_expired_presplit_makers(&market_id)
     })?;
     if expired.is_empty() {
@@ -159,11 +159,19 @@ pub(crate) async fn run_soft_expire_phase_inner(
         &ctx.reconcile.dexie_size_by_offer_id,
     )?;
     let reclaim = plan_soft_expire_reclaims(expired, market, &active_open);
+    // Match cancel_phase: dry-run plans reclaim targets but skips Coinset/vault/spend I/O.
+    if dry_run {
+        for row in &reclaim {
+            info!(offer_id = %row.offer_id, "dry_run: would reclaim expired maker");
+            io.attempted_reclaim_ids.push(row.offer_id.clone());
+        }
+        return Ok(());
+    }
     for row in &reclaim {
         if row.size_base_units.is_none_or(|units| units <= 0) {
             warn!(offer_id = %row.offer_id, "expired maker missing size_base_units; reclaim");
         }
-        reclaim_one_soft(write_store, ctx, row, dry_run, io).await;
+        reclaim_one_soft(write_store, ctx, row, false, io).await;
     }
     Ok(())
 }
@@ -238,13 +246,14 @@ mod tests {
         (write_store, db_path)
     }
 
-    fn dry_run_bundle(
+    fn phase_bundle(
         dir: &tempfile::TempDir,
         db_path: &Path,
         write_store: CycleWriteStore,
+        runtime_dry_run: bool,
     ) -> crate::daemon::test_support::TestCycleContextBundle {
         let program = ManagerProgramConfig {
-            runtime_dry_run: true,
+            runtime_dry_run,
             signer_kms_key_id: "kms-test".to_string(),
             vault_launcher_id: "11".repeat(32),
             ..Default::default()
@@ -262,11 +271,58 @@ mod tests {
     async fn run_soft_expire_skips_unstable_markets() {
         let dir = tempfile::tempdir().expect("tempdir");
         let (write_store, db_path) = open_phase_store(&dir);
-        let bundle = dry_run_bundle(&dir, Path::new(&db_path), write_store.clone());
+        let bundle = phase_bundle(&dir, Path::new(&db_path), write_store.clone(), true);
         let market = sample_market("xch1test");
         run_soft_expire_phase(&write_store, &bundle.cycle_context(), &market)
             .await
             .expect("skip unstable");
+    }
+
+    #[tokio::test]
+    async fn run_soft_expire_dry_run_does_not_mark_or_reclaim() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (write_store, db_path) = open_phase_store(&dir);
+        {
+            let store = write_store.lock().expect("lock");
+            seed_maker(
+                &store,
+                "offer-open",
+                "open",
+                Some(10),
+                Some("sell"),
+                0x11,
+                Some(1_700_000_000),
+            );
+            // Already expired surplus — dry-run plans reclaim without I/O.
+            seed_maker(
+                &store,
+                "offer-expired",
+                "expired",
+                Some(99),
+                Some("sell"),
+                0xaa,
+                Some(1_700_000_000),
+            );
+        }
+        let bundle = phase_bundle(&dir, Path::new(&db_path), write_store.clone(), true);
+        let market = stable_market_with_target(10, 1);
+        let mut io = SoftExpireIoOverrides {
+            reclaim_outcomes: VecDeque::from([Ok(ReclaimMakerOutcome::Reclaimed {
+                superseded_offer_id: "offer-expired".into(),
+            })]),
+            attempted_reclaim_ids: Vec::new(),
+        };
+        run_soft_expire_phase_inner(&write_store, &bundle.cycle_context(), &market, &mut io)
+            .await
+            .expect("dry-run soft expire");
+        let state = write_store
+            .sync(|store| store.offer_state_for_id("offer-open"))
+            .expect("lookup")
+            .expect("row");
+        assert_eq!(state, "open");
+        assert_eq!(io.attempted_reclaim_ids, vec!["offer-expired".to_string()]);
+        // Injected outcome unused — dry-run must not call reclaim I/O.
+        assert_eq!(io.reclaim_outcomes.len(), 1);
     }
 
     #[tokio::test]
@@ -294,7 +350,7 @@ mod tests {
                 Some(1_700_000_000),
             );
         }
-        let bundle = dry_run_bundle(&dir, Path::new(&db_path), write_store.clone());
+        let bundle = phase_bundle(&dir, Path::new(&db_path), write_store.clone(), false);
         let market = stable_market_with_target(10, 1);
         let mut io = SoftExpireIoOverrides {
             // keep offer-a (gap>0); unwanted offer-b reclaim fails soft
@@ -343,7 +399,7 @@ mod tests {
                 Some(1_700_000_000),
             );
         }
-        let mut bundle = dry_run_bundle(&dir, Path::new(&db_path), write_store.clone());
+        let mut bundle = phase_bundle(&dir, Path::new(&db_path), write_store.clone(), false);
         bundle
             .reconcile
             .dexie_size_by_offer_id

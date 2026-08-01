@@ -16,6 +16,16 @@ pub use reusable::ReusablePresplitMakerRow;
 pub(crate) const REUSABLE_PAGE_SIZE: i64 = 200;
 const UNRETURNED_PAGE_SIZE: i64 = 500;
 
+/// `WHERE` fragment: row has reclaim/reuse cancel metadata (presplit durable maker).
+///
+/// Shared by mark-list, reusable, and unreturned queries so the predicate cannot drift.
+pub(crate) const DURABLE_MAKER_CANCEL_METADATA_SQL: &str = r"
+              AND cancel_input_coin_id IS NOT NULL
+              AND TRIM(cancel_input_coin_id) != ''
+              AND fixed_delegated_puzzle_hash IS NOT NULL
+              AND TRIM(fixed_delegated_puzzle_hash) != ''
+";
+
 fn paginate_all<T, F>(page_size: i64, mut fetch_page: F) -> SignerResult<Vec<T>>
 where
     F: FnMut(i64, i64) -> SignerResult<Vec<T>>,

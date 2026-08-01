@@ -5,11 +5,13 @@ use tracing::info;
 use crate::error::SignerResult;
 use crate::storage::{CycleWriteStore, SqliteStore};
 
-/// Mark active listings past soft `listing_expires_at` as expired (Dexie status 6).
+/// Mark durable (presplit) listings past soft `listing_expires_at` as expired (Dexie status 6).
 ///
 /// CAS per row: only transitions when still in `open` / `refresh_due` / `mempool_observed`,
-/// so a concurrent take/cancel cannot be clobbered back to `expired`. Legacy rows with
-/// NULL `listing_expires_at` are included (treated as already elapsed).
+/// so a concurrent take/cancel cannot be clobbered back to `expired`. Only rows with
+/// reclaim metadata are marked (same filter as expired-maker reclaim/reuse). Legacy rows
+/// with NULL `listing_expires_at` are included (treated as already elapsed).
+/// No-ops when `dry_run` (same contract as claim helpers).
 ///
 /// # Errors
 ///
@@ -18,7 +20,11 @@ pub fn mark_listings_soft_expired(
     store: &SqliteStore,
     market_id: &str,
     now_unix: i64,
+    dry_run: bool,
 ) -> SignerResult<usize> {
+    if dry_run {
+        return Ok(0);
+    }
     let rows = store.list_open_offers_past_listing_expiry(market_id, now_unix)?;
     let mut marked = 0usize;
     for row in rows {
@@ -169,7 +175,11 @@ mod tests {
             )
             .expect("upsert");
 
-        let marked = mark_listings_soft_expired(&store, "m1", 1_700_000_001).expect("mark");
+        assert_eq!(
+            mark_listings_soft_expired(&store, "m1", 1_700_000_001, true).expect("dry"),
+            0
+        );
+        let marked = mark_listings_soft_expired(&store, "m1", 1_700_000_001, false).expect("mark");
         assert_eq!(marked, 1);
         let expired = store.list_expired_presplit_makers("m1").expect("expired");
         assert_eq!(expired.len(), 1);

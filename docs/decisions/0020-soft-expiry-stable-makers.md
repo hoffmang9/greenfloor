@@ -30,16 +30,21 @@ price is unchanged.
    - no maker → PresplitNew from receive.
 
 3. **Expire handling.** The daemon `soft_expire` phase runs **only** for soft-expiry
-   markets (`quote_asset_type: stable`). It CAS soft-expires `open` / `refresh_due` /
-   `mempool_observed` rows past `listing_expires_at` (NULL expiry counts as already
-   elapsed for legacy rows; concurrent terminal states are not clobbered), then
-   groups expired makers by `(side, size)`: if the ladder wants size N and the gap
-   (`target_count` minus active ladder capacity) is positive, leave **all** expired
-   makers at that size for strategy `ensure_size_n_offer` (hash-match PreferExisting);
-   if the gap is zero, reclaim them. Unwanted or missing-size makers are always reclaimed.
-   Soft-expire does **not** post. Strategy fills the gap via ensure. Both ensure and
-   soft-expire reclaim CAS-claim an expired row into `maker_claimed` with a fencing
-   `maker_claim_token` (`ExpiredMakerLease`) before PreferExisting or reclaim I/O;
+   markets (`quote_asset_type: stable`). It CAS soft-expires durable (presplit) `open` /
+   `refresh_due` / `mempool_observed` rows past `listing_expires_at` that have cancel
+   metadata (NULL expiry counts as already elapsed for legacy rows; concurrent terminal
+   states are not clobbered). Direct/incomplete rows without reclaim metadata are left
+   alone so they are not orphaned out of ladder capacity while a Dexie listing remains.
+   `runtime.dry_run` skips soft-expire DB mutations (mark/claim restore) and reclaim
+   Coinset/vault/spend I/O the same way cancel short-circuits execution — dry-run still
+   plans reclaim targets for logs. Then soft-expire groups expired makers by
+   `(side, size)`: if the ladder wants size N and the gap (`target_count` minus active
+   ladder capacity) is positive, leave **all** expired makers at that size for strategy
+   `ensure_size_n_offer` (hash-match PreferExisting); if the gap is zero, reclaim them.
+   Unwanted or missing-size makers are always reclaimed. Soft-expire does **not** post.
+   Strategy fills the gap via ensure. Both ensure and soft-expire reclaim CAS-claim an
+   expired row into `maker_claimed` with a fencing `maker_claim_token`
+   (`ExpiredMakerLease`) before PreferExisting or reclaim I/O;
    restore to `expired` on failure when the coin is still reusable; finalize to
    `cancelled` on success (or when the maker coin is already spent). Restore/finalize/
    renew/stale-sweep CAS on the token so a late worker cannot clobber a newer claim.

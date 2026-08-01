@@ -9,7 +9,7 @@ use rusqlite::params;
 use super::super::{query_mapped, utcnow_iso, SqliteStore};
 use super::{
     paginate_all, read_reusable_presplit_maker_row, state_in_placeholders,
-    ReusablePresplitMakerRow, REUSABLE_PAGE_SIZE,
+    ReusablePresplitMakerRow, DURABLE_MAKER_CANCEL_METADATA_SQL, REUSABLE_PAGE_SIZE,
 };
 
 /// Persisted listing size/side on `offer_state` (canonical active-count source when set).
@@ -23,12 +23,15 @@ pub struct OfferListingFields {
 pub const SOFT_EXPIRE_MARK_STATES: &[&str] = &["open", "refresh_due", "mempool_observed"];
 
 impl SqliteStore {
-    /// Active listings past soft listing expiry for the soft-expire mark path.
+    /// Durable (presplit) listings past soft listing expiry for the soft-expire mark path.
     ///
     /// Includes `open`, `refresh_due`, and `mempool_observed` (takes/cancels in flight
-    /// must still soft-expire when Dexie status 6 will not fire). NULL `listing_expires_at`
-    /// counts as already elapsed (legacy). This NULL policy is specific to soft-expire
-    /// marking — reusable-maker queries do not overload a shared expiry filter.
+    /// must still soft-expire when Dexie status 6 will not fire). Requires cancel metadata
+    /// (`cancel_input_coin_id` + `fixed_delegated_puzzle_hash`) so soft-expire only marks
+    /// makers it can leave for ensure or reclaim — Direct/incomplete rows stay open for
+    /// other cleanup paths. NULL `listing_expires_at` counts as already elapsed (legacy).
+    /// This NULL policy is specific to soft-expire marking — reusable-maker queries do not
+    /// overload a shared expiry filter.
     ///
     /// # Errors
     ///
@@ -59,6 +62,7 @@ impl SqliteStore {
                    cancel_input_coin_id, fixed_delegated_puzzle_hash, offer_nonce, listing_expires_at
             FROM offer_state
             WHERE market_id = ?1
+              {DURABLE_MAKER_CANCEL_METADATA_SQL}
               AND state IN ({state_placeholders})
               AND (listing_expires_at IS NULL OR listing_expires_at <= ?2)
             ORDER BY updated_at ASC, offer_id ASC

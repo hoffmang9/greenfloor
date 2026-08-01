@@ -2,32 +2,23 @@
 
 use crate::hex::normalize_hex_id;
 
-/// Pure selection among reusable makers before Coinset/post I/O.
+/// Local reuse choice before Coinset unspent checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum EnsureCandidateDecision {
+pub(super) enum EnsureReuseKind {
     PreferExisting,
     ReclaimThenNew,
-    /// Maker coin is spent; retire the expired listing without reclaim spend.
-    RetireSpent,
 }
 
 #[must_use]
-pub(super) fn decide_ensure_candidate(
-    unspent: bool,
+pub(super) fn decide_ensure_reuse(
     has_offer_nonce: bool,
     planned_hash: &str,
     stored_hash: &str,
-) -> EnsureCandidateDecision {
-    if !unspent {
-        return EnsureCandidateDecision::RetireSpent;
-    }
-    if !has_offer_nonce {
-        return EnsureCandidateDecision::ReclaimThenNew;
-    }
-    if normalize_hex_id(planned_hash) == normalize_hex_id(stored_hash) {
-        EnsureCandidateDecision::PreferExisting
+) -> EnsureReuseKind {
+    if has_offer_nonce && normalize_hex_id(planned_hash) == normalize_hex_id(stored_hash) {
+        EnsureReuseKind::PreferExisting
     } else {
-        EnsureCandidateDecision::ReclaimThenNew
+        EnsureReuseKind::ReclaimThenNew
     }
 }
 
@@ -36,30 +27,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ensure_candidate_prefers_existing_on_hash_match() {
+    fn ensure_reuse_prefers_existing_on_hash_match() {
         assert_eq!(
-            decide_ensure_candidate(true, true, "aa".repeat(32).as_str(), &"aa".repeat(32)),
-            EnsureCandidateDecision::PreferExisting
+            decide_ensure_reuse(true, "aa".repeat(32).as_str(), &"aa".repeat(32)),
+            EnsureReuseKind::PreferExisting
         );
     }
 
     #[test]
-    fn ensure_candidate_reclaims_on_hash_mismatch_or_missing_nonce() {
+    fn ensure_reuse_reclaims_on_hash_mismatch_or_missing_nonce() {
         assert_eq!(
-            decide_ensure_candidate(true, true, "aa".repeat(32).as_str(), &"bb".repeat(32)),
-            EnsureCandidateDecision::ReclaimThenNew
+            decide_ensure_reuse(true, "aa".repeat(32).as_str(), &"bb".repeat(32)),
+            EnsureReuseKind::ReclaimThenNew
         );
         assert_eq!(
-            decide_ensure_candidate(true, false, "", &"aa".repeat(32)),
-            EnsureCandidateDecision::ReclaimThenNew
-        );
-    }
-
-    #[test]
-    fn ensure_candidate_retires_spent_makers() {
-        assert_eq!(
-            decide_ensure_candidate(false, true, "aa".repeat(32).as_str(), &"aa".repeat(32)),
-            EnsureCandidateDecision::RetireSpent
+            decide_ensure_reuse(false, "", &"aa".repeat(32)),
+            EnsureReuseKind::ReclaimThenNew
         );
     }
 }
