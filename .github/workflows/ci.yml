@@ -82,6 +82,8 @@ jobs:
           save-cache: "true"
           install-nextest: ${{ steps.scope.outputs.run_rust_cov != 'true' }}
 
+      # Fail-fast order: lint/format/clippy first, then collect coverage + gate before
+      # plain Rust tests (so coverage failures do not wait on a full nextest run).
       - name: Lint, format, clippy, and script tests (parallel)
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit

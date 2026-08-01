@@ -173,6 +173,20 @@ pub(crate) fn confirm_wait_for_run(dry_run: bool, wait: bool) -> ReclaimConfirmW
     }
 }
 
+/// Confirm a submitted maker is spent; returns a wait-error string when confirmation fails.
+async fn confirm_maker_spent_wait_error(
+    client: &chia_sdk_coinset::CoinsetClient,
+    coin_id: &str,
+) -> Option<String> {
+    match hex_to_bytes32(coin_id) {
+        Ok(coin) => wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
+            .await
+            .err()
+            .map(|err| err.to_string()),
+        Err(err) => Some(err.to_string()),
+    }
+}
+
 /// Reclaim orphaned presplit maker coins from already-normalized pairs.
 ///
 /// When `confirm_wait` is [`ReclaimConfirmWait::AfterEachSubmit`], each successful broadcast
@@ -227,16 +241,8 @@ pub async fn offers_reclaim_presplit_pairs(
 
         if let Some(client) = wait_client.as_ref() {
             if item.succeeded() {
-                let wait_err = match hex_to_bytes32(&pair.coin_id) {
-                    Ok(coin) => {
-                        wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
-                            .await
-                            .err()
-                    }
-                    Err(err) => Some(err),
-                };
-                if let Some(err) = wait_err {
-                    item.result.wait_error = Some(err.to_string());
+                if let Some(err) = confirm_maker_spent_wait_error(client, &pair.coin_id).await {
+                    item.result.wait_error = Some(err);
                     items.push(item);
                     stopped_early = index + 1 < pairs.len();
                     break;
@@ -368,5 +374,69 @@ mod tests {
         };
         assert!(with_wait.cli_failed());
         assert_eq!(with_wait.remaining_count, 1);
+    }
+
+    #[tokio::test]
+    async fn confirm_maker_spent_wait_error_none_when_already_spent() {
+        use crate::coinset::test_support::mock_get_coin_record_by_name_body;
+        use chia_protocol::{Bytes32, Coin};
+
+        let coin = Coin::new(Bytes32::new([1; 32]), Bytes32::new([2; 32]), 1000);
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_record_by_name")
+            .with_status(200)
+            .with_body(mock_get_coin_record_by_name_body(&coin, 12))
+            .create_async()
+            .await;
+        let client = chia_sdk_coinset::CoinsetClient::new(server.url());
+        let err = confirm_maker_spent_wait_error(&client, &hex::encode(coin.coin_id())).await;
+        assert_eq!(err, None);
+    }
+
+    #[tokio::test]
+    async fn confirm_maker_spent_wait_error_on_bad_hex() {
+        let client = chia_sdk_coinset::CoinsetClient::new("https://example.invalid".to_string());
+        let err = confirm_maker_spent_wait_error(&client, "not-hex")
+            .await
+            .expect("error");
+        assert!(!err.is_empty());
+    }
+
+    #[tokio::test]
+    async fn offers_reclaim_presplit_pairs_builds_wait_client_even_when_submit_fails() {
+        use crate::test_support::signer_config::test_signer_config;
+
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_record_by_name")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_record":null}"#)
+            .create_async()
+            .await;
+        let pairs = vec![
+            PresplitReclaimPair {
+                coin_id: "aa".repeat(32),
+                fixed_delegated_puzzle_hash: "bb".repeat(32),
+            },
+            PresplitReclaimPair {
+                coin_id: "cc".repeat(32),
+                fixed_delegated_puzzle_hash: "dd".repeat(32),
+            },
+        ];
+        let result = offers_reclaim_presplit_pairs(
+            test_signer_config(&server.url()),
+            "mainnet",
+            &pairs,
+            false,
+            ReclaimConfirmWait::AfterEachSubmit,
+        )
+        .await
+        .expect("batch");
+        // Submit fails (missing coin); wait client was constructed but wait skipped on failure.
+        assert_eq!(result.failed_count, 2);
+        assert!(!result.stopped_early);
+        assert_eq!(result.selected_count, 2);
+        assert_eq!(result.remaining_count, 0);
     }
 }

@@ -3,6 +3,8 @@ mod build;
 mod cancel_binding;
 mod conditions;
 mod orphan_discover;
+#[cfg(test)]
+mod orphan_sim_tests;
 mod pipeline;
 mod split;
 

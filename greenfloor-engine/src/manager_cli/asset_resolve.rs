@@ -144,3 +144,117 @@ pub async fn resolve_market_inventory_asset_id(
         Ok(market_base_asset.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manager_cli::test_support::{
+        write_combine_dust_cats, write_combine_dust_markets, ManagerContextBuilder,
+    };
+    use crate::minimal_program_template::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+
+    const CAT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const RECEIVE: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+
+    fn harness_with_market_and_cats() -> (
+        tempfile::TempDir,
+        crate::manager_cli::context::ManagerContext,
+    ) {
+        let dir = tempfile::tempdir().expect("tmp");
+        let program = dir.path().join("program.yaml");
+        let markets = dir.path().join("markets.yaml");
+        let cats = dir.path().join("cats.yaml");
+        write_minimal_program_with_signer(
+            &program,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        write_combine_dust_markets(&markets, CAT, RECEIVE);
+        let mut yaml = std::fs::read_to_string(&markets).expect("read");
+        yaml = yaml.replace("dust_m", "m1");
+        std::fs::write(&markets, yaml).expect("rewrite");
+        write_combine_dust_cats(&cats, CAT);
+        let harness = ManagerContextBuilder::new(program, markets)
+            .cats_config(cats)
+            .scratch_dir(dir.path().to_path_buf())
+            .build_capturing();
+        (dir, harness.ctx)
+    }
+
+    #[tokio::test]
+    async fn resolve_market_base_cat_and_orphan_helpers() {
+        let (_dir, ctx) = harness_with_market_and_cats();
+        let bundle = crate::config::load_program_bundle_gated(&ctx.program_config).expect("bundle");
+
+        let (asset, market) = resolve_market_base_cat_asset(&ctx, "mainnet", "m1", Some(CAT))
+            .await
+            .expect("market base");
+        assert_eq!(asset, CAT);
+        assert_eq!(market, "m1");
+
+        let err = resolve_market_base_cat_asset(&ctx, "mainnet", "m1", Some(&"bb".repeat(32)))
+            .await
+            .expect_err("mismatch");
+        assert!(err.to_string().contains("does not match"));
+
+        let (orphan_asset, orphan_market) =
+            resolve_orphan_presplit_cat_asset(&ctx, &bundle.signer, "mainnet", Some("m1"), None)
+                .await
+                .expect("orphan market");
+        assert_eq!(orphan_asset, CAT);
+        assert_eq!(orphan_market.as_deref(), Some("m1"));
+
+        let (hex_asset, none_market) =
+            resolve_orphan_presplit_cat_asset(&ctx, &bundle.signer, "mainnet", None, Some(CAT))
+                .await
+                .expect("orphan hex");
+        assert_eq!(hex_asset, CAT);
+        assert!(none_market.is_none());
+
+        let err = resolve_orphan_presplit_cat_asset(&ctx, &bundle.signer, "mainnet", None, None)
+            .await
+            .expect_err("missing");
+        assert!(err.to_string().contains("provide --asset"));
+
+        let vault_asset = resolve_cat_vault_trace_asset(&ctx, &bundle.signer, "mainnet", CAT)
+            .await
+            .expect("vault trace");
+        assert_eq!(vault_asset, CAT);
+
+        let err = resolve_cat_vault_trace_asset(&ctx, &bundle.signer, "mainnet", "xch")
+            .await
+            .expect_err("xch");
+        assert!(err.to_string().contains("must resolve to a CAT"));
+    }
+
+    #[tokio::test]
+    async fn resolve_market_inventory_asset_id_override_and_default() {
+        let (_dir, ctx) = harness_with_market_and_cats();
+        let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
+            program_path: &ctx.program_config,
+            markets_path: &ctx.markets_config,
+            testnet_markets_path: ctx.testnet_markets_path(),
+            cats_path: Some(&ctx.cats_config),
+            network: "mainnet",
+            market_id: Some("m1"),
+            pair: None,
+            command: OperatorMarketCommand::CoinList,
+        })
+        .expect("load");
+        let resolver = loaded.asset_resolver();
+        let default_id =
+            resolve_market_inventory_asset_id(&resolver, &loaded.market_row.base_asset, None)
+                .await
+                .expect("default");
+        assert_eq!(normalize_hex_id(&default_id), CAT);
+        let override_id =
+            resolve_market_inventory_asset_id(&resolver, &loaded.market_row.base_asset, Some(CAT))
+                .await
+                .expect("override");
+        assert_eq!(normalize_hex_id(&override_id), CAT);
+    }
+}
