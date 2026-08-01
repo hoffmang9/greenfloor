@@ -220,7 +220,10 @@ pub async fn build_offer_cancel_spend_bundle_from_metadata<C: OfferCoinsetBacken
     .await
 }
 
-fn metadata_for_presplit_maker(coin_id: &str, fixed_hash: &str) -> StoredOfferCancelMetadata {
+pub(crate) fn metadata_for_presplit_maker(
+    coin_id: &str,
+    fixed_hash: &str,
+) -> StoredOfferCancelMetadata {
     StoredOfferCancelMetadata {
         fields: OfferCancelFields::from_presplit_build(
             normalize_hex_id(coin_id),
@@ -258,4 +261,26 @@ pub async fn reclaim_presplit_maker_coin(
     }
     let broadcast = broadcast_spend_bundle(&coinset_client, bundle).await?;
     Ok(broadcast.operation_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_for_presplit_maker_normalizes_hex() {
+        let meta = metadata_for_presplit_maker(&format!("0x{}", "ab".repeat(32)), &"cd".repeat(32));
+        assert_eq!(
+            meta.fields.input_coin_id.as_deref(),
+            Some(&*"ab".repeat(32))
+        );
+        assert_eq!(
+            meta.fields.fixed_delegated_puzzle_hash.as_deref(),
+            Some(&*"cd".repeat(32))
+        );
+        assert_eq!(
+            meta.execution_mode,
+            Some(OfferExecutionMode::PresplitExisting)
+        );
+    }
 }

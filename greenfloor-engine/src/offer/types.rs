@@ -458,4 +458,80 @@ mod tests {
         assert_eq!(request.offer_coin_ids.len(), 1);
         assert_eq!(hex::encode(request.offer_coin_ids[0]), coin);
     }
+
+    #[test]
+    fn conditions_expires_at_respects_soft_bake_flag() {
+        let soft = OfferTerms {
+            receive_address: "xch1".into(),
+            offer_asset_id: "a".into(),
+            offer_amount: 1,
+            request_asset_id: "xch".into(),
+            request_amount: 1,
+            expires_at: Some(9),
+            bake_expiry_into_conditions: false,
+        };
+        assert_eq!(soft.conditions_expires_at(), None);
+        assert_eq!(
+            OfferTerms {
+                bake_expiry_into_conditions: true,
+                ..soft
+            }
+            .conditions_expires_at(),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn create_offer_request_deserializes_optional_offer_nonce() {
+        let nonce = "b".repeat(64);
+        let raw = format!(
+            r#"{{
+                "receive_address": "xch1",
+                "offer_asset_id": "cat",
+                "offer_amount": 1,
+                "request_asset_id": "xch",
+                "request_amount": 1,
+                "split_input_coins": false,
+                "broadcast_split": false,
+                "offer_nonce": "{nonce}",
+                "bake_expiry_into_conditions": false
+            }}"#
+        );
+        let request: CreateOfferRequest = serde_json::from_str(&raw).expect("request");
+        assert_eq!(
+            request.offer_nonce.map(hex::encode).as_deref(),
+            Some(nonce.as_str())
+        );
+        assert!(!request.bake_expiry_into_conditions);
+        let empty = r#"{
+                "receive_address": "xch1",
+                "offer_asset_id": "cat",
+                "offer_amount": 1,
+                "request_asset_id": "xch",
+                "request_amount": 1,
+                "split_input_coins": false,
+                "broadcast_split": false,
+                "offer_nonce": ""
+            }"#;
+        let cleared: CreateOfferRequest = serde_json::from_str(empty).expect("empty nonce");
+        assert!(cleared.offer_nonce.is_none());
+
+        let with_nonce = CreateOfferRequest {
+            offer_nonce: Some(Bytes32::new([0xab; 32])),
+            ..base_request()
+        };
+        let encoded = serde_json::to_value(&with_nonce).expect("serialize some");
+        assert_eq!(
+            encoded.get("offer_nonce").and_then(|v| v.as_str()),
+            Some(hex::encode([0xab; 32]).as_str())
+        );
+        let without = CreateOfferRequest {
+            offer_nonce: None,
+            ..base_request()
+        };
+        let encoded_none = serde_json::to_value(&without).expect("serialize none");
+        assert!(encoded_none
+            .get("offer_nonce")
+            .is_none_or(serde_json::Value::is_null));
+    }
 }

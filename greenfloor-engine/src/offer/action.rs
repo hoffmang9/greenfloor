@@ -74,30 +74,24 @@ pub fn expires_at_unix_from_pricing(pricing: &MarketPricing) -> SignerResult<u64
         .map_err(|_| SignerError::Other("system clock before unix epoch".to_string()))
 }
 
-/// Plan offer terms for a market size/side (shared by ensure hash compare and create).
+/// Build offer terms from already-resolved market assets (same ids create/post use).
 ///
 /// # Errors
 ///
-/// Returns an error when asset resolve, pricing, or size conversion fails.
-pub(crate) async fn plan_offer_terms_for_market(
-    signer: &SignerConfig,
-    ticker_index: &CatTickerIndex,
-    network: &str,
+/// Returns an error when pricing or size conversion fails.
+pub(crate) fn offer_terms_from_resolved_assets(
     market: &MarketConfig,
+    assets: &crate::offer::assets::ResolvedMarketOfferAssets,
     size_base_units: u64,
     side: &str,
 ) -> SignerResult<OfferTerms> {
-    let resolver = OfferAssetResolver::new(signer, ticker_index, network);
-    let (base_id, quote_id) = resolver
-        .resolve_pair(&market.base_asset, &market.quote_asset)
-        .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
     let leg = compute_signer_offer_leg_amounts(
         size_i64,
         quote_price,
-        &base_id,
-        &quote_id,
+        &assets.base_asset_id,
+        &assets.quote_asset_id,
         side,
         &market.pricing,
     )?;
@@ -113,6 +107,26 @@ pub(crate) async fn plan_offer_terms_for_market(
             &market.quote_asset_type,
         ),
     })
+}
+
+/// Plan offer terms for a market size/side (shared by ensure hash compare and create).
+///
+/// Uses [`OfferAssetResolver::resolve_market_assets`] so quote normalization matches post.
+///
+/// # Errors
+///
+/// Returns an error when asset resolve, pricing, or size conversion fails.
+pub(crate) async fn plan_offer_terms_for_market(
+    signer: &SignerConfig,
+    ticker_index: &CatTickerIndex,
+    network: &str,
+    market: &MarketConfig,
+    size_base_units: u64,
+    side: &str,
+) -> SignerResult<OfferTerms> {
+    let resolver = OfferAssetResolver::new(signer, ticker_index, network);
+    let assets = resolver.resolve_market_assets(market).await?;
+    offer_terms_from_resolved_assets(market, &assets, size_base_units, side)
 }
 
 fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64> {
@@ -216,6 +230,7 @@ fn create_offer_request_from_leg(
 mod tests {
     use super::*;
     use crate::config::MarketPricing;
+    use crate::offer::request::SignerOfferLegAmounts;
 
     #[test]
     fn expires_at_from_minutes_pricing() {
@@ -230,5 +245,84 @@ mod tests {
         let expires = expires_at_unix_from_pricing(&pricing).expect("expiry");
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
+    }
+
+    fn sample_action_request(reuse: Option<PresplitMakerReuse>) -> BuildOfferForActionRequest {
+        BuildOfferForActionRequest {
+            receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w"
+                .to_string(),
+            base_asset: "aa".repeat(32),
+            quote_asset: "xch".to_string(),
+            size_base_units: 1_000,
+            action_side: "sell".to_string(),
+            pricing: MarketPricing::default(),
+            quote_price: Some(1.0),
+            split_input_coins: true,
+            broadcast_split: true,
+            offer_coin_ids: Vec::new(),
+            quote_asset_type: "stable".to_string(),
+            maker_reuse: reuse,
+        }
+    }
+
+    #[test]
+    fn create_offer_request_from_leg_omits_split_when_reusing_maker() {
+        let request = sample_action_request(Some(PresplitMakerReuse {
+            coin_id: "ab".repeat(32),
+            offer_nonce: "cd".repeat(32),
+        }));
+        let leg = SignerOfferLegAmounts {
+            offer_asset_id: "ab".repeat(32),
+            offer_amount_mojos: 1_000,
+            request_asset_id: "xch".to_string(),
+            request_amount_mojos: 1,
+        };
+        let created = create_offer_request_from_leg(&request, &leg, 1_700_000_000).expect("create");
+        assert!(!created.split_input_coins);
+        assert!(!created.broadcast_split);
+        assert!(!created.bake_expiry_into_conditions);
+        assert_eq!(created.presplit_coin_ids.len(), 1);
+        assert!(created.offer_nonce.is_some());
+    }
+
+    #[test]
+    fn create_offer_request_from_leg_presplit_new_without_reuse() {
+        let request = sample_action_request(None);
+        let leg = SignerOfferLegAmounts {
+            offer_asset_id: "ab".repeat(32),
+            offer_amount_mojos: 1_000,
+            request_asset_id: "xch".to_string(),
+            request_amount_mojos: 1,
+        };
+        let created = create_offer_request_from_leg(&request, &leg, 1_700_000_000).expect("create");
+        assert!(created.split_input_coins);
+        assert!(created.broadcast_split);
+        assert!(created.presplit_coin_ids.is_empty());
+        assert!(created.offer_nonce.is_none());
+    }
+
+    #[test]
+    fn offer_terms_from_resolved_assets_uses_normalized_quote_ids() {
+        use crate::offer::assets::ResolvedMarketOfferAssets;
+        use crate::test_support::market_config::sample_market;
+
+        let mut market =
+            sample_market("xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w");
+        market.quote_asset = "xch".into();
+        market.quote_asset_type = "stable".into();
+        market.pricing = MarketPricing {
+            fixed_quote_per_base: Some(1.0),
+            ..MarketPricing::default()
+        };
+        let assets = ResolvedMarketOfferAssets {
+            base_asset_id: "aa".repeat(32),
+            quote_asset_id: "xch".into(),
+            quote_asset_for_offer: "txch".into(),
+        };
+        let terms =
+            offer_terms_from_resolved_assets(&market, &assets, 1_000, "sell").expect("terms");
+        assert_eq!(terms.offer_asset_id, "aa".repeat(32));
+        assert_eq!(terms.request_asset_id, "xch");
+        assert!(!terms.bake_expiry_into_conditions);
     }
 }

@@ -76,7 +76,7 @@ pub fn supersede_listing_for_repost_synced(
 mod tests {
     use super::*;
     use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
-    use crate::storage::{OfferCancelWrite, OfferListingWrite};
+    use crate::storage::{CycleWriteStore, OfferCancelWrite, OfferListingWrite};
     use tempfile::tempdir;
 
     #[test]
@@ -121,5 +121,52 @@ mod tests {
             .list_expired_presplit_makers("m1")
             .expect("expired after supersede");
         assert!(after.is_empty());
+    }
+
+    #[test]
+    fn supersede_synced_skips_mutation_on_dry_run() {
+        let dir = tempdir().expect("tempdir");
+        let db = dir.path().join("state.db");
+        let write_store = CycleWriteStore::open(&db).expect("open");
+        {
+            let store = write_store.lock().expect("lock");
+            let fields = OfferCancelFields::from_presplit_build(
+                "aa".repeat(32),
+                "bb".repeat(32),
+                "cc".repeat(32),
+            );
+            store
+                .upsert_offer_state_with_metadata_at(
+                    "offer-soft",
+                    "m1",
+                    "expired",
+                    Some(6),
+                    "2026-01-01T00:00:00Z",
+                    OfferCancelWrite {
+                        fields: Some(&fields),
+                        execution_mode: Some(OfferExecutionMode::PresplitExisting),
+                        listing: OfferListingWrite {
+                            publish_venue: Some("dexie"),
+                            listing_expires_at: Some(1_700_000_000),
+                            size_base_units: Some(10),
+                            offer_nonce: Some(&"dd".repeat(32)),
+                            offer_side: Some("sell"),
+                        },
+                        ..OfferCancelWrite::default()
+                    },
+                )
+                .expect("upsert");
+        }
+        supersede_listing_for_repost_synced(&write_store, "m1", "offer-soft", true)
+            .expect("dry-run");
+        let still = write_store
+            .sync(|store| store.list_expired_presplit_makers("m1"))
+            .expect("list");
+        assert_eq!(still.len(), 1);
+        supersede_listing_for_repost_synced(&write_store, "m1", "offer-soft", false).expect("live");
+        let gone = write_store
+            .sync(|store| store.list_expired_presplit_makers("m1"))
+            .expect("list");
+        assert!(gone.is_empty());
     }
 }

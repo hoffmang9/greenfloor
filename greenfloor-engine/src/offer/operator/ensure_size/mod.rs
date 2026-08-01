@@ -1,5 +1,7 @@
 //! Ensure a size-N offer exists: prefer matching idle maker (`PresplitExisting`), else reclaim+new, else `PresplitNew`.
 
+mod selection;
+
 use chia_protocol::Bytes32;
 use tracing::{info, warn};
 
@@ -17,12 +19,15 @@ use crate::offer::types::{OfferTerms, PresplitMakerReuse};
 use crate::storage::{upsert_offer_post_record, CycleWriteStore, ReusablePresplitMakerRow};
 use crate::vault::session::resolve_vault_spend_context;
 
+use self::selection::{
+    decide_ensure_candidate, select_from_decisions, EnsureCandidateDecision, EnsureSelection,
+};
 use super::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
     BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
 };
 
-/// Result of [`ensure_size_n_offer`] / reclaim helpers. Variants own protection fields.
+/// Result of [`ensure_size_n_offer`]. Variants own protection fields for surplus reclaim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnsureSizeResult {
     PostedExisting {
@@ -33,6 +38,7 @@ pub enum EnsureSizeResult {
     ReclaimedThenPostedNew {
         superseded_offer_id: String,
     },
+    /// Ensure reclaimed a mismatched maker then failed to post a replacement.
     ReclaimedOnly {
         superseded_offer_id: String,
     },
@@ -86,57 +92,38 @@ impl EnsureSizeResult {
     }
 }
 
-/// Pure selection among reusable makers before Coinset/post I/O.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EnsureCandidateDecision {
-    PreferExisting,
-    ReclaimThenNew,
+/// Outcome of reclaiming one expired maker outside the ensure post path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReclaimMakerOutcome {
+    Reclaimed { superseded_offer_id: String },
+    Skipped,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EnsureSelection {
-    PreferExisting(usize),
-    ReclaimThenNew(usize),
-    New,
+/// Shared plan inputs for hash compare (must match create/post asset resolution).
+struct EnsurePlan {
+    terms: OfferTerms,
+    receive_puzzle_hash: Bytes32,
+    launcher_id: Bytes32,
 }
 
-fn decide_ensure_candidate(
-    unspent: bool,
-    has_offer_nonce: bool,
-    planned_hash: &str,
-    stored_hash: &str,
-) -> Option<EnsureCandidateDecision> {
-    if !unspent {
-        return None;
-    }
-    if !has_offer_nonce {
-        return Some(EnsureCandidateDecision::ReclaimThenNew);
-    }
-    Some(
-        if normalize_hex_id(planned_hash) == normalize_hex_id(stored_hash) {
-            EnsureCandidateDecision::PreferExisting
-        } else {
-            EnsureCandidateDecision::ReclaimThenNew
-        },
-    )
-}
-
-/// Short-circuit on `PreferExisting`; otherwise first reclaim index or New.
-#[cfg(test)]
-fn select_from_decisions(decisions: &[Option<EnsureCandidateDecision>]) -> EnsureSelection {
-    let mut reclaim_idx = None;
-    for (idx, decision) in decisions.iter().enumerate() {
-        match decision {
-            Some(EnsureCandidateDecision::PreferExisting) => {
-                return EnsureSelection::PreferExisting(idx);
-            }
-            Some(EnsureCandidateDecision::ReclaimThenNew) if reclaim_idx.is_none() => {
-                reclaim_idx = Some(idx);
-            }
-            _ => {}
-        }
-    }
-    reclaim_idx.map_or(EnsureSelection::New, EnsureSelection::ReclaimThenNew)
+async fn plan_ensure(
+    signer: &SignerConfig,
+    ticker_index: &crate::config::CatTickerIndex,
+    network: &str,
+    market: &MarketConfig,
+    size_base_units: u64,
+    side: &str,
+) -> SignerResult<EnsurePlan> {
+    let terms =
+        plan_offer_terms_for_market(signer, ticker_index, network, market, size_base_units, side)
+            .await?;
+    let receive_puzzle_hash = decode_address(&terms.receive_address)?;
+    let vault_ctx = resolve_vault_spend_context(signer.clone()).await?;
+    Ok(EnsurePlan {
+        terms,
+        receive_puzzle_hash,
+        launcher_id: vault_ctx.launcher_id,
+    })
 }
 
 fn planned_fixed_hash(
@@ -151,11 +138,7 @@ fn planned_fixed_hash(
 
 async fn coin_unspent<C: OfferCoinsetBackend>(backend: &C, coin_id: &str) -> SignerResult<bool> {
     let id = hex_to_bytes32(coin_id)?;
-    match backend.fetch_offer_input_cat(id).await {
-        Ok(_) => Ok(true),
-        Err(SignerError::PresplitCoinNotFound) => Ok(false),
-        Err(err) => Err(err),
-    }
+    Ok(!backend.offer_input_coin_is_spent(id).await?)
 }
 
 fn with_maker_reuse(
@@ -197,16 +180,19 @@ async fn post_offer(
 
 async fn candidate_decision<C: OfferCoinsetBackend>(
     backend: &C,
-    launcher_id: Bytes32,
-    terms: &OfferTerms,
-    receive_puzzle_hash: Bytes32,
+    plan: &EnsurePlan,
     candidate: &ReusablePresplitMakerRow,
 ) -> SignerResult<Option<EnsureCandidateDecision>> {
     let unspent = coin_unspent(backend, &candidate.cancel_input_coin_id).await?;
     let has_nonce = candidate.offer_nonce.is_some();
     let planned = if let Some(nonce_hex) = candidate.offer_nonce.as_deref() {
         let offer_nonce = hex_to_bytes32(nonce_hex)?;
-        planned_fixed_hash(launcher_id, terms, receive_puzzle_hash, offer_nonce)?
+        planned_fixed_hash(
+            plan.launcher_id,
+            &plan.terms,
+            plan.receive_puzzle_hash,
+            offer_nonce,
+        )?
     } else {
         String::new()
     };
@@ -219,26 +205,19 @@ async fn candidate_decision<C: OfferCoinsetBackend>(
 /// Prefer a hash-matching maker; stop Coinset checks once `PreferExisting` is found.
 async fn select_ensure_candidate<C: OfferCoinsetBackend>(
     backend: &C,
-    launcher_id: Bytes32,
-    terms: &OfferTerms,
-    receive_puzzle_hash: Bytes32,
+    plan: &EnsurePlan,
     candidates: &[ReusablePresplitMakerRow],
 ) -> SignerResult<EnsureSelection> {
-    let mut reclaim_idx = None;
-    for (idx, candidate) in candidates.iter().enumerate() {
-        match candidate_decision(backend, launcher_id, terms, receive_puzzle_hash, candidate)
-            .await?
-        {
-            Some(EnsureCandidateDecision::PreferExisting) => {
-                return Ok(EnsureSelection::PreferExisting(idx));
-            }
-            Some(EnsureCandidateDecision::ReclaimThenNew) if reclaim_idx.is_none() => {
-                reclaim_idx = Some(idx);
-            }
-            _ => {}
+    let mut decisions = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let decision = candidate_decision(backend, plan, candidate).await?;
+        if matches!(decision, Some(EnsureCandidateDecision::PreferExisting)) {
+            decisions.push(decision);
+            break;
         }
+        decisions.push(decision);
     }
-    Ok(reclaim_idx.map_or(EnsureSelection::New, EnsureSelection::ReclaimThenNew))
+    Ok(select_from_decisions(&decisions))
 }
 
 async fn apply_prefer_existing(
@@ -327,6 +306,8 @@ fn result_after_reclaim_then_post(posted: bool, superseded_offer_id: String) -> 
 
 /// Prefer an existing matching maker for size N; reclaim+rebuild on hash mismatch; else `PresplitNew`.
 ///
+/// Hash compare uses the same market asset resolution as create/post (`resolve_market_assets`).
+///
 /// # Errors
 ///
 /// Returns an error when planning, reclaim, or post fails hard (soft post failures return Ok outcome).
@@ -345,7 +326,7 @@ pub async fn ensure_size_n_offer(
         return Ok(EnsureSizeResult::skipped());
     }
 
-    let terms = plan_offer_terms_for_market(
+    let plan = plan_ensure(
         &signer,
         ticker_index,
         &parts.network,
@@ -354,8 +335,6 @@ pub async fn ensure_size_n_offer(
         &side,
     )
     .await?;
-    let receive_puzzle_hash = decode_address(&terms.receive_address)?;
-    let vault_ctx = resolve_vault_spend_context(signer.clone()).await?;
     let coinset_client = client_for_signer_on_network(&signer, &parts.network)?;
     let backend = LiveCoinset(&coinset_client);
 
@@ -366,14 +345,7 @@ pub async fn ensure_size_n_offer(
             store.list_reusable_presplit_makers_for_size(&market_id, size_i64, Some(&side))
         })?,
     };
-    let selection = select_ensure_candidate(
-        &backend,
-        vault_ctx.launcher_id,
-        &terms,
-        receive_puzzle_hash,
-        &candidates,
-    )
-    .await?;
+    let selection = select_ensure_candidate(&backend, &plan, &candidates).await?;
 
     match selection {
         EnsureSelection::PreferExisting(idx) => {
@@ -404,11 +376,11 @@ pub async fn reclaim_expired_maker_if_unspent(
     network: &str,
     row: &ReusablePresplitMakerRow,
     dry_run: bool,
-) -> SignerResult<EnsureSizeResult> {
+) -> SignerResult<ReclaimMakerOutcome> {
     let coinset_client = client_for_signer_on_network(&signer, network)?;
     let backend = LiveCoinset(&coinset_client);
     if !coin_unspent(&backend, &row.cancel_input_coin_id).await? {
-        return Ok(EnsureSizeResult::skipped());
+        return Ok(ReclaimMakerOutcome::Skipped);
     }
     reclaim_presplit_maker_coin(
         signer,
@@ -419,7 +391,7 @@ pub async fn reclaim_expired_maker_if_unspent(
     )
     .await?;
     supersede_listing_for_repost_synced(write_store, &row.market_id, &row.offer_id, dry_run)?;
-    Ok(EnsureSizeResult::ReclaimedOnly {
+    Ok(ReclaimMakerOutcome::Reclaimed {
         superseded_offer_id: row.offer_id.clone(),
     })
 }
@@ -427,13 +399,7 @@ pub async fn reclaim_expired_maker_if_unspent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::bake_expiry_into_conditions_for_quote;
-
-    #[test]
-    fn stable_quote_does_not_bake_expiry() {
-        assert!(!bake_expiry_into_conditions_for_quote("stable"));
-        assert!(bake_expiry_into_conditions_for_quote("unstable"));
-    }
+    use crate::test_support::noop_coinset::SpentFlagCoinset;
 
     #[test]
     fn planned_hash_ignores_listing_expiry_when_soft() {
@@ -468,65 +434,6 @@ mod tests {
         let hard_hash = planned_fixed_hash(launcher, &hard, receive, nonce).expect("hard");
         assert_eq!(soft_hash, soft_hash2);
         assert_ne!(soft_hash, hard_hash);
-    }
-
-    #[test]
-    fn ensure_candidate_prefers_existing_on_hash_match() {
-        assert_eq!(
-            decide_ensure_candidate(true, true, "aa".repeat(32).as_str(), &"aa".repeat(32)),
-            Some(EnsureCandidateDecision::PreferExisting)
-        );
-    }
-
-    #[test]
-    fn ensure_candidate_reclaims_on_hash_mismatch_or_missing_nonce() {
-        assert_eq!(
-            decide_ensure_candidate(true, true, "aa".repeat(32).as_str(), &"bb".repeat(32)),
-            Some(EnsureCandidateDecision::ReclaimThenNew)
-        );
-        assert_eq!(
-            decide_ensure_candidate(true, false, "", &"aa".repeat(32)),
-            Some(EnsureCandidateDecision::ReclaimThenNew)
-        );
-    }
-
-    #[test]
-    fn ensure_candidate_skips_spent_makers() {
-        assert_eq!(
-            decide_ensure_candidate(false, true, "aa".repeat(32).as_str(), &"aa".repeat(32)),
-            None
-        );
-    }
-
-    #[test]
-    fn select_short_circuits_on_prefer_even_after_reclaim_candidate() {
-        let decisions = [
-            Some(EnsureCandidateDecision::ReclaimThenNew),
-            Some(EnsureCandidateDecision::PreferExisting),
-            Some(EnsureCandidateDecision::ReclaimThenNew),
-        ];
-        assert_eq!(
-            select_from_decisions(&decisions),
-            EnsureSelection::PreferExisting(1)
-        );
-    }
-
-    #[test]
-    fn select_uses_first_reclaim_when_no_prefer() {
-        let decisions = [
-            None,
-            Some(EnsureCandidateDecision::ReclaimThenNew),
-            Some(EnsureCandidateDecision::ReclaimThenNew),
-        ];
-        assert_eq!(
-            select_from_decisions(&decisions),
-            EnsureSelection::ReclaimThenNew(1)
-        );
-    }
-
-    #[test]
-    fn select_new_when_all_spent() {
-        assert_eq!(select_from_decisions(&[None, None]), EnsureSelection::New);
     }
 
     #[test]
@@ -603,5 +510,158 @@ mod tests {
         assert!(result.protects_maker(&selected));
         assert!(!result.protects_maker(&surplus));
         assert!(!result.posted());
+    }
+
+    #[tokio::test]
+    async fn coin_unspent_uses_spent_flag() {
+        let unspent = coin_unspent(&SpentFlagCoinset { spent: false }, &"aa".repeat(32))
+            .await
+            .expect("unspent");
+        assert!(unspent);
+        let spent = coin_unspent(&SpentFlagCoinset { spent: true }, &"aa".repeat(32))
+            .await
+            .expect("spent");
+        assert!(!spent);
+
+        let terms = OfferTerms {
+            receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w".into(),
+            offer_asset_id: "bb".repeat(32),
+            offer_amount: 1_000,
+            request_asset_id: "xch".into(),
+            request_amount: 1,
+            expires_at: Some(4_000_000_000),
+            bake_expiry_into_conditions: false,
+        };
+        let row = ReusablePresplitMakerRow {
+            offer_id: "o1".into(),
+            market_id: "m1".into(),
+            state: "expired".into(),
+            size_base_units: Some(10),
+            offer_side: Some("sell".into()),
+            cancel_input_coin_id: "aa".repeat(32),
+            fixed_delegated_puzzle_hash: "cc".repeat(32),
+            offer_nonce: Some("dd".repeat(32)),
+            listing_expires_at: None,
+        };
+        let plan = EnsurePlan {
+            terms,
+            receive_puzzle_hash: Bytes32::new([0x22; 32]),
+            launcher_id: Bytes32::new([0x11; 32]),
+        };
+        let selection = select_ensure_candidate(&SpentFlagCoinset { spent: true }, &plan, &[row])
+            .await
+            .expect("select");
+        assert_eq!(selection, EnsureSelection::New);
+    }
+
+    #[tokio::test]
+    async fn ensure_skips_when_ladder_does_not_want_size() {
+        use crate::config::{empty_cat_ticker_index, ManagerProgramConfig};
+        use crate::storage::CycleWriteStore;
+        use crate::test_support::market_config::sample_market;
+        use crate::test_support::signer_config::test_signer_config;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let write_store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
+        let market = sample_market("xch1test");
+        let program = ManagerProgramConfig::default();
+        let paths = super::super::OperatorConfigPaths {
+            program_path: dir.path().join("program.yaml"),
+            markets_path: dir.path().join("markets.yaml"),
+            testnet_markets_path: None,
+        };
+        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
+            &paths,
+            &program,
+            "mainnet",
+            market.market_id.clone(),
+            10,
+            "sell",
+        );
+        let result = ensure_size_n_offer(
+            &write_store,
+            test_signer_config("https://api.coinset.org"),
+            &empty_cat_ticker_index(),
+            &market,
+            parts,
+            Some(Vec::new()),
+        )
+        .await
+        .expect("ensure");
+        assert!(!result.posted());
+        assert!(matches!(
+            result,
+            EnsureSizeResult::Skipped {
+                retained_maker_coin_id: None
+            }
+        ));
+    }
+
+    #[test]
+    fn with_maker_reuse_maps_nonce_and_skips_empty() {
+        use crate::config::ManagerProgramConfig;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let program = ManagerProgramConfig::default();
+        let paths = super::super::OperatorConfigPaths {
+            program_path: dir.path().join("program.yaml"),
+            markets_path: dir.path().join("markets.yaml"),
+            testnet_markets_path: None,
+        };
+        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
+            &paths, &program, "mainnet", "m1", 10, "sell",
+        );
+        let row = ReusablePresplitMakerRow {
+            offer_id: "o1".into(),
+            market_id: "m1".into(),
+            state: "expired".into(),
+            size_base_units: Some(10),
+            offer_side: Some("sell".into()),
+            cancel_input_coin_id: "aa".repeat(32),
+            fixed_delegated_puzzle_hash: "bb".repeat(32),
+            offer_nonce: Some("cc".repeat(32)),
+            listing_expires_at: None,
+        };
+        let mapped = with_maker_reuse(&parts, Some(&row));
+        let reuse = mapped.maker_reuse.expect("reuse");
+        assert_eq!(reuse.coin_id, "aa".repeat(32));
+        assert_eq!(reuse.offer_nonce, "cc".repeat(32));
+        let empty_nonce = ReusablePresplitMakerRow {
+            offer_nonce: Some("   ".into()),
+            ..row
+        };
+        assert!(with_maker_reuse(&parts, Some(&empty_nonce))
+            .maker_reuse
+            .is_none());
+        assert!(with_maker_reuse(&parts, None).maker_reuse.is_none());
+    }
+
+    #[test]
+    fn protect_maker_covers_remaining_result_variants() {
+        let row = ReusablePresplitMakerRow {
+            offer_id: "offer-a".into(),
+            market_id: "m1".into(),
+            state: "expired".into(),
+            size_base_units: Some(10),
+            offer_side: Some("sell".into()),
+            cancel_input_coin_id: "coin-a".into(),
+            fixed_delegated_puzzle_hash: "hh".into(),
+            offer_nonce: Some("nn".into()),
+            listing_expires_at: None,
+        };
+        assert!(EnsureSizeResult::ReclaimedThenPostedNew {
+            superseded_offer_id: "offer-a".into(),
+        }
+        .protects_maker(&row));
+        assert!(EnsureSizeResult::ReclaimedOnly {
+            superseded_offer_id: "offer-a".into(),
+        }
+        .protects_maker(&row));
+        assert!(!EnsureSizeResult::PostedNew.protects_maker(&row));
+        assert!(!EnsureSizeResult::skipped().protects_maker(&row));
+        assert!(EnsureSizeResult::PostedNew.posted());
+        assert!(!EnsureSizeResult::skipped().posted());
     }
 }

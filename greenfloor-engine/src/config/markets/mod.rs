@@ -78,10 +78,16 @@ pub fn load_markets_config_with_overlay(
     parse_markets_config(&raw)
 }
 
-/// Stable-quote markets omit on-chain expiry from presplit maker CONDITIONS (soft listing expiry).
+/// Stable-quote markets use soft listing expiry (`SQLite`), not on-chain CONDITIONS expiry.
+#[must_use]
+pub fn market_uses_soft_listing_expiry(quote_asset_type: &str) -> bool {
+    quote_asset_type.trim().eq_ignore_ascii_case("stable")
+}
+
+/// Whether presplit maker CONDITIONS should bake listing expiry on-chain.
 #[must_use]
 pub fn bake_expiry_into_conditions_for_quote(quote_asset_type: &str) -> bool {
-    !quote_asset_type.trim().eq_ignore_ascii_case("stable")
+    !market_uses_soft_listing_expiry(quote_asset_type)
 }
 
 /// Whether the market still wants ladder size `N` on `side` (`target_count > 0`).
@@ -141,15 +147,17 @@ fn reject_testnet_receive_addresses_in_base(path: &Path, raw: &Value) -> SignerR
 #[cfg(test)]
 mod soft_expiry_tests {
     use super::{
-        bake_expiry_into_conditions_for_quote, market_wants_ladder_size, LadderEntry, MarketConfig,
-        MarketPricing,
+        bake_expiry_into_conditions_for_quote, market_uses_soft_listing_expiry,
+        market_wants_ladder_size, LadderEntry, MarketConfig, MarketPricing,
     };
     use std::collections::HashMap;
 
     #[test]
-    fn bake_expiry_gate_is_stable_only() {
+    fn soft_listing_expiry_is_stable_only() {
+        assert!(market_uses_soft_listing_expiry("stable"));
+        assert!(market_uses_soft_listing_expiry("STABLE"));
+        assert!(!market_uses_soft_listing_expiry("unstable"));
         assert!(!bake_expiry_into_conditions_for_quote("stable"));
-        assert!(!bake_expiry_into_conditions_for_quote("STABLE"));
         assert!(bake_expiry_into_conditions_for_quote("unstable"));
     }
 
@@ -183,5 +191,9 @@ mod soft_expiry_tests {
         assert!(market_wants_ladder_size(&market, "sell", 10));
         assert!(!market_wants_ladder_size(&market, "sell", 100));
         assert!(!market_wants_ladder_size(&market, "buy", 10));
+        assert!(!market_wants_ladder_size(&market, "sell", 0));
+        let mut disabled = market.clone();
+        disabled.enabled = false;
+        assert!(!market_wants_ladder_size(&disabled, "sell", 10));
     }
 }

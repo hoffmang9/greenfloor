@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::hex::normalize_hex_id;
+use crate::hex::normalize_hex;
 use crate::offer::reclaim::reclaim_presplit_maker_coin;
 
 /// One `--coin-id` / `--fixed-delegated-puzzle-hash` pair.
@@ -54,8 +54,8 @@ pub fn parse_presplit_reclaim_pairs(
     }
     let mut pairs = Vec::with_capacity(coin_ids.len());
     for (coin_id, fixed_hash) in coin_ids.iter().zip(fixed_hashes.iter()) {
-        let coin_id = normalize_hex_id(coin_id);
-        let fixed_delegated_puzzle_hash = normalize_hex_id(fixed_hash);
+        let coin_id = normalize_hex(coin_id);
+        let fixed_delegated_puzzle_hash = normalize_hex(fixed_hash);
         if coin_id.is_empty() || fixed_delegated_puzzle_hash.is_empty() {
             return Err(SignerError::Other(
                 "each --coin-id and --fixed-delegated-puzzle-hash must be non-empty hex"
@@ -183,5 +183,30 @@ mod tests {
     fn parse_pairs_rejects_empty() {
         let err = parse_presplit_reclaim_pairs(&[], &[]).expect_err("empty");
         assert!(err.to_string().contains("at least one"));
+    }
+
+    #[test]
+    fn parse_pairs_rejects_empty_or_short_hex() {
+        let err = parse_presplit_reclaim_pairs(&[String::new()], &["aa".repeat(32)])
+            .expect_err("empty coin");
+        assert!(err.to_string().contains("non-empty"));
+        let err = parse_presplit_reclaim_pairs(&["aa".repeat(16)], &["bb".repeat(32)])
+            .expect_err("short");
+        assert!(err.to_string().contains("64 hex"));
+    }
+
+    #[test]
+    fn item_success_and_failure_payload_shapes() {
+        let pair = PresplitReclaimPair {
+            coin_id: "aa".repeat(32),
+            fixed_delegated_puzzle_hash: "bb".repeat(32),
+        };
+        let ok = item_success(&pair, "op-1", true);
+        assert_eq!(ok.result["success"], true);
+        assert_eq!(ok.result["dry_run"], true);
+        assert_eq!(ok.result["operation_id"], "op-1");
+        let fail = item_failure(&pair, "boom");
+        assert_eq!(fail.result["success"], false);
+        assert_eq!(fail.result["error"], "boom");
     }
 }

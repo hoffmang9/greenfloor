@@ -158,7 +158,10 @@ pub async fn run_coins_balance(
 
 #[cfg(test)]
 mod tests {
-    use super::{cat_matches_asset_filter, state_is_reclaimable, vault_controlled_total};
+    use super::{
+        cat_matches_asset_filter, state_is_reclaimable, unreturned_row_priority,
+        vault_controlled_total,
+    };
 
     #[test]
     fn reclaimable_uses_idle_state_allowlist() {
@@ -167,6 +170,15 @@ mod tests {
         assert!(state_is_reclaimable("expired"));
         assert!(state_is_reclaimable("cancelled"));
         assert!(state_is_reclaimable("cancel_submitted"));
+    }
+
+    #[test]
+    fn unreturned_priority_orders_open_before_expired() {
+        assert!(unreturned_row_priority("open") < unreturned_row_priority("expired"));
+        assert!(unreturned_row_priority("expired") < unreturned_row_priority("cancelled"));
+        assert_eq!(unreturned_row_priority("refresh_due"), 0);
+        assert_eq!(unreturned_row_priority("pending_visibility"), 0);
+        assert_eq!(unreturned_row_priority("mempool_observed"), 0);
     }
 
     #[test]
@@ -182,5 +194,83 @@ mod tests {
         assert!(cat_matches_asset_filter(&asset_a, &asset_a));
         assert!(cat_matches_asset_filter(&format!("0x{asset_a}"), &asset_a));
         assert!(!cat_matches_asset_filter(&asset_a, &asset_b));
+    }
+
+    #[tokio::test]
+    async fn run_coins_balance_empty_receive_and_no_unreturned() {
+        use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+        use crate::minimal_program_template::{
+            write_minimal_program_with_signer_coinset, MinimalProgramParams,
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_records":[]}"#)
+            .create_async()
+            .await;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("program.yaml");
+        let markets = dir.path().join("markets.yaml");
+        let db_path = dir.path().join("state.db");
+        write_minimal_program_with_signer_coinset(
+            &program,
+            &server.url(),
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        std::fs::write(
+            &markets,
+            r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "xch"
+    base_symbol: "XCH"
+    quote_asset: "xch"
+    quote_asset_type: "stable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+      bucket_counts:
+        1: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#,
+        )
+        .expect("write markets");
+        let harness = ManagerContextBuilder::new(program, markets)
+            .scratch_dir(dir.path().to_path_buf())
+            .state_db(db_path.to_string_lossy().into_owned())
+            .build_capturing();
+        let code = crate::manager_cli::commands::ManagerCommands::CoinsBalance {
+            market_id: Some("m1".to_string()),
+            pair: None,
+            network: "mainnet".to_string(),
+            asset: String::new(),
+        }
+        .run(&harness.ctx)
+        .await
+        .expect("coins-balance command");
+        assert_eq!(code, 0);
+        let payload = pop_json(&harness.captured);
+        assert_eq!(payload.get("receive_amount"), Some(&serde_json::json!(0)));
+        assert_eq!(
+            payload.get("unreturned_amount"),
+            Some(&serde_json::json!(0))
+        );
+        assert_eq!(
+            payload.get("vault_controlled_amount"),
+            Some(&serde_json::json!(0))
+        );
     }
 }

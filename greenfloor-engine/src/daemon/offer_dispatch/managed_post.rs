@@ -13,7 +13,7 @@ use crate::daemon::cycle_paths::DaemonCyclePaths;
 use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
 use crate::offer::operator::{
-    ensure_size_n_offer, BuildAndPostOfferRequestParts, EnsureSizeResult, OperatorConfigPaths,
+    ensure_size_n_offer, BuildAndPostOfferRequestParts, EnsureSizeResult,
 };
 use crate::offer::request::normalize_offer_side;
 use crate::storage::CycleWriteStore;
@@ -57,13 +57,8 @@ fn daemon_ensure_parts(
     action: &PlannedAction,
 ) -> SignerResult<BuildAndPostOfferRequestParts> {
     let size_base_units = crate::config::parse_non_negative_u64(action.size, "action.size")?;
-    let paths = OperatorConfigPaths {
-        program_path: post_ctx.paths.program_path.clone(),
-        markets_path: post_ctx.paths.markets_path.clone(),
-        testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
-    };
     Ok(BuildAndPostOfferRequestParts::for_ensure_size(
-        &paths,
+        &post_ctx.paths.as_operator_paths(),
         &post_ctx.program,
         post_ctx.operator_network.clone(),
         market.market_id.clone(),

@@ -17,7 +17,9 @@ pub use build_and_post::{
 pub(crate) use build_and_post::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
 };
-pub use ensure_size::{ensure_size_n_offer, reclaim_expired_maker_if_unspent, EnsureSizeResult};
+pub use ensure_size::{
+    ensure_size_n_offer, reclaim_expired_maker_if_unspent, EnsureSizeResult, ReclaimMakerOutcome,
+};
 pub use logging::{
     initialize_manager_file_logging, sync_manager_file_logging, warn_if_log_level_auto_healed,
 };

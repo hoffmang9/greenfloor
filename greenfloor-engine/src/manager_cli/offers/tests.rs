@@ -387,3 +387,42 @@ async fn offers_reclaim_presplit_rejects_mismatched_pair_counts() {
     .expect_err("mismatch");
     assert!(err.to_string().contains("must match"));
 }
+
+#[tokio::test]
+async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_record_by_name")
+        .with_status(200)
+        .with_body(r#"{"success":true,"coin_record":null}"#)
+        .create_async()
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_cancel_test_markets(&markets);
+    crate::minimal_program_template::write_minimal_program_with_signer_coinset(
+        &program,
+        &server.url(),
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = crate::manager_cli::commands::ManagerCommands::OffersReclaimPresplit {
+        coin_id: vec!["ab".repeat(32)],
+        fixed_delegated_puzzle_hash: vec!["cd".repeat(32)],
+        dry_run: true,
+    }
+    .run(&harness.ctx)
+    .await
+    .expect("soft fail path");
+    assert_eq!(code, 2);
+    let payload = pop_json(&harness.captured);
+    assert_eq!(payload.get("failed_count"), Some(&json!(1)));
+    assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
+}
