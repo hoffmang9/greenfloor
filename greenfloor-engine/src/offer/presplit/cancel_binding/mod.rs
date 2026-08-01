@@ -9,7 +9,9 @@ use clvm_utils::TreeHash;
 use clvmr::Allocator;
 
 use crate::error::{SignerError, SignerResult};
-use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
+use crate::vault::members::{
+    p2_conditions_or_singleton_from_member_fixed, p2_conditions_or_singleton_puzzle_hash,
+};
 
 use parse::{coin_spend_for_presplit_input, parse_offer_maker_coin_spend, ParsedOfferMakerSpend};
 use peel::{presplit_fixed_delegated_puzzle_hash_from_inner, PeelError};
@@ -93,24 +95,30 @@ pub(crate) fn verify_fixed_delegated_puzzle_hash_for_binding(
     Ok(())
 }
 
-/// Verify a Cloud Wallet–style member-wrapped `fixedConditionsHash` against binding p2.
+/// Resolve a stored fixed hash to the member-wrapped form used by cancel/reclaim.
+///
+/// Accepts operator `fixed_delegated_puzzle_hash` (raw delegated CONDITIONS tree hash) or
+/// Cloud Wallet `fixedConditionsHash` (already member-wrapped). Construction errors propagate;
+/// only a successful hash build with a non-matching binding p2 falls through to the other
+/// encoding before returning [`SignerError::PresplitCoinPuzzleHashMismatch`].
 ///
 /// # Errors
 ///
-/// Returns an error when the hash does not match the binding.
-pub(crate) fn verify_member_fixed_conditions_hash_for_binding(
+/// Returns an error when hash construction fails or neither encoding matches the binding.
+pub(crate) fn resolve_member_fixed_conditions_hash_for_binding(
     launcher_id: Bytes32,
     binding_p2_puzzle_hash: Bytes32,
-    fixed_conditions_member_hash: TreeHash,
-) -> SignerResult<()> {
-    let expected = crate::vault::members::p2_conditions_or_singleton_from_member_fixed(
-        fixed_conditions_member_hash,
-        launcher_id,
-    )?;
-    if binding_p2_puzzle_hash != expected.puzzle_hash.into() {
-        return Err(SignerError::PresplitCoinPuzzleHashMismatch);
+    stored_hash: TreeHash,
+) -> SignerResult<TreeHash> {
+    let delegated_hashes = p2_conditions_or_singleton_puzzle_hash(stored_hash, launcher_id)?;
+    if binding_p2_puzzle_hash == delegated_hashes.puzzle_hash.into() {
+        return Ok(delegated_hashes.fixed_conditions_hash);
     }
-    Ok(())
+    let member_hashes = p2_conditions_or_singleton_from_member_fixed(stored_hash, launcher_id)?;
+    if binding_p2_puzzle_hash == member_hashes.puzzle_hash.into() {
+        return Ok(member_hashes.fixed_conditions_hash);
+    }
+    Err(SignerError::PresplitCoinPuzzleHashMismatch)
 }
 
 /// Read presplit maker binding from a cancellable input (XCH or CAT).
@@ -140,4 +148,54 @@ pub(crate) fn offer_maker_cat_from_coin_input(
     let coin_spend = coin_spend_for_presplit_input(spend_bundle, coin)?;
     let mut allocator = Allocator::new();
     Ok(parse_offer_maker_coin_spend(&mut allocator, coin, coin_spend)?.cat)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::SignerError;
+
+    fn sample_binding() -> (Bytes32, TreeHash, TreeHash, Bytes32) {
+        let launcher_id = Bytes32::new([0x11; 32]);
+        let delegated = TreeHash::new([0x22; 32]);
+        let hashes =
+            p2_conditions_or_singleton_puzzle_hash(delegated, launcher_id).expect("p2 hashes");
+        let binding_p2: Bytes32 = hashes.puzzle_hash.into();
+        (
+            launcher_id,
+            delegated,
+            hashes.fixed_conditions_hash,
+            binding_p2,
+        )
+    }
+
+    #[test]
+    fn resolve_accepts_greenfloor_delegated_hash() {
+        let (launcher_id, delegated, member_hash, binding_p2) = sample_binding();
+        let resolved =
+            resolve_member_fixed_conditions_hash_for_binding(launcher_id, binding_p2, delegated)
+                .expect("resolve delegated");
+        assert_eq!(resolved, member_hash);
+    }
+
+    #[test]
+    fn resolve_accepts_cloud_wallet_member_wrapped_hash() {
+        let (launcher_id, _delegated, member_hash, binding_p2) = sample_binding();
+        let resolved =
+            resolve_member_fixed_conditions_hash_for_binding(launcher_id, binding_p2, member_hash)
+                .expect("resolve member-wrapped");
+        assert_eq!(resolved, member_hash);
+    }
+
+    #[test]
+    fn resolve_rejects_unrelated_hash() {
+        let (launcher_id, _delegated, _member_hash, binding_p2) = sample_binding();
+        let err = resolve_member_fixed_conditions_hash_for_binding(
+            launcher_id,
+            binding_p2,
+            TreeHash::new([0x33; 32]),
+        )
+        .expect_err("unrelated hash");
+        assert!(matches!(err, SignerError::PresplitCoinPuzzleHashMismatch));
+    }
 }

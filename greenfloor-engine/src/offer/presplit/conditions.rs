@@ -12,24 +12,6 @@ use crate::vault::members::{
 };
 use crate::vault::spend::VaultSpendContext;
 
-/// How a persisted fixed-conditions hash is encoded for presplit cancel/reclaim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresplitFixedHash {
-    /// Raw delegated CONDITIONS tree hash (`fixed_delegated_puzzle_hash` in operator state).
-    Delegated(TreeHash),
-    /// Already member-wrapped hash (Cloud Wallet `fixedConditionsHash`).
-    ConditionsMember(TreeHash),
-}
-
-impl PresplitFixedHash {
-    #[must_use]
-    pub const fn tree_hash(self) -> TreeHash {
-        match self {
-            Self::Delegated(hash) | Self::ConditionsMember(hash) => hash,
-        }
-    }
-}
-
 fn insert_p2_conditions_m_of_n(
     mips_spend: &mut MipsSpend,
     fixed_conditions_hash: TreeHash,
@@ -94,20 +76,21 @@ pub fn build_presplit_conditions_inner_spend(
         .map_err(SignerError::from)
 }
 
-pub(crate) fn build_presplit_offer_cancel_inner_spend_for_fixed(
+/// Build cancel/reclaim inner spend from a member-wrapped fixed-conditions hash.
+///
+/// Callers must normalize stored hashes via
+/// [`super::cancel_binding::resolve_member_fixed_conditions_hash_for_binding`] (or equivalent)
+/// before calling this.
+pub(crate) fn build_presplit_offer_cancel_inner_spend(
     ctx: &mut SpendContext,
     cancel_delegated: Spend,
     vault_ctx: &VaultSpendContext,
-    fixed: PresplitFixedHash,
+    fixed_conditions_member_hash: TreeHash,
 ) -> SignerResult<Spend> {
-    let hashes = match fixed {
-        PresplitFixedHash::Delegated(hash) => {
-            p2_conditions_or_singleton_puzzle_hash(hash, vault_ctx.launcher_id)?
-        }
-        PresplitFixedHash::ConditionsMember(hash) => {
-            p2_conditions_or_singleton_from_member_fixed(hash, vault_ctx.launcher_id)?
-        }
-    };
+    let hashes = p2_conditions_or_singleton_from_member_fixed(
+        fixed_conditions_member_hash,
+        vault_ctx.launcher_id,
+    )?;
 
     let mut mips_spend = MipsSpend::new(cancel_delegated);
     let member = SingletonMember::new(vault_ctx.launcher_id);
