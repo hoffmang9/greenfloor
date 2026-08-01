@@ -17,7 +17,9 @@ pub use discovery::{
     nonce_member_puzzle_hash_hex_from_launcher_id,
 };
 pub use hash::m_of_n_hash;
-pub use p2_conditions::p2_conditions_or_singleton_puzzle_hash;
+pub use p2_conditions::{
+    p2_conditions_or_singleton_from_member_fixed, p2_conditions_or_singleton_puzzle_hash,
+};
 pub use restrictions::{
     force_1_of_2_restriction, prevent_vault_side_effects_restriction, timelock_restriction,
 };

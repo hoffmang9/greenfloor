@@ -93,6 +93,26 @@ pub(crate) fn verify_fixed_delegated_puzzle_hash_for_binding(
     Ok(())
 }
 
+/// Verify a Cloud Wallet–style member-wrapped `fixedConditionsHash` against binding p2.
+///
+/// # Errors
+///
+/// Returns an error when the hash does not match the binding.
+pub(crate) fn verify_member_fixed_conditions_hash_for_binding(
+    launcher_id: Bytes32,
+    binding_p2_puzzle_hash: Bytes32,
+    fixed_conditions_member_hash: TreeHash,
+) -> SignerResult<()> {
+    let expected = crate::vault::members::p2_conditions_or_singleton_from_member_fixed(
+        fixed_conditions_member_hash,
+        launcher_id,
+    )?;
+    if binding_p2_puzzle_hash != expected.puzzle_hash.into() {
+        return Err(SignerError::PresplitCoinPuzzleHashMismatch);
+    }
+    Ok(())
+}
+
 /// Read presplit maker binding from a cancellable input (XCH or CAT).
 ///
 /// # Errors

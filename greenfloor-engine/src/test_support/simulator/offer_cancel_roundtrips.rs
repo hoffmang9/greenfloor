@@ -108,7 +108,9 @@ async fn build_presplit_offer_reclaim_spend_returns_cat_to_vault() {
         &mut setup,
         presplit_cat,
         OfferReclaimMode::PresplitOffer {
-            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
+            fixed: crate::offer::presplit::PresplitFixedHash::Delegated(
+                binding.fixed_conditions_tree_hash,
+            ),
         },
     )
     .await;
@@ -518,7 +520,9 @@ async fn build_offer_cancel_rejects_spent_presplit_cat() {
         &mut setup,
         presplit_cat,
         OfferReclaimMode::PresplitOffer {
-            fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
+            fixed: crate::offer::presplit::PresplitFixedHash::Delegated(
+                binding.fixed_conditions_tree_hash,
+            ),
         },
     )
     .await;
