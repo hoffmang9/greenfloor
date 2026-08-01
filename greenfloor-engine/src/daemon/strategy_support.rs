@@ -12,6 +12,63 @@ use crate::storage::SqliteStore;
 
 use super::watchlist::{active_offer_counts_by_size, active_offer_counts_by_size_and_side};
 
+/// Watchlist active counts using the same one-sided / two-sided semantics as strategy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActiveCapacityCounts {
+    /// Side-blind size buckets (sell-only / one-sided markets).
+    OneSided { by_size: BTreeMap<i64, i64> },
+    TwoSided {
+        buy: BTreeMap<i64, i64>,
+        sell: BTreeMap<i64, i64>,
+    },
+}
+
+impl ActiveCapacityCounts {
+    #[must_use]
+    pub(crate) fn for_side_size(&self, side: &str, size_base_units: i64) -> i64 {
+        match self {
+            Self::OneSided { by_size } => by_size.get(&size_base_units).copied().unwrap_or(0),
+            Self::TwoSided { buy, sell } => {
+                if side == "buy" {
+                    buy.get(&size_base_units).copied().unwrap_or(0)
+                } else {
+                    sell.get(&size_base_units).copied().unwrap_or(0)
+                }
+            }
+        }
+    }
+}
+
+/// Active ladder capacity counts shared by strategy and soft-expire.
+///
+/// # Errors
+///
+/// Returns an error when watchlist queries fail.
+pub(crate) fn active_capacity_counts_for_market(
+    store: &SqliteStore,
+    market: &MarketConfig,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    tracked_sizes: &[i64],
+) -> SignerResult<ActiveCapacityCounts> {
+    if is_two_sided_market_mode(&market.mode) {
+        let (buy, sell, _) = active_offer_counts_by_size_and_side(
+            store,
+            &market.market_id,
+            dexie_size_by_offer_id,
+            tracked_sizes,
+        )?;
+        Ok(ActiveCapacityCounts::TwoSided { buy, sell })
+    } else {
+        let (by_size, _) = active_offer_counts_by_size(
+            store,
+            &market.market_id,
+            dexie_size_by_offer_id,
+            tracked_sizes,
+        )?;
+        Ok(ActiveCapacityCounts::OneSided { by_size })
+    }
+}
+
 pub fn strategy_config_from_market(market: &MarketConfig, network: &str) -> StrategyConfig {
     strategy_config_for_ladder(market, network, "sell", true)
 }
@@ -38,49 +95,44 @@ pub fn evaluate_strategy_actions_for_market(
 ) -> SignerResult<(Vec<PlannedAction>, BTreeMap<i64, i64>)> {
     let config = strategy_config_from_market(market, network);
     let tracked_sizes_list = resolve_tracked_sizes_for_market(market, &config);
-    let market_mode = market_mode_label(market);
-    let two_sided = is_two_sided_market_mode(&market_mode);
-
-    if two_sided {
-        let (buy_counts, sell_counts, _unmapped) = active_offer_counts_by_size_and_side(
-            store,
-            &market.market_id,
-            Some(dexie_size_by_offer_id),
-            &tracked_sizes_list,
-        )?;
-        let buy_config = strategy_config_for_ladder(market, network, "buy", false);
-        let sell_config = strategy_config_for_ladder(market, network, "sell", false);
-        let buy_state = strategy_state_from_bucket_counts(&buy_counts, xch_price_usd);
-        let sell_state = strategy_state_from_bucket_counts(&sell_counts, xch_price_usd);
-        let actions = crate::cycle::evaluate_two_sided_market_actions(
-            &buy_state,
-            &sell_state,
-            &buy_config,
-            &sell_config,
-        );
-        return Ok((actions, sell_counts));
-    }
-
-    let (active_offer_counts_by_size, _unmapped) = active_offer_counts_by_size(
+    let counts = active_capacity_counts_for_market(
         store,
-        &market.market_id,
+        market,
         Some(dexie_size_by_offer_id),
         &tracked_sizes_list,
     )?;
-    let mut actions = crate::cycle::evaluate_market(
-        &strategy_state_from_bucket_counts(&active_offer_counts_by_size, xch_price_usd),
-        &config,
-    );
-    actions = filter_planned_actions_with_positive_repeat(&actions);
-    let target_counts = config.target_counts_by_size.clone().unwrap_or_default();
-    let reseed = plan_reseed_actions_from_gap(
-        &actions,
-        &active_offer_counts_by_size,
-        &target_counts,
-        &config,
-        xch_price_usd,
-    );
-    Ok((reseed.actions, active_offer_counts_by_size))
+
+    match counts {
+        ActiveCapacityCounts::TwoSided { buy, sell } => {
+            let buy_config = strategy_config_for_ladder(market, network, "buy", false);
+            let sell_config = strategy_config_for_ladder(market, network, "sell", false);
+            let buy_state = strategy_state_from_bucket_counts(&buy, xch_price_usd);
+            let sell_state = strategy_state_from_bucket_counts(&sell, xch_price_usd);
+            let actions = crate::cycle::evaluate_two_sided_market_actions(
+                &buy_state,
+                &sell_state,
+                &buy_config,
+                &sell_config,
+            );
+            Ok((actions, sell))
+        }
+        ActiveCapacityCounts::OneSided { by_size } => {
+            let mut actions = crate::cycle::evaluate_market(
+                &strategy_state_from_bucket_counts(&by_size, xch_price_usd),
+                &config,
+            );
+            actions = filter_planned_actions_with_positive_repeat(&actions);
+            let target_counts = config.target_counts_by_size.clone().unwrap_or_default();
+            let reseed = plan_reseed_actions_from_gap(
+                &actions,
+                &by_size,
+                &target_counts,
+                &config,
+                xch_price_usd,
+            );
+            Ok((reseed.actions, by_size))
+        }
+    }
 }
 
 fn strategy_config_for_ladder(
@@ -161,10 +213,6 @@ fn target_sizes_from_config(config: &StrategyConfig) -> Vec<i64> {
         return targets.keys().copied().collect();
     }
     vec![1, 10, 100]
-}
-
-fn market_mode_label(market: &MarketConfig) -> String {
-    market.mode.trim().to_ascii_lowercase()
 }
 
 #[cfg(test)]

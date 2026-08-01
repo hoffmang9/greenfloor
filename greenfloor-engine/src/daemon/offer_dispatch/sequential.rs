@@ -14,7 +14,7 @@ pub async fn execute_actions_sequential(
     market: &MarketConfig,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    let post_ctx = ManagedPostContext::from_market_cycle(ctx);
+    let post_ctx = ManagedPostContext::from_market_cycle(ctx)?;
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
 

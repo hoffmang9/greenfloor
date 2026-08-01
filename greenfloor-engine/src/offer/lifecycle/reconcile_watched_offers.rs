@@ -266,7 +266,7 @@ mod tests {
                     Some(0),
                     &Utc::now().to_rfc3339(),
                     crate::storage::OfferCancelWrite {
-                        publish_venue: Some("dexie"),
+                        listing: crate::storage::OfferListingWrite::venue(Some("dexie")),
                         ..Default::default()
                     },
                 )

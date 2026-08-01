@@ -28,6 +28,7 @@ pub use coinset_signals::{
 };
 pub(crate) use metadata::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
 pub use state::{ReconcileState, ReconcileStateError};
+pub(crate) use state::{LADDER_CAPACITY_QUERY_STATES, STATE_CANCELLED, STATE_MAKER_CLAIMED};
 pub use transition::CycleOfferTransition;
 
 use builders::{

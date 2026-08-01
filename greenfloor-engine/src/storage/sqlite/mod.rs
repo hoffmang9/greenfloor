@@ -6,6 +6,7 @@ mod coin_ops;
 mod migrations;
 mod offer_cancel;
 mod offer_coin_watches;
+mod offer_presplit_makers;
 mod offers;
 mod pricing;
 mod reservations;
@@ -48,11 +49,19 @@ pub struct OfferPostPersistRecord {
     pub watched_coin_ids: Vec<String>,
     /// Maker puzzle hashes (p2) to watch on Coinset WS when known at post time.
     pub watched_p2s: Vec<String>,
+    /// Soft listing expiry (unix seconds) for reconcile-driven expire/repost.
+    pub listing_expires_at: Option<u64>,
+    /// Offer nonce hex (presplit reuse after soft listing expiry).
+    pub offer_nonce: Option<String>,
 }
 
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
-pub use offer_cancel::OfferCancelWrite;
+pub use offer_cancel::{OfferCancelWrite, OfferListingWrite};
 pub use offer_coin_watches::{WatchHitRow, WatchMatchKind};
+pub use offer_presplit_makers::{
+    OfferListingFields, ReusablePresplitMakerRow, MAKER_CLAIM_RENEW_INTERVAL_SECONDS,
+    MAKER_CLAIM_STALE_SECONDS,
+};
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,

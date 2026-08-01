@@ -92,6 +92,7 @@ pub(super) fn offer_post_persist_record(
     execution_mode: &str,
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
+    listing_expires_at: Option<u64>,
     create_result: Option<&CreateOfferResult>,
 ) -> Option<OfferPostPersistRecord> {
     if !publish.success {
@@ -104,6 +105,9 @@ pub(super) fn offer_post_persist_record(
     let execution_mode = create_result
         .map(|result| result.execution_mode)
         .or_else(|| OfferExecutionMode::parse_db(execution_mode));
+    let offer_nonce = create_result
+        .map(|result| result.offer_nonce.clone())
+        .filter(|value| !value.trim().is_empty());
     let mut watched_coin_ids = create_result
         .map(|result| result.selected_coin_ids.clone())
         .unwrap_or_default();
@@ -139,6 +143,8 @@ pub(super) fn offer_post_persist_record(
         execution_mode,
         watched_coin_ids,
         watched_p2s,
+        listing_expires_at,
+        offer_nonce,
     })
 }
 

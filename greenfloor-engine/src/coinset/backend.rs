@@ -3,7 +3,21 @@ use clvm_utils::TreeHash;
 
 use super::{broadcast, coin_select, presplit, vault_fetch, CoinsetClient, SelectedCats};
 use crate::error::SignerResult;
+use crate::hex::hex_to_bytes32;
 use chia_sdk_driver::{Cat, Vault};
+
+/// True when the hex coin id is unspent on this backend.
+///
+/// # Errors
+///
+/// Returns an error when the id is invalid or the spent lookup fails.
+pub async fn coin_id_is_unspent<C: OfferCoinsetBackend>(
+    backend: &C,
+    coin_id_hex: &str,
+) -> SignerResult<bool> {
+    let id = hex_to_bytes32(coin_id_hex)?;
+    Ok(!backend.offer_input_coin_is_spent(id).await?)
+}
 
 pub struct LiveCoinset<'a>(pub &'a CoinsetClient);
 

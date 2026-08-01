@@ -1,5 +1,6 @@
 use crate::error::SignerResult;
 use crate::offer::action::BuildOfferForActionResult;
+use crate::offer::types::PresplitMakerReuse;
 use crate::offer::{build_signer_offer_for_action, BuildOfferForActionRequest};
 
 use super::context::ResolvedBuildAndPostContext;
@@ -7,7 +8,9 @@ use super::context::ResolvedBuildAndPostContext;
 pub(super) fn build_create_offer_request(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
+    maker_reuse: Option<PresplitMakerReuse>,
 ) -> SignerResult<BuildOfferForActionRequest> {
+    let reuse = maker_reuse.is_some();
     Ok(BuildOfferForActionRequest {
         receive_address: ctx.gated.market_row.receive_address.clone(),
         base_asset: ctx.gated.market_row.base_asset.clone(),
@@ -18,15 +21,19 @@ pub(super) fn build_create_offer_request(
         quote_price: Some(ctx.quote_price()?),
         // Presplit (ent-wallet `splitInputCoins`): vault singleton spends only in the split tx;
         // the Dexie offer file is self-contained so one taker fill does not invalidate siblings.
-        split_input_coins: true,
-        broadcast_split: true,
+        // Maker reuse skips split (coin already exists).
+        split_input_coins: !reuse,
+        broadcast_split: !reuse,
         offer_coin_ids: Vec::new(),
+        quote_asset_type: ctx.gated.market_row.quote_asset_type.clone(),
+        maker_reuse,
     })
 }
 
 pub(super) async fn create_offer(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
+    maker_reuse: Option<PresplitMakerReuse>,
 ) -> SignerResult<BuildOfferForActionResult> {
     #[cfg(test)]
     if let Some(offer_text) = ctx.test_overrides.stub_offer_text() {
@@ -40,7 +47,7 @@ pub(super) async fn create_offer(
             create_result: None,
         });
     }
-    let request = build_create_offer_request(ctx, size_base_units)?;
+    let request = build_create_offer_request(ctx, size_base_units, maker_reuse)?;
     build_signer_offer_for_action(
         ctx.gated.signer.clone(),
         request,
@@ -66,7 +73,7 @@ mod tests {
             quote_asset_for_offer: "txch".to_string(),
         };
 
-        let request = build_create_offer_request(&ctx, 100).expect("create offer request");
+        let request = build_create_offer_request(&ctx, 100, None).expect("create offer request");
 
         assert_eq!(request.quote_asset, "txch");
         assert_ne!(request.quote_asset, ctx.gated.market_row.quote_asset);

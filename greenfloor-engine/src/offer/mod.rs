@@ -53,13 +53,13 @@ pub use publish::{
 };
 pub use reclaim::{
     build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
-    build_vault_cat_reclaim_spend_bundle,
+    build_vault_cat_reclaim_spend_bundle, reclaim_presplit_maker_coin,
 };
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     signer_split_asset_id, SignerOfferLegAmounts,
 };
 pub use types::{
-    CreateOfferRequest, CreateOfferResult, OfferCancelFields, OfferExecutionMode,
-    StoredOfferCancelMetadata,
+    effective_maker_reuse, CreateOfferRequest, CreateOfferResult, OfferCancelFields,
+    OfferExecutionMode, PresplitMakerReuse, StoredOfferCancelMetadata,
 };

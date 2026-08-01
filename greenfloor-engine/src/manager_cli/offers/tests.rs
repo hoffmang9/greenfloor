@@ -16,8 +16,8 @@ use crate::minimal_program_template::{
 use crate::storage::SqliteStore;
 
 use super::{
-    run_offers_cancel_command, run_offers_reconcile_command, OffersCancelCliArgs,
-    OffersReconcileCliArgs,
+    run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
+    OffersCancelCliArgs, OffersReclaimPresplitCliArgs, OffersReconcileCliArgs,
 };
 
 const TEST_RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
@@ -62,7 +62,7 @@ fn seed_offer_states_with_venue(
                 Some(0),
                 &chrono::Utc::now().to_rfc3339(),
                 crate::storage::OfferCancelWrite {
-                    publish_venue,
+                    listing: crate::storage::OfferListingWrite::venue(publish_venue),
                     ..Default::default()
                 },
             )
@@ -89,7 +89,7 @@ async fn offers_reconcile_updates_states_from_dexie() {
                     Some(0),
                     &chrono::Utc::now().to_rfc3339(),
                     crate::storage::OfferCancelWrite {
-                        publish_venue: Some("dexie"),
+                        listing: crate::storage::OfferListingWrite::venue(Some("dexie")),
                         ..Default::default()
                     },
                 )
@@ -329,4 +329,100 @@ fn offers_cancel_rejects_removed_submit_onchain_flag() {
         "--submit-onchain-after-offchain",
     ])
     .is_err());
+}
+
+#[test]
+fn offers_reclaim_presplit_parses_paired_flags() {
+    let cli = ManagerCli::try_parse_from([
+        "greenfloor-manager",
+        "--program-config",
+        "/tmp/program.yaml",
+        "offers-reclaim-presplit",
+        "--coin-id",
+        &"ab".repeat(32),
+        "--fixed-delegated-puzzle-hash",
+        &"cd".repeat(32),
+        "--dry-run",
+    ])
+    .expect("parse");
+    match cli.command {
+        crate::manager_cli::commands::ManagerCommands::OffersReclaimPresplit {
+            coin_id,
+            fixed_delegated_puzzle_hash,
+            dry_run,
+        } => {
+            assert_eq!(coin_id, vec!["ab".repeat(32)]);
+            assert_eq!(fixed_delegated_puzzle_hash, vec!["cd".repeat(32)]);
+            assert!(dry_run);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn offers_reclaim_presplit_rejects_mismatched_pair_counts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_cancel_test_markets(&markets);
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let err = run_offers_reclaim_presplit_command(
+        &harness.ctx,
+        OffersReclaimPresplitCliArgs {
+            coin_id: vec!["ab".repeat(32)],
+            fixed_delegated_puzzle_hash: vec!["cd".repeat(32), "ef".repeat(32)],
+            dry_run: true,
+        },
+    )
+    .await
+    .expect_err("mismatch");
+    assert!(err.to_string().contains("must match"));
+}
+
+#[tokio::test]
+async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_record_by_name")
+        .with_status(200)
+        .with_body(r#"{"success":true,"coin_record":null}"#)
+        .create_async()
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_cancel_test_markets(&markets);
+    crate::minimal_program_template::write_minimal_program_with_signer_coinset(
+        &program,
+        &server.url(),
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = crate::manager_cli::commands::ManagerCommands::OffersReclaimPresplit {
+        coin_id: vec!["ab".repeat(32)],
+        fixed_delegated_puzzle_hash: vec!["cd".repeat(32)],
+        dry_run: true,
+    }
+    .run(&harness.ctx)
+    .await
+    .expect("soft fail path");
+    assert_eq!(code, 2);
+    let payload = pop_json(&harness.captured);
+    assert_eq!(payload.get("failed_count"), Some(&json!(1)));
+    assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
 }

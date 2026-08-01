@@ -1,7 +1,7 @@
 use tempfile::tempdir;
 
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
-use crate::storage::sqlite::{OfferCancelWrite, SqliteStore};
+use crate::storage::sqlite::{OfferCancelWrite, OfferListingWrite, SqliteStore};
 
 use super::super::utcnow_iso;
 use super::helpers::column_exists;
@@ -79,7 +79,7 @@ fn migration_heals_partial_coin_watch_with_missing_p2() {
                 OfferCancelWrite {
                     fields: Some(&fields),
                     execution_mode: Some(OfferExecutionMode::PresplitExisting),
-                    publish_venue: Some("coinset"),
+                    listing: OfferListingWrite::venue(Some("coinset")),
                     ..OfferCancelWrite::default()
                 },
             )
@@ -139,7 +139,7 @@ fn migration_seeds_watches_from_cancel_metadata_when_absent() {
                 OfferCancelWrite {
                     fields: Some(&fields),
                     execution_mode: Some(OfferExecutionMode::PresplitExisting),
-                    publish_venue: Some("coinset"),
+                    listing: OfferListingWrite::venue(Some("coinset")),
                     ..OfferCancelWrite::default()
                 },
             )

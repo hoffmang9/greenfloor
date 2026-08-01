@@ -40,13 +40,17 @@ impl PresplitOfferBinding {
     ) -> SignerResult<Self> {
         let payment_ctx = PresplitPaymentContext::new(terms, receive_puzzle_hash, offer_nonce);
         let mut ctx = SpendContext::new();
-        let built =
-            payment_ctx.build_fixed_conditions(&mut ctx, terms.offer_amount, terms.expires_at)?;
+        let conditions_expires_at = terms.conditions_expires_at();
+        let built = payment_ctx.build_fixed_conditions(
+            &mut ctx,
+            terms.offer_amount,
+            conditions_expires_at,
+        )?;
         let p2_hashes =
             p2_conditions_or_singleton_puzzle_hash(built.fixed_conditions_tree_hash, launcher_id)?;
         Ok(Self {
             offer_amount: terms.offer_amount,
-            expires_at: terms.expires_at,
+            expires_at: conditions_expires_at,
             fixed_conditions_tree_hash: built.fixed_conditions_tree_hash,
             p2_puzzle_hash: p2_hashes.puzzle_hash.into(),
         })
@@ -108,6 +112,7 @@ mod tests {
             request_asset_id: "xch".to_string(),
             request_amount: 1,
             expires_at: None,
+            bake_expiry_into_conditions: true,
         };
         let binding =
             PresplitOfferBinding::plan(launcher_id, &terms, Bytes32::default(), Bytes32::default())

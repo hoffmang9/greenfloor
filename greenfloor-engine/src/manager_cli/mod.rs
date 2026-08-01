@@ -3,6 +3,7 @@
 mod cats;
 mod cats_catalog;
 mod coin_op_loop;
+pub(crate) mod coins_balance;
 mod combine_market_cat_dust;
 mod commands;
 mod context;
@@ -32,8 +33,9 @@ pub use crate::config::load_cats_catalog;
 pub use commands::{ManagerCli, ManagerCommands};
 pub use dispatch::run_manager_cli;
 pub use offers::{
-    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
-    OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+    run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
+    run_offers_status_command, OffersCancelCliArgs, OffersReclaimPresplitCliArgs,
+    OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 pub use paths::{
     default_cats_config_path, default_markets_config_path, default_metadata_config_paths,

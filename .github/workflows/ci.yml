@@ -113,12 +113,6 @@ jobs:
           INCREMENTAL: "1"
         run: bash .github/scripts/ubuntu-rust-coverage.sh
 
-      - name: Rust tests
-        if: steps.scope.outputs.run_rust_cov != 'true'
-        env:
-          CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
-        run: bash .github/scripts/ubuntu-rust-tests.sh
-
       - name: Diff coverage gate (changed lines only)
         if: >-
           steps.scope.outputs.run_rust_cov == 'true'
@@ -156,6 +150,12 @@ jobs:
             lcov.info
             coverage-python.xml
           if-no-files-found: ignore
+
+      - name: Rust tests
+        if: steps.scope.outputs.run_rust_cov != 'true'
+        env:
+          CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+        run: bash .github/scripts/ubuntu-rust-tests.sh
 
   test:
     name: Test (${{ matrix.os }})

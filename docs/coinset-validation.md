@@ -54,6 +54,8 @@ greenfloor-manager coins-list --asset wUSDC.b
 ```
 
 These use the Rust engine Coinset client against the market receive address scope.
+For vault-controlled totals that include known unreturned maker coins, use
+`greenfloor-manager coins-balance --asset <ticker>` (ADR 0020).
 
 For vault-wide lineage (all member puzzle hashes, including spent coins), use
 `vault-asset-trace` (§4) instead of `coins-list`.

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::cycle::reconcile::LADDER_CAPACITY_QUERY_STATES;
 use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::canonical_tx_id;
@@ -152,6 +153,77 @@ impl SqliteStore {
             ),
             params![open.as_str(), pending.as_str(), limit_i64, offset_i64],
             "open offer_state",
+            read_offer_state_list_row,
+        )
+    }
+
+    /// Ladder-capacity candidate rows for a market (paginated; no silent truncation).
+    ///
+    /// Includes `open` / `refresh_due` / `maker_claimed` and `mempool_observed` (caller
+    /// applies the recent-age gate for mempool). Newest-first order is not required —
+    /// capacity counting is a full set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_ladder_capacity_offer_states(
+        &self,
+        market_id: &str,
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        const PAGE_SIZE: i64 = 500;
+        let market = market_id.trim();
+        if market.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut all = Vec::new();
+        let mut offset: i64 = 0;
+        loop {
+            let page = self.list_ladder_capacity_offer_states_page(market, PAGE_SIZE, offset)?;
+            let page_len = i64::try_from(page.len()).unwrap_or(i64::MAX);
+            all.extend(page);
+            if page_len < PAGE_SIZE {
+                break;
+            }
+            offset = offset.saturating_add(PAGE_SIZE);
+        }
+        Ok(all)
+    }
+
+    fn list_ladder_capacity_offer_states_page(
+        &self,
+        market_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        let state_placeholders = (1..=LADDER_CAPACITY_QUERY_STATES.len())
+            .map(|idx| format!("?{idx}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let market_idx = LADDER_CAPACITY_QUERY_STATES.len() + 1;
+        let limit_idx = market_idx + 1;
+        let offset_idx = limit_idx + 1;
+        let sql = format!(
+            r"
+            SELECT {OFFER_STATE_LIST_COLUMNS}
+            FROM offer_state
+            WHERE state IN ({state_placeholders})
+              AND market_id = ?{market_idx}
+            ORDER BY offer_id ASC
+            LIMIT ?{limit_idx} OFFSET ?{offset_idx}
+            "
+        );
+        let mut values: Vec<rusqlite::types::Value> = LADDER_CAPACITY_QUERY_STATES
+            .iter()
+            .map(|state| (*state).to_string().into())
+            .collect();
+        values.push(market_id.to_string().into());
+        values.push(limit.into());
+        values.push(offset.into());
+        query_mapped(
+            &self.conn,
+            &sql,
+            rusqlite::params_from_iter(values),
+            "ladder capacity offer_state",
             read_offer_state_list_row,
         )
     }

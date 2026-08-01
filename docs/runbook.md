@@ -103,6 +103,20 @@ Optional developer bootstrap for testnet markets:
     confirmation.
   - `--cancel-open` includes all `open` and `pending_visibility` rows (paginated, not recency-capped)
     and skips offers already in `cancel_submitted`.
+- Vault-controlled CAT balance (receive inventory + known unreturned makers):
+  - `greenfloor-manager coins-balance --market-id <id> --asset ECO.181.2022 --json`
+  - JSON includes `vault_controlled_amount` / `_units`, `receive_*`, `unreturned_*`, and
+    `unreturned_coins[]` with `coin_id`, `fixed_delegated_puzzle_hash`, `offer_id`,
+    `state`, `reclaimable` (open makers are listed but not reclaimable by default).
+- Reclaim orphaned **presplit** maker coins (idle/expired, or legacy without `offer_state`).
+  Needs maker coin id + fixed delegated CONDITIONS hash (from `coins-balance` unreturned
+  fields, Cloud Wallet `puzzleHashes.fixedConditionsHash`, or offer-build cancel metadata):
+  - Dry-run (build/sign only): `greenfloor-manager offers-reclaim-presplit --coin-id <hex> --fixed-delegated-puzzle-hash <hex> --dry-run --json`
+  - Broadcast reclaim: omit `--dry-run`. Repeat `--coin-id` / `--fixed-delegated-puzzle-hash` in matching pairs for multiple coins.
+  - Ephemeral path: no SQLite offer row updates; confirm on Coinset that the maker coin is spent and CAT returned to vault change.
+- Stable soft expiry (ADR 0020): daemon marks listing expiry locally, then re-offers the
+  same maker when the ladder still wants that size; reclaim when size is no longer wanted
+  or CONDITIONS no longer match current price.
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 

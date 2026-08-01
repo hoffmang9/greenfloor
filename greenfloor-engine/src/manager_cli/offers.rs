@@ -1,4 +1,4 @@
-//! Manager CLI entrypoints for offers status, reconcile, and cancel.
+//! Manager CLI entrypoints for offers status, reconcile, cancel, and presplit reclaim.
 
 use clap::Args;
 
@@ -6,8 +6,8 @@ use crate::cli_util::optional_trimmed;
 use crate::config::{load_program_bundle_gated, load_program_config};
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
-    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliRequest,
-    OffersCancelCliResult,
+    offers_cancel_cli, offers_reclaim_presplit_cli, offers_status_cli, reconcile_offers_cli,
+    OffersCancelCliRequest, OffersCancelCliResult, OffersReclaimPresplitCliResult,
 };
 use crate::storage::resolve_state_db_path;
 
@@ -45,6 +45,16 @@ pub struct OffersCancelCliArgs {
     pub cancel_open: bool,
     #[arg(long)]
     pub venue: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct OffersReclaimPresplitCliArgs {
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub coin_id: Vec<String>,
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub fixed_delegated_puzzle_hash: Vec<String>,
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 /// Run offers reconcile command.
@@ -129,6 +139,30 @@ pub async fn run_offers_cancel_command(
         },
         bundle.signer,
         &program.network,
+    )
+    .await?;
+    let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
+    ctx.emit_serialized(&payload)?;
+    Ok(exit_code)
+}
+
+/// Run orphaned-presplit reclaim command (metadata cancel; no `offer_state` row).
+///
+/// # Errors
+///
+/// Returns an error if pair parsing or program/signer load fails.
+pub async fn run_offers_reclaim_presplit_command(
+    ctx: &ManagerContext,
+    args: OffersReclaimPresplitCliArgs,
+) -> SignerResult<i32> {
+    let bundle = load_program_bundle_gated(&ctx.program_config)?;
+    let program = bundle.program;
+    let payload: OffersReclaimPresplitCliResult = offers_reclaim_presplit_cli(
+        bundle.signer,
+        &program.network,
+        &args.coin_id,
+        &args.fixed_delegated_puzzle_hash,
+        args.dry_run,
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };

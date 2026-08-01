@@ -5,7 +5,7 @@ pub mod time;
 use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::cycle::{OfferLifecycleState, ReconcileState};
+use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
@@ -16,6 +16,7 @@ use time::is_recent_mempool_observed_offer_state;
 type ActiveOfferStateSummary = (
     Vec<String>,
     HashMap<String, i64>,
+    HashMap<String, crate::storage::OfferListingFields>,
     HashMap<String, OfferExecutionMetadata>,
 );
 type SizeCountDetail = (BTreeMap<i64, i64>, HashMap<String, i64>, u64);
@@ -61,43 +62,36 @@ fn active_offer_state_summary(
     store: &SqliteStore,
     market_id: &str,
     clock: DateTime<Utc>,
-    limit: usize,
 ) -> SignerResult<ActiveOfferStateSummary> {
-    let offer_states = store.list_offer_states(Some(market_id), limit)?;
+    let offer_states = store.list_ladder_capacity_offer_states(market_id)?;
     let mut state_counts: HashMap<String, i64> = HashMap::default();
+    let mut active_offer_ids = Vec::new();
     for row in &offer_states {
         let state = row.state.trim().to_ascii_lowercase();
         if state.is_empty() {
             continue;
         }
-        *state_counts.entry(state).or_insert(0) += 1;
-    }
-
-    let active_states: HashSet<&str> = [
-        OfferLifecycleState::Open.as_str(),
-        OfferLifecycleState::RefreshDue.as_str(),
-    ]
-    .into_iter()
-    .collect();
-    let mut active_offer_ids = Vec::new();
-    for row in &offer_states {
-        let state = row.state.trim().to_ascii_lowercase();
+        *state_counts.entry(state.clone()).or_insert(0) += 1;
         let offer_id = row.offer_id.trim();
         if offer_id.is_empty() {
             continue;
         }
-        if active_states.contains(state.as_str()) {
+        let Ok(parsed) = ReconcileState::parse(&state) else {
+            continue;
+        };
+        if parsed.counts_toward_ladder_capacity() {
             active_offer_ids.push(offer_id.to_string());
             continue;
         }
-        if state == OfferLifecycleState::MempoolObserved.as_str()
+        if parsed.is_timed_ladder_capacity_candidate()
             && is_recent_mempool_observed_offer_state(&row.updated_at, clock)
         {
             active_offer_ids.push(offer_id.to_string());
         }
     }
+    let listing = store.offer_listing_fields_by_offer_id(market_id)?;
     let metadata = recent_offer_metadata_by_offer_id(store, market_id)?;
-    Ok((active_offer_ids, state_counts, metadata))
+    Ok((active_offer_ids, state_counts, listing, metadata))
 }
 
 /// Active offer counts by size.
@@ -111,7 +105,7 @@ pub fn active_offer_counts_by_size(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
-    let (counts, _, unmapped) = active_offer_counts_by_size_detail(
+    let (counts, _state_counts, unmapped) = active_offer_counts_by_size_detail(
         store,
         market_id,
         dexie_size_by_offer_id,
@@ -133,15 +127,13 @@ pub fn active_offer_counts_by_size_detail(
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SizeCountDetail> {
-    let (counts, unmapped) = active_offer_counts_by_size_at(
+    active_offer_counts_by_size_at(
         store,
         market_id,
         dexie_size_by_offer_id,
         tracked_sizes,
         clock,
-    )?;
-    let (_, state_counts, _) = active_offer_state_summary(store, market_id, clock, 500)?;
-    Ok((counts, state_counts, unmapped))
+    )
 }
 
 fn active_offer_counts_by_size_at(
@@ -150,17 +142,18 @@ fn active_offer_counts_by_size_at(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
-) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
-    let (active_offer_ids, _state_counts, metadata_by_offer_id) =
-        active_offer_state_summary(store, market_id, clock, 500)?;
+) -> SignerResult<SizeCountDetail> {
+    let (active_offer_ids, state_counts, listing_by_offer_id, metadata_by_offer_id) =
+        active_offer_state_summary(store, market_id, clock)?;
     let buckets = bucket_active_offers_by_size(
         &active_offer_ids,
+        &listing_by_offer_id,
         &metadata_by_offer_id,
         tracked_sizes,
         dexie_size_by_offer_id,
         clock,
     );
-    Ok((buckets.counts, buckets.unmapped))
+    Ok((buckets.counts, state_counts, buckets.unmapped))
 }
 
 /// Active offer counts by size and side.
@@ -196,15 +189,13 @@ pub fn active_offer_counts_by_size_and_side_detail(
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SideCountDetail> {
-    let (buy, sell, unmapped) = active_offer_counts_by_size_and_side_at(
+    active_offer_counts_by_size_and_side_at(
         store,
         market_id,
         dexie_size_by_offer_id,
         tracked_sizes,
         clock,
-    )?;
-    let (_, state_counts, _) = active_offer_state_summary(store, market_id, clock, 500)?;
-    Ok((buy, sell, state_counts, unmapped))
+    )
 }
 
 fn active_offer_counts_by_size_and_side_at(
@@ -213,17 +204,23 @@ fn active_offer_counts_by_size_and_side_at(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
-) -> SignerResult<SideCounts> {
-    let (active_offer_ids, _state_counts, metadata_by_offer_id) =
-        active_offer_state_summary(store, market_id, clock, 500)?;
+) -> SignerResult<SideCountDetail> {
+    let (active_offer_ids, state_counts, listing_by_offer_id, metadata_by_offer_id) =
+        active_offer_state_summary(store, market_id, clock)?;
     let buckets = bucket_active_offers_by_side(
         &active_offer_ids,
+        &listing_by_offer_id,
         &metadata_by_offer_id,
         tracked_sizes,
         dexie_size_by_offer_id,
         clock,
     );
-    Ok((buckets.buy_counts, buckets.sell_counts, buckets.unmapped))
+    Ok((
+        buckets.buy_counts,
+        buckets.sell_counts,
+        state_counts,
+        buckets.unmapped,
+    ))
 }
 
 #[cfg(test)]

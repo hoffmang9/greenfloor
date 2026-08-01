@@ -14,6 +14,7 @@ use super::cycle_store::run_logged_market_phase;
 use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
+use super::soft_expire_phase::run_soft_expire_phase;
 use super::strategy_phase::run_strategy_phase;
 
 pub fn run_post_reconcile_market_phases<'a>(
@@ -35,6 +36,15 @@ async fn execute_post_reconcile_phases(
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
+    // Soft-expire marks + reclaims surplus; strategy ensure_size fills ladder gaps.
+    // Uses CycleWriteStore sync slices (no lock held across Coinset/Dexie awaits).
+    run_logged_market_phase(
+        market.market_id.as_str(),
+        "soft_expire",
+        run_soft_expire_phase(write_store, ctx, market),
+    )
+    .await?;
+
     let bucket_counts = locked_logged_phase!(
         market.market_id.as_str(),
         "inventory",
@@ -143,6 +153,7 @@ mod tests {
         assert_eq!(
             crate::cycle::post_reconcile_market_cycle_phases(),
             &[
+                MarketCyclePhase::SoftExpire,
                 MarketCyclePhase::Inventory,
                 MarketCyclePhase::Strategy,
                 MarketCyclePhase::Cancel,

@@ -57,6 +57,7 @@ pub(crate) fn build_and_post_request(
                     persist_results: true,
                 },
                 action_side: None,
+                maker_reuse: None,
             },
         ),
     )

@@ -270,7 +270,7 @@ pub async fn fetch_and_ensure_watches(
 mod tests {
     use super::*;
     use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
-    use crate::storage::OfferCancelWrite;
+    use crate::storage::{OfferCancelWrite, OfferListingWrite};
     use tempfile::tempdir;
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
                 OfferCancelWrite {
                     fields: Some(&fields),
                     execution_mode: Some(OfferExecutionMode::PresplitExisting),
-                    publish_venue: None,
+                    listing: OfferListingWrite::venue(None),
                     ..OfferCancelWrite::default()
                 },
             )
@@ -329,7 +329,7 @@ mod tests {
                 OfferCancelWrite {
                     fields: Some(&OfferCancelFields::default()),
                     execution_mode: Some(OfferExecutionMode::PresplitExisting),
-                    publish_venue: Some("coinset"),
+                    listing: OfferListingWrite::venue(Some("coinset")),
                     ..OfferCancelWrite::default()
                 },
             )
@@ -352,7 +352,7 @@ mod tests {
                 None,
                 &chrono::Utc::now().to_rfc3339(),
                 OfferCancelWrite {
-                    publish_venue: None,
+                    listing: OfferListingWrite::venue(None),
                     ..OfferCancelWrite::default()
                 },
             )

@@ -349,6 +349,8 @@ pub(crate) fn sample_create_offer_request(
         split_input_coins,
         broadcast_split,
         expires_at: None,
+        bake_expiry_into_conditions: true,
+        offer_nonce: None,
     }
 }
 

@@ -45,12 +45,88 @@ fn watchlist_includes_open_refresh_due_and_mempool_observed() {
     store
         .upsert_offer_state("o4", "m1", "cancelled", Some(3))
         .expect("upsert");
+    store
+        .upsert_offer_state("o6", "m1", "maker_claimed", Some(0))
+        .expect("upsert");
     let ids = watchlist_offer_ids(&store, "m1").expect("watchlist");
     assert!(ids.contains("o1"));
     assert!(ids.contains("o2"));
     assert!(ids.contains("o3"));
     assert!(ids.contains("o5"));
     assert!(!ids.contains("o4"));
+    assert!(!ids.contains("o6"));
+}
+
+#[test]
+fn active_offer_counts_include_maker_claimed_lease() {
+    let (_dir, store) = open_test_store();
+    let clock = Utc::now();
+    let clock_iso = clock.to_rfc3339();
+    let fields = crate::offer::types::OfferCancelFields::from_presplit_build(
+        "aa".repeat(32),
+        "bb".repeat(32),
+        "cc".repeat(32),
+    );
+    store
+        .upsert_offer_state_with_metadata_at(
+            "claimed-10",
+            "m1",
+            "maker_claimed",
+            None,
+            &clock_iso,
+            crate::storage::OfferCancelWrite {
+                fields: Some(&fields),
+                listing: crate::storage::OfferListingWrite {
+                    publish_venue: Some("dexie"),
+                    listing_expires_at: Some(4_000_000_000),
+                    size_base_units: Some(10),
+                    offer_nonce: Some(&"dd".repeat(32)),
+                    offer_side: Some("sell"),
+                },
+                ..crate::storage::OfferCancelWrite::default()
+            },
+        )
+        .expect("upsert");
+
+    let (buy_counts, sell_counts, _, unmapped) =
+        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[10], clock).expect("counts");
+
+    assert_eq!(buy_counts.get(&10), Some(&0));
+    assert_eq!(sell_counts.get(&10), Some(&1));
+    assert_eq!(unmapped, 0);
+}
+
+#[test]
+fn active_offer_counts_paginate_past_capacity_page_size() {
+    let (_dir, store) = open_test_store();
+    let clock = Utc::now();
+    let clock_iso = clock.to_rfc3339();
+    let total = 503i64;
+    for idx in 0..total {
+        store
+            .upsert_offer_state_with_metadata_at(
+                &format!("cap-{idx:04}"),
+                "m1",
+                "open",
+                Some(0),
+                &clock_iso,
+                crate::storage::OfferCancelWrite {
+                    listing: crate::storage::OfferListingWrite {
+                        publish_venue: None,
+                        listing_expires_at: None,
+                        size_base_units: Some(10),
+                        offer_nonce: None,
+                        offer_side: Some("sell"),
+                    },
+                    ..crate::storage::OfferCancelWrite::default()
+                },
+            )
+            .expect("upsert");
+    }
+    let (counts, _, unmapped) =
+        active_offer_counts_by_size_at(&store, "m1", None, &[10], clock).expect("counts");
+    assert_eq!(counts.get(&10), Some(&total));
+    assert_eq!(unmapped, 0);
 }
 
 #[test]
@@ -99,7 +175,7 @@ fn active_offer_counts_by_size_uses_offer_state_and_size_mapping() {
         &clock_iso,
     );
 
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&1), Some(&1));
@@ -136,7 +212,7 @@ fn active_offer_counts_by_size_counts_cli_posted_offer() {
         )
         .expect("audit");
 
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
@@ -144,15 +220,15 @@ fn active_offer_counts_by_size_counts_cli_posted_offer() {
 }
 
 #[test]
-fn active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() {
+fn active_offer_counts_by_size_and_side_unknown_size_stays_unmapped() {
     let (_dir, store) = open_test_store();
     let clock = Utc::now();
     let clock_iso = clock.to_rfc3339();
     store
-        .upsert_offer_state_at("offer-unknown-side", "m1", "open", Some(0), &clock_iso)
+        .upsert_offer_state_at("offer-unknown-size", "m1", "open", Some(0), &clock_iso)
         .expect("upsert");
 
-    let (buy_counts, sell_counts, unmapped) =
+    let (buy_counts, sell_counts, _, unmapped) =
         active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(buy_counts.get(&1), Some(&0));
@@ -161,7 +237,7 @@ fn active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() {
 }
 
 #[test]
-fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
+fn active_offer_counts_by_size_and_side_defaults_missing_side_to_sell() {
     let (_dir, store) = open_test_store();
     let clock = Utc::now();
     let clock_iso = clock.to_rfc3339();
@@ -190,10 +266,12 @@ fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
         &clock_iso,
     );
 
-    let (_buy_counts, _sell_counts, unmapped) =
+    let (buy_counts, sell_counts, _, unmapped) =
         active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
-    assert_eq!(unmapped, 2);
+    assert_eq!(buy_counts.get(&10), Some(&0));
+    assert_eq!(sell_counts.get(&10), Some(&2));
+    assert_eq!(unmapped, 0);
 }
 
 #[test]
@@ -205,7 +283,7 @@ fn active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() {
         .upsert_offer_state_at("beyond-cap-hundred", "m1", "open", Some(0), &clock_iso)
         .expect("upsert");
 
-    let (counts_without, unmapped_without) = active_offer_counts_by_size_at(
+    let (counts_without, _, unmapped_without) = active_offer_counts_by_size_at(
         &store,
         "m1",
         Some(&HashMap::<String, i64>::default()),
@@ -217,7 +295,7 @@ fn active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() {
     assert_eq!(unmapped_without, 1);
 
     let dexie = HashMap::from([("beyond-cap-hundred".to_string(), 100)]);
-    let (counts_with, unmapped_with) =
+    let (counts_with, _, unmapped_with) =
         active_offer_counts_by_size_at(&store, "m1", Some(&dexie), &[], clock).expect("counts");
     assert_eq!(counts_with.get(&100), Some(&1));
     assert_eq!(unmapped_with, 0);
@@ -241,7 +319,7 @@ fn active_offer_counts_by_size_foreign_offer_stays_unmapped() {
         &clock_iso,
     );
 
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
@@ -263,7 +341,7 @@ fn active_offer_counts_by_size_tracks_non_legacy_size() {
         &clock_iso,
     );
 
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
@@ -290,7 +368,7 @@ fn active_offer_counts_excludes_stale_pending_visibility_offer() {
         &stale_created_at,
     );
 
-    let (counts, unmapped) = active_offer_counts_by_size_at(
+    let (counts, _, unmapped) = active_offer_counts_by_size_at(
         &store,
         "m1",
         Some(&HashMap::<String, i64>::default()),
@@ -324,10 +402,55 @@ fn active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie() {
     );
 
     let dexie = HashMap::from([("pending-50".to_string(), 50)]);
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", Some(&dexie), &[50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
+    assert_eq!(unmapped, 0);
+}
+
+#[test]
+fn active_offer_counts_prefer_offer_state_listing_size_over_audit() {
+    let (_dir, store) = open_test_store();
+    let clock = Utc::now();
+    let clock_iso = clock.to_rfc3339();
+    let fields = crate::offer::types::OfferCancelFields::from_presplit_build(
+        "aa".repeat(32),
+        "bb".repeat(32),
+        "cc".repeat(32),
+    );
+    store
+        .upsert_offer_state_with_metadata_at(
+            "listed-10",
+            "m1",
+            "open",
+            None,
+            &clock_iso,
+            crate::storage::OfferCancelWrite {
+                fields: Some(&fields),
+                listing: crate::storage::OfferListingWrite {
+                    publish_venue: Some("dexie"),
+                    listing_expires_at: Some(4_000_000_000),
+                    size_base_units: Some(10),
+                    offer_nonce: Some(&"dd".repeat(32)),
+                    offer_side: Some("sell"),
+                },
+                ..crate::storage::OfferCancelWrite::default()
+            },
+        )
+        .expect("upsert");
+    // Audit claims a different size — listing columns must win.
+    insert_strategy_execution(
+        &store,
+        "m1",
+        &json!([{"offer_id": "listed-10", "size": 100, "status": "executed", "side": "sell"}]),
+        &clock_iso,
+    );
+
+    let (counts, _, unmapped) =
+        active_offer_counts_by_size_at(&store, "m1", None, &[10, 100], clock).expect("counts");
+    assert_eq!(counts.get(&10), Some(&1));
+    assert_eq!(counts.get(&100), Some(&0));
     assert_eq!(unmapped, 0);
 }
 
@@ -351,7 +474,7 @@ fn active_offer_counts_keeps_pending_when_no_dexie_snapshot() {
         &very_old,
     );
 
-    let (counts, unmapped) =
+    let (counts, _, unmapped) =
         active_offer_counts_by_size_at(&store, "m1", None, &[50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));

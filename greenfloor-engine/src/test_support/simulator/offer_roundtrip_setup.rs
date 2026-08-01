@@ -62,6 +62,7 @@ async fn split_presplit_cat_on_sim(
         request_asset_id: "xch".to_string(),
         request_amount: TEST_XCH_MOJO_MULT,
         expires_at: None,
+        bake_expiry_into_conditions: true,
     };
     let binding = PresplitOfferBinding::plan(
         harness.chain.launcher_id,

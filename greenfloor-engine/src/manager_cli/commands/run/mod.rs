@@ -37,13 +37,15 @@ impl ManagerCommands {
             ManagerCommands::BuildAndPostOffer { .. } => build_offer::run_command(self, ctx).await,
             cmd @ (ManagerCommands::OffersStatus { .. }
             | ManagerCommands::OffersReconcile { .. }) => offers::run_command(cmd, ctx).await,
-            cmd @ ManagerCommands::OffersCancel { .. } => {
+            cmd @ (ManagerCommands::OffersCancel { .. }
+            | ManagerCommands::OffersReclaimPresplit { .. }) => {
                 Box::pin(offers::run_command(cmd, ctx)).await
             }
             cmd @ (ManagerCommands::CatsAdd { .. }
             | ManagerCommands::CatsList
             | ManagerCommands::CatsDelete { .. }) => cats::run_command(cmd, ctx).await,
             cmd @ (ManagerCommands::CoinsList { .. }
+            | ManagerCommands::CoinsBalance { .. }
             | ManagerCommands::CoinStatus { .. }
             | ManagerCommands::CoinSplit { .. }
             | ManagerCommands::CoinCombine { .. }) => coin_ops::run_command(cmd, ctx).await,

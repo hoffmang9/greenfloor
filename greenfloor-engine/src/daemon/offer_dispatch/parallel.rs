@@ -248,7 +248,7 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let post_ctx = Arc::new(ManagedPostContext::from_market_cycle(ctx));
+    let post_ctx = Arc::new(ManagedPostContext::from_market_cycle(ctx)?);
     let (executed, action_items) = run_parallel_post_jobs(post_ctx, market, setup).await?;
 
     Ok(OfferDispatchOutput {

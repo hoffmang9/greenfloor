@@ -134,6 +134,8 @@ fn build_leg_request(
                 split_input_coins: false,
                 broadcast_split: false,
                 expires_at: None,
+                bake_expiry_into_conditions: true,
+                offer_nonce: None,
             }
         }
         OfferLegScenario::CatCatDirect => {
@@ -150,6 +152,8 @@ fn build_leg_request(
                 split_input_coins: false,
                 broadcast_split: false,
                 expires_at: None,
+                bake_expiry_into_conditions: true,
+                offer_nonce: None,
             }
         }
     }

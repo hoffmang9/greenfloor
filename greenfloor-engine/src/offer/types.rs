@@ -3,6 +3,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{SignerError, SignerResult};
 
+fn default_bake_expiry_into_conditions() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CreateOfferRequest {
     pub receive_address: String,
@@ -25,6 +29,39 @@ pub struct CreateOfferRequest {
     pub split_input_coins: bool,
     pub broadcast_split: bool,
     pub expires_at: Option<u64>,
+    /// When false (stable soft-expiry), listing expiry is kept but not baked into
+    /// presplit fixed CONDITIONS. Direct path still uses [`Self::expires_at`].
+    #[serde(default = "default_bake_expiry_into_conditions")]
+    pub bake_expiry_into_conditions: bool,
+    /// Explicit offer nonce for [`OfferInput::PresplitExisting`] when source coin ids
+    /// are unavailable (reuse after soft listing expiry).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_coin_id",
+        serialize_with = "serialize_optional_coin_id"
+    )]
+    pub offer_nonce: Option<Bytes32>,
+}
+
+/// Reuse an unspent soft-expiry maker via `PresplitExisting`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PresplitMakerReuse {
+    pub coin_id: String,
+    pub offer_nonce: String,
+}
+
+impl PresplitMakerReuse {
+    /// Non-empty coin id and nonce — same gate create uses before `PreferExisting`.
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        !self.coin_id.trim().is_empty() && !self.offer_nonce.trim().is_empty()
+    }
+}
+
+/// Maker reuse that create will actually apply (non-empty coin id + nonce).
+#[must_use]
+pub fn effective_maker_reuse(reuse: Option<&PresplitMakerReuse>) -> Option<&PresplitMakerReuse> {
+    reuse.filter(|r| r.is_usable())
 }
 
 /// Shared offer fields parsed from CLI/API input.
@@ -36,6 +73,19 @@ pub(crate) struct OfferTerms {
     pub request_asset_id: String,
     pub request_amount: u64,
     pub expires_at: Option<u64>,
+    pub bake_expiry_into_conditions: bool,
+}
+
+impl OfferTerms {
+    /// Expiry seconds included in presplit fixed CONDITIONS (None for soft-expiry makers).
+    #[must_use]
+    pub(crate) fn conditions_expires_at(&self) -> Option<u64> {
+        if self.bake_expiry_into_conditions {
+            self.expires_at
+        } else {
+            None
+        }
+    }
 }
 
 /// Typed offer path after parsing [`CreateOfferRequest`].
@@ -64,6 +114,8 @@ pub(crate) enum OfferInput {
         terms: OfferTerms,
         presplit_coin_id: Bytes32,
         source_coin_ids: Vec<Bytes32>,
+        /// When set, used instead of deriving nonce from [`Self::PresplitExisting::source_coin_ids`].
+        offer_nonce: Option<Bytes32>,
     },
 }
 
@@ -88,6 +140,7 @@ impl TryFrom<CreateOfferRequest> for OfferInput {
             request_asset_id: request.request_asset_id,
             request_amount: request.request_amount,
             expires_at: request.expires_at,
+            bake_expiry_into_conditions: request.bake_expiry_into_conditions,
         };
 
         if !request.presplit_coin_ids.is_empty() {
@@ -98,6 +151,7 @@ impl TryFrom<CreateOfferRequest> for OfferInput {
                 terms,
                 presplit_coin_id: request.presplit_coin_ids[0],
                 source_coin_ids: request.offer_coin_ids,
+                offer_nonce: request.offer_nonce,
             });
         }
 
@@ -147,6 +201,31 @@ where
     S: Serializer,
 {
     serializer.serialize_str(&hex::encode(value))
+}
+
+fn deserialize_optional_coin_id<'de, D>(deserializer: D) -> Result<Option<Bytes32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    match raw {
+        None => Ok(None),
+        Some(value) if value.trim().is_empty() => Ok(None),
+        Some(value) => crate::hex::hex_to_bytes32(&value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
+#[allow(clippy::ref_option)] // serde `serialize_with` always passes `&Option<T>`
+fn serialize_optional_coin_id<S>(value: &Option<Bytes32>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(id) => serializer.serialize_some(&hex::encode(id)),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -298,6 +377,8 @@ mod tests {
             split_input_coins: false,
             broadcast_split: false,
             expires_at: Some(1_700_000_000),
+            bake_expiry_into_conditions: true,
+            offer_nonce: None,
         }
     }
 
@@ -390,5 +471,81 @@ mod tests {
         let request: CreateOfferRequest = serde_json::from_str(&raw).expect("request");
         assert_eq!(request.offer_coin_ids.len(), 1);
         assert_eq!(hex::encode(request.offer_coin_ids[0]), coin);
+    }
+
+    #[test]
+    fn conditions_expires_at_respects_soft_bake_flag() {
+        let soft = OfferTerms {
+            receive_address: "xch1".into(),
+            offer_asset_id: "a".into(),
+            offer_amount: 1,
+            request_asset_id: "xch".into(),
+            request_amount: 1,
+            expires_at: Some(9),
+            bake_expiry_into_conditions: false,
+        };
+        assert_eq!(soft.conditions_expires_at(), None);
+        assert_eq!(
+            OfferTerms {
+                bake_expiry_into_conditions: true,
+                ..soft
+            }
+            .conditions_expires_at(),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn create_offer_request_deserializes_optional_offer_nonce() {
+        let nonce = "b".repeat(64);
+        let raw = format!(
+            r#"{{
+                "receive_address": "xch1",
+                "offer_asset_id": "cat",
+                "offer_amount": 1,
+                "request_asset_id": "xch",
+                "request_amount": 1,
+                "split_input_coins": false,
+                "broadcast_split": false,
+                "offer_nonce": "{nonce}",
+                "bake_expiry_into_conditions": false
+            }}"#
+        );
+        let request: CreateOfferRequest = serde_json::from_str(&raw).expect("request");
+        assert_eq!(
+            request.offer_nonce.map(hex::encode).as_deref(),
+            Some(nonce.as_str())
+        );
+        assert!(!request.bake_expiry_into_conditions);
+        let empty = r#"{
+                "receive_address": "xch1",
+                "offer_asset_id": "cat",
+                "offer_amount": 1,
+                "request_asset_id": "xch",
+                "request_amount": 1,
+                "split_input_coins": false,
+                "broadcast_split": false,
+                "offer_nonce": ""
+            }"#;
+        let cleared: CreateOfferRequest = serde_json::from_str(empty).expect("empty nonce");
+        assert!(cleared.offer_nonce.is_none());
+
+        let with_nonce = CreateOfferRequest {
+            offer_nonce: Some(Bytes32::new([0xab; 32])),
+            ..base_request()
+        };
+        let encoded = serde_json::to_value(&with_nonce).expect("serialize some");
+        assert_eq!(
+            encoded.get("offer_nonce").and_then(|v| v.as_str()),
+            Some(hex::encode([0xab; 32]).as_str())
+        );
+        let without = CreateOfferRequest {
+            offer_nonce: None,
+            ..base_request()
+        };
+        let encoded_none = serde_json::to_value(&without).expect("serialize none");
+        assert!(encoded_none
+            .get("offer_nonce")
+            .is_none_or(serde_json::Value::is_null));
     }
 }

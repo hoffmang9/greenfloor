@@ -279,6 +279,8 @@ async fn run_create_offer_command(
             split_input_coins,
             broadcast_split,
             expires_at,
+            bake_expiry_into_conditions: true,
+            offer_nonce: None,
         },
     )
     .await?;

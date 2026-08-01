@@ -132,15 +132,15 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": false}),
     };
-    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1, None).is_none());
+    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1, None, None).is_none());
 
     let success = PublishResult {
         success: true,
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": true, "id": "offer-1"}),
     };
-    let record =
-        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None).expect("record");
+    let record = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None, None)
+        .expect("record");
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
 
@@ -163,8 +163,9 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
             p2.clone(),
         ),
     };
-    let presplit = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&create))
-        .expect("presplit record");
+    let presplit =
+        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None, Some(&create))
+            .expect("presplit record");
     assert_eq!(
         presplit.execution_mode,
         Some(OfferExecutionMode::PresplitNew)
@@ -192,9 +193,16 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         split_broadcast_status: None,
         cancel_fields: OfferCancelFields::from_direct_build(direct_coin.clone(), direct_p2.clone()),
     };
-    let direct =
-        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, Some(&direct_create))
-            .expect("direct record");
+    let direct = offer_post_persist_record(
+        &success,
+        "sell",
+        "direct",
+        &ctx,
+        10,
+        None,
+        Some(&direct_create),
+    )
+    .expect("direct record");
     assert_eq!(direct.execution_mode, Some(OfferExecutionMode::Direct));
     assert_eq!(
         direct.cancel_fields.input_coin_id.as_deref(),
@@ -254,6 +262,8 @@ fn flush_post_batch_writes_execution_audit_only() {
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
             }],
             &[],
         )
@@ -309,6 +319,8 @@ fn success_persists_offer_state_immediately_before_flush() {
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: vec![coin.clone()],
                 watched_p2s: vec![p2.clone()],
+                listing_expires_at: None,
+                offer_nonce: None,
             }),
         })),
         &mut batch,
@@ -373,6 +385,8 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
             }),
         })),
         &mut batch,
@@ -494,6 +508,7 @@ async fn dry_run_returns_preview_payload_in_process() {
             persist_results: true,
         },
         action_side: None,
+        maker_reuse: None,
         test_overrides: crate::offer::operator::BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
         },

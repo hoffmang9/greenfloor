@@ -11,6 +11,10 @@ pub fn write_offer_post_record_in_txn(
     store: &SqliteStore,
     record: &OfferPostPersistRecord,
 ) -> SignerResult<()> {
+    let size_base_units = i64::try_from(record.size_base_units).ok();
+    let listing_expires_at = record
+        .listing_expires_at
+        .and_then(|seconds| i64::try_from(seconds).ok());
     store.upsert_offer_state_with_metadata_at(
         &record.offer_id,
         &record.market_id,
@@ -20,7 +24,13 @@ pub fn write_offer_post_record_in_txn(
         super::sqlite::OfferCancelWrite {
             fields: Some(&record.cancel_fields),
             execution_mode: record.execution_mode,
-            publish_venue: Some(record.publish_venue.as_str()),
+            listing: super::sqlite::OfferListingWrite {
+                publish_venue: Some(record.publish_venue.as_str()),
+                listing_expires_at,
+                size_base_units,
+                offer_nonce: record.offer_nonce.as_deref(),
+                offer_side: Some(record.side.as_str()),
+            },
             ..Default::default()
         },
     )?;
@@ -100,6 +110,8 @@ mod tests {
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: vec!["ab".repeat(32)],
                 watched_p2s: Vec::new(),
+                listing_expires_at: Some(1_700_000_000),
+                offer_nonce: Some("cd".repeat(32)),
             }],
         )
         .expect("persist");
@@ -122,6 +134,11 @@ mod tests {
             .list_watched_coin_ids_for_market("m1")
             .expect("watches");
         assert!(watched.contains(&"ab".repeat(32)));
+        let past = store
+            .list_open_offers_past_listing_expiry("m1", 1_700_000_001)
+            .expect("listing expiry");
+        // Direct path has no fixed_delegated hash, so unreturned maker queries skip it.
+        assert!(past.is_empty());
     }
 
     #[test]
@@ -149,6 +166,8 @@ mod tests {
                 execution_mode: Some(OfferExecutionMode::PresplitExisting),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
             }],
         )
         .expect("persist");
@@ -207,6 +226,8 @@ mod tests {
                 execution_mode: Some(OfferExecutionMode::Direct),
                 watched_coin_ids: Vec::new(),
                 watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
             },
         )
         .expect("persist empty watches");

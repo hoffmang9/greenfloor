@@ -613,6 +613,7 @@ async fn build_offer_cancel_spend_bundle_presplit_xch_returns_coin_to_vault() {
         request_asset_id: hex::encode(harness.chain.asset_id),
         request_amount: TEST_CAT_MOJO_MULT,
         expires_at: None,
+        bake_expiry_into_conditions: true,
     };
     let binding = PresplitOfferBinding::plan(
         harness.vault_ctx.launcher_id,

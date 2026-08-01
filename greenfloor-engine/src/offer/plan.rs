@@ -42,7 +42,13 @@ pub(crate) fn validate_offer_input(input: &OfferInput) -> SignerResult<()> {
     Ok(())
 }
 
-fn offer_nonce_for_existing_presplit(source_coin_ids: &[Bytes32]) -> SignerResult<Bytes32> {
+fn offer_nonce_for_existing_presplit(
+    source_coin_ids: &[Bytes32],
+    explicit_nonce: Option<Bytes32>,
+) -> SignerResult<Bytes32> {
+    if let Some(nonce) = explicit_nonce {
+        return Ok(nonce);
+    }
     if source_coin_ids.is_empty() {
         return Err(SignerError::PresplitOfferRequiresSourceCoinIds);
     }
@@ -56,9 +62,11 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
 ) -> SignerResult<OfferPlan> {
     match input {
         OfferInput::PresplitExisting {
-            source_coin_ids, ..
+            source_coin_ids,
+            offer_nonce,
+            ..
         } => Ok(OfferPlan::ExistingPresplit {
-            offer_nonce: offer_nonce_for_existing_presplit(source_coin_ids)?,
+            offer_nonce: offer_nonce_for_existing_presplit(source_coin_ids, *offer_nonce)?,
         }),
         OfferInput::Direct {
             terms,
@@ -212,7 +220,7 @@ mod tests {
 
     #[test]
     fn existing_presplit_plan_requires_source_coin_ids_for_nonce() {
-        let err = offer_nonce_for_existing_presplit(&[]).unwrap_err();
+        let err = offer_nonce_for_existing_presplit(&[], None).unwrap_err();
         assert!(matches!(
             err,
             SignerError::PresplitOfferRequiresSourceCoinIds
@@ -233,6 +241,8 @@ mod tests {
             split_input_coins: false,
             broadcast_split: false,
             expires_at: None,
+            bake_expiry_into_conditions: true,
+            offer_nonce: None,
         };
         let err = OfferInput::try_from(request).unwrap_err();
         assert!(matches!(err, SignerError::PresplitOfferRequiresSingleCoin));

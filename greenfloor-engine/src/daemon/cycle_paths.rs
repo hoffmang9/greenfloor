@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::offer::operator::OperatorConfigPaths;
+
 /// Config file paths carried through a daemon cycle (from the run-once request).
 #[derive(Debug, Clone)]
 pub struct DaemonCyclePaths {
@@ -25,5 +27,15 @@ impl DaemonCyclePaths {
     #[must_use]
     pub fn testnet_markets_path(&self) -> Option<&Path> {
         self.testnet_markets_path.as_deref()
+    }
+
+    /// Paths shape shared with manager/ensure `build_and_post` callers.
+    #[must_use]
+    pub fn as_operator_paths(&self) -> OperatorConfigPaths {
+        OperatorConfigPaths {
+            program_path: self.program_path.clone(),
+            markets_path: self.markets_path.clone(),
+            testnet_markets_path: self.testnet_markets_path.clone(),
+        }
     }
 }
