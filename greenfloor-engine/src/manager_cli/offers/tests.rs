@@ -15,6 +15,10 @@ use crate::minimal_program_template::{
 };
 use crate::storage::SqliteStore;
 
+use crate::offer::lifecycle::{
+    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, PresplitReclaimPair,
+};
+
 use super::{
     run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
     OffersCancelCliArgs, OffersReclaimPresplitCliArgs, OffersReconcileCliArgs,
@@ -350,10 +354,12 @@ fn offers_reclaim_presplit_parses_paired_flags() {
             coin_id,
             fixed_delegated_puzzle_hash,
             dry_run,
+            no_wait,
         } => {
             assert_eq!(coin_id, vec!["ab".repeat(32)]);
             assert_eq!(fixed_delegated_puzzle_hash, vec!["cd".repeat(32)]);
             assert!(dry_run);
+            assert!(!no_wait);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -381,6 +387,7 @@ async fn offers_reclaim_presplit_rejects_mismatched_pair_counts() {
             coin_id: vec!["ab".repeat(32)],
             fixed_delegated_puzzle_hash: vec!["cd".repeat(32), "ef".repeat(32)],
             dry_run: true,
+            no_wait: false,
         },
     )
     .await
@@ -417,6 +424,7 @@ async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
         coin_id: vec!["ab".repeat(32)],
         fixed_delegated_puzzle_hash: vec!["cd".repeat(32)],
         dry_run: true,
+        no_wait: false,
     }
     .run(&harness.ctx)
     .await
@@ -425,4 +433,70 @@ async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
     assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
+}
+
+#[test]
+fn reclaim_result_cli_failed_on_wait_error_even_when_submit_succeeded() {
+    let pair = PresplitReclaimPair {
+        coin_id: "aa".repeat(32),
+        fixed_delegated_puzzle_hash: "bb".repeat(32),
+    };
+    let mut item = OffersReclaimPresplitCliItem::success(&pair, "op-1", false);
+    item.result.wait_error = Some("timed out".to_string());
+    let result = OffersReclaimPresplitCliResult {
+        dry_run: false,
+        selected_count: 1,
+        remaining_count: 1,
+        submitted_count: 1,
+        failed_count: 0,
+        stopped_early: true,
+        items: vec![item],
+    };
+    assert!(result.cli_failed());
+    assert_eq!(result.remaining_count, 1);
+    let clean = OffersReclaimPresplitCliResult {
+        dry_run: false,
+        selected_count: 0,
+        remaining_count: 0,
+        submitted_count: 0,
+        failed_count: 0,
+        stopped_early: false,
+        items: vec![],
+    };
+    assert!(!clean.cli_failed());
+}
+
+#[test]
+fn offers_orphan_presplit_parses_discover_flags() {
+    let cli = ManagerCli::try_parse_from([
+        "greenfloor-manager",
+        "--program-config",
+        "/tmp/program.yaml",
+        "offers-orphan-presplit",
+        "--asset",
+        "ECO.181.2022",
+        "--start-height",
+        "8330000",
+        "--reclaim",
+        "--dry-run",
+        "--no-wait",
+    ])
+    .expect("parse");
+    match cli.command {
+        crate::manager_cli::commands::ManagerCommands::OffersOrphanPresplit {
+            asset,
+            start_height,
+            reclaim,
+            dry_run,
+            no_wait,
+            ..
+        } => {
+            assert_eq!(asset, "ECO.181.2022");
+            assert_eq!(start_height, Some(8_330_000));
+            assert!(reclaim);
+            assert!(dry_run);
+            assert!(no_wait);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
 }

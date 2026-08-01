@@ -1,8 +1,9 @@
 use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::offers::{
-    run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
-    run_offers_status_command, OffersCancelCliArgs, OffersReclaimPresplitCliArgs,
+    run_offers_cancel_command, run_offers_orphan_presplit_command,
+    run_offers_reclaim_presplit_command, run_offers_reconcile_command, run_offers_status_command,
+    OffersCancelCliArgs, OffersOrphanPresplitCliArgs, OffersReclaimPresplitCliArgs,
     OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 
@@ -60,6 +61,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             coin_id,
             fixed_delegated_puzzle_hash,
             dry_run,
+            no_wait,
         } => {
             Box::pin(run_offers_reclaim_presplit_command(
                 ctx,
@@ -67,6 +69,38 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                     coin_id,
                     fixed_delegated_puzzle_hash,
                     dry_run,
+                    no_wait,
+                },
+            ))
+            .await
+        }
+        ManagerCommands::OffersOrphanPresplit {
+            asset,
+            market_id,
+            network,
+            coinset_base_url,
+            launcher_id,
+            launcher_id_file,
+            max_nonce,
+            start_height,
+            reclaim,
+            dry_run,
+            no_wait,
+        } => {
+            Box::pin(run_offers_orphan_presplit_command(
+                ctx,
+                OffersOrphanPresplitCliArgs {
+                    asset,
+                    market_id,
+                    network,
+                    coinset_base_url,
+                    launcher_id,
+                    launcher_id_file,
+                    max_nonce,
+                    start_height,
+                    reclaim,
+                    dry_run,
+                    no_wait,
                 },
             ))
             .await

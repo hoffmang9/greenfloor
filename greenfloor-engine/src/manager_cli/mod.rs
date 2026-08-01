@@ -1,5 +1,6 @@
 //! Native `GreenFloor` manager CLI (`greenfloor-manager` binary).
 
+mod asset_resolve;
 mod cats;
 mod cats_catalog;
 mod coin_op_loop;
@@ -33,8 +34,9 @@ pub use crate::config::load_cats_catalog;
 pub use commands::{ManagerCli, ManagerCommands};
 pub use dispatch::run_manager_cli;
 pub use offers::{
-    run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
-    run_offers_status_command, OffersCancelCliArgs, OffersReclaimPresplitCliArgs,
+    run_offers_cancel_command, run_offers_orphan_presplit_command,
+    run_offers_reclaim_presplit_command, run_offers_reconcile_command, run_offers_status_command,
+    OffersCancelCliArgs, OffersOrphanPresplitCliArgs, OffersReclaimPresplitCliArgs,
     OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 pub use paths::{

@@ -108,12 +108,28 @@ Optional developer bootstrap for testnet markets:
   - JSON includes `vault_controlled_amount` / `_units`, `receive_*`, `unreturned_*`, and
     `unreturned_coins[]` with `coin_id`, `fixed_delegated_puzzle_hash`, `offer_id`,
     `state`, `reclaimable` (open makers are listed but not reclaimable by default).
-- Reclaim orphaned **presplit** maker coins (idle/expired, or legacy without `offer_state`).
-  Needs maker coin id + fixed hash from `coins-balance` unreturned fields, GreenFloor
+- Discover vault-hinted orphaned **presplit** makers (not tracked in SQLite), recover
+  fixed hashes from Cloud Wallet-style parent CREATE_COIN memos when present, and
+  optionally reclaim recoverable coins one-by-one:
+  - Discover only: `greenfloor-manager offers-orphan-presplit --asset ECO.181.2022 --start-height 8330000 --json`
+  - Dry-run reclaim: add `--reclaim --dry-run`
+  - Broadcast reclaim (waits for each maker spend by default): add `--reclaim` (use `--no-wait` to skip waits)
+  - With wait enabled, a confirm-wait failure stops the batch (vault singleton must settle before the
+    next reclaim) and exits non-zero; `wait_error` is set on that item under `reclaim_result`
+  - Scope by market base asset: `--market-id <id>` (optional `--asset` must match `base_asset`)
+  - JSON: discover rows are `orphans[]`; reclaim outcomes (including `wait_error`) are only under
+    `reclaim_result` when `--reclaim` is set
+  - GF-native splits use `Memos::None` and report `recovery: unavailable` (use
+    `offers-reclaim-presplit` with a known fixed hash, or `coins-balance` for tracked makers)
+- Reclaim orphaned **presplit** maker coins by explicit coin id + fixed hash (idle/expired,
+  or legacy without `offer_state`). Needs maker coin id + fixed hash from
+  `offers-orphan-presplit`, `coins-balance` unreturned fields, GreenFloor
   `fixed_delegated_puzzle_hash`, or Cloud Wallet `puzzleHashes.fixedConditionsHash`
   (CW stores a member-wrapped hash; reclaim auto-detects GF vs CW encoding):
   - Dry-run (build/sign only): `greenfloor-manager offers-reclaim-presplit --coin-id <hex> --fixed-delegated-puzzle-hash <hex> --dry-run`
-  - Broadcast reclaim: omit `--dry-run`. Repeat `--coin-id` / `--fixed-delegated-puzzle-hash` in matching pairs for multiple coins.
+  - Broadcast reclaim: omit `--dry-run` (waits for each maker spend by default; use `--no-wait` to skip).
+    Repeat `--coin-id` / `--fixed-delegated-puzzle-hash` in matching pairs for multiple coins.
+    A confirm-wait failure stops the batch and sets `wait_error` / `stopped_early` / `remaining_count`.
   - Ephemeral path: no SQLite offer row updates; confirm on Coinset that the maker coin is spent and CAT returned to vault change.
 - Stable soft expiry (ADR 0020): daemon marks listing expiry locally, then re-offers the
   same maker when the ladder still wants that size; reclaim when size is no longer wanted

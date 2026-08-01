@@ -384,4 +384,44 @@ mod coinset_parse_tests {
         assert_eq!(resolved.coin.coin_id(), coin_id);
         assert_eq!(resolved.coin.amount, 5_000);
     }
+
+    /// Orphan recovery must match the child by CAT coin id from the **inner** p2 `CREATE_COIN`
+    /// (same path as ``Cat::parse_children``), not by treating outer CAT outputs as coin ids.
+    #[tokio::test]
+    async fn cat_child_p2_create_coin_memos_finds_child_by_coin_id_on_simulator() {
+        let mut harness = SimulatorVaultHarness::new();
+        harness.mint_vault();
+        let cat = harness.fund_vault_cat(5_000);
+        let coin_id = cat.coin.coin_id();
+        let sim = harness.chain.sim.lock().expect("sim lock");
+        let parent = sim
+            .coin_spend(cat.coin.parent_coin_info)
+            .expect("parent spend");
+        let parent_spend = CoinSpend {
+            coin: parent.coin,
+            puzzle_reveal: parent.puzzle_reveal.clone(),
+            solution: parent.solution.clone(),
+        };
+        drop(sim);
+
+        let (resolved, memos) = coinset::cat_child_p2_create_coin_memos(&parent_spend, coin_id)
+            .expect("parse")
+            .expect("child CREATE_COIN");
+        assert_eq!(resolved.coin.coin_id(), coin_id);
+        assert_eq!(resolved.coin.amount, 5_000);
+        assert_eq!(resolved.info.p2_puzzle_hash, cat.info.p2_puzzle_hash);
+        // Mint/fund path uses hint memos or none; either is fine — child match is the guard.
+        let _ = memos;
+
+        let (hash, detail) = crate::offer::presplit::recover_from_parent_spend(
+            harness.chain.launcher_id,
+            coin_id,
+            5_000,
+            &parent_spend,
+        )
+        .expect("recover");
+        // Funded vault CAT is not a CW-style presplit maker with fixedConditions in memos.
+        assert!(hash.is_none());
+        assert!(!detail.is_empty());
+    }
 }

@@ -135,6 +135,40 @@ pub enum ManagerCommands {
         /// Build and sign reclaim spends but do not broadcast (`push_tx`).
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+        /// Do not wait for each maker coin to be spent after broadcast.
+        #[arg(long, default_value_t = false)]
+        no_wait: bool,
+    },
+    /// Discover vault-hinted orphaned presplit makers; optionally reclaim recoverable ones.
+    OffersOrphanPresplit {
+        /// CAT ticker or asset id hex (required unless `--market-id` is set).
+        #[arg(long, default_value = "")]
+        asset: String,
+        /// Market whose `base_asset` to scan (optional when `--asset` is set).
+        #[arg(long, default_value = "")]
+        market_id: String,
+        #[arg(long, default_value = "")]
+        network: String,
+        #[arg(long, default_value = "")]
+        coinset_base_url: String,
+        #[arg(long, default_value = "")]
+        launcher_id: String,
+        #[arg(long, default_value = "~/.greenfloor/cache/vault_launcher_id.txt")]
+        launcher_id_file: String,
+        #[arg(long, default_value_t = 100)]
+        max_nonce: u32,
+        /// Only consider maker coins confirmed at or after this height.
+        #[arg(long)]
+        start_height: Option<u64>,
+        /// Reclaim coins whose fixed hash can be recovered from parent `CREATE_COIN` memos.
+        #[arg(long, default_value_t = false)]
+        reclaim: bool,
+        /// With `--reclaim`, build/sign only (no `push_tx`). Discover-only when reclaim is off.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// With `--reclaim`, do not wait for each maker coin to be spent after broadcast.
+        #[arg(long, default_value_t = false)]
+        no_wait: bool,
     },
     BootstrapHome {
         #[arg(long, default_value = "~/.greenfloor")]

@@ -59,6 +59,8 @@ Core trading/runtime (V1):
 
 Adjunct operator commands:
 
+- `offers-orphan-presplit` — discover vault-hinted orphaned makers; recover CW memo fixed
+  hashes; optional sequential reclaim
 - `offers-reclaim-presplit` — reclaim orphaned/idle presplit makers by coin id + fixed hash
 - `vault-asset-trace` — per-asset vault lineage from reception to current balance (XCH or CAT)
 - `combine-market-cat-dust` — batch merge sub-unit CAT dust for enabled markets
@@ -112,7 +114,8 @@ Coin-op notes:
   offer file (fixed delegated puzzle hash), not by replanning with source-coin nonce.
 - Daemon cancel audit items use `status: "cancel_submitted"` and
   `reason: "cancel_submitted_on_strong_unstable_move"` on successful submit.
-- Orphaned / unwanted-size presplit makers: daemon soft-expire reclaim, or ops
+- Orphaned / unwanted-size presplit makers: daemon soft-expire reclaim, ops
+  `offers-orphan-presplit --asset … [--reclaim]`, or explicit
   `offers-reclaim-presplit --coin-id … --fixed-delegated-puzzle-hash …` (also for legacy
   coins without `offer_state`). `--cancel-open` does not target `expired` rows.
 
