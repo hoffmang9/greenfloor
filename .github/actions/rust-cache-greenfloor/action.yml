@@ -10,11 +10,18 @@ inputs:
   shared-key:
     description: >-
       Swatinem/rust-cache shared-key namespace. Use `test` for clippy and plain
-      nextest. Use `coverage` for llvm-cov instrumented builds. The ubuntu lint job
-      runs clippy on `test`, then restores `coverage` before incremental llvm-cov so
-      non-instrumented clippy artifacts are not saved into the coverage cache.
+      nextest (`target/`). Use `coverage` for llvm-cov (`target-coverage/`). Separate
+      target dirs keep instrumented and plain artifacts from poisoning each other.
+      Coverage caches must be saved on refs/heads/main; PR-scoped caches are not
+      visible to other PRs.
     required: false
     default: "test"
+  target-dir:
+    description: >-
+      Cargo target directory relative to greenfloor-engine (mapped into rust-cache
+      workspaces). Use `target` for plain builds and `target-coverage` for llvm-cov.
+    required: false
+    default: "target"
   install-nextest:
     description: Install cargo-nextest (disable on jobs that only build or lint).
     required: false
@@ -31,7 +38,7 @@ runs:
       with:
         shared-key: ${{ inputs.shared-key }}
         workspaces: |
-          greenfloor-engine -> target
+          greenfloor-engine -> ${{ inputs.target-dir }}
         cache-workspace-crates: true
         save-if: ${{ inputs.save-cache == 'true' }}
 

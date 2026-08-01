@@ -24,6 +24,9 @@ jobs:
     name: Lint, format, and tests (ubuntu-latest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write # prune-github-actions-caches.sh on main
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,14 +79,36 @@ jobs:
           restore-keys: |
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
+      # llvm-cov uses greenfloor-engine/target-coverage; clippy/plain nextest use
+      # target/. Separate dirs + rust-cache keys avoid artifact poisoning. Coverage
+      # caches must be saved on refs/heads/main (PR-scoped caches are invisible to
+      # other PRs and are pruned on main).
+      - name: Plan coverage cache usage
+        id: cov
+        run: |
+          need=false
+          seed_main=false
+          if [ "${{ steps.scope.outputs.run_rust_cov }}" = "true" ]; then
+            need=true
+          fi
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            need=true
+            if [ "${{ steps.scope.outputs.run_rust_cov }}" != "true" ]; then
+              seed_main=true
+            fi
+          fi
+          {
+            echo "need=${need}"
+            echo "seed_main=${seed_main}"
+          } >>"${GITHUB_OUTPUT}"
+
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
           shared-key: test
+          target-dir: target
           save-cache: "true"
-          install-nextest: ${{ steps.scope.outputs.run_rust_cov != 'true' }}
+          install-nextest: ${{ steps.cov.outputs.need != 'true' }}
 
-      # Fail-fast order: lint/format/clippy first, then collect coverage + gate before
-      # plain Rust tests (so coverage failures do not wait on a full nextest run).
       - name: Lint, format, clippy, and script tests (parallel)
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
@@ -91,28 +116,41 @@ jobs:
         run: bash .github/scripts/ubuntu-all-checks-parallel.sh
 
       - uses: ./.github/actions/rust-cache-greenfloor
-        if: steps.scope.outputs.run_rust_cov == 'true'
+        if: steps.cov.outputs.need == 'true'
         with:
           shared-key: coverage
+          target-dir: target-coverage
           save-cache: "true"
           install-nextest: "true"
 
       - name: Install cargo-llvm-cov
-        if: steps.scope.outputs.run_rust_cov == 'true'
+        if: steps.cov.outputs.need == 'true'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
       - name: Install Rust llvm-tools for coverage
-        if: steps.scope.outputs.run_rust_cov == 'true'
+        if: steps.cov.outputs.need == 'true'
         run: rustup component add llvm-tools-preview
 
+      # PR / gated path: filtered instrumented tests + lcov for diff-cover.
       - name: Rust tests (incremental coverage)
         if: steps.scope.outputs.run_rust_cov == 'true'
         env:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/greenfloor-engine/target-coverage
           COMPARE_BRANCH: origin/main
           INCREMENTAL: "1"
+        run: bash .github/scripts/ubuntu-rust-coverage.sh
+
+      # Main seed: instrumented --no-run into target-coverage only (cheap cache warm).
+      # Plain nextest below still exercises tests on target/.
+      - name: Warm main coverage cache
+        if: steps.cov.outputs.seed_main == 'true'
+        env:
+          CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/greenfloor-engine/target-coverage
+          WARM_ONLY: "1"
         run: bash .github/scripts/ubuntu-rust-coverage.sh
 
       - name: Diff coverage gate (changed lines only)
@@ -153,11 +191,18 @@ jobs:
             coverage-python.xml
           if-no-files-found: ignore
 
+      # Plain nextest when not running the gated llvm-cov suite (includes main seed).
       - name: Rust tests
         if: steps.scope.outputs.run_rust_cov != 'true'
         env:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
         run: bash .github/scripts/ubuntu-rust-tests.sh
+
+      - name: Prune stale Actions caches
+        if: github.ref == 'refs/heads/main' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/prune-github-actions-caches.sh
 
   test:
     name: Test (${{ matrix.os }})
