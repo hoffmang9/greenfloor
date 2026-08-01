@@ -36,7 +36,7 @@ async fn execute_post_reconcile_phases(
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
-    // Soft-expire + ensure/reclaim before strategy so open-count gaps are already filled.
+    // Soft-expire marks + reclaims surplus; strategy ensure_size fills ladder gaps.
     // Uses CycleWriteStore sync slices (no lock held across Coinset/Dexie awaits).
     run_logged_market_phase(
         market.market_id.as_str(),

@@ -33,7 +33,7 @@ pub use api::{
 };
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
-pub use backend::{LiveCoinset, OfferCoinsetBackend};
+pub use backend::{coin_id_is_unspent, LiveCoinset, OfferCoinsetBackend};
 pub use batch::chunk_values;
 pub use broadcast::{
     broadcast_spend_bundle, spend_bundle_operation_id, BroadcastSpendBundleResult,

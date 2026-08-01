@@ -20,7 +20,7 @@ use crate::storage::{resolve_state_db_path, SqliteStore};
 fn state_is_reclaimable(state: &str) -> bool {
     matches!(
         state.trim().to_ascii_lowercase().as_str(),
-        "expired" | "cancelled" | "cancel_submitted"
+        "expired" | "maker_claimed" | "cancelled" | "cancel_submitted"
     )
 }
 
@@ -168,6 +168,7 @@ mod tests {
         assert!(!state_is_reclaimable("open"));
         assert!(!state_is_reclaimable("refresh_due"));
         assert!(state_is_reclaimable("expired"));
+        assert!(state_is_reclaimable("maker_claimed"));
         assert!(state_is_reclaimable("cancelled"));
         assert!(state_is_reclaimable("cancel_submitted"));
     }

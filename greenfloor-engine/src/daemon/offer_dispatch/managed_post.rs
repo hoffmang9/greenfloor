@@ -12,9 +12,7 @@ use crate::cycle::PlannedAction;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
-use crate::offer::operator::{
-    ensure_size_n_offer, BuildAndPostOfferRequestParts, EnsureSizeResult,
-};
+use crate::offer::operator::{ensure_size_n_offer, BuildAndPostOfferRequestParts};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::CycleWriteStore;
 
@@ -82,16 +80,14 @@ async fn execute_managed_post(
         return Ok(false);
     }
     let parts = daemon_ensure_parts(post_ctx, market, action)?;
-    let result: EnsureSizeResult = ensure_size_n_offer(
+    ensure_size_n_offer(
         &post_ctx.write_store,
         post_ctx.signer.clone(),
         &post_ctx.ticker_index,
         market,
         parts,
-        None,
     )
-    .await?;
-    Ok(result.posted())
+    .await
 }
 
 pub fn post_managed_planned_action<'a>(

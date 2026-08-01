@@ -19,9 +19,10 @@ Pre-Rust migration detail lives in git history and
 ### 2026-07-31 — Soft-expiry stable maker coins (ADR 0020)
 
 Stable-quote markets omit on-chain expiry from presplit CONDITIONS; listing expiry is
-soft (`listing_expires_at`). Shared `ensure_size_n_offer` reuses matching makers via
-PresplitExisting (or reclaim+rebuild on price change). Soft-expire phase runs before
-strategy. `coins-balance` reports vault-controlled totals including unreturned makers.
+soft (`listing_expires_at`). Soft-expire leaves wanted-size makers when the ladder has a
+gap (reclaims when full); strategy `ensure_size_n_offer` PreferExisting / rebuilds with
+CAS supersede against parallel races. `coins-balance` reports vault-controlled totals
+including unreturned makers.
 
 ### 2026-07-28 — Three ownership simplifications
 

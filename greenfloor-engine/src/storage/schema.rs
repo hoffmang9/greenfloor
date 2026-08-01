@@ -38,6 +38,8 @@ pub(crate) const OFFER_STATE_ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("size_base_units", "INTEGER NULL"),
     ("offer_nonce", "TEXT NULL"),
     ("offer_side", "TEXT NULL"),
+    // Fencing token for exclusive `maker_claimed` leases (ensure / soft-expire).
+    ("maker_claim_token", "TEXT NULL"),
 ];
 
 pub(crate) const OFFER_COIN_WATCHES_COLUMNS_DDL: &str = r"

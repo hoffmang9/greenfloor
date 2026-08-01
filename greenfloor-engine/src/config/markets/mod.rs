@@ -90,18 +90,25 @@ pub fn bake_expiry_into_conditions_for_quote(quote_asset_type: &str) -> bool {
     !market_uses_soft_listing_expiry(quote_asset_type)
 }
 
-/// Whether the market still wants ladder size `N` on `side` (`target_count > 0`).
+/// Ladder `target_count` for `side` / size N (0 when disabled or unset).
 #[must_use]
-pub fn market_wants_ladder_size(market: &MarketConfig, side: &str, size_base_units: i64) -> bool {
+pub fn market_ladder_target_count(market: &MarketConfig, side: &str, size_base_units: i64) -> i64 {
     if !market.enabled || size_base_units <= 0 {
-        return false;
+        return 0;
     }
     market
         .ladders
         .get(side)
         .into_iter()
         .flatten()
-        .any(|entry| entry.size_base_units == size_base_units && entry.target_count > 0)
+        .find(|entry| entry.size_base_units == size_base_units)
+        .map_or(0, |entry| entry.target_count.max(0))
+}
+
+/// Whether the market still wants ladder size `N` on `side` (`target_count > 0`).
+#[must_use]
+pub fn market_wants_ladder_size(market: &MarketConfig, side: &str, size_base_units: i64) -> bool {
+    market_ladder_target_count(market, side, size_base_units) > 0
 }
 
 fn market_rows(raw: &Value) -> Vec<Value> {

@@ -6,6 +6,8 @@ use crate::cycle::lifecycle::{apply_open_signal, OfferLifecycleState, OfferSigna
 
 pub(crate) const STATE_UNSUPPORTED_VENUE: &str = "reconcile_unsupported_venue";
 pub(crate) const STATE_CANCELLED: &str = "cancelled";
+/// In-flight CAS lock for expired-maker `PreferExisting` / reclaim (not a Dexie cancel).
+pub(crate) const STATE_MAKER_CLAIMED: &str = "maker_claimed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReconcileStateError {
@@ -26,6 +28,8 @@ pub enum ReconcileState {
     PendingVisibility,
     CancelSubmitted,
     Cancelled,
+    /// Exclusive claim on an expired maker during ensure/soft-expire I/O.
+    MakerClaimed,
     UnknownOrphaned,
     UnsupportedVenue,
 }
@@ -40,6 +44,9 @@ impl ReconcileState {
         let trimmed = raw.trim();
         if trimmed == STATE_CANCELLED {
             return Ok(Self::Cancelled);
+        }
+        if trimmed == STATE_MAKER_CLAIMED {
+            return Ok(Self::MakerClaimed);
         }
         if trimmed == "cancel_submitted" {
             return Ok(Self::CancelSubmitted);
@@ -72,6 +79,7 @@ impl ReconcileState {
             Self::PendingVisibility => Cow::Borrowed("pending_visibility"),
             Self::CancelSubmitted => Cow::Borrowed("cancel_submitted"),
             Self::Cancelled => Cow::Borrowed(STATE_CANCELLED),
+            Self::MakerClaimed => Cow::Borrowed(STATE_MAKER_CLAIMED),
             Self::UnknownOrphaned => Cow::Borrowed("unknown_orphaned"),
             Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
         }
@@ -115,10 +123,40 @@ impl ReconcileState {
             | Self::PendingVisibility
             | Self::CancelSubmitted
             | Self::UnknownOrphaned => true,
-            Self::Lifecycle(_) | Self::Cancelled | Self::UnsupportedVenue => false,
+            Self::Lifecycle(_) | Self::Cancelled | Self::MakerClaimed | Self::UnsupportedVenue => {
+                false
+            }
         }
     }
+
+    /// Whether this state always occupies a ladder capacity slot (no age gate).
+    ///
+    /// Distinct from [`Self::is_watched_for_reconcile`]: `maker_claimed` holds capacity
+    /// during ensure/soft-expire I/O but is not Dexie-reconciled. `mempool_observed` is
+    /// capacity-eligible only when recent (caller applies the age predicate).
+    #[must_use]
+    pub fn counts_toward_ladder_capacity(&self) -> bool {
+        matches!(
+            self,
+            Self::Lifecycle(OfferLifecycleState::Open | OfferLifecycleState::RefreshDue)
+                | Self::MakerClaimed
+        )
+    }
+
+    /// Whether capacity counting may include this state when `updated_at` is recent.
+    #[must_use]
+    pub fn is_timed_ladder_capacity_candidate(&self) -> bool {
+        matches!(self, Self::Lifecycle(OfferLifecycleState::MempoolObserved))
+    }
 }
+
+/// Persistable states loaded for ladder capacity (includes mempool for timed filter).
+pub(crate) const LADDER_CAPACITY_QUERY_STATES: &[&str] = &[
+    "open",
+    "refresh_due",
+    STATE_MAKER_CLAIMED,
+    "mempool_observed",
+];
 
 impl Serialize for ReconcileState {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -154,5 +192,19 @@ mod tests {
         assert!(ReconcileState::Lifecycle(OfferLifecycleState::Open).is_cancel_eligible());
         assert!(ReconcileState::PendingVisibility.is_cancel_eligible());
         assert!(!ReconcileState::CancelSubmitted.is_cancel_eligible());
+    }
+
+    #[test]
+    fn ladder_capacity_includes_maker_claimed_not_reconcile_watch() {
+        assert!(ReconcileState::MakerClaimed.counts_toward_ladder_capacity());
+        assert!(!ReconcileState::MakerClaimed.is_watched_for_reconcile());
+        assert!(
+            ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved)
+                .is_timed_ladder_capacity_candidate()
+        );
+        assert!(
+            !ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved)
+                .counts_toward_ladder_capacity()
+        );
     }
 }

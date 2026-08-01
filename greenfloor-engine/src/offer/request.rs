@@ -4,14 +4,23 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 
+/// Default side when listing/`offer_side` is NULL or blank (matches soft-expire / ensure).
+pub const DEFAULT_OFFER_SIDE: &str = "sell";
+
 /// Normalized offer action side: ``buy`` or ``sell``.
 #[must_use]
 pub fn normalize_offer_side(value: &str) -> &'static str {
     if value.trim().eq_ignore_ascii_case("buy") {
         "buy"
     } else {
-        "sell"
+        DEFAULT_OFFER_SIDE
     }
+}
+
+/// Side for ladder / ensure / watchlist when DB or audit side may be missing.
+#[must_use]
+pub fn effective_offer_side(value: Option<&str>) -> &'static str {
+    normalize_offer_side(value.unwrap_or(""))
 }
 
 /// Asset id to split for bootstrap / presplit given action side.
@@ -178,6 +187,9 @@ mod tests {
         assert_eq!(normalize_offer_side("BUY"), "buy");
         assert_eq!(normalize_offer_side("sell"), "sell");
         assert_eq!(normalize_offer_side(""), "sell");
+        assert_eq!(effective_offer_side(None), DEFAULT_OFFER_SIDE);
+        assert_eq!(effective_offer_side(Some("")), DEFAULT_OFFER_SIDE);
+        assert_eq!(effective_offer_side(Some("buy")), "buy");
     }
 
     #[test]

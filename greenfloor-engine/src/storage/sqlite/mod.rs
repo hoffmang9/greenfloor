@@ -58,7 +58,10 @@ pub struct OfferPostPersistRecord {
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
 pub use offer_cancel::{OfferCancelWrite, OfferListingWrite};
 pub use offer_coin_watches::{WatchHitRow, WatchMatchKind};
-pub use offer_presplit_makers::ReusablePresplitMakerRow;
+pub use offer_presplit_makers::{
+    OfferListingFields, ReusablePresplitMakerRow, MAKER_CLAIM_RENEW_INTERVAL_SECONDS,
+    MAKER_CLAIM_STALE_SECONDS,
+};
 pub use reservations::{
     OfferReservationAcquireOutcome, OfferReservationLeaseRequest, OfferReservationLeaseRow,
     OfferReservationRejectReason,

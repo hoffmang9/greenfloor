@@ -87,9 +87,10 @@ Coin-op notes:
 - All posted offers include listing expiry; stable-vs-unstable pairs use shorter expiries.
 - **Stable soft makers (ADR 0020):** `quote_asset_type: stable` omits on-chain
   `AssertBeforeSecondsAbsolute` from presplit fixed CONDITIONS. Listing expiry is
-  operator/SQLite (`listing_expires_at`); on expire, `ensure_size_n_offer` re-offers the
-  same maker when the ladder still wants that size and CONDITIONS still match, else
-  reclaim. Unstable keeps hard on-chain expiry.
+  operator/SQLite (`listing_expires_at`); on expire, soft-expire leaves wanted-size makers
+  for strategy when the ladder has a gap (reclaims when full), and strategy
+  `ensure_size_n_offer` PreferExisting when CONDITIONS match, else reclaim+rebuild.
+  Unstable keeps hard on-chain expiry.
 - Cancellation is exceptional: stable-vs-unstable only, on strong unstable-leg moves
   (`pricing.cancel_policy_stable_vs_unstable`).
 - Normal rotation is expiry-driven; stable size refresh prefers PresplitExisting (no chain
