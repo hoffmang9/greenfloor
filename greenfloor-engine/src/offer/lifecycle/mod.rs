@@ -5,6 +5,7 @@ mod cancel_cli;
 mod cancel_context;
 mod cancel_eligibility;
 pub(crate) mod dexie_index;
+mod listing_expire;
 pub mod market_reconcile;
 mod persist;
 mod reclaim_cli;
@@ -29,6 +30,9 @@ pub use cancel_eligibility::{
     collect_market_cancel_target_offer_ids, filter_cancel_target_offer_ids, row_cancel_eligible,
 };
 pub use dexie_index::build_dexie_size_by_offer_id;
+pub use listing_expire::{
+    mark_listings_soft_expired, supersede_listing_for_repost, supersede_listing_for_repost_synced,
+};
 pub use market_reconcile::{
     run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,
 };

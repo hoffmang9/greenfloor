@@ -13,7 +13,7 @@ use crate::daemon::cycle_paths::DaemonCyclePaths;
 use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
 use crate::offer::operator::{
-    ensure_size_n_offer, EnsureSizeConfigPaths, EnsureSizeNOfferRequest, EnsureSizeOutcome,
+    ensure_size_n_offer, BuildAndPostOfferRequestParts, EnsureSizeResult, OperatorConfigPaths,
 };
 use crate::offer::request::normalize_offer_side;
 use crate::storage::CycleWriteStore;
@@ -51,21 +51,22 @@ impl ManagedPostContext {
     }
 }
 
-fn daemon_ensure_request(
+fn daemon_ensure_parts(
     post_ctx: &ManagedPostContext,
     market: &MarketConfig,
     action: &PlannedAction,
-) -> SignerResult<EnsureSizeNOfferRequest> {
+) -> SignerResult<BuildAndPostOfferRequestParts> {
     let size_base_units = crate::config::parse_non_negative_u64(action.size, "action.size")?;
-    Ok(EnsureSizeNOfferRequest::from_program(
-        EnsureSizeConfigPaths {
-            program_path: post_ctx.paths.program_path.clone(),
-            markets_path: post_ctx.paths.markets_path.clone(),
-            testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
-        },
+    let paths = OperatorConfigPaths {
+        program_path: post_ctx.paths.program_path.clone(),
+        markets_path: post_ctx.paths.markets_path.clone(),
+        testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
+    };
+    Ok(BuildAndPostOfferRequestParts::for_ensure_size(
+        &paths,
         &post_ctx.program,
         post_ctx.operator_network.clone(),
-        market.clone(),
+        market.market_id.clone(),
         size_base_units,
         normalize_offer_side(&action.side),
     ))
@@ -85,15 +86,17 @@ async fn execute_managed_post(
     if action.size <= 0 {
         return Ok(false);
     }
-    let request = daemon_ensure_request(post_ctx, market, action)?;
-    let outcome = ensure_size_n_offer(
+    let parts = daemon_ensure_parts(post_ctx, market, action)?;
+    let result: EnsureSizeResult = ensure_size_n_offer(
         &post_ctx.write_store,
         post_ctx.signer.clone(),
         &post_ctx.ticker_index,
-        request,
+        market,
+        parts,
+        None,
     )
     .await?;
-    Ok(!matches!(outcome, EnsureSizeOutcome::Skipped))
+    Ok(result.posted())
 }
 
 pub fn post_managed_planned_action<'a>(
@@ -173,20 +176,22 @@ mod tests {
     }
 
     #[test]
-    fn daemon_ensure_request_builds_size_and_side() {
+    fn daemon_ensure_parts_builds_size_and_side() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
         let post_ctx = sample_post_context(store);
         let market = sample_market("xch1test");
         let action = sample_action(25);
 
-        let request = daemon_ensure_request(&post_ctx, &market, &action).expect("ensure request");
+        let parts = daemon_ensure_parts(&post_ctx, &market, &action).expect("ensure parts");
 
-        assert_eq!(request.network, "mainnet");
-        assert_eq!(request.market.market_id, "m1");
-        assert_eq!(request.size_base_units, 25);
-        assert_eq!(request.side, "sell");
-        assert_eq!(request.publish_venue.as_deref(), Some("dexie"));
+        assert_eq!(parts.network, "mainnet");
+        assert_eq!(parts.market_id.as_deref(), Some("m1"));
+        assert_eq!(parts.size_base_units, 25);
+        assert_eq!(parts.action_side.as_deref(), Some("sell"));
+        assert_eq!(parts.publish_venue.as_deref(), Some("dexie"));
+        assert!(parts.venue.drop_only);
+        assert_eq!(parts.repeat, 1);
     }
 
     #[tokio::test]

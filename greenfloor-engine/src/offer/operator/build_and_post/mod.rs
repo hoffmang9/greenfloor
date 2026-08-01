@@ -16,7 +16,10 @@ use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
+use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::offer::request::normalize_offer_side;
+use crate::paths::resolve_cats_config_path;
 use crate::storage::{
     state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
 };
@@ -109,6 +112,52 @@ pub struct BuildAndPostOfferRequestParts {
     pub run: BuildAndPostRunOptions,
     pub action_side: Option<String>,
     pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
+}
+
+/// Program/markets config paths for managed ensure / build-and-post callers.
+#[derive(Debug, Clone)]
+pub struct OperatorConfigPaths {
+    pub program_path: PathBuf,
+    pub markets_path: PathBuf,
+    pub testnet_markets_path: Option<PathBuf>,
+}
+
+impl BuildAndPostOfferRequestParts {
+    /// Shared parts for daemon/ensure size-N posts (`drop_only`, single repeat).
+    #[must_use]
+    pub fn for_ensure_size(
+        paths: &OperatorConfigPaths,
+        program: &ManagerProgramConfig,
+        network: impl Into<String>,
+        market_id: impl Into<String>,
+        size_base_units: u64,
+        side: impl Into<String>,
+    ) -> Self {
+        Self {
+            cats_path: Some(resolve_cats_config_path(&paths.markets_path, None)),
+            program_path: paths.program_path.clone(),
+            markets_path: paths.markets_path.clone(),
+            testnet_markets_path: paths.testnet_markets_path.clone(),
+            network: network.into(),
+            market_id: Some(market_id.into()),
+            pair: None,
+            size_base_units,
+            repeat: 1,
+            publish_venue: Some(program.offer_publish_venue.clone()),
+            dexie_base_url: Some(program.dexie_api_base.clone()),
+            splash_base_url: Some(program.splash_api_base.clone()),
+            venue: BuildAndPostVenueOptions {
+                drop_only: true,
+                claim_rewards: false,
+            },
+            run: BuildAndPostRunOptions {
+                dry_run: program.runtime_dry_run,
+                persist_results: true,
+            },
+            action_side: Some(normalize_offer_side(&side.into()).to_string()),
+            maker_reuse: None,
+        }
+    }
 }
 
 impl BuildAndPostOfferRequest {

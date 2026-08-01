@@ -12,13 +12,13 @@ pub(crate) use build_and_post::empty_persist_artifacts_for_test;
 pub use build_and_post::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
     BuildAndPostOfferResponse, BuildAndPostRunOptions, BuildAndPostVenueOptions,
+    OperatorConfigPaths,
 };
 pub(crate) use build_and_post::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
 };
 pub use ensure_size::{
-    ensure_size_n_offer, reclaim_expired_maker_if_unspent, EnsureSizeConfigPaths,
-    EnsureSizeNOfferRequest, EnsureSizeOutcome,
+    ensure_size_n_offer, reclaim_expired_maker_if_unspent, EnsureSizeOutcome, EnsureSizeResult,
 };
 pub use logging::{
     initialize_manager_file_logging, sync_manager_file_logging, warn_if_log_level_auto_healed,

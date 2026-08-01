@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::coinset::parse_coin_ids;
 use crate::config::{
-    bake_expiry_into_conditions_for_quote, CatTickerIndex, MarketPricing, SignerConfig,
+    bake_expiry_into_conditions_for_quote, CatTickerIndex, MarketConfig, MarketPricing,
+    SignerConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::offer::assets::OfferAssetResolver;
@@ -15,7 +16,7 @@ use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
-use crate::offer::types::{CreateOfferRequest, CreateOfferResult, PresplitMakerReuse};
+use crate::offer::types::{CreateOfferRequest, CreateOfferResult, OfferTerms, PresplitMakerReuse};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildOfferForActionRequest {
@@ -71,6 +72,47 @@ pub fn expires_at_unix_from_pricing(pricing: &MarketPricing) -> SignerResult<u64
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().saturating_add(secs_u64))
         .map_err(|_| SignerError::Other("system clock before unix epoch".to_string()))
+}
+
+/// Plan offer terms for a market size/side (shared by ensure hash compare and create).
+///
+/// # Errors
+///
+/// Returns an error when asset resolve, pricing, or size conversion fails.
+pub(crate) async fn plan_offer_terms_for_market(
+    signer: &SignerConfig,
+    ticker_index: &CatTickerIndex,
+    network: &str,
+    market: &MarketConfig,
+    size_base_units: u64,
+    side: &str,
+) -> SignerResult<OfferTerms> {
+    let resolver = OfferAssetResolver::new(signer, ticker_index, network);
+    let (base_id, quote_id) = resolver
+        .resolve_pair(&market.base_asset, &market.quote_asset)
+        .await?;
+    let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
+    let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let leg = compute_signer_offer_leg_amounts(
+        size_i64,
+        quote_price,
+        &base_id,
+        &quote_id,
+        side,
+        &market.pricing,
+    )?;
+    let expires_at = expires_at_unix_from_pricing(&market.pricing)?;
+    Ok(OfferTerms {
+        receive_address: market.receive_address.clone(),
+        offer_asset_id: leg.offer_asset_id,
+        offer_amount: leg.offer_amount_mojos,
+        request_asset_id: leg.request_asset_id,
+        request_amount: leg.request_amount_mojos,
+        expires_at: Some(expires_at),
+        bake_expiry_into_conditions: bake_expiry_into_conditions_for_quote(
+            &market.quote_asset_type,
+        ),
+    })
 }
 
 fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64> {
