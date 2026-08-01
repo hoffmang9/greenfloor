@@ -61,6 +61,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             coin_id,
             fixed_delegated_puzzle_hash,
             dry_run,
+            no_wait,
         } => {
             Box::pin(run_offers_reclaim_presplit_command(
                 ctx,
@@ -68,6 +69,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
                     coin_id,
                     fixed_delegated_puzzle_hash,
                     dry_run,
+                    no_wait,
                 },
             ))
             .await

@@ -2,9 +2,10 @@
 
 use serde::Serialize;
 
+use crate::coinset::{client_for_signer_on_network, wait_until_coins_spent, CoinSpentVerifyConfig};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::hex::normalize_hex;
+use crate::hex::{hex_to_bytes32, normalize_hex};
 use crate::offer::reclaim::reclaim_presplit_maker_coin;
 
 /// One `--coin-id` / `--fixed-delegated-puzzle-hash` pair.
@@ -12,6 +13,16 @@ use crate::offer::reclaim::reclaim_presplit_maker_coin;
 pub struct PresplitReclaimPair {
     pub coin_id: String,
     pub fixed_delegated_puzzle_hash: String,
+}
+
+/// Whether to confirm each submitted reclaim before starting the next (vault singleton safety).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReclaimConfirmWait {
+    /// Do not wait between submits (dry-run, or explicit `--no-wait`).
+    #[default]
+    None,
+    /// Wait until each submitted maker is spent; stop the batch on wait failure.
+    AfterEachSubmit,
 }
 
 /// Typed per-coin reclaim outcome (serialized under `result`).
@@ -86,9 +97,13 @@ impl OffersReclaimPresplitCliItem {
 #[derive(Debug, Clone, Serialize)]
 pub struct OffersReclaimPresplitCliResult {
     pub dry_run: bool,
+    /// Pairs attempted (may be less than requested when confirm-wait stops the batch).
     pub selected_count: u64,
+    /// Pairs not attempted because the batch stopped early.
+    pub remaining_count: u64,
     pub submitted_count: u64,
     pub failed_count: u64,
+    pub stopped_early: bool,
     pub items: Vec<OffersReclaimPresplitCliItem>,
 }
 
@@ -149,24 +164,49 @@ pub fn parse_presplit_reclaim_pairs(
     Ok(pairs)
 }
 
+#[must_use]
+pub(crate) fn confirm_wait_for_run(dry_run: bool, wait: bool) -> ReclaimConfirmWait {
+    if dry_run || !wait {
+        ReclaimConfirmWait::None
+    } else {
+        ReclaimConfirmWait::AfterEachSubmit
+    }
+}
+
 /// Reclaim orphaned presplit maker coins from already-normalized pairs.
+///
+/// When `confirm_wait` is [`ReclaimConfirmWait::AfterEachSubmit`], each successful broadcast
+/// waits for the maker coin to be spent before the next pair (vault singleton serialization).
+/// A wait failure sets `wait_error` and stops the batch; `remaining_count` lists unattempted pairs.
 ///
 /// # Errors
 ///
 /// Per-coin reclaim failures are soft-failed into the result payload (exit code decided by
-/// the manager wrapper). This function itself only fails on unexpected orchestration errors.
+/// the manager wrapper). This function itself only fails on unexpected orchestration errors
+/// (for example Coinset client construction when waiting).
 pub async fn offers_reclaim_presplit_pairs(
     signer_config: SignerConfig,
     operator_network: &str,
     pairs: &[PresplitReclaimPair],
     dry_run: bool,
+    confirm_wait: ReclaimConfirmWait,
 ) -> SignerResult<OffersReclaimPresplitCliResult> {
+    let wait_client = if matches!(confirm_wait, ReclaimConfirmWait::AfterEachSubmit) {
+        Some(client_for_signer_on_network(
+            &signer_config,
+            operator_network,
+        )?)
+    } else {
+        None
+    };
+
     let mut items = Vec::with_capacity(pairs.len());
     let mut submitted_count = 0u64;
     let mut failed_count = 0u64;
+    let mut stopped_early = false;
 
-    for pair in pairs {
-        match reclaim_presplit_maker_coin(
+    for (index, pair) in pairs.iter().enumerate() {
+        let mut item = match reclaim_presplit_maker_coin(
             signer_config.clone(),
             operator_network,
             &pair.coin_id,
@@ -177,27 +217,46 @@ pub async fn offers_reclaim_presplit_pairs(
         {
             Ok(operation_id) => {
                 submitted_count = submitted_count.saturating_add(1);
-                items.push(OffersReclaimPresplitCliItem::success(
-                    pair,
-                    &operation_id,
-                    dry_run,
-                ));
+                OffersReclaimPresplitCliItem::success(pair, &operation_id, dry_run)
             }
             Err(err) => {
                 failed_count = failed_count.saturating_add(1);
-                items.push(OffersReclaimPresplitCliItem::failure(
-                    pair,
-                    &err.to_string(),
-                ));
+                OffersReclaimPresplitCliItem::failure(pair, &err.to_string())
+            }
+        };
+
+        if let Some(client) = wait_client.as_ref() {
+            if item.succeeded() {
+                let wait_err = match hex_to_bytes32(&pair.coin_id) {
+                    Ok(coin) => {
+                        wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
+                            .await
+                            .err()
+                    }
+                    Err(err) => Some(err),
+                };
+                if let Some(err) = wait_err {
+                    item.result.wait_error = Some(err.to_string());
+                    items.push(item);
+                    stopped_early = index + 1 < pairs.len();
+                    break;
+                }
             }
         }
+
+        items.push(item);
     }
+
+    let selected_count = u64::try_from(items.len()).unwrap_or(u64::MAX);
+    let remaining_count = u64::try_from(pairs.len().saturating_sub(items.len())).unwrap_or(0);
 
     Ok(OffersReclaimPresplitCliResult {
         dry_run,
-        selected_count: u64::try_from(pairs.len()).unwrap_or(u64::MAX),
+        selected_count,
+        remaining_count,
         submitted_count,
         failed_count,
+        stopped_early,
         items,
     })
 }
@@ -205,7 +264,8 @@ pub async fn offers_reclaim_presplit_pairs(
 /// Reclaim orphaned presplit maker coins (ephemeral: no `offer_state` row).
 ///
 /// Builds a cancel/reclaim spend per pair via stored metadata. With `dry_run`, builds and
-/// signs but does not `push_tx`.
+/// signs but does not `push_tx`. When `wait` is true and not dry-run, confirms each submit
+/// before the next pair.
 ///
 /// # Errors
 ///
@@ -217,9 +277,17 @@ pub async fn offers_reclaim_presplit_cli(
     coin_ids: &[String],
     fixed_hashes: &[String],
     dry_run: bool,
+    wait: bool,
 ) -> SignerResult<OffersReclaimPresplitCliResult> {
     let pairs = parse_presplit_reclaim_pairs(coin_ids, fixed_hashes)?;
-    offers_reclaim_presplit_pairs(signer_config, operator_network, &pairs, dry_run).await
+    offers_reclaim_presplit_pairs(
+        signer_config,
+        operator_network,
+        &pairs,
+        dry_run,
+        confirm_wait_for_run(dry_run, wait),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -261,6 +329,16 @@ mod tests {
     }
 
     #[test]
+    fn confirm_wait_disabled_for_dry_run_or_no_wait() {
+        assert_eq!(confirm_wait_for_run(true, true), ReclaimConfirmWait::None);
+        assert_eq!(confirm_wait_for_run(false, false), ReclaimConfirmWait::None);
+        assert_eq!(
+            confirm_wait_for_run(false, true),
+            ReclaimConfirmWait::AfterEachSubmit
+        );
+    }
+
+    #[test]
     fn item_success_and_failure_payload_shapes() {
         let pair = PresplitReclaimPair {
             coin_id: "aa".repeat(32),
@@ -282,10 +360,13 @@ mod tests {
         let with_wait = OffersReclaimPresplitCliResult {
             dry_run: false,
             selected_count: 1,
+            remaining_count: 1,
             submitted_count: 1,
             failed_count: 0,
+            stopped_early: true,
             items: vec![waited],
         };
         assert!(with_wait.cli_failed());
+        assert_eq!(with_wait.remaining_count, 1);
     }
 }

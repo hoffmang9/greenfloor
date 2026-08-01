@@ -39,8 +39,9 @@ pub use broadcast::{
     broadcast_spend_bundle, spend_bundle_operation_id, BroadcastSpendBundleResult,
 };
 pub use cats::{
-    cat_from_parent_spend, child_cat_asset_ids_from_parent_spend, list_unspent_cats,
-    list_unspent_cats_by_ids, require_cat_from_parent_spend,
+    cat_child_p2_create_coin_memos, cat_from_parent_spend, child_cat_asset_ids_from_parent_spend,
+    fetch_parent_coin_spend, list_unspent_cats, list_unspent_cats_by_ids,
+    require_cat_from_parent_spend,
 };
 pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{

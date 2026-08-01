@@ -135,6 +135,9 @@ pub enum ManagerCommands {
         /// Build and sign reclaim spends but do not broadcast (`push_tx`).
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+        /// Do not wait for each maker coin to be spent after broadcast.
+        #[arg(long, default_value_t = false)]
+        no_wait: bool,
     },
     /// Discover vault-hinted orphaned presplit makers; optionally reclaim recoverable ones.
     OffersOrphanPresplit {

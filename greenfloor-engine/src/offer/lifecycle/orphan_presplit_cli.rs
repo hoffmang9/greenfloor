@@ -3,21 +3,19 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use chia_sdk_coinset::CoinsetClient;
 use serde::Serialize;
 
-use crate::coinset::{client_for_signer_on_network, wait_until_coins_spent, CoinSpentVerifyConfig};
+use crate::coinset::client_for_signer_on_network;
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::offer::lifecycle::reclaim_cli::{
-    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, PresplitReclaimPair,
+    confirm_wait_for_run, offers_reclaim_presplit_pairs, OffersReclaimPresplitCliResult,
+    PresplitReclaimPair,
 };
 use crate::offer::presplit::{
-    discover_orphan_presplit_candidates, OrphanFixedHashRecovery, OrphanPresplitCandidate,
-    OrphanScanRow,
+    discover_orphan_presplit_candidates, OrphanPresplitCandidate, OrphanScanRow,
 };
-use crate::offer::reclaim::reclaim_presplit_maker_coin;
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 /// Request for orphaned-presplit discovery / reclaim.
@@ -66,13 +64,6 @@ pub struct OffersOrphanPresplitCliResult {
     pub reclaim_result: Option<OffersReclaimPresplitCliResult>,
 }
 
-fn recovery_label(recovery: OrphanFixedHashRecovery) -> &'static str {
-    match recovery {
-        OrphanFixedHashRecovery::ParentMemo => "parent_memo",
-        OrphanFixedHashRecovery::Unavailable => "unavailable",
-    }
-}
-
 fn tracked_cancel_input_coin_ids(
     home_dir: &Path,
     state_db_override: Option<&str>,
@@ -96,7 +87,7 @@ fn item_from_candidate(candidate: &OrphanPresplitCandidate) -> OffersOrphanPresp
         units: candidate.amount / 1000,
         confirmed_block_index: candidate.confirmed_block_index,
         fixed_delegated_puzzle_hash: candidate.fixed_delegated_puzzle_hash.clone(),
-        recovery: recovery_label(candidate.recovery()),
+        recovery: candidate.recovery_label(),
         recovery_detail: candidate.recovery_detail.clone(),
     }
 }
@@ -114,70 +105,6 @@ fn reclaimable_pairs(candidates: &[OrphanPresplitCandidate]) -> Vec<PresplitRecl
                 })
         })
         .collect()
-}
-
-async fn reclaim_pairs_sequentially(
-    signer: &SignerConfig,
-    network: &str,
-    client: &CoinsetClient,
-    pairs: &[PresplitReclaimPair],
-    dry_run: bool,
-    wait: bool,
-) -> OffersReclaimPresplitCliResult {
-    // One-by-one so vault singleton / confirm wait stays serialized.
-    let mut items = Vec::with_capacity(pairs.len());
-    let mut submitted = 0u64;
-    let mut failed = 0u64;
-    for pair in pairs {
-        let mut item = match reclaim_presplit_maker_coin(
-            signer.clone(),
-            network,
-            &pair.coin_id,
-            &pair.fixed_delegated_puzzle_hash,
-            dry_run,
-        )
-        .await
-        {
-            Ok(operation_id) => {
-                submitted = submitted.saturating_add(1);
-                OffersReclaimPresplitCliItem::success(pair, &operation_id, dry_run)
-            }
-            Err(err) => {
-                failed = failed.saturating_add(1);
-                OffersReclaimPresplitCliItem::failure(pair, &err.to_string())
-            }
-        };
-        let stop_batch = if wait && !dry_run && item.succeeded() {
-            // Confirm-wait is required before the next vault singleton spend.
-            let wait_err = match hex_to_bytes32(&pair.coin_id) {
-                Ok(coin) => {
-                    wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
-                        .await
-                        .err()
-                }
-                Err(err) => Some(err),
-            };
-            if let Some(err) = wait_err {
-                item.result.wait_error = Some(err.to_string());
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        items.push(item);
-        if stop_batch {
-            break;
-        }
-    }
-    OffersReclaimPresplitCliResult {
-        dry_run,
-        selected_count: u64::try_from(pairs.len()).unwrap_or(u64::MAX),
-        submitted_count: submitted,
-        failed_count: failed,
-        items,
-    }
 }
 
 /// Discover orphaned vault-hinted presplit makers; optionally reclaim recoverable ones.
@@ -224,15 +151,14 @@ pub async fn offers_orphan_presplit_cli(
 
     let reclaim_result = if request.reclaim {
         Some(
-            reclaim_pairs_sequentially(
-                &signer,
+            offers_reclaim_presplit_pairs(
+                signer,
                 network,
-                &client,
                 &pairs,
                 request.dry_run,
-                request.wait,
+                confirm_wait_for_run(request.dry_run, request.wait),
             )
-            .await,
+            .await?,
         )
     } else {
         None

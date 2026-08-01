@@ -4,22 +4,18 @@ use clap::Args;
 
 use crate::cli_util::{optional_str, optional_trimmed};
 use crate::coinset::resolve_coinset_endpoint;
-use crate::config::{
-    load_gated_operator_market, load_program_bundle_gated, load_program_config,
-    operator_ticker_index_from_paths, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
-};
-use crate::error::{SignerError, SignerResult};
-use crate::hex::normalize_hex_id;
+use crate::config::{load_program_bundle_gated, load_program_config};
+use crate::error::SignerResult;
 use crate::offer::lifecycle::{
     offers_cancel_cli, offers_orphan_presplit_cli, offers_reclaim_presplit_cli, offers_status_cli,
     reconcile_offers_cli, OffersCancelCliRequest, OffersCancelCliResult,
     OffersOrphanPresplitCliRequest, OffersOrphanPresplitCliResult, OffersReclaimPresplitCliResult,
 };
 use crate::offer::presplit::OrphanScanRow;
-use crate::offer::{OfferAssetResolver, VaultTraceAssetKind};
 use crate::storage::resolve_state_db_path;
-use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinRow};
+use crate::vault_coinset_scan::types::AssetTypeFilter;
 
+use super::asset_resolve::resolve_orphan_presplit_cat_asset;
 use super::context::ManagerContext;
 use super::vault_scan::{
     manager_vault_scan_params, resolve_manager_vault_launcher, run_manager_vault_scan,
@@ -67,6 +63,9 @@ pub struct OffersReclaimPresplitCliArgs {
     pub fixed_delegated_puzzle_hash: Vec<String>,
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+    /// Do not wait for each maker coin to be spent after broadcast.
+    #[arg(long, default_value_t = false)]
+    pub no_wait: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -190,86 +189,12 @@ pub async fn run_offers_reclaim_presplit_command(
         &args.coin_id,
         &args.fixed_delegated_puzzle_hash,
         args.dry_run,
+        !args.no_wait,
     )
     .await?;
-    let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
+    let exit_code = if payload.cli_failed() { 2 } else { 0 };
     ctx.emit_serialized(&payload)?;
     Ok(exit_code)
-}
-
-fn orphan_scan_rows_from_vault_coins(coins: &[CoinRow]) -> Vec<OrphanScanRow> {
-    coins
-        .iter()
-        .filter(|row| row.kind.is_cat())
-        .map(|row| OrphanScanRow {
-            coin_id: row.coin_id.clone(),
-            parent_coin_info: row.parent_coin_info.clone(),
-            amount: row.amount,
-            confirmed_block_index: row.confirmed_block_index,
-            spent_block_index: row.spent_block_index,
-            discovered_by_hint: row.discovered_by_hint,
-            discovered_by_puzzle_hash: row.discovered_by_puzzle_hash,
-            cat_asset_id: row.cat_asset_id.clone(),
-        })
-        .collect()
-}
-
-async fn resolve_orphan_presplit_asset(
-    ctx: &ManagerContext,
-    signer: &crate::config::SignerConfig,
-    network: &str,
-    market_id: Option<&str>,
-    asset: Option<&str>,
-) -> SignerResult<(String, Option<String>)> {
-    if let Some(mid) = market_id {
-        let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
-            program_path: &ctx.program_config,
-            markets_path: &ctx.markets_config,
-            testnet_markets_path: ctx.testnet_markets_path(),
-            cats_path: Some(&ctx.cats_config),
-            network,
-            market_id: Some(mid),
-            pair: None,
-            command: OperatorMarketCommand::CoinList,
-        })?;
-        let resolver = loaded.asset_resolver();
-        let base = resolver
-            .resolve_inventory_asset(loaded.market_row.base_asset.trim())
-            .await?;
-        if !crate::hex::is_hex_id(&base) {
-            return Err(SignerError::Other(
-                "offers-orphan-presplit requires a CAT market base_asset".to_string(),
-            ));
-        }
-        if let Some(filter) = asset {
-            let inventory_asset = resolver.resolve_inventory_asset(filter).await?;
-            if normalize_hex_id(&inventory_asset) != normalize_hex_id(&base) {
-                return Err(SignerError::Other(
-                    "--asset does not match market base_asset".to_string(),
-                ));
-            }
-        }
-        return Ok((normalize_hex_id(&base), Some(mid.to_string())));
-    }
-    let Some(filter) = asset else {
-        return Err(SignerError::Other(
-            "provide --asset and/or --market-id".to_string(),
-        ));
-    };
-    let ticker_index = operator_ticker_index_from_paths(
-        &ctx.markets_config,
-        ctx.testnet_markets_path(),
-        Some(&ctx.cats_config),
-    );
-    let vault_asset = OfferAssetResolver::new(signer, &ticker_index, network)
-        .resolve_vault_trace_asset(filter)
-        .await?;
-    if !matches!(vault_asset.kind, VaultTraceAssetKind::Cat) {
-        return Err(SignerError::Other(
-            "offers-orphan-presplit requires a CAT asset".to_string(),
-        ));
-    }
-    Ok((normalize_hex_id(&vault_asset.asset_id), None))
 }
 
 /// Discover vault-hinted orphaned presplit makers; optionally reclaim recoverable ones.
@@ -283,7 +208,7 @@ pub async fn run_offers_orphan_presplit_command(
 ) -> SignerResult<i32> {
     let bundle = load_program_bundle_gated(&ctx.program_config)?;
     let network = optional_str(&args.network).unwrap_or(bundle.program.network.as_str());
-    let (asset_id, market_id_out) = resolve_orphan_presplit_asset(
+    let (asset_id, market_id_out) = resolve_orphan_presplit_cat_asset(
         ctx,
         &bundle.signer,
         network,
@@ -314,6 +239,13 @@ pub async fn run_offers_orphan_presplit_command(
     scan_params.start_height = args.start_height;
     let scan = run_manager_vault_scan(scan_params).await?;
 
+    let scan_rows: Vec<OrphanScanRow> = scan
+        .coins
+        .iter()
+        .filter(|row| row.kind.is_cat())
+        .map(OrphanScanRow::from)
+        .collect();
+
     let payload: OffersOrphanPresplitCliResult = offers_orphan_presplit_cli(
         bundle.signer,
         network,
@@ -327,7 +259,7 @@ pub async fn run_offers_orphan_presplit_command(
             home_dir: bundle.program.home_dir.clone(),
             state_db_override: ctx.state_db_override().map(str::to_string),
             launcher_id: launcher.launcher_id,
-            scan_rows: orphan_scan_rows_from_vault_coins(&scan.coins),
+            scan_rows,
         },
     )
     .await?;

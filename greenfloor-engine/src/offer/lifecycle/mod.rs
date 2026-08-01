@@ -49,7 +49,7 @@ pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reclaim_cli::{
     offers_reclaim_presplit_cli, offers_reclaim_presplit_pairs, parse_presplit_reclaim_pairs,
     OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, OffersReclaimPresplitOutcome,
-    PresplitReclaimPair,
+    PresplitReclaimPair, ReclaimConfirmWait,
 };
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

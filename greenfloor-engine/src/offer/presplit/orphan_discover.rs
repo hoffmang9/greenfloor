@@ -2,21 +2,20 @@
 
 use std::collections::HashSet;
 
-use chia_protocol::{Bytes32, Coin, CoinSpend};
-use chia_puzzle_types::Memos;
-use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient, GetPuzzleAndSolutionResponse};
-use chia_sdk_types::{run_puzzle, Condition, Conditions};
+use chia_protocol::{Bytes32, CoinSpend};
+use chia_sdk_coinset::CoinsetClient;
 use clvm_traits::FromClvm;
 use clvm_utils::{tree_hash, TreeHash};
 use clvmr::serde::node_from_bytes;
 use clvmr::{Allocator, NodePtr};
 
-use crate::coinset::{cat_from_parent_spend, with_coinset_client_retries};
+use crate::coinset::{cat_child_p2_create_coin_memos, fetch_parent_coin_spend};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id, tree_hash_to_hex};
 use crate::offer::presplit::resolve_member_fixed_conditions_hash_for_binding;
+use crate::vault_coinset_scan::types::CoinRow;
 
-/// Minimal scan view for orphan discovery (decoupled from vault-scan `CoinRow`).
+/// Minimal scan view for orphan discovery (decoupled from vault-scan `CoinRow` extras).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrphanScanRow {
     pub coin_id: String,
@@ -29,11 +28,19 @@ pub struct OrphanScanRow {
     pub cat_asset_id: Option<String>,
 }
 
-/// How a fixed-conditions hash was recovered for an orphan candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrphanFixedHashRecovery {
-    ParentMemo,
-    Unavailable,
+impl From<&CoinRow> for OrphanScanRow {
+    fn from(row: &CoinRow) -> Self {
+        Self {
+            coin_id: row.coin_id.clone(),
+            parent_coin_info: row.parent_coin_info.clone(),
+            amount: row.amount,
+            confirmed_block_index: row.confirmed_block_index,
+            spent_block_index: row.spent_block_index,
+            discovered_by_hint: row.discovered_by_hint,
+            discovered_by_puzzle_hash: row.discovered_by_puzzle_hash,
+            cat_asset_id: row.cat_asset_id.clone(),
+        }
+    }
 }
 
 /// One unspent vault-hinted CAT coin that may be a stranded presplit maker.
@@ -42,17 +49,18 @@ pub struct OrphanPresplitCandidate {
     pub coin_id: String,
     pub amount: u64,
     pub confirmed_block_index: u64,
+    /// Binding-valid fixed hash when recovered from CW-style parent memos.
     pub fixed_delegated_puzzle_hash: Option<String>,
     pub recovery_detail: String,
 }
 
 impl OrphanPresplitCandidate {
     #[must_use]
-    pub fn recovery(&self) -> OrphanFixedHashRecovery {
+    pub fn recovery_label(&self) -> &'static str {
         if self.fixed_delegated_puzzle_hash.is_some() {
-            OrphanFixedHashRecovery::ParentMemo
+            "parent_memo"
         } else {
-            OrphanFixedHashRecovery::Unavailable
+            "unavailable"
         }
     }
 }
@@ -107,67 +115,38 @@ fn candidate_fixed_hashes_in_allocator(
     Ok([direct, tree_hash(allocator, quoted)])
 }
 
-/// Recover a binding-valid fixed hash from a parent spend in one puzzle pass.
-fn recover_from_parent_spend(
+/// Recover a binding-valid fixed hash from a CAT parent spend's inner p2 `CREATE_COIN` memos.
+///
+/// Cloud Wallet emits `createCoin(p2PuzzleHash, amount, [changePuzzleHash, fixedConditions])`.
+/// Those conditions live on the **inner** p2 spend, not on the outer CAT puzzle output.
+pub(crate) fn recover_from_parent_spend(
     launcher_id: Bytes32,
     coin_id: Bytes32,
     amount: u64,
     parent_spend: &CoinSpend,
 ) -> SignerResult<(Option<TreeHash>, String)> {
-    let mut allocator = Allocator::new();
-    let puzzle = node_from_bytes(&mut allocator, parent_spend.puzzle_reveal.as_ref())
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
-    let solution = node_from_bytes(&mut allocator, parent_spend.solution.as_ref())
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
-    let output = run_puzzle(&mut allocator, puzzle, solution)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
-    let conditions = Conditions::<NodePtr>::from_clvm(&allocator, output)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
-
-    let mut child_coin = None;
-    let mut conditions_ptr = None;
-    for condition in conditions.iter() {
-        let Condition::CreateCoin(create) = condition else {
-            continue;
-        };
-        let created = Coin::new(
-            parent_spend.coin.coin_id(),
-            create.puzzle_hash,
-            create.amount,
-        );
-        if created.coin_id() != coin_id {
-            continue;
-        }
-        conditions_ptr = match create.memos {
-            Memos::Some(ptr) => second_memo_item(&allocator, ptr),
-            Memos::None => None,
-        };
-        child_coin = Some(created);
-        break;
-    }
-    let Some(child_coin) = child_coin else {
+    let Some((cat, memos_bytes)) = cat_child_p2_create_coin_memos(parent_spend, coin_id)? else {
         return Ok((
             None,
-            "CREATE_COIN for child not found in parent spend".to_string(),
+            "CREATE_COIN for child not found in parent CAT inner spend".to_string(),
         ));
     };
-    if child_coin.amount != amount {
+    if cat.coin.amount != amount {
         return Ok((None, "CREATE_COIN amount mismatch".to_string()));
     }
-    let Some(cat) = cat_from_parent_spend(child_coin, parent_spend)? else {
+    let Some(memos_bytes) = memos_bytes else {
         return Ok((
             None,
-            "parent spend does not yield matching CAT child".to_string(),
+            "CREATE_COIN has no memos (GF-native split)".to_string(),
         ));
     };
-    if cat.coin.coin_id() != coin_id {
-        return Ok((None, "CAT child coin id mismatch".to_string()));
-    }
-    let Some(conditions_ptr) = conditions_ptr else {
+    let mut allocator = Allocator::new();
+    let memos_ptr = node_from_bytes(&mut allocator, &memos_bytes)
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let Some(conditions_ptr) = second_memo_item(&allocator, memos_ptr) else {
         return Ok((
             None,
-            "CREATE_COIN has no memos (GF-native split) or memos are not a two-item CW-style list"
-                .to_string(),
+            "CREATE_COIN memos are not a two-item CW-style list".to_string(),
         ));
     };
     for candidate in candidate_fixed_hashes_in_allocator(&mut allocator, conditions_ptr)? {
@@ -194,26 +173,11 @@ async fn recover_fixed_hash_for_row(
     amount: u64,
     parent_coin_info: Bytes32,
 ) -> SignerResult<(Option<TreeHash>, String)> {
-    let parent_record = with_coinset_client_retries(|| async {
-        client.get_coin_record_by_name(parent_coin_info).await
-    })
-    .await?
-    .coin_record;
-    let Some(parent_record) = parent_record else {
-        return Ok((None, "orphan parent coin record not found".to_string()));
-    };
-    if parent_record.spent_block_index == 0 {
-        return Ok((None, "parent coin is unspent".to_string()));
-    }
-    let parent_coin_id = parent_record.coin.coin_id();
-    let solution_response: GetPuzzleAndSolutionResponse = with_coinset_client_retries(|| async {
-        client
-            .get_puzzle_and_solution(parent_coin_id, Some(parent_record.spent_block_index))
-            .await
-    })
-    .await?;
-    let Some(parent_spend) = solution_response.coin_solution else {
-        return Ok((None, "parent puzzle and solution missing".to_string()));
+    let Some(parent_spend) = fetch_parent_coin_spend(client, parent_coin_info).await? else {
+        return Ok((
+            None,
+            "orphan parent coin record or spend not found".to_string(),
+        ));
     };
     recover_from_parent_spend(launcher_id, coin_id, amount, &parent_spend)
 }
@@ -334,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_derived_from_hash_presence() {
+    fn recovery_label_from_hash_presence() {
         let with_hash = OrphanPresplitCandidate {
             coin_id: "11".repeat(32),
             amount: 1000,
@@ -347,8 +311,8 @@ mod tests {
             recovery_detail: "CREATE_COIN has no memos (GF-native split)".to_string(),
             ..with_hash.clone()
         };
-        assert_eq!(with_hash.recovery(), OrphanFixedHashRecovery::ParentMemo);
-        assert_eq!(without.recovery(), OrphanFixedHashRecovery::Unavailable);
+        assert_eq!(with_hash.recovery_label(), "parent_memo");
+        assert_eq!(without.recovery_label(), "unavailable");
     }
 
     #[test]
@@ -357,6 +321,30 @@ mod tests {
         assert!(matches!(err, SignerError::Coinset(_)));
         let detail = soft_fail_detail(SignerError::Driver("bad puzzle".to_string())).expect("soft");
         assert!(detail.contains("bad puzzle"));
+    }
+
+    #[test]
+    fn orphan_scan_row_from_coin_row() {
+        let coin = CoinRow {
+            coin_id: "11".repeat(32),
+            puzzle_hash: "22".repeat(32),
+            parent_coin_info: "33".repeat(32),
+            amount: 5000,
+            confirmed_block_index: 9,
+            spent_block_index: 0,
+            discovered_nonces: vec![1],
+            discovered_by_puzzle_hash: false,
+            discovered_by_hint: true,
+            kind: crate::vault_coinset_scan::types::CoinKind::Cat,
+            cat_asset_id: Some("aa".repeat(32)),
+            cat_symbols: vec!["BYC".to_string()],
+        };
+        let row = OrphanScanRow::from(&coin);
+        assert_eq!(row.coin_id, coin.coin_id);
+        assert_eq!(row.parent_coin_info, coin.parent_coin_info);
+        assert_eq!(row.amount, 5000);
+        assert!(row.discovered_by_hint);
+        assert_eq!(row.cat_asset_id.as_deref(), Some("aa".repeat(32).as_str()));
     }
 
     #[tokio::test]
@@ -387,7 +375,7 @@ mod tests {
         .expect("soft fail");
         assert_eq!(got.len(), 1);
         assert!(got[0].fixed_delegated_puzzle_hash.is_none());
-        assert_eq!(got[0].recovery(), OrphanFixedHashRecovery::Unavailable);
+        assert_eq!(got[0].recovery_label(), "unavailable");
         assert!(!got[0].recovery_detail.is_empty());
     }
 }

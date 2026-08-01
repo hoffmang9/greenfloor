@@ -354,10 +354,12 @@ fn offers_reclaim_presplit_parses_paired_flags() {
             coin_id,
             fixed_delegated_puzzle_hash,
             dry_run,
+            no_wait,
         } => {
             assert_eq!(coin_id, vec!["ab".repeat(32)]);
             assert_eq!(fixed_delegated_puzzle_hash, vec!["cd".repeat(32)]);
             assert!(dry_run);
+            assert!(!no_wait);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -385,6 +387,7 @@ async fn offers_reclaim_presplit_rejects_mismatched_pair_counts() {
             coin_id: vec!["ab".repeat(32)],
             fixed_delegated_puzzle_hash: vec!["cd".repeat(32), "ef".repeat(32)],
             dry_run: true,
+            no_wait: false,
         },
     )
     .await
@@ -421,6 +424,7 @@ async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
         coin_id: vec!["ab".repeat(32)],
         fixed_delegated_puzzle_hash: vec!["cd".repeat(32)],
         dry_run: true,
+        no_wait: false,
     }
     .run(&harness.ctx)
     .await
@@ -441,17 +445,22 @@ fn reclaim_result_cli_failed_on_wait_error_even_when_submit_succeeded() {
     item.result.wait_error = Some("timed out".to_string());
     let result = OffersReclaimPresplitCliResult {
         dry_run: false,
-        selected_count: 2,
+        selected_count: 1,
+        remaining_count: 1,
         submitted_count: 1,
         failed_count: 0,
+        stopped_early: true,
         items: vec![item],
     };
     assert!(result.cli_failed());
+    assert_eq!(result.remaining_count, 1);
     let clean = OffersReclaimPresplitCliResult {
         dry_run: false,
         selected_count: 0,
+        remaining_count: 0,
         submitted_count: 0,
         failed_count: 0,
+        stopped_early: false,
         items: vec![],
     };
     assert!(!clean.cli_failed());

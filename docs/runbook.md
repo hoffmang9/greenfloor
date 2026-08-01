@@ -127,7 +127,9 @@ Optional developer bootstrap for testnet markets:
   `fixed_delegated_puzzle_hash`, or Cloud Wallet `puzzleHashes.fixedConditionsHash`
   (CW stores a member-wrapped hash; reclaim auto-detects GF vs CW encoding):
   - Dry-run (build/sign only): `greenfloor-manager offers-reclaim-presplit --coin-id <hex> --fixed-delegated-puzzle-hash <hex> --dry-run`
-  - Broadcast reclaim: omit `--dry-run`. Repeat `--coin-id` / `--fixed-delegated-puzzle-hash` in matching pairs for multiple coins.
+  - Broadcast reclaim: omit `--dry-run` (waits for each maker spend by default; use `--no-wait` to skip).
+    Repeat `--coin-id` / `--fixed-delegated-puzzle-hash` in matching pairs for multiple coins.
+    A confirm-wait failure stops the batch and sets `wait_error` / `stopped_early` / `remaining_count`.
   - Ephemeral path: no SQLite offer row updates; confirm on Coinset that the maker coin is spent and CAT returned to vault change.
 - Stable soft expiry (ADR 0020): daemon marks listing expiry locally, then re-offers the
   same maker when the ladder still wants that size; reclaim when size is no longer wanted

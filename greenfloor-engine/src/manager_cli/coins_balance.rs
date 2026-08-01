@@ -13,6 +13,7 @@ use crate::config::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
+use crate::manager_cli::asset_resolve::resolve_market_inventory_asset_id;
 use crate::manager_cli::context::ManagerContext;
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
@@ -73,11 +74,8 @@ pub async fn run_coins_balance(
         ));
     }
     let resolver = loaded.asset_resolver();
-    let list_asset_id = if let Some(filter) = asset.map(str::trim).filter(|v| !v.is_empty()) {
-        resolver.resolve_inventory_asset(filter).await?
-    } else {
-        market.base_asset.clone()
-    };
+    let list_asset_id =
+        resolve_market_inventory_asset_id(&resolver, &market.base_asset, asset).await?;
 
     let receive_coins = list_wallet_unspent_coins_for_signer(
         &loaded.operator_network,

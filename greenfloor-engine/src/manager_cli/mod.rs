@@ -1,5 +1,6 @@
 //! Native `GreenFloor` manager CLI (`greenfloor-manager` binary).
 
+mod asset_resolve;
 mod cats;
 mod cats_catalog;
 mod coin_op_loop;
