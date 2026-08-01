@@ -108,8 +108,18 @@ Optional developer bootstrap for testnet markets:
   - JSON includes `vault_controlled_amount` / `_units`, `receive_*`, `unreturned_*`, and
     `unreturned_coins[]` with `coin_id`, `fixed_delegated_puzzle_hash`, `offer_id`,
     `state`, `reclaimable` (open makers are listed but not reclaimable by default).
-- Reclaim orphaned **presplit** maker coins (idle/expired, or legacy without `offer_state`).
-  Needs maker coin id + fixed hash from `coins-balance` unreturned fields, GreenFloor
+- Discover vault-hinted orphaned **presplit** makers (not tracked in SQLite), recover
+  fixed hashes from Cloud Wallet-style parent CREATE_COIN memos when present, and
+  optionally reclaim recoverable coins one-by-one:
+  - Discover only: `greenfloor-manager offers-orphan-presplit --asset ECO.181.2022 --start-height 8330000 --json`
+  - Dry-run reclaim: add `--reclaim --dry-run`
+  - Broadcast reclaim (waits for each maker spend by default): add `--reclaim` (use `--no-wait` to skip waits)
+  - Scope by market base asset: `--market-id <id>` (optional `--asset` must match `base_asset`)
+  - GF-native splits use `Memos::None` and report `recovery: unavailable` (use
+    `offers-reclaim-presplit` with a known fixed hash, or `coins-balance` for tracked makers)
+- Reclaim orphaned **presplit** maker coins by explicit coin id + fixed hash (idle/expired,
+  or legacy without `offer_state`). Needs maker coin id + fixed hash from
+  `offers-orphan-presplit`, `coins-balance` unreturned fields, GreenFloor
   `fixed_delegated_puzzle_hash`, or Cloud Wallet `puzzleHashes.fixedConditionsHash`
   (CW stores a member-wrapped hash; reclaim auto-detects GF vs CW encoding):
   - Dry-run (build/sign only): `greenfloor-manager offers-reclaim-presplit --coin-id <hex> --fixed-delegated-puzzle-hash <hex> --dry-run`

@@ -1,17 +1,28 @@
-//! Manager CLI entrypoints for offers status, reconcile, cancel, and presplit reclaim.
+//! Manager CLI entrypoints for offers status, reconcile, cancel, and presplit reclaim/orphan.
 
 use clap::Args;
 
-use crate::cli_util::optional_trimmed;
-use crate::config::{load_program_bundle_gated, load_program_config};
-use crate::error::SignerResult;
-use crate::offer::lifecycle::{
-    offers_cancel_cli, offers_reclaim_presplit_cli, offers_status_cli, reconcile_offers_cli,
-    OffersCancelCliRequest, OffersCancelCliResult, OffersReclaimPresplitCliResult,
+use crate::cli_util::{optional_str, optional_trimmed};
+use crate::coinset::resolve_coinset_endpoint;
+use crate::config::{
+    load_gated_operator_market, load_program_bundle_gated, load_program_config,
+    operator_ticker_index_from_paths, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
+use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex_id;
+use crate::offer::lifecycle::{
+    offers_cancel_cli, offers_orphan_presplit_cli, offers_reclaim_presplit_cli, offers_status_cli,
+    reconcile_offers_cli, OffersCancelCliRequest, OffersCancelCliResult,
+    OffersOrphanPresplitCliRequest, OffersOrphanPresplitCliResult, OffersReclaimPresplitCliResult,
+};
+use crate::offer::{OfferAssetResolver, VaultTraceAssetKind};
 use crate::storage::resolve_state_db_path;
+use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 use super::context::ManagerContext;
+use super::vault_scan::{
+    manager_vault_scan_params, resolve_manager_vault_launcher, run_manager_vault_scan,
+};
 
 #[derive(Debug, Args)]
 pub struct OffersReconcileCliArgs {
@@ -55,6 +66,21 @@ pub struct OffersReclaimPresplitCliArgs {
     pub fixed_delegated_puzzle_hash: Vec<String>,
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct OffersOrphanPresplitCliArgs {
+    pub asset: String,
+    pub market_id: String,
+    pub network: String,
+    pub coinset_base_url: String,
+    pub launcher_id: String,
+    pub launcher_id_file: String,
+    pub max_nonce: u32,
+    pub start_height: Option<u64>,
+    pub reclaim: bool,
+    pub dry_run: bool,
+    pub no_wait: bool,
 }
 
 /// Run offers reconcile command.
@@ -166,6 +192,127 @@ pub async fn run_offers_reclaim_presplit_command(
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
+    ctx.emit_serialized(&payload)?;
+    Ok(exit_code)
+}
+
+async fn resolve_orphan_presplit_asset(
+    ctx: &ManagerContext,
+    signer: &crate::config::SignerConfig,
+    network: &str,
+    market_id: Option<&str>,
+    asset: Option<&str>,
+) -> SignerResult<(String, Option<String>)> {
+    if let Some(mid) = market_id {
+        let loaded = load_gated_operator_market(&GatedOperatorMarketLoadRequest {
+            program_path: &ctx.program_config,
+            markets_path: &ctx.markets_config,
+            testnet_markets_path: ctx.testnet_markets_path(),
+            cats_path: Some(&ctx.cats_config),
+            network,
+            market_id: Some(mid),
+            pair: None,
+            command: OperatorMarketCommand::CoinList,
+        })?;
+        let base = normalize_hex_id(&loaded.market_row.base_asset);
+        if let Some(filter) = asset {
+            let inventory_asset = loaded
+                .asset_resolver()
+                .resolve_inventory_asset(filter)
+                .await?;
+            if normalize_hex_id(&inventory_asset) != base {
+                return Err(SignerError::Other(
+                    "--asset does not match market base_asset".to_string(),
+                ));
+            }
+        }
+        return Ok((base, Some(mid.to_string())));
+    }
+    let Some(filter) = asset else {
+        return Err(SignerError::Other(
+            "provide --asset and/or --market-id".to_string(),
+        ));
+    };
+    let ticker_index = operator_ticker_index_from_paths(
+        &ctx.markets_config,
+        ctx.testnet_markets_path(),
+        Some(&ctx.cats_config),
+    );
+    let vault_asset = OfferAssetResolver::new(signer, &ticker_index, network)
+        .resolve_vault_trace_asset(filter)
+        .await?;
+    if !matches!(vault_asset.kind, VaultTraceAssetKind::Cat) {
+        return Err(SignerError::Other(
+            "offers-orphan-presplit requires a CAT asset".to_string(),
+        ));
+    }
+    Ok((normalize_hex_id(&vault_asset.asset_id), None))
+}
+
+/// Discover vault-hinted orphaned presplit makers; optionally reclaim recoverable ones.
+///
+/// # Errors
+///
+/// Returns an error when config, vault scan, discovery, or reclaim fails.
+pub async fn run_offers_orphan_presplit_command(
+    ctx: &ManagerContext,
+    args: OffersOrphanPresplitCliArgs,
+) -> SignerResult<i32> {
+    let bundle = load_program_bundle_gated(&ctx.program_config)?;
+    let network = optional_str(&args.network).unwrap_or(bundle.program.network.as_str());
+    let (asset_id, market_id_out) = resolve_orphan_presplit_asset(
+        ctx,
+        &bundle.signer,
+        network,
+        optional_trimmed(&args.market_id).as_deref(),
+        optional_trimmed(&args.asset).as_deref(),
+    )
+    .await?;
+
+    let coinset = resolve_coinset_endpoint(
+        network,
+        &bundle.signer.coinset_base_url,
+        optional_str(&args.coinset_base_url),
+    );
+    let launcher = resolve_manager_vault_launcher(
+        ctx,
+        optional_str(&args.launcher_id),
+        optional_str(&args.launcher_id_file),
+    )?;
+    let mut scan_params = manager_vault_scan_params(
+        ctx,
+        &coinset,
+        &launcher.launcher_id,
+        args.max_nonce,
+        false,
+        AssetTypeFilter::Cat,
+        Some(asset_id.as_str()),
+    );
+    scan_params.start_height = args.start_height;
+    let scan = run_manager_vault_scan(scan_params).await?;
+
+    let payload: OffersOrphanPresplitCliResult = offers_orphan_presplit_cli(
+        bundle.signer,
+        network,
+        OffersOrphanPresplitCliRequest {
+            asset_id,
+            market_id: market_id_out,
+            start_height: args.start_height,
+            reclaim: args.reclaim,
+            dry_run: args.dry_run,
+            wait: !args.no_wait,
+            home_dir: bundle.program.home_dir.clone(),
+            state_db_override: ctx.state_db_override().map(str::to_string),
+            launcher_id: launcher.launcher_id,
+            scan_rows: scan.coins,
+        },
+    )
+    .await?;
+    let failed = payload
+        .reclaim_result
+        .as_ref()
+        .is_some_and(|result| result.failed_count > 0);
+    let exit_code = if failed { 2 } else { 0 };
     ctx.emit_serialized(&payload)?;
     Ok(exit_code)
 }

@@ -1,7 +1,6 @@
 //! CLI: reclaim orphaned presplit maker coins by coin id + fixed delegated hash.
 
 use serde::Serialize;
-use serde_json::{json, Value};
 
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -15,11 +14,66 @@ pub struct PresplitReclaimPair {
     pub fixed_delegated_puzzle_hash: String,
 }
 
+/// Typed per-coin reclaim outcome (serialized under `result`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OffersReclaimPresplitOutcome {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+    pub operation_id: String,
+    pub error: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OffersReclaimPresplitCliItem {
     pub coin_id: String,
     pub fixed_delegated_puzzle_hash: String,
-    pub result: Value,
+    pub result: OffersReclaimPresplitOutcome,
+}
+
+impl OffersReclaimPresplitCliItem {
+    #[must_use]
+    pub fn succeeded(&self) -> bool {
+        self.result.success
+    }
+
+    #[must_use]
+    pub fn operation_id(&self) -> &str {
+        &self.result.operation_id
+    }
+
+    #[must_use]
+    pub fn error_message(&self) -> &str {
+        &self.result.error
+    }
+
+    #[must_use]
+    pub fn success(pair: &PresplitReclaimPair, operation_id: &str, dry_run: bool) -> Self {
+        Self {
+            coin_id: pair.coin_id.clone(),
+            fixed_delegated_puzzle_hash: pair.fixed_delegated_puzzle_hash.clone(),
+            result: OffersReclaimPresplitOutcome {
+                success: true,
+                dry_run: Some(dry_run),
+                operation_id: operation_id.to_string(),
+                error: String::new(),
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn failure(pair: &PresplitReclaimPair, error: &str) -> Self {
+        Self {
+            coin_id: pair.coin_id.clone(),
+            fixed_delegated_puzzle_hash: pair.fixed_delegated_puzzle_hash.clone(),
+            result: OffersReclaimPresplitOutcome {
+                success: false,
+                dry_run: None,
+                operation_id: String::new(),
+                error: error.to_string(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,33 +130,57 @@ pub fn parse_presplit_reclaim_pairs(
     Ok(pairs)
 }
 
-fn item_success(
-    pair: &PresplitReclaimPair,
-    operation_id: &str,
+/// Reclaim orphaned presplit maker coins from already-normalized pairs.
+///
+/// # Errors
+///
+/// Per-coin reclaim failures are soft-failed into the result payload (exit code decided by
+/// the manager wrapper). This function itself only fails on unexpected orchestration errors.
+pub async fn offers_reclaim_presplit_pairs(
+    signer_config: SignerConfig,
+    operator_network: &str,
+    pairs: &[PresplitReclaimPair],
     dry_run: bool,
-) -> OffersReclaimPresplitCliItem {
-    OffersReclaimPresplitCliItem {
-        coin_id: pair.coin_id.clone(),
-        fixed_delegated_puzzle_hash: pair.fixed_delegated_puzzle_hash.clone(),
-        result: json!({
-            "success": true,
-            "dry_run": dry_run,
-            "operation_id": operation_id,
-            "error": "",
-        }),
-    }
-}
+) -> SignerResult<OffersReclaimPresplitCliResult> {
+    let mut items = Vec::with_capacity(pairs.len());
+    let mut submitted_count = 0u64;
+    let mut failed_count = 0u64;
 
-fn item_failure(pair: &PresplitReclaimPair, error: &str) -> OffersReclaimPresplitCliItem {
-    OffersReclaimPresplitCliItem {
-        coin_id: pair.coin_id.clone(),
-        fixed_delegated_puzzle_hash: pair.fixed_delegated_puzzle_hash.clone(),
-        result: json!({
-            "success": false,
-            "operation_id": "",
-            "error": error,
-        }),
+    for pair in pairs {
+        match reclaim_presplit_maker_coin(
+            signer_config.clone(),
+            operator_network,
+            &pair.coin_id,
+            &pair.fixed_delegated_puzzle_hash,
+            dry_run,
+        )
+        .await
+        {
+            Ok(operation_id) => {
+                submitted_count = submitted_count.saturating_add(1);
+                items.push(OffersReclaimPresplitCliItem::success(
+                    pair,
+                    &operation_id,
+                    dry_run,
+                ));
+            }
+            Err(err) => {
+                failed_count = failed_count.saturating_add(1);
+                items.push(OffersReclaimPresplitCliItem::failure(
+                    pair,
+                    &err.to_string(),
+                ));
+            }
+        }
     }
+
+    Ok(OffersReclaimPresplitCliResult {
+        dry_run,
+        selected_count: u64::try_from(pairs.len()).unwrap_or(u64::MAX),
+        submitted_count,
+        failed_count,
+        items,
+    })
 }
 
 /// Reclaim orphaned presplit maker coins (ephemeral: no `offer_state` row).
@@ -122,39 +200,7 @@ pub async fn offers_reclaim_presplit_cli(
     dry_run: bool,
 ) -> SignerResult<OffersReclaimPresplitCliResult> {
     let pairs = parse_presplit_reclaim_pairs(coin_ids, fixed_hashes)?;
-
-    let mut items = Vec::with_capacity(pairs.len());
-    let mut submitted_count = 0u64;
-    let mut failed_count = 0u64;
-
-    for pair in &pairs {
-        match reclaim_presplit_maker_coin(
-            signer_config.clone(),
-            operator_network,
-            &pair.coin_id,
-            &pair.fixed_delegated_puzzle_hash,
-            dry_run,
-        )
-        .await
-        {
-            Ok(operation_id) => {
-                submitted_count = submitted_count.saturating_add(1);
-                items.push(item_success(pair, &operation_id, dry_run));
-            }
-            Err(err) => {
-                failed_count = failed_count.saturating_add(1);
-                items.push(item_failure(pair, &err.to_string()));
-            }
-        }
-    }
-
-    Ok(OffersReclaimPresplitCliResult {
-        dry_run,
-        selected_count: u64::try_from(pairs.len()).unwrap_or(u64::MAX),
-        submitted_count,
-        failed_count,
-        items,
-    })
+    offers_reclaim_presplit_pairs(signer_config, operator_network, &pairs, dry_run).await
 }
 
 #[cfg(test)]
@@ -201,12 +247,13 @@ mod tests {
             coin_id: "aa".repeat(32),
             fixed_delegated_puzzle_hash: "bb".repeat(32),
         };
-        let ok = item_success(&pair, "op-1", true);
-        assert_eq!(ok.result["success"], true);
-        assert_eq!(ok.result["dry_run"], true);
-        assert_eq!(ok.result["operation_id"], "op-1");
-        let fail = item_failure(&pair, "boom");
-        assert_eq!(fail.result["success"], false);
-        assert_eq!(fail.result["error"], "boom");
+        let ok = OffersReclaimPresplitCliItem::success(&pair, "op-1", true);
+        assert!(ok.succeeded());
+        assert_eq!(ok.result.dry_run, Some(true));
+        assert_eq!(ok.operation_id(), "op-1");
+        let fail = OffersReclaimPresplitCliItem::failure(&pair, "boom");
+        assert!(!fail.succeeded());
+        assert_eq!(fail.error_message(), "boom");
+        assert_eq!(fail.result.dry_run, None);
     }
 }

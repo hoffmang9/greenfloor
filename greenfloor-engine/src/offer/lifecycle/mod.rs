@@ -8,6 +8,7 @@ pub(crate) mod dexie_index;
 mod expired_maker_lease;
 mod listing_expire;
 pub mod market_reconcile;
+mod orphan_presplit_cli;
 mod persist;
 mod reclaim_cli;
 mod reconcile_watched_offers;
@@ -41,10 +42,14 @@ pub use listing_expire::{
 pub use market_reconcile::{
     run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,
 };
+pub use orphan_presplit_cli::{
+    offers_orphan_presplit_cli, OffersOrphanPresplitCliRequest, OffersOrphanPresplitCliResult,
+};
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 pub use reclaim_cli::{
-    offers_reclaim_presplit_cli, parse_presplit_reclaim_pairs, OffersReclaimPresplitCliItem,
-    OffersReclaimPresplitCliResult, PresplitReclaimPair,
+    offers_reclaim_presplit_cli, offers_reclaim_presplit_pairs, parse_presplit_reclaim_pairs,
+    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, OffersReclaimPresplitOutcome,
+    PresplitReclaimPair,
 };
 pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

@@ -38,7 +38,8 @@ impl ManagerCommands {
             cmd @ (ManagerCommands::OffersStatus { .. }
             | ManagerCommands::OffersReconcile { .. }) => offers::run_command(cmd, ctx).await,
             cmd @ (ManagerCommands::OffersCancel { .. }
-            | ManagerCommands::OffersReclaimPresplit { .. }) => {
+            | ManagerCommands::OffersReclaimPresplit { .. }
+            | ManagerCommands::OffersOrphanPresplit { .. }) => {
                 Box::pin(offers::run_command(cmd, ctx)).await
             }
             cmd @ (ManagerCommands::CatsAdd { .. }

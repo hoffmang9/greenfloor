@@ -426,3 +426,38 @@ async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
     assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
 }
+
+#[test]
+fn offers_orphan_presplit_parses_discover_flags() {
+    let cli = ManagerCli::try_parse_from([
+        "greenfloor-manager",
+        "--program-config",
+        "/tmp/program.yaml",
+        "offers-orphan-presplit",
+        "--asset",
+        "ECO.181.2022",
+        "--start-height",
+        "8330000",
+        "--reclaim",
+        "--dry-run",
+        "--no-wait",
+    ])
+    .expect("parse");
+    match cli.command {
+        crate::manager_cli::commands::ManagerCommands::OffersOrphanPresplit {
+            asset,
+            start_height,
+            reclaim,
+            dry_run,
+            no_wait,
+            ..
+        } => {
+            assert_eq!(asset, "ECO.181.2022");
+            assert_eq!(start_height, Some(8_330_000));
+            assert!(reclaim);
+            assert!(dry_run);
+            assert!(no_wait);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
