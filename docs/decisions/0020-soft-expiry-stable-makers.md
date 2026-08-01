@@ -29,10 +29,12 @@ price is unchanged.
    - hash mismatch (price/terms change) → reclaim then PresplitNew;
    - no maker → PresplitNew from receive.
 
-3. **Expire handling.** Soft-expire open rows past `listing_expires_at` (stable). For each
-   expired maker with cancel metadata: if the ladder still wants size N, call
-   `ensure_size_n_offer`; else reclaim to vault. Runs before strategy so open-count gaps
-   are already filled.
+3. **Expire handling.** The daemon `soft_expire` phase runs **only** for soft-expiry
+   markets (`quote_asset_type: stable`). It soft-expires open rows past
+   `listing_expires_at`, then for each expired maker with cancel metadata: if the ladder
+   still wants size N, call `ensure_size_n_offer`; else reclaim to vault. Runs before
+   strategy so open-count gaps are already filled. Unstable (hard on-chain expiry) cleanup
+   stays on the reconcile path — this phase does not ensure/reclaim those makers.
 
 4. **Vault-controlled balance CLI.** `coins-balance` reports receive + known unreturned
    makers (`vault_controlled_amount`). Open makers are listed with `reclaimable: false`.

@@ -22,52 +22,67 @@ use super::{
     BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnsureSizeOutcome {
-    PostedExisting,
-    PostedNew,
-    ReclaimedThenPostedNew,
-    ReclaimedOnly,
-    Skipped,
-}
-
-/// Result of [`ensure_size_n_offer`], including which maker was consumed so surplus reclaim can skip it.
+/// Result of [`ensure_size_n_offer`] / reclaim helpers. Variants own protection fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnsureSizeResult {
-    pub outcome: EnsureSizeOutcome,
-    /// Listing retired by reclaim or `PreferExisting` re-post.
-    pub superseded_offer_id: Option<String>,
-    /// Maker coin retained by `PreferExisting` (must not surplus-reclaim).
-    pub retained_maker_coin_id: Option<String>,
+pub enum EnsureSizeResult {
+    PostedExisting {
+        superseded_offer_id: String,
+        retained_maker_coin_id: String,
+    },
+    PostedNew,
+    ReclaimedThenPostedNew {
+        superseded_offer_id: String,
+    },
+    ReclaimedOnly {
+        superseded_offer_id: String,
+    },
+    /// No venue listing created. Optional retained coin blocks surplus reclaim after failed `PreferExisting`.
+    Skipped {
+        retained_maker_coin_id: Option<String>,
+    },
 }
 
 impl EnsureSizeResult {
     fn skipped() -> Self {
-        Self {
-            outcome: EnsureSizeOutcome::Skipped,
-            superseded_offer_id: None,
+        Self::Skipped {
             retained_maker_coin_id: None,
         }
     }
 
+    /// True when a venue listing was created/re-posted (not reclaim-only or skip).
     #[must_use]
     pub fn posted(&self) -> bool {
-        !matches!(self.outcome, EnsureSizeOutcome::Skipped)
+        matches!(
+            self,
+            Self::PostedExisting { .. } | Self::PostedNew | Self::ReclaimedThenPostedNew { .. }
+        )
     }
 
     /// True when surplus reclaim must leave this expired row alone.
     #[must_use]
     pub fn protects_maker(&self, row: &ReusablePresplitMakerRow) -> bool {
-        if self
-            .retained_maker_coin_id
-            .as_deref()
-            .is_some_and(|coin| coin == row.cancel_input_coin_id)
-        {
-            return true;
+        match self {
+            Self::PostedExisting {
+                superseded_offer_id,
+                retained_maker_coin_id,
+            } => {
+                retained_maker_coin_id == &row.cancel_input_coin_id
+                    || superseded_offer_id == &row.offer_id
+            }
+            Self::ReclaimedThenPostedNew {
+                superseded_offer_id,
+            }
+            | Self::ReclaimedOnly {
+                superseded_offer_id,
+            } => superseded_offer_id == &row.offer_id,
+            Self::Skipped {
+                retained_maker_coin_id: Some(coin),
+            } => coin == &row.cancel_input_coin_id,
+            Self::PostedNew
+            | Self::Skipped {
+                retained_maker_coin_id: None,
+            } => false,
         }
-        self.superseded_offer_id
-            .as_deref()
-            .is_some_and(|id| id == row.offer_id)
     }
 }
 
@@ -239,7 +254,10 @@ async fn apply_prefer_existing(
     );
     let posted = post_offer(parts, write_store, Some(candidate)).await?;
     if !posted {
-        return Ok(EnsureSizeResult::skipped());
+        // Keep the selected maker out of surplus reclaim; coin is still the intended reuse target.
+        return Ok(EnsureSizeResult::Skipped {
+            retained_maker_coin_id: Some(candidate.cancel_input_coin_id.clone()),
+        });
     }
     supersede_listing_for_repost_synced(
         write_store,
@@ -247,10 +265,9 @@ async fn apply_prefer_existing(
         &candidate.offer_id,
         parts.run.dry_run,
     )?;
-    Ok(EnsureSizeResult {
-        outcome: EnsureSizeOutcome::PostedExisting,
-        superseded_offer_id: Some(candidate.offer_id.clone()),
-        retained_maker_coin_id: Some(candidate.cancel_input_coin_id.clone()),
+    Ok(EnsureSizeResult::PostedExisting {
+        superseded_offer_id: candidate.offer_id.clone(),
+        retained_maker_coin_id: candidate.cancel_input_coin_id.clone(),
     })
 }
 
@@ -289,19 +306,22 @@ async fn apply_reclaim_then_new(
         parts.run.dry_run,
     )?;
     let posted = post_offer(parts, write_store, None).await?;
-    Ok(EnsureSizeResult {
-        outcome: outcome_after_reclaim_then_post(posted),
-        superseded_offer_id: Some(candidate.offer_id.clone()),
-        retained_maker_coin_id: None,
-    })
+    Ok(result_after_reclaim_then_post(
+        posted,
+        candidate.offer_id.clone(),
+    ))
 }
 
-fn outcome_after_reclaim_then_post(posted: bool) -> EnsureSizeOutcome {
+fn result_after_reclaim_then_post(posted: bool, superseded_offer_id: String) -> EnsureSizeResult {
     if posted {
-        EnsureSizeOutcome::ReclaimedThenPostedNew
+        EnsureSizeResult::ReclaimedThenPostedNew {
+            superseded_offer_id,
+        }
     } else {
         // Coin already reclaimed; do not report Skipped.
-        EnsureSizeOutcome::ReclaimedOnly
+        EnsureSizeResult::ReclaimedOnly {
+            superseded_offer_id,
+        }
     }
 }
 
@@ -365,11 +385,7 @@ pub async fn ensure_size_n_offer(
         EnsureSelection::New => {
             let posted = post_offer(&parts, write_store, None).await?;
             Ok(if posted {
-                EnsureSizeResult {
-                    outcome: EnsureSizeOutcome::PostedNew,
-                    superseded_offer_id: None,
-                    retained_maker_coin_id: None,
-                }
+                EnsureSizeResult::PostedNew
             } else {
                 EnsureSizeResult::skipped()
             })
@@ -403,10 +419,8 @@ pub async fn reclaim_expired_maker_if_unspent(
     )
     .await?;
     supersede_listing_for_repost_synced(write_store, &row.market_id, &row.offer_id, dry_run)?;
-    Ok(EnsureSizeResult {
-        outcome: EnsureSizeOutcome::ReclaimedOnly,
-        superseded_offer_id: Some(row.offer_id.clone()),
-        retained_maker_coin_id: None,
+    Ok(EnsureSizeResult::ReclaimedOnly {
+        superseded_offer_id: row.offer_id.clone(),
     })
 }
 
@@ -517,10 +531,9 @@ mod tests {
 
     #[test]
     fn protect_maker_retains_prefer_existing_coin() {
-        let result = EnsureSizeResult {
-            outcome: EnsureSizeOutcome::PostedExisting,
-            superseded_offer_id: Some("offer-a".into()),
-            retained_maker_coin_id: Some("coin-a".into()),
+        let result = EnsureSizeResult::PostedExisting {
+            superseded_offer_id: "offer-a".into(),
+            retained_maker_coin_id: "coin-a".into(),
         };
         let protected = ReusablePresplitMakerRow {
             offer_id: "offer-a".into(),
@@ -545,18 +558,50 @@ mod tests {
     #[test]
     fn reclaim_then_failed_post_is_reclaimed_only_not_skipped() {
         assert_eq!(
-            outcome_after_reclaim_then_post(false),
-            EnsureSizeOutcome::ReclaimedOnly
+            result_after_reclaim_then_post(false, "x".into()),
+            EnsureSizeResult::ReclaimedOnly {
+                superseded_offer_id: "x".into(),
+            }
         );
         assert_eq!(
-            outcome_after_reclaim_then_post(true),
-            EnsureSizeOutcome::ReclaimedThenPostedNew
+            result_after_reclaim_then_post(true, "x".into()),
+            EnsureSizeResult::ReclaimedThenPostedNew {
+                superseded_offer_id: "x".into(),
+            }
         );
-        assert!(EnsureSizeResult {
-            outcome: EnsureSizeOutcome::ReclaimedOnly,
-            superseded_offer_id: Some("x".into()),
-            retained_maker_coin_id: None,
+        assert!(!EnsureSizeResult::ReclaimedOnly {
+            superseded_offer_id: "x".into(),
         }
         .posted());
+        assert!(EnsureSizeResult::ReclaimedThenPostedNew {
+            superseded_offer_id: "x".into(),
+        }
+        .posted());
+    }
+
+    #[test]
+    fn failed_prefer_existing_still_protects_maker_coin() {
+        let result = EnsureSizeResult::Skipped {
+            retained_maker_coin_id: Some("coin-a".into()),
+        };
+        let selected = ReusablePresplitMakerRow {
+            offer_id: "offer-a".into(),
+            market_id: "m1".into(),
+            state: "expired".into(),
+            size_base_units: Some(10),
+            offer_side: Some("sell".into()),
+            cancel_input_coin_id: "coin-a".into(),
+            fixed_delegated_puzzle_hash: "hh".into(),
+            offer_nonce: Some("nn".into()),
+            listing_expires_at: None,
+        };
+        let surplus = ReusablePresplitMakerRow {
+            offer_id: "offer-b".into(),
+            cancel_input_coin_id: "coin-b".into(),
+            ..selected.clone()
+        };
+        assert!(result.protects_maker(&selected));
+        assert!(!result.protects_maker(&surplus));
+        assert!(!result.posted());
     }
 }

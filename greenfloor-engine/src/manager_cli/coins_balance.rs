@@ -38,6 +38,11 @@ fn unreturned_row_priority(state: &str) -> u8 {
     }
 }
 
+#[must_use]
+fn cat_matches_asset_filter(cat_asset_id: &str, filter_asset_id: &str) -> bool {
+    normalize_hex_id(cat_asset_id) == normalize_hex_id(filter_asset_id)
+}
+
 /// Vault-controlled balance for one asset: receive inventory + known unreturned makers.
 ///
 /// # Errors
@@ -107,7 +112,13 @@ pub async fn run_coins_balance(
             continue;
         };
         let amount = match backend.fetch_offer_input_cat(bytes).await {
-            Ok(cat) => cat.coin.amount,
+            Ok(cat) => {
+                let maker_asset = hex::encode(cat.info.asset_id);
+                if !cat_matches_asset_filter(&maker_asset, &list_asset_id) {
+                    continue;
+                }
+                cat.coin.amount
+            }
             Err(SignerError::PresplitCoinNotFound) => continue,
             Err(err) => return Err(err),
         };
@@ -147,7 +158,7 @@ pub async fn run_coins_balance(
 
 #[cfg(test)]
 mod tests {
-    use super::{state_is_reclaimable, vault_controlled_total};
+    use super::{cat_matches_asset_filter, state_is_reclaimable, vault_controlled_total};
 
     #[test]
     fn reclaimable_uses_idle_state_allowlist() {
@@ -162,5 +173,14 @@ mod tests {
     fn vault_controlled_sums_receive_and_unreturned() {
         assert_eq!(vault_controlled_total(1_000, 2_000), 3_000);
         assert_eq!(vault_controlled_total(u64::MAX, 1), u64::MAX);
+    }
+
+    #[test]
+    fn unreturned_makers_filter_by_asset_id() {
+        let asset_a = "aa".repeat(32);
+        let asset_b = "bb".repeat(32);
+        assert!(cat_matches_asset_filter(&asset_a, &asset_a));
+        assert!(cat_matches_asset_filter(&format!("0x{asset_a}"), &asset_a));
+        assert!(!cat_matches_asset_filter(&asset_a, &asset_b));
     }
 }

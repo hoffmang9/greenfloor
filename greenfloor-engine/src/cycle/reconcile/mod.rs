@@ -27,6 +27,7 @@ pub use coinset_signals::{
     signals_from_ws_offer_status, CoinsetSignalSummary, CoinsetTxSignals, MakerHit,
 };
 pub(crate) use metadata::{REASON_POTENTIAL_TAKE_SEEN, REASON_TAKE_CONFIRMED_ON_TX_BLOCK};
+pub(crate) use state::STATE_CANCELLED;
 pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 

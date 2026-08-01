@@ -2,6 +2,7 @@
 
 use tracing::info;
 
+use crate::cycle::reconcile::STATE_CANCELLED;
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::{DEXIE_STATUS_CANCELLED, DEXIE_STATUS_EXPIRED};
@@ -49,7 +50,7 @@ pub fn supersede_listing_for_repost(
     store.upsert_offer_state(
         offer_id,
         market_id,
-        "cancelled",
+        STATE_CANCELLED,
         Some(DEXIE_STATUS_CANCELLED),
     )
 }

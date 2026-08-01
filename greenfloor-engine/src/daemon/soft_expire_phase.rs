@@ -1,4 +1,7 @@
 //! Soft-expire open listings and ensure/reclaim durable maker coins after expiry.
+//!
+//! Runs only for soft-expiry markets (`quote_asset_type: stable`). Unstable hard-expiry
+//! cleanup stays on the reconcile path.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -104,14 +107,14 @@ async fn reclaim_surplus_makers(
         .await?;
         info!(
             offer_id = %row.offer_id,
-            outcome = ?outcome.outcome,
+            outcome = ?outcome,
             "expired surplus maker reclaimed"
         );
     }
     Ok(())
 }
 
-/// Soft-expire listings (stable) then ensure size-N offer or reclaim expired makers.
+/// Soft-expire listings then ensure size-N offer or reclaim expired makers (stable markets only).
 ///
 /// Wanted sizes are ensured once per `(side, size)` group; surplus makers in that group
 /// are reclaimed except the maker retained/superseded by ensure.
@@ -124,13 +127,15 @@ pub async fn run_soft_expire_phase(
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
 ) -> SignerResult<()> {
+    if bake_expiry_into_conditions_for_quote(&market.quote_asset_type) {
+        // Hard on-chain expiry: leave cleanup to reconcile; do not ensure/reclaim here.
+        return Ok(());
+    }
+
     let now = now_unix();
     let market_id = market.market_id.clone();
-    let soft = !bake_expiry_into_conditions_for_quote(&market.quote_asset_type);
     let expired = write_store.sync(|store| {
-        if soft {
-            let _ = mark_listings_soft_expired(store, &market_id, now)?;
-        }
+        let _ = mark_listings_soft_expired(store, &market_id, now)?;
         store.list_expired_presplit_makers(&market_id)
     })?;
     if expired.is_empty() {
@@ -158,7 +163,7 @@ pub async fn run_soft_expire_phase(
                 .await?;
                 info!(
                     offer_id = %row.offer_id,
-                    outcome = ?outcome.outcome,
+                    outcome = ?outcome,
                     "expired maker reclaimed"
                 );
             }
@@ -193,7 +198,7 @@ pub async fn run_soft_expire_phase(
                     market_id = %market.market_id,
                     side = %group.side,
                     ladder_size = group.size_base_units,
-                    outcome = ?result.outcome,
+                    outcome = ?result,
                     "ensure_size_n_offer after expire"
                 );
                 reclaim_surplus_makers(write_store, ctx, &group.makers, &result, dry_run).await?;
@@ -273,6 +278,14 @@ mod tests {
         assert!(matches!(
             &plan[2],
             SoftExpirePlanItem::Reclaim(row) if row.offer_id == "c"
+        ));
+    }
+
+    #[test]
+    fn hard_expiry_markets_skip_soft_expire_phase_gate() {
+        let market = sample_market("xch1test");
+        assert!(bake_expiry_into_conditions_for_quote(
+            &market.quote_asset_type
         ));
     }
 }
