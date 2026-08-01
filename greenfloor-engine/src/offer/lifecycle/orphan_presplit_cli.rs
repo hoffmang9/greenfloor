@@ -11,15 +11,14 @@ use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::offer::lifecycle::reclaim_cli::{
-    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, OffersReclaimPresplitOutcome,
-    PresplitReclaimPair,
+    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, PresplitReclaimPair,
 };
 use crate::offer::presplit::{
     discover_orphan_presplit_candidates, OrphanFixedHashRecovery, OrphanPresplitCandidate,
+    OrphanScanRow,
 };
 use crate::offer::reclaim::reclaim_presplit_maker_coin;
 use crate::storage::{resolve_state_db_path, SqliteStore};
-use crate::vault_coinset_scan::types::CoinRow;
 
 /// Request for orphaned-presplit discovery / reclaim.
 #[derive(Debug, Clone)]
@@ -33,7 +32,7 @@ pub struct OffersOrphanPresplitCliRequest {
     pub home_dir: PathBuf,
     pub state_db_override: Option<String>,
     pub launcher_id: String,
-    pub scan_rows: Vec<CoinRow>,
+    pub scan_rows: Vec<OrphanScanRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,8 +45,6 @@ pub struct OffersOrphanPresplitCliItem {
     pub fixed_delegated_puzzle_hash: Option<String>,
     pub recovery: &'static str,
     pub recovery_detail: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reclaim: Option<OffersReclaimPresplitOutcome>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,7 +98,6 @@ fn item_from_candidate(candidate: &OrphanPresplitCandidate) -> OffersOrphanPresp
         fixed_delegated_puzzle_hash: candidate.fixed_delegated_puzzle_hash.clone(),
         recovery: recovery_label(candidate.recovery()),
         recovery_detail: candidate.recovery_detail.clone(),
-        reclaim: None,
     }
 }
 
@@ -125,16 +121,15 @@ async fn reclaim_pairs_sequentially(
     network: &str,
     client: &CoinsetClient,
     pairs: &[PresplitReclaimPair],
-    orphans: &mut [OffersOrphanPresplitCliItem],
     dry_run: bool,
     wait: bool,
-) -> SignerResult<OffersReclaimPresplitCliResult> {
+) -> OffersReclaimPresplitCliResult {
     // One-by-one so vault singleton / confirm wait stays serialized.
     let mut items = Vec::with_capacity(pairs.len());
     let mut submitted = 0u64;
     let mut failed = 0u64;
     for pair in pairs {
-        let item = match reclaim_presplit_maker_coin(
+        let mut item = match reclaim_presplit_maker_coin(
             signer.clone(),
             network,
             &pair.coin_id,
@@ -152,30 +147,36 @@ async fn reclaim_pairs_sequentially(
                 OffersReclaimPresplitCliItem::failure(pair, &err.to_string())
             }
         };
-        if let Some(row) = orphans.iter_mut().find(|o| o.coin_id == pair.coin_id) {
-            row.reclaim = Some(item.result.clone());
+        if wait && !dry_run && item.succeeded() {
+            // Wait failures must not abort the batch: the spend was already submitted.
+            let wait_err = match hex_to_bytes32(&pair.coin_id) {
+                Ok(coin) => {
+                    wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
+                        .await
+                        .err()
+                }
+                Err(err) => Some(err),
+            };
+            if let Some(err) = wait_err {
+                item.result.wait_error = Some(err.to_string());
+            }
         }
-        let succeeded = item.succeeded();
         items.push(item);
-        if wait && !dry_run && succeeded {
-            let coin = hex_to_bytes32(&pair.coin_id)?;
-            wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default()).await?;
-        }
     }
-    Ok(OffersReclaimPresplitCliResult {
+    OffersReclaimPresplitCliResult {
         dry_run,
         selected_count: u64::try_from(pairs.len()).unwrap_or(u64::MAX),
         submitted_count: submitted,
         failed_count: failed,
         items,
-    })
+    }
 }
 
 /// Discover orphaned vault-hinted presplit makers; optionally reclaim recoverable ones.
 ///
 /// # Errors
 ///
-/// Returns an error when `SQLite`, Coinset discovery, or reclaim orchestration fails.
+/// Returns an error when `SQLite`, Coinset transport, or reclaim orchestration fails.
 pub async fn offers_orphan_presplit_cli(
     signer: SignerConfig,
     network: &str,
@@ -207,7 +208,7 @@ pub async fn offers_orphan_presplit_cli(
     )
     .await?;
 
-    let mut orphans: Vec<OffersOrphanPresplitCliItem> =
+    let orphans: Vec<OffersOrphanPresplitCliItem> =
         candidates.iter().map(item_from_candidate).collect();
     let pairs = reclaimable_pairs(&candidates);
     let unreclaimable_count =
@@ -220,11 +221,10 @@ pub async fn offers_orphan_presplit_cli(
                 network,
                 &client,
                 &pairs,
-                &mut orphans,
                 request.dry_run,
                 request.wait,
             )
-            .await?,
+            .await,
         )
     } else {
         None

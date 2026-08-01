@@ -15,6 +15,9 @@ pub struct PresplitReclaimPair {
 }
 
 /// Typed per-coin reclaim outcome (serialized under `result`).
+///
+/// Invariants: `error` is set only when `success` is false (reclaim/submit failure).
+/// `wait_error` is independent and may be set after a successful submit when confirm-wait fails.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct OffersReclaimPresplitOutcome {
     pub success: bool,
@@ -22,6 +25,8 @@ pub struct OffersReclaimPresplitOutcome {
     pub dry_run: Option<bool>,
     pub operation_id: String,
     pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +62,7 @@ impl OffersReclaimPresplitCliItem {
                 dry_run: Some(dry_run),
                 operation_id: operation_id.to_string(),
                 error: String::new(),
+                wait_error: None,
             },
         }
     }
@@ -71,6 +77,7 @@ impl OffersReclaimPresplitCliItem {
                 dry_run: None,
                 operation_id: String::new(),
                 error: error.to_string(),
+                wait_error: None,
             },
         }
     }
@@ -251,9 +258,11 @@ mod tests {
         assert!(ok.succeeded());
         assert_eq!(ok.result.dry_run, Some(true));
         assert_eq!(ok.operation_id(), "op-1");
+        assert_eq!(ok.result.wait_error, None);
         let fail = OffersReclaimPresplitCliItem::failure(&pair, "boom");
         assert!(!fail.succeeded());
         assert_eq!(fail.error_message(), "boom");
         assert_eq!(fail.result.dry_run, None);
+        assert_eq!(fail.result.wait_error, None);
     }
 }

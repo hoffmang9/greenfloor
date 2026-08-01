@@ -21,6 +21,7 @@ pub use conditions::build_presplit_conditions_inner_spend;
 pub(crate) use conditions::build_presplit_offer_cancel_inner_spend;
 pub(crate) use orphan_discover::{
     discover_orphan_presplit_candidates, OrphanFixedHashRecovery, OrphanPresplitCandidate,
+    OrphanScanRow,
 };
 pub(crate) use pipeline::PresplitPaymentContext;
 pub use split::{

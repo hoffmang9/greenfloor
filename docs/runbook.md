@@ -115,6 +115,8 @@ Optional developer bootstrap for testnet markets:
   - Dry-run reclaim: add `--reclaim --dry-run`
   - Broadcast reclaim (waits for each maker spend by default): add `--reclaim` (use `--no-wait` to skip waits)
   - Scope by market base asset: `--market-id <id>` (optional `--asset` must match `base_asset`)
+  - JSON: discover rows are `orphans[]`; reclaim outcomes (including `wait_error`) are only under
+    `reclaim_result` when `--reclaim` is set
   - GF-native splits use `Memos::None` and report `recovery: unavailable` (use
     `offers-reclaim-presplit` with a known fixed hash, or `coins-balance` for tracked makers)
 - Reclaim orphaned **presplit** maker coins by explicit coin id + fixed hash (idle/expired,

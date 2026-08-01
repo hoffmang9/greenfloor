@@ -15,7 +15,19 @@ use crate::coinset::{cat_from_parent_spend, with_coinset_client_retries};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id, tree_hash_to_hex};
 use crate::offer::presplit::resolve_member_fixed_conditions_hash_for_binding;
-use crate::vault_coinset_scan::types::{CoinKind, CoinRow};
+
+/// Minimal scan view for orphan discovery (decoupled from vault-scan `CoinRow`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanScanRow {
+    pub coin_id: String,
+    pub parent_coin_info: String,
+    pub amount: u64,
+    pub confirmed_block_index: u64,
+    pub spent_block_index: u64,
+    pub discovered_by_hint: bool,
+    pub discovered_by_puzzle_hash: bool,
+    pub cat_asset_id: Option<String>,
+}
 
 /// How a fixed-conditions hash was recovered for an orphan candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,16 +60,15 @@ impl OrphanPresplitCandidate {
 /// Select unspent CAT scan rows that look like hinted maker coins (not vault-nonce receive).
 #[must_use]
 pub fn hinted_unspent_cat_candidates<'a>(
-    rows: &'a [CoinRow],
+    rows: &'a [OrphanScanRow],
     asset_id: &str,
     tracked_coin_ids: &HashSet<String>,
     start_height: Option<u64>,
-) -> Vec<&'a CoinRow> {
+) -> Vec<&'a OrphanScanRow> {
     let asset = normalize_hex_id(asset_id);
     rows.iter()
         .filter(|row| {
-            row.kind == CoinKind::Cat
-                && row.spent_block_index == 0
+            row.spent_block_index == 0
                 && row.discovered_by_hint
                 && !row.discovered_by_puzzle_hash
                 && row
@@ -207,18 +218,27 @@ async fn recover_fixed_hash_for_row(
     recover_from_parent_spend(launcher_id, coin_id, amount, &parent_spend)
 }
 
+fn soft_fail_detail(err: SignerError) -> SignerResult<String> {
+    match err {
+        // Transport / API failures should fail the whole discover, not hide as per-row noise.
+        SignerError::Coinset(_) => Err(err),
+        other => Ok(other.to_string()),
+    }
+}
+
 /// Build orphan candidates with recovered fixed hashes where possible.
 ///
-/// Coinset transport failures fail the whole discovery. Per-coin recovery misses are soft:
+/// Per-coin logical recovery misses (invalid ids, missing memos, parse failures) are soft:
 /// the candidate is still returned with `fixed_delegated_puzzle_hash = None`.
+/// Coinset transport failures abort discovery.
 ///
 /// # Errors
 ///
-/// Returns an error when Coinset access fails for a candidate in a non-recoverable way.
+/// Returns [`SignerError::Coinset`] when Coinset access fails for a candidate.
 pub async fn discover_orphan_presplit_candidates(
     client: &CoinsetClient,
     launcher_id: Bytes32,
-    rows: &[CoinRow],
+    rows: &[OrphanScanRow],
     asset_id: &str,
     tracked_coin_ids: &HashSet<String>,
     start_height: Option<u64>,
@@ -227,11 +247,23 @@ pub async fn discover_orphan_presplit_candidates(
     for row in hinted_unspent_cat_candidates(rows, asset_id, tracked_coin_ids, start_height) {
         let coin_id = normalize_hex_id(&row.coin_id);
         let parent = normalize_hex_id(&row.parent_coin_info);
-        let coin_bytes = hex_to_bytes32(&coin_id)?;
-        let parent_bytes = hex_to_bytes32(&parent)?;
-        let (hash, detail) =
-            recover_fixed_hash_for_row(client, launcher_id, coin_bytes, row.amount, parent_bytes)
-                .await?;
+        let (hash, detail) = match (hex_to_bytes32(&coin_id), hex_to_bytes32(&parent)) {
+            (Ok(coin_bytes), Ok(parent_bytes)) => {
+                match recover_fixed_hash_for_row(
+                    client,
+                    launcher_id,
+                    coin_bytes,
+                    row.amount,
+                    parent_bytes,
+                )
+                .await
+                {
+                    Ok(recovered) => recovered,
+                    Err(err) => (None, soft_fail_detail(err)?),
+                }
+            }
+            (Err(err), _) | (_, Err(err)) => (None, err.to_string()),
+        };
         out.push(OrphanPresplitCandidate {
             coin_id,
             amount: row.amount,
@@ -254,20 +286,16 @@ mod tests {
         spent: u64,
         asset: &str,
         height: u64,
-    ) -> CoinRow {
-        CoinRow {
+    ) -> OrphanScanRow {
+        OrphanScanRow {
             coin_id: coin_id.to_string(),
-            puzzle_hash: "bb".repeat(32),
             parent_coin_info: "cc".repeat(32),
             amount: 1000,
             confirmed_block_index: height,
             spent_block_index: spent,
-            discovered_nonces: vec![0],
             discovered_by_puzzle_hash: by_ph,
             discovered_by_hint: hint,
-            kind: CoinKind::Cat,
             cat_asset_id: Some(asset.to_string()),
-            cat_symbols: vec![],
         }
     }
 
@@ -321,5 +349,45 @@ mod tests {
         };
         assert_eq!(with_hash.recovery(), OrphanFixedHashRecovery::ParentMemo);
         assert_eq!(without.recovery(), OrphanFixedHashRecovery::Unavailable);
+    }
+
+    #[test]
+    fn soft_fail_detail_propagates_coinset_transport() {
+        let err = soft_fail_detail(SignerError::Coinset("down".to_string())).expect_err("coinset");
+        assert!(matches!(err, SignerError::Coinset(_)));
+        let detail = soft_fail_detail(SignerError::Driver("bad puzzle".to_string())).expect("soft");
+        assert!(detail.contains("bad puzzle"));
+    }
+
+    #[tokio::test]
+    async fn discover_soft_fails_invalid_coin_hex_and_continues() {
+        let asset = "aa".repeat(32);
+        let tracked = HashSet::new();
+        let bad = OrphanScanRow {
+            coin_id: "not-hex".to_string(),
+            parent_coin_info: "cc".repeat(32),
+            amount: 1000,
+            confirmed_block_index: 9_000_000,
+            spent_block_index: 0,
+            discovered_by_puzzle_hash: false,
+            discovered_by_hint: true,
+            cat_asset_id: Some(asset.clone()),
+        };
+        // No Coinset calls: invalid hex soft-fails before network.
+        let client = CoinsetClient::new("https://api.coinset.org".to_string());
+        let got = discover_orphan_presplit_candidates(
+            &client,
+            Bytes32::new([0u8; 32]),
+            &[bad],
+            &asset,
+            &tracked,
+            None,
+        )
+        .await
+        .expect("soft fail");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].fixed_delegated_puzzle_hash.is_none());
+        assert_eq!(got[0].recovery(), OrphanFixedHashRecovery::Unavailable);
+        assert!(!got[0].recovery_detail.is_empty());
     }
 }

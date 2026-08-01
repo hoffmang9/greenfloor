@@ -15,9 +15,10 @@ use crate::offer::lifecycle::{
     reconcile_offers_cli, OffersCancelCliRequest, OffersCancelCliResult,
     OffersOrphanPresplitCliRequest, OffersOrphanPresplitCliResult, OffersReclaimPresplitCliResult,
 };
+use crate::offer::presplit::OrphanScanRow;
 use crate::offer::{OfferAssetResolver, VaultTraceAssetKind};
 use crate::storage::resolve_state_db_path;
-use crate::vault_coinset_scan::types::AssetTypeFilter;
+use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinRow};
 
 use super::context::ManagerContext;
 use super::vault_scan::{
@@ -196,6 +197,23 @@ pub async fn run_offers_reclaim_presplit_command(
     Ok(exit_code)
 }
 
+fn orphan_scan_rows_from_vault_coins(coins: &[CoinRow]) -> Vec<OrphanScanRow> {
+    coins
+        .iter()
+        .filter(|row| row.kind.is_cat())
+        .map(|row| OrphanScanRow {
+            coin_id: row.coin_id.clone(),
+            parent_coin_info: row.parent_coin_info.clone(),
+            amount: row.amount,
+            confirmed_block_index: row.confirmed_block_index,
+            spent_block_index: row.spent_block_index,
+            discovered_by_hint: row.discovered_by_hint,
+            discovered_by_puzzle_hash: row.discovered_by_puzzle_hash,
+            cat_asset_id: row.cat_asset_id.clone(),
+        })
+        .collect()
+}
+
 async fn resolve_orphan_presplit_asset(
     ctx: &ManagerContext,
     signer: &crate::config::SignerConfig,
@@ -214,19 +232,24 @@ async fn resolve_orphan_presplit_asset(
             pair: None,
             command: OperatorMarketCommand::CoinList,
         })?;
-        let base = normalize_hex_id(&loaded.market_row.base_asset);
+        let resolver = loaded.asset_resolver();
+        let base = resolver
+            .resolve_inventory_asset(loaded.market_row.base_asset.trim())
+            .await?;
+        if !crate::hex::is_hex_id(&base) {
+            return Err(SignerError::Other(
+                "offers-orphan-presplit requires a CAT market base_asset".to_string(),
+            ));
+        }
         if let Some(filter) = asset {
-            let inventory_asset = loaded
-                .asset_resolver()
-                .resolve_inventory_asset(filter)
-                .await?;
-            if normalize_hex_id(&inventory_asset) != base {
+            let inventory_asset = resolver.resolve_inventory_asset(filter).await?;
+            if normalize_hex_id(&inventory_asset) != normalize_hex_id(&base) {
                 return Err(SignerError::Other(
                     "--asset does not match market base_asset".to_string(),
                 ));
             }
         }
-        return Ok((base, Some(mid.to_string())));
+        return Ok((normalize_hex_id(&base), Some(mid.to_string())));
     }
     let Some(filter) = asset else {
         return Err(SignerError::Other(
@@ -304,7 +327,7 @@ pub async fn run_offers_orphan_presplit_command(
             home_dir: bundle.program.home_dir.clone(),
             state_db_override: ctx.state_db_override().map(str::to_string),
             launcher_id: launcher.launcher_id,
-            scan_rows: scan.coins,
+            scan_rows: orphan_scan_rows_from_vault_coins(&scan.coins),
         },
     )
     .await?;
