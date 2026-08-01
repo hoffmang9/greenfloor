@@ -147,8 +147,8 @@ async fn reclaim_pairs_sequentially(
                 OffersReclaimPresplitCliItem::failure(pair, &err.to_string())
             }
         };
-        if wait && !dry_run && item.succeeded() {
-            // Wait failures must not abort the batch: the spend was already submitted.
+        let stop_batch = if wait && !dry_run && item.succeeded() {
+            // Confirm-wait is required before the next vault singleton spend.
             let wait_err = match hex_to_bytes32(&pair.coin_id) {
                 Ok(coin) => {
                     wait_until_coins_spent(client, &[coin], CoinSpentVerifyConfig::default())
@@ -159,9 +159,17 @@ async fn reclaim_pairs_sequentially(
             };
             if let Some(err) = wait_err {
                 item.result.wait_error = Some(err.to_string());
+                true
+            } else {
+                false
             }
-        }
+        } else {
+            false
+        };
         items.push(item);
+        if stop_batch {
+            break;
+        }
     }
     OffersReclaimPresplitCliResult {
         dry_run,

@@ -15,6 +15,10 @@ use crate::minimal_program_template::{
 };
 use crate::storage::SqliteStore;
 
+use crate::offer::lifecycle::{
+    OffersReclaimPresplitCliItem, OffersReclaimPresplitCliResult, PresplitReclaimPair,
+};
+
 use super::{
     run_offers_cancel_command, run_offers_reclaim_presplit_command, run_offers_reconcile_command,
     OffersCancelCliArgs, OffersReclaimPresplitCliArgs, OffersReconcileCliArgs,
@@ -425,6 +429,32 @@ async fn offers_reclaim_presplit_soft_fails_when_coin_missing() {
     let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
     assert_eq!(payload.get("submitted_count"), Some(&json!(0)));
+}
+
+#[test]
+fn reclaim_result_cli_failed_on_wait_error_even_when_submit_succeeded() {
+    let pair = PresplitReclaimPair {
+        coin_id: "aa".repeat(32),
+        fixed_delegated_puzzle_hash: "bb".repeat(32),
+    };
+    let mut item = OffersReclaimPresplitCliItem::success(&pair, "op-1", false);
+    item.result.wait_error = Some("timed out".to_string());
+    let result = OffersReclaimPresplitCliResult {
+        dry_run: false,
+        selected_count: 2,
+        submitted_count: 1,
+        failed_count: 0,
+        items: vec![item],
+    };
+    assert!(result.cli_failed());
+    let clean = OffersReclaimPresplitCliResult {
+        dry_run: false,
+        selected_count: 0,
+        submitted_count: 0,
+        failed_count: 0,
+        items: vec![],
+    };
+    assert!(!clean.cli_failed());
 }
 
 #[test]

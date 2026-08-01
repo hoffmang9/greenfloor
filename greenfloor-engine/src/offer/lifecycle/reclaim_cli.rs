@@ -92,6 +92,18 @@ pub struct OffersReclaimPresplitCliResult {
     pub items: Vec<OffersReclaimPresplitCliItem>,
 }
 
+impl OffersReclaimPresplitCliResult {
+    /// True when any reclaim submit failed or a post-submit confirm-wait failed.
+    #[must_use]
+    pub fn cli_failed(&self) -> bool {
+        self.failed_count > 0
+            || self
+                .items
+                .iter()
+                .any(|item| item.result.wait_error.is_some())
+    }
+}
+
 /// Zip repeatable CLI flags into 1:1 reclaim pairs (normalized hex).
 ///
 /// # Errors
@@ -264,5 +276,16 @@ mod tests {
         assert_eq!(fail.error_message(), "boom");
         assert_eq!(fail.result.dry_run, None);
         assert_eq!(fail.result.wait_error, None);
+
+        let mut waited = OffersReclaimPresplitCliItem::success(&pair, "op-1", false);
+        waited.result.wait_error = Some("timeout".to_string());
+        let with_wait = OffersReclaimPresplitCliResult {
+            dry_run: false,
+            selected_count: 1,
+            submitted_count: 1,
+            failed_count: 0,
+            items: vec![waited],
+        };
+        assert!(with_wait.cli_failed());
     }
 }

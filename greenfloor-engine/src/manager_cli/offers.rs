@@ -331,11 +331,15 @@ pub async fn run_offers_orphan_presplit_command(
         },
     )
     .await?;
-    let failed = payload
+    let exit_code = if payload
         .reclaim_result
         .as_ref()
-        .is_some_and(|result| result.failed_count > 0);
-    let exit_code = if failed { 2 } else { 0 };
+        .is_some_and(OffersReclaimPresplitCliResult::cli_failed)
+    {
+        2
+    } else {
+        0
+    };
     ctx.emit_serialized(&payload)?;
     Ok(exit_code)
 }

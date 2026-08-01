@@ -114,6 +114,8 @@ Optional developer bootstrap for testnet markets:
   - Discover only: `greenfloor-manager offers-orphan-presplit --asset ECO.181.2022 --start-height 8330000 --json`
   - Dry-run reclaim: add `--reclaim --dry-run`
   - Broadcast reclaim (waits for each maker spend by default): add `--reclaim` (use `--no-wait` to skip waits)
+  - With wait enabled, a confirm-wait failure stops the batch (vault singleton must settle before the
+    next reclaim) and exits non-zero; `wait_error` is set on that item under `reclaim_result`
   - Scope by market base asset: `--market-id <id>` (optional `--asset` must match `base_asset`)
   - JSON: discover rows are `orphans[]`; reclaim outcomes (including `wait_error`) are only under
     `reclaim_result` when `--reclaim` is set
