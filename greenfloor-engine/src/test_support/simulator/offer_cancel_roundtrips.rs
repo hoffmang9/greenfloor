@@ -125,6 +125,47 @@ async fn build_presplit_offer_reclaim_spend_returns_cat_to_vault() {
 }
 
 #[tokio::test]
+async fn build_presplit_offer_reclaim_accepts_cloud_wallet_member_wrapped_hash() {
+    let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
+    let result = build_offer_from_setup(&mut setup)
+        .await
+        .expect("presplit-existing offer");
+    let presplit_cat = setup.presplit_cat.expect("presplit cat");
+    let presplit_coin_id = presplit_cat.coin.coin_id();
+    let spend_bundle = crate::bech32m::decode_offer(&result.offer).expect("decode offer");
+    let binding = PresplitOfferBinding::from_presplit_coin_input(
+        setup.harness.vault_ctx.launcher_id,
+        presplit_cat.coin,
+        &spend_bundle,
+    )
+    .expect("extract binding");
+    let member_wrapped = crate::vault::members::p2_conditions_or_singleton_puzzle_hash(
+        binding.fixed_conditions_tree_hash,
+        setup.harness.vault_ctx.launcher_id,
+    )
+    .expect("member wrap")
+    .fixed_conditions_hash;
+    spend_vault_cat_reclaim(
+        &mut setup,
+        presplit_cat,
+        OfferReclaimMode::PresplitOffer {
+            fixed_conditions_tree_hash: member_wrapped,
+        },
+    )
+    .await;
+    assert!(setup
+        .harness
+        .chain
+        .sim
+        .lock()
+        .expect("sim lock")
+        .coin_state(presplit_coin_id)
+        .expect("presplit coin")
+        .spent_height
+        .is_some());
+}
+
+#[tokio::test]
 async fn build_offer_cancel_spend_bundle_presplit_existing_returns_cat_to_vault() {
     let mut setup = setup_roundtrip(OfferRoundtripScenario::PresplitExisting).await;
     let result = build_offer_from_setup(&mut setup)

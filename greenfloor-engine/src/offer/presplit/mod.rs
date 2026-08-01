@@ -14,7 +14,7 @@ pub(crate) use build::build_offer_from_presplit_cat;
 pub(crate) use build::build_offer_from_presplit_xch;
 pub(crate) use cancel_binding::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
-    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup,
+    resolve_member_fixed_conditions_hash_for_binding, PresplitBindingLookup,
 };
 pub use conditions::build_presplit_conditions_inner_spend;
 pub(crate) use conditions::build_presplit_offer_cancel_inner_spend;

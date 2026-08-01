@@ -7,7 +7,9 @@ use clvmr::NodePtr;
 
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::{build_offer_request_conditions, OfferPaymentBundle};
-use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
+use crate::vault::members::{
+    p2_conditions_or_singleton_from_member_fixed, p2_conditions_or_singleton_puzzle_hash,
+};
 use crate::vault::spend::VaultSpendContext;
 
 fn insert_p2_conditions_m_of_n(
@@ -74,14 +76,21 @@ pub fn build_presplit_conditions_inner_spend(
         .map_err(SignerError::from)
 }
 
+/// Build cancel/reclaim inner spend from a member-wrapped fixed-conditions hash.
+///
+/// Callers must normalize stored hashes via
+/// [`super::cancel_binding::resolve_member_fixed_conditions_hash_for_binding`] (or equivalent)
+/// before calling this.
 pub(crate) fn build_presplit_offer_cancel_inner_spend(
     ctx: &mut SpendContext,
     cancel_delegated: Spend,
     vault_ctx: &VaultSpendContext,
-    fixed_delegated_puzzle_hash: TreeHash,
+    fixed_conditions_member_hash: TreeHash,
 ) -> SignerResult<Spend> {
-    let hashes =
-        p2_conditions_or_singleton_puzzle_hash(fixed_delegated_puzzle_hash, vault_ctx.launcher_id)?;
+    let hashes = p2_conditions_or_singleton_from_member_fixed(
+        fixed_conditions_member_hash,
+        vault_ctx.launcher_id,
+    )?;
 
     let mut mips_spend = MipsSpend::new(cancel_delegated);
     let member = SingletonMember::new(vault_ctx.launcher_id);

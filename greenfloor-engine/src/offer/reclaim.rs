@@ -4,10 +4,6 @@
 //! coins sit at `P2_CONDITIONS_OR_SINGLETON` and the published offer bundle is self-contained.
 //! Cancel walks [`Offer::cancellable_coin_spends`], not settlement/notary side coins.
 
-use chia_protocol::{Bytes32, Coin, SpendBundle};
-use chia_sdk_driver::{Cat, CatSpend, Offer, SpendContext, Vault};
-use clvm_utils::TreeHash;
-
 use crate::bech32m::decode_offer;
 use crate::coinset::{
     broadcast_spend_bundle, client_for_signer_on_network, spend_bundle_operation_id, LiveCoinset,
@@ -20,7 +16,10 @@ use crate::offer::cancel_input::{
     classify_cancellable_maker_input, classify_maker_input_from_stored_metadata,
     CancellableMakerInput,
 };
-use crate::offer::presplit::{build_presplit_offer_cancel_inner_spend, vault_change_puzzle_hash};
+use crate::offer::presplit::{
+    build_presplit_offer_cancel_inner_spend, resolve_member_fixed_conditions_hash_for_binding,
+    vault_change_puzzle_hash,
+};
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
 use crate::vault::materialize::{
     append_vault_p2_reclaim_spend, build_vault_change_delegated_spend,
@@ -28,6 +27,9 @@ use crate::vault::materialize::{
 };
 use crate::vault::session::resolve_vault_spend_context;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
+use chia_protocol::{Bytes32, Coin, SpendBundle};
+use chia_sdk_driver::{Cat, CatSpend, Offer, SpendContext, Vault};
+use clvm_utils::TreeHash;
 
 pub use crate::offer::cancel_input::OfferReclaimMode;
 
@@ -36,10 +38,10 @@ fn build_presplit_reclaim_inner_spend(
     change_puzzle_hash: Bytes32,
     amount: u64,
     vault_ctx: &VaultSpendContext,
-    fixed_conditions_tree_hash: TreeHash,
+    fixed_conditions_member_hash: TreeHash,
 ) -> SignerResult<chia_sdk_driver::Spend> {
     let delegated = build_vault_change_delegated_spend(ctx, change_puzzle_hash, amount)?;
-    build_presplit_offer_cancel_inner_spend(ctx, delegated, vault_ctx, fixed_conditions_tree_hash)
+    build_presplit_offer_cancel_inner_spend(ctx, delegated, vault_ctx, fixed_conditions_member_hash)
 }
 
 fn append_presplit_maker_reclaim(
@@ -48,7 +50,7 @@ fn append_presplit_maker_reclaim(
     cat: Option<Cat>,
     change_puzzle_hash: Bytes32,
     vault_ctx: &VaultSpendContext,
-    fixed_conditions_tree_hash: TreeHash,
+    fixed_conditions_member_hash: TreeHash,
 ) -> SignerResult<()> {
     let amount = cat.map_or(coin.amount, |value| value.coin.amount);
     let inner_spend = build_presplit_reclaim_inner_spend(
@@ -56,7 +58,7 @@ fn append_presplit_maker_reclaim(
         change_puzzle_hash,
         amount,
         vault_ctx,
-        fixed_conditions_tree_hash,
+        fixed_conditions_member_hash,
     )?;
     if let Some(cat) = cat {
         Cat::spend_all(ctx, &[CatSpend::new(cat, inner_spend)]).map_err(SignerError::from)?;
@@ -101,14 +103,14 @@ fn append_cancellable_input_reclaim(
         CancellableMakerInput::PresplitMaker {
             coin,
             cat,
-            fixed_conditions_tree_hash,
+            fixed_conditions_member_hash,
         } => append_presplit_maker_reclaim(
             ctx,
             coin,
             cat,
             change_puzzle_hash,
             vault_ctx,
-            fixed_conditions_tree_hash,
+            fixed_conditions_member_hash,
         ),
     }
 }
@@ -134,11 +136,18 @@ where
         OfferReclaimMode::DirectVault => CancellableMakerInput::VaultCatDirect { cat },
         OfferReclaimMode::PresplitOffer {
             fixed_conditions_tree_hash,
-        } => CancellableMakerInput::PresplitMaker {
-            coin: cat.coin,
-            cat: Some(cat),
-            fixed_conditions_tree_hash,
-        },
+        } => {
+            let fixed_conditions_member_hash = resolve_member_fixed_conditions_hash_for_binding(
+                vault_ctx.launcher_id,
+                cat.info.p2_puzzle_hash,
+                fixed_conditions_tree_hash,
+            )?;
+            CancellableMakerInput::PresplitMaker {
+                coin: cat.coin,
+                cat: Some(cat),
+                fixed_conditions_member_hash,
+            }
+        }
     };
     let mut ctx = SpendContext::new();
     append_cancellable_input_reclaim(&mut ctx, &input, change_puzzle_hash, vault_ctx)?;

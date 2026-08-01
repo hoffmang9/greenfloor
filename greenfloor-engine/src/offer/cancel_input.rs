@@ -1,23 +1,25 @@
 //! Classify cancellable offer maker coins and resolve on-chain CAT inputs for cancel.
 
-use chia_protocol::{Bytes32, Coin, SpendBundle};
-use chia_sdk_driver::Cat;
-use clvm_utils::TreeHash;
-
 use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
-    verify_fixed_delegated_puzzle_hash_for_binding, PresplitBindingLookup,
+    resolve_member_fixed_conditions_hash_for_binding, PresplitBindingLookup,
 };
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
+use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
 use crate::vault::spend::VaultSpendContext;
+use chia_protocol::{Bytes32, Coin, SpendBundle};
+use chia_sdk_driver::Cat;
+use clvm_utils::TreeHash;
 
 /// How a vault-owned maker coin should be reclaimed to vault change.
 #[derive(Debug, Clone, Copy)]
 pub enum OfferReclaimMode {
     DirectVault,
+    /// Stored fixed hash: operator delegated encoding or Cloud Wallet member-wrapped.
+    /// Resolved against the CAT p2 at reclaim ingress.
     PresplitOffer {
         fixed_conditions_tree_hash: TreeHash,
     },
@@ -36,7 +38,8 @@ pub enum CancellableMakerInput {
     PresplitMaker {
         coin: Coin,
         cat: Option<Cat>,
-        fixed_conditions_tree_hash: TreeHash,
+        /// Member-wrapped fixed-conditions hash (normalized at classify ingress).
+        fixed_conditions_member_hash: TreeHash,
     },
 }
 
@@ -142,7 +145,7 @@ pub(crate) async fn resolve_cancellable_cat<C: OfferCoinsetBackend>(
     Ok(None)
 }
 
-fn presplit_hash_from_stored_fields(
+fn member_fixed_hash_from_stored_fields(
     launcher_id: Bytes32,
     coin: Coin,
     cat: Option<Cat>,
@@ -157,8 +160,7 @@ fn presplit_hash_from_stored_fields(
             .ok_or(SignerError::OfferCancelNoSpendableInput)?,
     )?;
     let binding_p2 = cat.map_or(coin.puzzle_hash, |value| value.info.p2_puzzle_hash);
-    verify_fixed_delegated_puzzle_hash_for_binding(launcher_id, binding_p2, hash)?;
-    Ok(hash)
+    resolve_member_fixed_conditions_hash_for_binding(launcher_id, binding_p2, hash)
 }
 
 /// Shared direct/presplit decision for a known on-chain coin (+ optional CAT).
@@ -216,8 +218,8 @@ fn resolve_presplit_maker(
     offer_bundle: Option<&SpendBundle>,
 ) -> SignerResult<Option<CancellableMakerInput>> {
     if let Some(fields) = stored_presplit_fields(metadata) {
-        return match presplit_hash_from_stored_fields(launcher_id, coin, coinset_cat, fields) {
-            Ok(fixed_conditions_tree_hash) => {
+        return match member_fixed_hash_from_stored_fields(launcher_id, coin, coinset_cat, fields) {
+            Ok(fixed_conditions_member_hash) => {
                 let cat = match coinset_cat {
                     Some(cat) => Some(cat),
                     None => match offer_bundle {
@@ -228,7 +230,7 @@ fn resolve_presplit_maker(
                 Ok(Some(CancellableMakerInput::PresplitMaker {
                     coin,
                     cat,
-                    fixed_conditions_tree_hash,
+                    fixed_conditions_member_hash,
                 }))
             }
             Err(SignerError::PresplitCoinPuzzleHashMismatch) => {
@@ -242,10 +244,16 @@ fn resolve_presplit_maker(
     };
     match presplit_binding_from_coin_input(launcher_id, coin, bundle) {
         Ok(PresplitBindingLookup::Found(binding)) => {
+            // Peel yields the raw delegated CONDITIONS hash; normalize to member-wrapped.
+            let fixed_conditions_member_hash = p2_conditions_or_singleton_puzzle_hash(
+                binding.fixed_conditions_tree_hash,
+                launcher_id,
+            )?
+            .fixed_conditions_hash;
             Ok(Some(CancellableMakerInput::PresplitMaker {
                 coin,
                 cat: coinset_cat.or(binding.parsed_cat),
-                fixed_conditions_tree_hash: binding.fixed_conditions_tree_hash,
+                fixed_conditions_member_hash,
             }))
         }
         Ok(PresplitBindingLookup::NotPresplitMaker) => Ok(None),
