@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Emit GitHub Actions outputs: whether Rust/Python diff coverage should run.
+# Emit GitHub Actions outputs for diff-coverage and coverage-cache planning.
+#
+# Outputs:
+#   run_rust_cov / run_py_cov — whether to collect + gate diff coverage
+#   need_coverage_cache — restore/save llvm-cov target-coverage cache
+#   seed_main_coverage — main push with no rust gate: warm instrumented artifacts
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,14 +30,23 @@ while IFS= read -r file; do
   esac
 done <<<"${changed_files}"
 
+# GitHub scopes Actions caches by ref: PR coverage caches are invisible to other
+# PRs. Seed instrumented artifacts on main so new PRs can restore them.
+need_coverage_cache=false
+seed_main_coverage=false
 if [[ "${run_rust_cov}" == "true" ]]; then
-  echo "run_rust_cov=true" >>"${GITHUB_OUTPUT}"
-else
-  echo "run_rust_cov=false" >>"${GITHUB_OUTPUT}"
+  need_coverage_cache=true
+fi
+if [[ "${GITHUB_REF:-}" == "refs/heads/main" ]]; then
+  need_coverage_cache=true
+  if [[ "${run_rust_cov}" != "true" ]]; then
+    seed_main_coverage=true
+  fi
 fi
 
-if [[ "${run_py_cov}" == "true" ]]; then
-  echo "run_py_cov=true" >>"${GITHUB_OUTPUT}"
-else
-  echo "run_py_cov=false" >>"${GITHUB_OUTPUT}"
-fi
+{
+  echo "run_rust_cov=${run_rust_cov}"
+  echo "run_py_cov=${run_py_cov}"
+  echo "need_coverage_cache=${need_coverage_cache}"
+  echo "seed_main_coverage=${seed_main_coverage}"
+} >>"${GITHUB_OUTPUT}"

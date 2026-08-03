@@ -20,7 +20,6 @@ build/
 target/
 target-coverage/
 greenfloor-native/target/
-greenfloor-engine/target-coverage/
 greenfloor-signer-pyo3/
 greenfloor-engine/target/
 .coverage

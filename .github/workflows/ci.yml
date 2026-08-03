@@ -23,10 +23,10 @@ jobs:
   lint:
     name: Lint, format, and tests (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Cold main: clippy + llvm-cov warm into target-coverage + plain nextest.
+    timeout-minutes: 15
     permissions:
       contents: read
-      actions: write # prune-github-actions-caches.sh on main
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,35 +79,15 @@ jobs:
           restore-keys: |
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
-      # llvm-cov uses greenfloor-engine/target-coverage; clippy/plain nextest use
-      # target/. Separate dirs + rust-cache keys avoid artifact poisoning. Coverage
-      # caches must be saved on refs/heads/main (PR-scoped caches are invisible to
-      # other PRs and are pruned on main).
-      - name: Plan coverage cache usage
-        id: cov
-        run: |
-          need=false
-          seed_main=false
-          if [ "${{ steps.scope.outputs.run_rust_cov }}" = "true" ]; then
-            need=true
-          fi
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            need=true
-            if [ "${{ steps.scope.outputs.run_rust_cov }}" != "true" ]; then
-              seed_main=true
-            fi
-          fi
-          {
-            echo "need=${need}"
-            echo "seed_main=${seed_main}"
-          } >>"${GITHUB_OUTPUT}"
-
+      # llvm-cov uses target-coverage/; clippy/plain nextest use target/. Cache
+      # plan outputs come from diff-coverage-scope.sh (need_coverage_cache /
+      # seed_main_coverage). PR-scoped coverage caches are pruned on main.
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
           shared-key: test
           target-dir: target
           save-cache: "true"
-          install-nextest: ${{ steps.cov.outputs.need != 'true' }}
+          install-nextest: ${{ steps.scope.outputs.need_coverage_cache != 'true' }}
 
       - name: Lint, format, clippy, and script tests (parallel)
         env:
@@ -116,7 +96,7 @@ jobs:
         run: bash .github/scripts/ubuntu-all-checks-parallel.sh
 
       - uses: ./.github/actions/rust-cache-greenfloor
-        if: steps.cov.outputs.need == 'true'
+        if: steps.scope.outputs.need_coverage_cache == 'true'
         with:
           shared-key: coverage
           target-dir: target-coverage
@@ -124,13 +104,13 @@ jobs:
           install-nextest: "true"
 
       - name: Install cargo-llvm-cov
-        if: steps.cov.outputs.need == 'true'
+        if: steps.scope.outputs.need_coverage_cache == 'true'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
       - name: Install Rust llvm-tools for coverage
-        if: steps.cov.outputs.need == 'true'
+        if: steps.scope.outputs.need_coverage_cache == 'true'
         run: rustup component add llvm-tools-preview
 
       # PR / gated path: filtered instrumented tests + lcov for diff-cover.
@@ -143,15 +123,14 @@ jobs:
           INCREMENTAL: "1"
         run: bash .github/scripts/ubuntu-rust-coverage.sh
 
-      # Main seed: instrumented --no-run into target-coverage only (cheap cache warm).
-      # Plain nextest below still exercises tests on target/.
+      # Main seed: instrumented compile into target-coverage; plain nextest still
+      # exercises tests on target/.
       - name: Warm main coverage cache
-        if: steps.cov.outputs.seed_main == 'true'
+        if: steps.scope.outputs.seed_main_coverage == 'true'
         env:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
           CARGO_TARGET_DIR: ${{ github.workspace }}/greenfloor-engine/target-coverage
-          WARM_ONLY: "1"
-        run: bash .github/scripts/ubuntu-rust-coverage.sh
+        run: bash .github/scripts/ubuntu-rust-coverage-warm.sh
 
       - name: Diff coverage gate (changed lines only)
         if: >-
@@ -198,8 +177,19 @@ jobs:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
         run: bash .github/scripts/ubuntu-rust-tests.sh
 
-      - name: Prune stale Actions caches
-        if: github.ref == 'refs/heads/main' && success()
+  # Narrow token: only this job needs actions:write (lint stays contents:read).
+  prune-caches:
+    name: Prune stale Actions caches
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prune PR-scoped and stale rust caches
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/prune-github-actions-caches.sh

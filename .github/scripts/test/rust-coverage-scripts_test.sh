@@ -62,6 +62,8 @@ init_git_repo() {
   git init --quiet
   git config user.email "test@example.com"
   git config user.name "test"
+  # Fixtures must not inherit the developer's commit.gpgsign / 1Password signer.
+  git config commit.gpgsign false
 }
 
 echo "changed-production-rust-files excludes tests.rs and test_support"
@@ -118,10 +120,13 @@ fixture_dir="$(new_fixture_dir)"
   git add .
   git commit --quiet -m "tests only"
   export GITHUB_OUTPUT="$(mktemp)"
+  unset GITHUB_REF || true
   bash "${repo_root}/.github/scripts/diff-coverage-scope.sh" HEAD~1 >/dev/null
   # shellcheck disable=SC1090
   source "${GITHUB_OUTPUT}"
   assert_eq "${run_rust_cov}" "false" "tests-only diff should not run rust cov"
+  assert_eq "${need_coverage_cache}" "false" "tests-only should not need coverage cache"
+  assert_eq "${seed_main_coverage}" "false" "tests-only should not seed main"
 )
 
 echo "scope and changed-files agree when production Rust changes"
@@ -137,10 +142,35 @@ fixture_dir="$(new_fixture_dir)"
   git add .
   git commit --quiet -m "delta"
   export GITHUB_OUTPUT="$(mktemp)"
+  unset GITHUB_REF || true
   bash "${repo_root}/.github/scripts/diff-coverage-scope.sh" HEAD~1 >/dev/null
   # shellcheck disable=SC1090
   source "${GITHUB_OUTPUT}"
   assert_eq "${run_rust_cov}" "true" "production rust diff should run rust cov"
+  assert_eq "${need_coverage_cache}" "true" "production rust needs coverage cache"
+  assert_eq "${seed_main_coverage}" "false" "non-main should not seed"
+)
+
+echo "main with no rust diff seeds coverage cache"
+fixture_dir="$(new_fixture_dir)"
+(
+  cd "${fixture_dir}"
+  init_git_repo
+  mkdir -p docs
+  touch docs/note.md
+  git add .
+  git commit --quiet -m "base"
+  echo "x" >> docs/note.md
+  git add .
+  git commit --quiet -m "docs"
+  export GITHUB_OUTPUT="$(mktemp)"
+  export GITHUB_REF="refs/heads/main"
+  bash "${repo_root}/.github/scripts/diff-coverage-scope.sh" HEAD~1 >/dev/null
+  # shellcheck disable=SC1090
+  source "${GITHUB_OUTPUT}"
+  assert_eq "${run_rust_cov}" "false" "docs-only should not gate rust cov"
+  assert_eq "${need_coverage_cache}" "true" "main should need coverage cache"
+  assert_eq "${seed_main_coverage}" "true" "main docs-only should seed"
 )
 
 echo "nextest filter includes integration binaries and changed path tokens"
