@@ -196,9 +196,13 @@ async fn build_leg_offer(scenario: OfferLegScenario) -> OfferBuildExport {
     coinset.register_cat(base_cat);
     coinset.register_cat(quote_cat);
     let input = OfferInput::try_from(request.clone()).expect("offer input");
-    let result = build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
-        .await
-        .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()));
+    let result = Box::pin(build_vault_cat_offer_with_spend(
+        &mut harness.vault_ctx,
+        &coinset,
+        input,
+    ))
+    .await
+    .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()));
     OfferBuildExport {
         request,
         result,

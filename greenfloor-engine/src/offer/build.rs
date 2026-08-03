@@ -41,7 +41,13 @@ async fn build_vault_cat_offer_async(
     let coinset = coinset::client_for_signer_on_network(&config, &operator_network)?;
     let mut session = resolve_vault_session(config).await?;
     let backend = LiveCoinset(&coinset);
-    build_vault_cat_offer_with_spend(&mut session.spend, &backend, input).await
+    // Box at the offer-build boundary (Clippy `large_futures`).
+    Box::pin(build_vault_cat_offer_with_spend(
+        &mut session.spend,
+        &backend,
+        input,
+    ))
+    .await
 }
 
 pub(crate) async fn build_vault_cat_offer_with_spend<C: OfferCoinsetBackend>(
