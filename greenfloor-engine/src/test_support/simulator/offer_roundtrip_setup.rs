@@ -207,7 +207,13 @@ pub(crate) async fn build_offer_from_setup(
     } else {
         coinset.register_cat(setup.source_cat);
     }
-    build_vault_cat_offer_with_spend(&mut setup.harness.vault_ctx, &coinset, input).await
+    // Box at the offer-build boundary (Clippy `large_futures`).
+    Box::pin(build_vault_cat_offer_with_spend(
+        &mut setup.harness.vault_ctx,
+        &coinset,
+        input,
+    ))
+    .await
 }
 
 pub(crate) fn assert_roundtrip_result(
