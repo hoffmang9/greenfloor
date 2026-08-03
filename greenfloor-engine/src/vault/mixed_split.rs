@@ -6,6 +6,7 @@ use crate::bech32m::decode_address;
 use crate::coinset::{self, CoinsetClient, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
+use crate::vault::cat_create::{assert_cat_creates, created_cats};
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::session::resolve_vault_spend_context;
 use crate::vault::spend::VaultSpendContext;
@@ -195,11 +196,11 @@ async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(
         spends.add(*cat);
     }
 
-    let asset_id = Id::Existing(asset_id);
+    let asset_id_key = Id::Existing(asset_id);
     let mut actions = Vec::new();
     for amount in output_amounts {
         actions.push(Action::send(
-            asset_id,
+            asset_id_key,
             receive_puzzle_hash,
             *amount,
             Memos::None,
@@ -207,7 +208,7 @@ async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(
     }
     if change_amount > 0 {
         actions.push(Action::send(
-            asset_id,
+            asset_id_key,
             receive_puzzle_hash,
             change_amount,
             Memos::None,
@@ -220,6 +221,12 @@ async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(
     let finished = spends
         .prepare(&mut ctx, &deltas, Relation::None)
         .map_err(SignerError::from)?;
+    assert_cat_creates(
+        created_cats(&finished.outputs),
+        asset_id,
+        receive_puzzle_hash,
+        &[],
+    )?;
 
     materialize_vault_cat_finished_spends(&mut ctx, vault_ctx, coinset, finished).await
 }
@@ -277,26 +284,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_mixed_split_spend_bundle_materializes_via_simulator() {
+    async fn build_mixed_split_rejects_double_wrap_and_keeps_receive_outputs() {
         use crate::test_support::simulator::harness::SimulatorVaultHarness;
         use crate::test_support::simulator::SimulatorOfferCoinset;
+        use crate::vault::cat_create::{
+            assert_cat_creates, created_cats, receive_cat_outer_puzzle_hash,
+        };
+        use chia_puzzle_types::Memos;
+        use chia_sdk_driver::{Action, Id, SpendContext, Spends};
 
         let mut harness = SimulatorVaultHarness::new();
         let cat = harness.fund_vault_cat(5_000);
         let coinset = SimulatorOfferCoinset::new(&harness.chain);
         coinset.register_cat(cat);
         let receive_puzzle_hash = harness.chain.p2_message_hash;
+        let asset_id = harness.chain.asset_id;
+
         let spend_bundle = super::build_vault_cat_mixed_split_spend_bundle(
             &mut harness.vault_ctx,
             &coinset,
             vec![cat],
             receive_puzzle_hash,
-            harness.chain.asset_id,
+            asset_id,
             &[1_000, 2_000],
             2_000,
         )
         .await
         .expect("mixed split bundle");
         assert!(!spend_bundle.coin_spends.is_empty());
+
+        // Regression: Action::send to the CAT outer fails the create assert.
+        let expected_outer = receive_cat_outer_puzzle_hash(asset_id, receive_puzzle_hash);
+        let mut bad_ctx = SpendContext::new();
+        let mut bad_spends = Spends::new(receive_puzzle_hash);
+        bad_spends.add(cat);
+        bad_spends
+            .apply(
+                &mut bad_ctx,
+                &[Action::send(
+                    Id::Existing(asset_id),
+                    expected_outer,
+                    5_000,
+                    Memos::None,
+                )],
+            )
+            .expect("apply buggy send");
+        let err = assert_cat_creates(
+            created_cats(&bad_spends.outputs),
+            asset_id,
+            receive_puzzle_hash,
+            &[],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            SignerError::VaultCatCreateDestinationIsOuterLayer
+        ));
     }
 }

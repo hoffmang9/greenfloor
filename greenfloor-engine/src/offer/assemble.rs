@@ -16,6 +16,7 @@ use crate::offer::types::{
     CreateOfferResult, OfferArtifacts, OfferCancelFields, OfferExecutionMode, OfferInput,
     PresplitArtifacts,
 };
+use crate::vault::cat_create::{assert_cat_creates, created_cats};
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::spend::VaultSpendContext;
 
@@ -230,6 +231,12 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
     let finished = spends
         .prepare(&mut ctx, &deltas, chia_sdk_driver::Relation::None)
         .map_err(SignerError::from)?;
+    assert_cat_creates(
+        created_cats(&finished.outputs),
+        offer_asset_id,
+        receive_puzzle_hash,
+        &[SETTLEMENT_PAYMENT_HASH.into()],
+    )?;
 
     let input_spend_bundle =
         materialize_vault_cat_finished_spends(&mut ctx, vault_ctx, coinset, finished).await?;

@@ -101,6 +101,14 @@ pub enum SignerError {
     #[error("cat change below minimum mojos")]
     CatChangeBelowMinimum,
 
+    #[error(
+        "vault cat create destination is the receive CAT outer puzzle hash (would double-wrap)"
+    )]
+    VaultCatCreateDestinationIsOuterLayer,
+
+    #[error("vault cat create destination is not the vault receive p2 puzzle hash")]
+    VaultCatCreateDestinationNotReceiveP2,
+
     #[error("vault receive message mode 23 not found")]
     VaultReceiveMessageNotFound,
 
