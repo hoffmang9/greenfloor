@@ -196,7 +196,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu-latest Rust/Python tests run in the lint job (plain nextest or incremental llvm-cov).
           - os: ubuntu-24.04-arm
             timeout_minutes: 8
           - os: macos-14
@@ -205,34 +204,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Restore Python venv cache
-        id: cache-venv
-        uses: actions/cache/restore@v4
-        with:
-          path: .venv
-          key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
-
-      - name: Create venv and install package
-        run: |
-          if [ ! -d .venv/bin ]; then
-            python -m venv .venv
-          fi
-          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-
-      - name: Save Python venv cache
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .venv
-          key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
@@ -252,8 +223,3 @@ jobs:
 
       - name: Build and test greenfloor-engine
         run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}" --features test
-
-      - name: Script adapter unit tests
-        env:
-          RUN_PY_COV: "false"
-        run: bash .github/scripts/ubuntu-script-tests.sh

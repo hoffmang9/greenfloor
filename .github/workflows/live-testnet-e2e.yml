@@ -34,36 +34,18 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
           install-nextest: "false"
 
       - name: Build native operator binaries
-        run: |
-          cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
-          export PYTHONPATH=scripts
-          target_dir="$(
-            python3 -c 'from greenfloor_scripts.binaries import cargo_target_directory; print(cargo_target_directory())'
-          )"
-          mkdir -p .venv/bin
-          for bin in greenfloor-engine greenfloor-manager greenfloord; do
-            install -m 755 "${target_dir}/debug/${bin}" ".venv/bin/${bin}"
-          done
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+        run: cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
 
       - name: Validate config and run manager proof flow
         shell: bash
         run: |
           set -euo pipefail
+          BIN="${GITHUB_WORKSPACE}/greenfloor-engine/target/debug"
           export GREENFLOOR_SIGNING_DEBUG=1
           export GREENFLOOR_CAT_PARSE_CAPTURE_DIR=./artifacts/cat-parse-cases
           export GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR=./artifacts/dry-run-offers
@@ -75,20 +57,20 @@ jobs:
           fi
           mkdir -p ./.tmp-state ./artifacts ./artifacts/cat-parse-cases ./artifacts/dry-run-offers
           printf "1\n%s\n" "${TESTNET_WALLET_MNEMONIC}" | \
-            greenfloor-manager \
+            "${BIN}/greenfloor-manager" \
               --program-config config/program.yaml \
               keys-onboard \
               --key-id key-main-1 \
               --state-dir ./.tmp-state
-          greenfloor-manager \
+          "${BIN}/greenfloor-manager" \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
             config-validate
-          greenfloor-manager \
+          "${BIN}/greenfloor-manager" \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
             doctor
-          greenfloor-manager \
+          "${BIN}/greenfloor-manager" \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
             build-and-post-offer \
@@ -98,7 +80,7 @@ jobs:
             --dry-run | tee ./artifacts/build-and-post-offer.dry-run.log
           # build-and-post-offer delegates to the native greenfloor-engine binary.
           if [ "${{ inputs.dry_run }}" = "false" ]; then
-            greenfloor-manager \
+            "${BIN}/greenfloor-manager" \
               --program-config config/program.yaml \
               --markets-config config/markets.yaml \
               build-and-post-offer \
@@ -106,21 +88,21 @@ jobs:
               --size-base-units "${{ inputs.size_base_units }}" \
               --network "${{ inputs.network_profile }}" \
               | tee ./artifacts/build-and-post-offer.live.log
-            greenfloor-manager \
+            "${BIN}/greenfloor-manager" \
               --program-config config/program.yaml \
               --markets-config config/markets.yaml \
               offers-status \
               --limit 50 \
               --events-limit 30 \
               | tee ./artifacts/offers-status.log
-            greenfloor-manager \
+            "${BIN}/greenfloor-manager" \
               --program-config config/program.yaml \
               --markets-config config/markets.yaml \
               offers-reconcile \
               --limit 200 \
               | tee ./artifacts/offers-reconcile.log
           fi
-          greenfloord \
+          "${BIN}/greenfloord" \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
             --state-dir ./.tmp-state \
