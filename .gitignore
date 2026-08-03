@@ -18,6 +18,7 @@ dist/
 build/
 *.egg-info/
 target/
+target-coverage/
 greenfloor-native/target/
 greenfloor-signer-pyo3/
 greenfloor-engine/target/
