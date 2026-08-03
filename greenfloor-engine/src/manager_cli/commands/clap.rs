@@ -388,9 +388,17 @@ pub enum ManagerCommands {
         launcher_id: String,
         #[arg(long, default_value = "~/.greenfloor/cache/vault_launcher_id.txt")]
         launcher_id_file: String,
-        #[arg(long, default_value_t = 100)]
-        max_nonce: u32,
+        #[arg(
+            long,
+            help = "Inclusive max vault member nonce to scan (`0` = nonce 0 only). CAT traces \
+                    default to receive-address hints only (no member walk). Pass --max-nonce N to \
+                    scan member nonces 0..=N. XCH traces default to 100. Raising this with spent \
+                    coins is slow."
+        )]
+        max_nonce: Option<u32>,
         /// Begin a partial lineage trace at this height; the balance still runs to chain peak.
+        /// With CAT assets, prefer receive-hint discovery (omit `--max-nonce`) — passing
+        /// `--max-nonce` with `include_spent` walks member puzzles and is much slower.
         #[arg(long)]
         start_height: Option<u64>,
     },

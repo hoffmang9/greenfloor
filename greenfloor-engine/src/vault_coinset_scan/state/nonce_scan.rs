@@ -6,18 +6,36 @@ use crate::coinset::{coin_id_from_record, to_coinset_hex, u64_from_value};
 use crate::error::SignerResult;
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::vault::members::nonce_member_puzzle_hash_hex;
-use crate::vault_coinset_scan::types::{CoinKind, CoinRow, DiscoverySource, ScanStopReason};
+use crate::vault_coinset_scan::cat_outer::cat_outer_coinset_hex;
+use crate::vault_coinset_scan::types::{
+    AssetTypeFilter, CoinKind, CoinRow, DiscoverySource, ScanStopReason,
+};
 
 use super::ScanState;
 
 impl ScanState {
     pub(super) async fn scan_nonces(&mut self) -> SignerResult<()> {
-        let max_nonce_target = self.request.max_nonce;
         let nonce_batch_size = self.request.nonce_batch_size;
         let empty_batch_stop_count = self.request.empty_batch_stop_count;
         let checkpoint_save_interval = self.request.checkpoint_save_interval;
         let mut scanned_since_resume = 0u32;
         let mut empty_batch_count = 0u32;
+        let cat_scoped = self.is_cat_scoped_scan();
+        let stop_after_empty_batches = match self.request.discovery.empty_batch_stop() {
+            crate::vault_coinset_scan::EmptyBatchStop::Always => true,
+            crate::vault_coinset_scan::EmptyBatchStop::WhenUnfiltered => {
+                self.window.effective_start_height.is_none()
+            }
+        };
+
+        self.scan_extra_hint_hashes().await?;
+
+        // Hint-only plans skip the member walk. `Nonces` / `HintsThenNonces` with
+        // `max_nonce: 0` still scan nonce 0.
+        let Some(max_nonce_target) = self.request.discovery.max_nonce() else {
+            self.stop_reason = ScanStopReason::MaxNonceReached;
+            return Ok(());
+        };
 
         for batch_start in
             (self.checkpoint_ctx.start_nonce..=max_nonce_target).step_by(nonce_batch_size as usize)
@@ -29,24 +47,18 @@ impl ScanState {
             let batch_nonce_p2 = self.build_batch_nonce_p2(&batch_nonces)?;
             let p2_hashes = coinset_p2_hashes(&batch_nonce_p2);
 
-            let (by_puzzle, by_hint) = tokio::join!(
-                self.scanner.by_puzzle_hashes(
-                    &p2_hashes,
-                    self.request.include_spent,
-                    self.window.effective_start_height,
-                    self.window.effective_end_height,
-                ),
-                self.scanner.by_hints(
-                    &p2_hashes,
-                    self.request.include_spent,
-                    self.window.effective_start_height,
-                    self.window.effective_end_height,
-                ),
-            );
-            let by_puzzle = by_puzzle?;
-            let by_hint = by_hint?;
+            let (by_puzzle, by_hint) = self.fetch_nonce_batch(&p2_hashes, cat_scoped).await?;
 
             let batch_has_any = !by_puzzle.is_empty() || !by_hint.is_empty();
+            tracing::debug!(
+                batch_start,
+                batch_end,
+                puzzle_hits = by_puzzle.len(),
+                hint_hits = by_hint.len(),
+                discovered_total = self.checkpoint.by_coin_id.len(),
+                cat_scoped,
+                "vault coinset scan nonce batch"
+            );
             if batch_end > 0 && !batch_has_any {
                 empty_batch_count = empty_batch_count.saturating_add(1);
             } else {
@@ -56,7 +68,7 @@ impl ScanState {
                 batch_end,
                 empty_batch_count,
                 empty_batch_stop_count,
-                self.window.effective_start_height,
+                stop_after_empty_batches,
             ) {
                 self.stop_reason = ScanStopReason::EmptyNonceBatches;
                 if self.checkpoint_ctx.enabled {
@@ -90,6 +102,131 @@ impl ScanState {
         Ok(())
     }
 
+    fn is_cat_scoped_scan(&self) -> bool {
+        matches!(self.effective_asset_type, AssetTypeFilter::Cat)
+            || !self.requested_cat_ids.is_empty()
+    }
+
+    /// CAT coins live on outer CAT puzzle hashes; vault discovery is via `CREATE_COIN` hints.
+    /// Skipping `by_puzzle_hashes` avoids pulling the full historical XCH set when
+    /// `include_spent` is true (vault-asset-trace).
+    async fn fetch_nonce_batch(
+        &self,
+        p2_hashes: &[String],
+        cat_scoped: bool,
+    ) -> SignerResult<(Vec<Value>, Vec<Value>)> {
+        if cat_scoped {
+            let by_hint = self
+                .scanner
+                .by_hints(
+                    p2_hashes,
+                    self.request.include_spent,
+                    self.window.effective_start_height,
+                    self.window.effective_end_height,
+                )
+                .await?;
+            return Ok((Vec::new(), by_hint));
+        }
+        let (by_puzzle, by_hint) = tokio::join!(
+            self.scanner.by_puzzle_hashes(
+                p2_hashes,
+                self.request.include_spent,
+                self.window.effective_start_height,
+                self.window.effective_end_height,
+            ),
+            self.scanner.by_hints(
+                p2_hashes,
+                self.request.include_spent,
+                self.window.effective_start_height,
+                self.window.effective_end_height,
+            ),
+        );
+        Ok((by_puzzle?, by_hint?))
+    }
+
+    async fn scan_extra_hint_hashes(&mut self) -> SignerResult<()> {
+        let extra_p2: Vec<String> = self
+            .request
+            .discovery
+            .hint_puzzle_hashes()
+            .iter()
+            .map(|value| normalize_hex_id(value))
+            .filter(|value| !value.is_empty())
+            .collect();
+        if extra_p2.is_empty() {
+            return Ok(());
+        }
+
+        let empty_nonce_p2 = HashMap::new();
+        if !self.requested_cat_ids.is_empty() {
+            // Scoped CAT discovery: query receive CAT outer puzzle hashes only.
+            // by_hints(receive_p2) with include_spent returns every asset ever sent to
+            // the vault and makes classify unbounded for vault-asset-trace.
+            let mut outer_hashes = Vec::new();
+            for p2_hex in &extra_p2 {
+                for asset_id in &self.requested_cat_ids {
+                    if let Some(outer) = cat_outer_coinset_hex(asset_id, p2_hex) {
+                        outer_hashes.push(outer);
+                    }
+                }
+            }
+            if outer_hashes.is_empty() {
+                return Ok(());
+            }
+            let by_puzzle = self
+                .scanner
+                .by_puzzle_hashes(
+                    &outer_hashes,
+                    self.request.include_spent,
+                    self.window.effective_start_height,
+                    self.window.effective_end_height,
+                )
+                .await?;
+            tracing::debug!(
+                outer_hashes = outer_hashes.len(),
+                puzzle_hits = by_puzzle.len(),
+                "vault coinset scan CAT receive outer puzzles"
+            );
+            ingest_records(
+                &mut self.checkpoint.by_coin_id,
+                &empty_nonce_p2,
+                DiscoverySource::PuzzleHash,
+                &by_puzzle,
+            );
+            return Ok(());
+        }
+
+        let extra = extra_p2
+            .iter()
+            .filter_map(|value| {
+                hex_to_bytes32(value)
+                    .ok()
+                    .map(|bytes| to_coinset_hex(bytes.as_ref()))
+            })
+            .collect::<Vec<_>>();
+        let by_hint = self
+            .scanner
+            .by_hints(
+                &extra,
+                self.request.include_spent,
+                self.window.effective_start_height,
+                self.window.effective_end_height,
+            )
+            .await?;
+        tracing::debug!(
+            hint_hashes = extra.len(),
+            hint_hits = by_hint.len(),
+            "vault coinset scan extra receive hints"
+        );
+        ingest_records(
+            &mut self.checkpoint.by_coin_id,
+            &empty_nonce_p2,
+            DiscoverySource::Hint,
+            &by_hint,
+        );
+        Ok(())
+    }
+
     fn build_batch_nonce_p2(&mut self, batch_nonces: &[u32]) -> SignerResult<HashMap<u32, String>> {
         let mut batch_nonce_p2 = HashMap::new();
         for nonce in batch_nonces {
@@ -108,9 +245,9 @@ fn should_stop_after_empty_batch(
     batch_end: u32,
     empty_batch_count: u32,
     empty_batch_stop_count: u32,
-    start_height: Option<u64>,
+    stop_after_empty_batches: bool,
 ) -> bool {
-    start_height.is_none() && batch_end > 0 && empty_batch_count >= empty_batch_stop_count
+    stop_after_empty_batches && batch_end > 0 && empty_batch_count >= empty_batch_stop_count
 }
 
 fn coinset_p2_hashes(batch_nonce_p2: &HashMap<u32, String>) -> Vec<String> {
@@ -179,7 +316,7 @@ pub(super) fn ingest_records(
 mod tests {
     use super::*;
     use crate::coinset::test_support::mock_get_coin_records_by_puzzle_hash_body;
-    use crate::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
+    use crate::vault_coinset_scan::request::{MemberDiscovery, ScanCheckpointControl, ScanRequest};
     use crate::vault_coinset_scan::types::AssetTypeFilter;
     use chia_protocol::{Bytes32, Coin};
     use mockito::Matcher;
@@ -190,7 +327,7 @@ mod tests {
             network: "mainnet".to_string(),
             coinset_base_url: Some(base_url),
             launcher_id: launcher_id.to_string(),
-            max_nonce: 63,
+            discovery: MemberDiscovery::nonces(63),
             include_spent: false,
             asset_type: AssetTypeFilter::Xch,
             requested_cat_ids: HashSet::new(),
@@ -261,12 +398,64 @@ mod tests {
 
     #[test]
     fn height_filtered_scan_does_not_stop_on_empty_nonce_batch() {
-        assert!(!should_stop_after_empty_batch(32, 1, 1, Some(8_376_742)));
+        assert!(!should_stop_after_empty_batch(32, 1, 1, false));
     }
 
     #[test]
-    fn unfiltered_scan_stops_on_configured_empty_nonce_batches() {
-        assert!(should_stop_after_empty_batch(32, 1, 1, None));
+    fn empty_batch_stop_honors_flag() {
+        assert!(should_stop_after_empty_batch(32, 1, 1, true));
+        assert!(!should_stop_after_empty_batch(32, 1, 1, false));
+        assert!(!should_stop_after_empty_batch(0, 1, 1, true));
+    }
+
+    #[tokio::test]
+    async fn hint_only_discovery_skips_member_nonce_walk() {
+        use crate::vault_coinset_scan::cat_outer::cat_outer_coinset_hex;
+
+        let mut server = mockito::Server::new_async().await;
+        let launcher_id = "11".repeat(32);
+        let asset_id = "aa".repeat(32);
+        let receive_p2 = "bb".repeat(32);
+        let outer = cat_outer_coinset_hex(&asset_id, &receive_p2).expect("outer");
+        let outer_coin = Coin::new(
+            Bytes32::new([0x33; 32]),
+            hex_to_bytes32(&normalize_hex_id(&outer)).expect("outer bytes"),
+            1000,
+        );
+
+        // Hint-only CAT path queries outer puzzle hashes, never member nonce endpoints.
+        let outer_mock = server
+            .mock("POST", "/get_coin_records_by_puzzle_hashes")
+            .match_body(Matcher::Regex(normalize_hex_id(&outer)))
+            .with_status(200)
+            .with_body(mock_get_coin_records_by_puzzle_hash_body(&[outer_coin]))
+            .expect(1)
+            .create();
+        let hints_mock = server
+            .mock("POST", "/get_coin_records_by_hints")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_records":[]}"#)
+            .expect(0)
+            .create();
+
+        let mut request = scan_request(server.url(), &launcher_id, Some(100));
+        request.asset_type = AssetTypeFilter::Cat;
+        request.requested_cat_ids = HashSet::from([asset_id.clone()]);
+        request.include_spent = true;
+        request.discovery = MemberDiscovery::Hints {
+            puzzle_hashes: vec![receive_p2],
+        };
+
+        let mut state = ScanState::prepare(request).await.expect("prepare scan");
+        state.scan_nonces().await.expect("scan nonces");
+
+        assert_eq!(state.stop_reason, ScanStopReason::MaxNonceReached);
+        assert!(state
+            .checkpoint
+            .by_coin_id
+            .contains_key(&normalize_hex_id(&hex::encode(outer_coin.coin_id()))));
+        outer_mock.assert();
+        hints_mock.assert();
     }
 
     #[test]

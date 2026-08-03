@@ -203,7 +203,7 @@ fn scan_request_from_cli_args(
         network: args.network,
         coinset_base_url: optional_trimmed(&args.coinset_base_url),
         launcher_id,
-        max_nonce: args.max_nonce,
+        discovery: crate::vault_coinset_scan::MemberDiscovery::nonces(args.max_nonce),
         include_spent: args.include_spent,
         asset_type: AssetTypeFilter::parse(&args.asset_type),
         requested_cat_ids,

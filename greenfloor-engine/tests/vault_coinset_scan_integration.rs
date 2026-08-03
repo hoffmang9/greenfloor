@@ -7,7 +7,9 @@ use greenfloor_engine::coinset::{coin_id_from_record, to_coinset_hex};
 use greenfloor_engine::hex::hex_to_bytes32;
 use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::nonce_member_puzzle_hash_hex_from_launcher_id;
-use greenfloor_engine::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
+use greenfloor_engine::vault_coinset_scan::request::{
+    MemberDiscovery, ScanCheckpointControl, ScanRequest,
+};
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
 use greenfloor_engine::vault_coinset_scan::ScanState;
 use mockito::Matcher;
@@ -29,7 +31,7 @@ fn scan_request(
         network: "mainnet".to_string(),
         coinset_base_url: Some(server.url()),
         launcher_id: launcher.to_string(),
-        max_nonce: 0,
+        discovery: MemberDiscovery::nonces(0),
         include_spent: false,
         asset_type: AssetTypeFilter::All,
         requested_cat_ids: HashSet::new(),

@@ -2,6 +2,7 @@
 
 pub mod asset_trace;
 pub mod cat_detect;
+pub(crate) mod cat_outer;
 pub mod checkpoint;
 pub mod cli;
 pub mod dust;
@@ -25,6 +26,9 @@ pub use launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, LauncherIdSource, ResolveLauncherIdParams,
     ResolvedLauncherId,
 };
-pub use request::{build_vault_scan_request, ScanRequest, ScanTuningDefaults, VaultScanParams};
+pub use request::{
+    build_vault_scan_request, EmptyBatchStop, MemberDiscovery, ScanRequest, ScanTuningDefaults,
+    VaultScanParams,
+};
 pub use result::ScanResult;
 pub use state::ScanState;

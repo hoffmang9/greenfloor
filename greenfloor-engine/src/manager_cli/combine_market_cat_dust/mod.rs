@@ -95,7 +95,7 @@ async fn run_vault_scan_for_job(
         mgr,
         coinset,
         launcher_id,
-        max_nonce,
+        crate::vault_coinset_scan::MemberDiscovery::nonces(max_nonce),
         false,
         AssetTypeFilter::Cat,
         Some(cat_asset_id),

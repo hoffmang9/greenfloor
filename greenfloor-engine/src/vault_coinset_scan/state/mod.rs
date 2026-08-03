@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use crate::error::SignerResult;
-use crate::vault_coinset_scan::cat_detect::{classify_coin_rows, CatDetectCaches};
+use crate::vault_coinset_scan::cat_detect::{
+    classify_coin_rows, prelabel_known_cat_outers, CatDetectCaches,
+};
 use crate::vault_coinset_scan::checkpoint::{
     save_scan_checkpoint, CheckpointWriteMetadata, LoadCheckpointDiscardReason,
     LoadCheckpointResult, LoadedCheckpoint,
@@ -165,6 +167,14 @@ impl ScanState {
     }
 
     async fn classify_rows(&mut self) -> SignerResult<()> {
+        prelabel_known_cat_outers(
+            &mut self.checkpoint.by_coin_id,
+            &self.requested_cat_ids,
+            self.request.discovery.hint_puzzle_hashes(),
+            &self.checkpoint.nonce_to_p2,
+            &self.asset_id_to_symbols,
+        );
+
         let mut detect_caches = CatDetectCaches::new(
             std::mem::take(&mut self.checkpoint.cat_asset_cache),
             std::mem::take(&mut self.checkpoint.parent_lineage_cache),

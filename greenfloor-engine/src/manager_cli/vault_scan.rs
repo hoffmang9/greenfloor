@@ -3,7 +3,7 @@ use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 use crate::vault_coinset_scan::{
-    build_vault_scan_request, cache_resolved_launcher_id, resolve_launcher_id,
+    build_vault_scan_request, cache_resolved_launcher_id, resolve_launcher_id, MemberDiscovery,
     ResolveLauncherIdParams, ResolvedLauncherId, ScanResult, ScanState, VaultScanParams,
 };
 
@@ -33,7 +33,7 @@ pub fn manager_vault_scan_params<'a>(
     mgr: &'a ManagerContext,
     coinset: &'a ResolvedCoinsetEndpoint,
     launcher_id: &'a str,
-    max_nonce: u32,
+    discovery: MemberDiscovery,
     include_spent: bool,
     asset_type: AssetTypeFilter,
     cat_asset_id: Option<&'a str>,
@@ -42,7 +42,7 @@ pub fn manager_vault_scan_params<'a>(
         network: coinset.network,
         coinset_base_url: Some(coinset.base_url()),
         launcher_id,
-        max_nonce,
+        discovery,
         start_height: None,
         include_spent,
         asset_type,

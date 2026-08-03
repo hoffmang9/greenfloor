@@ -34,6 +34,65 @@ impl CatDetectCaches {
     }
 }
 
+/// Label CAT rows whose outer puzzle hash matches a known (`asset_id`, `inner_p2`) pair.
+///
+/// This avoids parent puzzle/solution fetches for receive-address CAT coins during
+/// `vault-asset-trace`, where the outer hash is already determined by the asset filter.
+pub fn prelabel_known_cat_outers(
+    rows: &mut HashMap<String, CoinRow>,
+    requested_cat_ids: &HashSet<String>,
+    extra_hint_puzzle_hashes: &[String],
+    nonce_to_p2: &HashMap<u32, String>,
+    asset_id_to_symbols: &BTreeMap<String, Vec<String>>,
+) {
+    if requested_cat_ids.is_empty() || rows.is_empty() {
+        return;
+    }
+
+    let mut inner_p2s: HashSet<String> = extra_hint_puzzle_hashes
+        .iter()
+        .map(|value| normalize_hex_id(value))
+        .filter(|value| !value.is_empty())
+        .collect();
+    inner_p2s.extend(
+        nonce_to_p2
+            .values()
+            .map(|value| normalize_hex_id(value))
+            .filter(|value| !value.is_empty()),
+    );
+    if inner_p2s.is_empty() {
+        return;
+    }
+
+    let mut outer_to_asset: HashMap<String, String> = HashMap::new();
+    for asset_id in requested_cat_ids {
+        for p2_hex in &inner_p2s {
+            let Some(outer) =
+                crate::vault_coinset_scan::cat_outer::cat_outer_normalized_hex(asset_id, p2_hex)
+            else {
+                continue;
+            };
+            outer_to_asset.insert(outer, asset_id.clone());
+        }
+    }
+    if outer_to_asset.is_empty() {
+        return;
+    }
+
+    for row in rows.values_mut() {
+        let puzzle = normalize_hex_id(&row.puzzle_hash);
+        let Some(asset_id) = outer_to_asset.get(&puzzle) else {
+            continue;
+        };
+        row.kind = CoinKind::Cat;
+        row.cat_asset_id = Some(asset_id.clone());
+        row.cat_symbols = asset_id_to_symbols
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default();
+    }
+}
+
 /// Classify coin rows.
 ///
 /// # Errors
@@ -53,6 +112,15 @@ pub async fn classify_coin_rows(
     let mut pending_by_parent: HashMap<String, Vec<String>> = HashMap::new();
 
     for (coin_id, row) in rows.iter_mut() {
+        if row.kind == CoinKind::Cat && row.cat_asset_id.is_some() {
+            // Already labeled (for example receive CAT outer prelabel).
+            if let Some(asset_id) = row.cat_asset_id.as_ref() {
+                caches
+                    .cat_asset_cache
+                    .insert(coin_id.clone(), asset_id.clone());
+            }
+            continue;
+        }
         if classify_xch_or_other(&row.puzzle_hash, nonce_to_p2, &row.discovered_nonces) {
             row.kind = CoinKind::Xch;
             continue;
@@ -96,6 +164,7 @@ async fn prefetch_parent_records(
 ) -> SignerResult<HashMap<String, Option<Value>>> {
     let unresolved_parent_ids: Vec<String> = rows
         .values()
+        .filter(|row| !(row.kind == CoinKind::Cat && row.cat_asset_id.is_some()))
         .filter_map(|row| {
             let parent_id = normalize_hex_id(&row.parent_coin_info);
             if parent_id.is_empty() {
