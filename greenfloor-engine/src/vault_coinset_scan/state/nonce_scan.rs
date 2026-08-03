@@ -153,76 +153,43 @@ impl ScanState {
             .map(|value| normalize_hex_id(value))
             .filter(|value| !value.is_empty())
             .collect();
-        if extra_p2.is_empty() {
+        // Receive hints are CAT-scoped: query `cat(asset_id, receive_p2)` outer hashes.
+        // Non-CAT / unscoped scans do not use hint discovery (XCH is nonce-walk only).
+        if extra_p2.is_empty() || self.requested_cat_ids.is_empty() {
             return Ok(());
         }
 
         let empty_nonce_p2 = HashMap::new();
-        if !self.requested_cat_ids.is_empty() {
-            // Scoped CAT discovery: query receive CAT outer puzzle hashes only.
-            // by_hints(receive_p2) with include_spent returns every asset ever sent to
-            // the vault and makes classify unbounded for vault-asset-trace.
-            let mut outer_hashes = Vec::new();
-            for p2_hex in &extra_p2 {
-                for asset_id in &self.requested_cat_ids {
-                    if let Some(outer) = cat_outer_coinset_hex(asset_id, p2_hex) {
-                        outer_hashes.push(outer);
-                    }
+        let mut outer_hashes = Vec::new();
+        for p2_hex in &extra_p2 {
+            for asset_id in &self.requested_cat_ids {
+                if let Some(outer) = cat_outer_coinset_hex(asset_id, p2_hex) {
+                    outer_hashes.push(outer);
                 }
             }
-            if outer_hashes.is_empty() {
-                return Ok(());
-            }
-            let by_puzzle = self
-                .scanner
-                .by_puzzle_hashes(
-                    &outer_hashes,
-                    self.request.include_spent,
-                    self.window.effective_start_height,
-                    self.window.effective_end_height,
-                )
-                .await?;
-            tracing::debug!(
-                outer_hashes = outer_hashes.len(),
-                puzzle_hits = by_puzzle.len(),
-                "vault coinset scan CAT receive outer puzzles"
-            );
-            ingest_records(
-                &mut self.checkpoint.by_coin_id,
-                &empty_nonce_p2,
-                DiscoverySource::PuzzleHash,
-                &by_puzzle,
-            );
+        }
+        if outer_hashes.is_empty() {
             return Ok(());
         }
-
-        let extra = extra_p2
-            .iter()
-            .filter_map(|value| {
-                hex_to_bytes32(value)
-                    .ok()
-                    .map(|bytes| to_coinset_hex(bytes.as_ref()))
-            })
-            .collect::<Vec<_>>();
-        let by_hint = self
+        let by_puzzle = self
             .scanner
-            .by_hints(
-                &extra,
+            .by_puzzle_hashes(
+                &outer_hashes,
                 self.request.include_spent,
                 self.window.effective_start_height,
                 self.window.effective_end_height,
             )
             .await?;
         tracing::debug!(
-            hint_hashes = extra.len(),
-            hint_hits = by_hint.len(),
-            "vault coinset scan extra receive hints"
+            outer_hashes = outer_hashes.len(),
+            puzzle_hits = by_puzzle.len(),
+            "vault coinset scan CAT receive outer puzzles"
         );
         ingest_records(
             &mut self.checkpoint.by_coin_id,
             &empty_nonce_p2,
-            DiscoverySource::Hint,
-            &by_hint,
+            DiscoverySource::PuzzleHash,
+            &by_puzzle,
         );
         Ok(())
     }

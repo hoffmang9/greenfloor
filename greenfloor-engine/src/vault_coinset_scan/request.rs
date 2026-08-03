@@ -249,4 +249,16 @@ mod tests {
         assert_eq!(nonces.max_nonce(), Some(0));
         assert!(nonces.hint_puzzle_hashes().is_empty());
     }
+
+    #[test]
+    fn member_discovery_hints_then_nonces_always_stops_empty_batches() {
+        let plan = MemberDiscovery::HintsThenNonces {
+            puzzle_hashes: vec!["aa".repeat(32)],
+            max_nonce: 3,
+            empty_batch_stop: EmptyBatchStop::Always,
+        };
+        assert_eq!(plan.max_nonce(), Some(3));
+        assert_eq!(plan.empty_batch_stop(), EmptyBatchStop::Always);
+        assert_eq!(plan.hint_puzzle_hashes().len(), 1);
+    }
 }

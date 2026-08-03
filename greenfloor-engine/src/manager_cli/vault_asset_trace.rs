@@ -377,6 +377,47 @@ mod tests {
     }
 
     #[test]
+    fn cat_discovery_with_max_nonce_uses_hints_then_nonces() {
+        let hashes = vec!["aa".repeat(32)];
+        let plan = vault_trace_member_discovery(VaultTraceAssetKind::Cat, Some(7), hashes.clone())
+            .expect("cat plan");
+        assert_eq!(
+            plan,
+            MemberDiscovery::HintsThenNonces {
+                puzzle_hashes: hashes,
+                max_nonce: 7,
+                empty_batch_stop: EmptyBatchStop::Always,
+            }
+        );
+    }
+
+    #[test]
+    fn market_matches_cat_asset_via_base_symbol() {
+        let asset_id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let mut by_ticker = HashMap::new();
+        by_ticker.insert("byc".to_string(), HashSet::from([asset_id.to_string()]));
+        let index = CatTickerIndex {
+            by_ticker,
+            symbols_by_asset_id: std::collections::BTreeMap::default(),
+        };
+        let market = MarketConfig {
+            market_id: "m".to_string(),
+            enabled: true,
+            base_asset: "unrelated".to_string(),
+            base_symbol: "BYC".to_string(),
+            quote_asset: "xch".to_string(),
+            quote_asset_type: "volatile".to_string(),
+            receive_address: String::new(),
+            signer_key_id: "k".to_string(),
+            mode: "one_sided".to_string(),
+            pricing: crate::config::MarketPricing::default(),
+            cancel_move_threshold_bps: None,
+            ladders: HashMap::new(),
+        };
+        assert!(market_matches_cat_asset(&index, &market, asset_id, "other"));
+    }
+
+    #[test]
     fn cat_receive_hints_match_ticker_market_when_operator_passes_asset_id() {
         let asset_id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let mut by_ticker = HashMap::new();

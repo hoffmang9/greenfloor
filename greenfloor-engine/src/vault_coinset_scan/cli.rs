@@ -303,6 +303,25 @@ mod tests {
     }
 
     #[test]
+    fn scan_request_from_cli_uses_member_discovery_nonces() {
+        use std::collections::HashSet;
+
+        use crate::vault_coinset_scan::MemberDiscovery;
+
+        let args =
+            VaultCoinsetScanCliArgs::try_parse_from(["scan", "--max-nonce", "12"]).expect("parse");
+        let request = scan_request_from_cli_args(
+            args,
+            "aa".repeat(32),
+            HashSet::new(),
+            Vec::new(),
+            None,
+            None,
+        );
+        assert_eq!(request.discovery, MemberDiscovery::nonces(12));
+    }
+
+    #[test]
     fn clear_cache_files_reports_missing_and_deleted() {
         let dir = tempfile::tempdir().expect("tempdir");
         let existing = dir.path().join("exists.txt");

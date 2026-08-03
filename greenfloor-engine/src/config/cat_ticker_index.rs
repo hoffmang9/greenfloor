@@ -346,6 +346,8 @@ mod tests {
         assert!(!index.label_refers_to_asset("BYC", asset_id));
         assert!(index.label_refers_to_asset("wUSDC.b", asset_id));
         assert!(index.label_refers_to_asset(asset_id, asset_id));
+        assert!(!index.label_refers_to_asset("", asset_id));
+        assert!(!index.label_refers_to_asset("!!!", asset_id));
     }
 
     #[test]
