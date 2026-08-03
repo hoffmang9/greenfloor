@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      # Cache save (rust-cache / actions/cache) needs a writable Actions scope.
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -177,19 +179,11 @@ jobs:
           CARGO_MANIFEST: ${{ env.CARGO_MANIFEST }}
         run: bash .github/scripts/ubuntu-rust-tests.sh
 
-  # Narrow token: only this job needs actions:write (lint stays contents:read).
-  prune-caches:
-    name: Prune stale Actions caches
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Prune PR-scoped and stale rust caches
+      # After caches are saved for this run; continue-on-error so prune API blips
+      # do not fail the gate. Lint already has actions:write for cache save.
+      - name: Prune stale Actions caches
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && success()
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/prune-github-actions-caches.sh
