@@ -231,7 +231,7 @@ pub async fn run_offers_orphan_presplit_command(
         ctx,
         &coinset,
         &launcher.launcher_id,
-        args.max_nonce,
+        crate::vault_coinset_scan::MemberDiscovery::nonces(args.max_nonce),
         false,
         AssetTypeFilter::Cat,
         Some(asset_id.as_str()),

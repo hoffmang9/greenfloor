@@ -73,6 +73,32 @@ pub fn lookup_asset_id_from_ticker(
     )))
 }
 
+impl CatTickerIndex {
+    /// True when `label` is `asset_id` (hex) or a ticker that maps to it.
+    ///
+    /// Ambiguous tickers still match when `asset_id` is one of the candidates
+    /// (useful for market receive-hint matching against a already-resolved id).
+    #[must_use]
+    pub fn label_refers_to_asset(&self, label: &str, asset_id: &str) -> bool {
+        let resolved = normalize_hex_id(asset_id);
+        let trimmed = label.trim();
+        if trimmed.is_empty() || resolved.is_empty() {
+            return false;
+        }
+        let as_hex = normalize_hex_id(trimmed);
+        if !as_hex.is_empty() && as_hex == resolved {
+            return true;
+        }
+        let key = normalize_label(trimmed);
+        if key.is_empty() {
+            return false;
+        }
+        self.by_ticker
+            .get(&key)
+            .is_some_and(|ids| ids.iter().any(|id| normalize_hex_id(id) == resolved))
+    }
+}
+
 /// Build cat ticker index.
 ///
 /// # Errors
@@ -317,6 +343,32 @@ mod tests {
             .expect("lookup")
             .expect("asset id");
         assert_eq!(resolved, asset_id);
+        assert!(!index.label_refers_to_asset("BYC", asset_id));
+        assert!(index.label_refers_to_asset("wUSDC.b", asset_id));
+        assert!(index.label_refers_to_asset(asset_id, asset_id));
+        assert!(!index.label_refers_to_asset("", asset_id));
+        assert!(!index.label_refers_to_asset("!!!", asset_id));
+    }
+
+    #[test]
+    fn label_refers_to_asset_matches_when_ticker_ambiguous() {
+        let asset_a = "aa".repeat(32);
+        let asset_b = "bb".repeat(32);
+        let mut tickers = HashMap::new();
+        tickers.insert(
+            "byc".to_string(),
+            HashSet::from([asset_a.clone(), asset_b.clone()]),
+        );
+        let index = CatTickerIndex {
+            by_ticker: tickers,
+            symbols_by_asset_id: BTreeMap::new(),
+        };
+        assert!(index.label_refers_to_asset("BYC", &asset_a));
+        assert!(index.label_refers_to_asset("byc", &asset_b));
+        assert!(!index.label_refers_to_asset(
+            "BYC",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        ));
     }
 
     #[test]

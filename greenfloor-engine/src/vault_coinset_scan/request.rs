@@ -29,12 +29,86 @@ pub struct ScanCheckpointControl {
     pub auto_increment: bool,
 }
 
+/// When empty nonce batches may end the member walk early.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyBatchStop {
+    /// Stop only when the scan has no `start_height` filter.
+    WhenUnfiltered,
+    /// Always allow empty-batch stop (CAT nonce walks over tall height windows).
+    Always,
+}
+
+/// How vault Coinset discovery finds member / receive coins.
+///
+/// Encodes hint queries and optional nonce walks as one plan so callers cannot
+/// leave `max_nonce` / hint hashes / empty-batch policy out of sync.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberDiscovery {
+    /// Walk member nonces `0..=max_nonce` (no receive-hint pass).
+    Nonces {
+        max_nonce: u32,
+        empty_batch_stop: EmptyBatchStop,
+    },
+    /// Discover only via receive / extra puzzle hashes (no member walk).
+    Hints { puzzle_hashes: Vec<String> },
+    /// Receive/extra hints first, then walk member nonces `0..=max_nonce`.
+    HintsThenNonces {
+        puzzle_hashes: Vec<String>,
+        max_nonce: u32,
+        empty_batch_stop: EmptyBatchStop,
+    },
+}
+
+impl MemberDiscovery {
+    /// Standard nonce walk with empty-batch stop only when unfiltered by height.
+    #[must_use]
+    pub fn nonces(max_nonce: u32) -> Self {
+        Self::Nonces {
+            max_nonce,
+            empty_batch_stop: EmptyBatchStop::WhenUnfiltered,
+        }
+    }
+
+    #[must_use]
+    pub fn hint_puzzle_hashes(&self) -> &[String] {
+        match self {
+            Self::Nonces { .. } => &[],
+            Self::Hints { puzzle_hashes } | Self::HintsThenNonces { puzzle_hashes, .. } => {
+                puzzle_hashes.as_slice()
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn max_nonce(&self) -> Option<u32> {
+        match self {
+            Self::Hints { .. } => None,
+            Self::Nonces { max_nonce, .. } | Self::HintsThenNonces { max_nonce, .. } => {
+                Some(*max_nonce)
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn empty_batch_stop(&self) -> EmptyBatchStop {
+        match self {
+            Self::Hints { .. } => EmptyBatchStop::WhenUnfiltered,
+            Self::Nonces {
+                empty_batch_stop, ..
+            }
+            | Self::HintsThenNonces {
+                empty_batch_stop, ..
+            } => *empty_batch_stop,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScanRequest {
     pub network: String,
     pub coinset_base_url: Option<String>,
     pub launcher_id: String,
-    pub max_nonce: u32,
+    pub discovery: MemberDiscovery,
     pub include_spent: bool,
     pub asset_type: AssetTypeFilter,
     pub requested_cat_ids: HashSet<String>,
@@ -59,7 +133,7 @@ pub struct VaultScanParams<'a> {
     pub network: &'a str,
     pub coinset_base_url: Option<&'a str>,
     pub launcher_id: &'a str,
-    pub max_nonce: u32,
+    pub discovery: MemberDiscovery,
     pub start_height: Option<u64>,
     pub include_spent: bool,
     pub asset_type: AssetTypeFilter,
@@ -84,7 +158,7 @@ pub fn build_vault_scan_request(params: &VaultScanParams<'_>) -> ScanRequest {
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         launcher_id: params.launcher_id.to_string(),
-        max_nonce: params.max_nonce,
+        discovery: params.discovery.clone(),
         start_height: params.start_height,
         include_spent: params.include_spent,
         asset_type: params.asset_type,
@@ -118,7 +192,7 @@ mod tests {
             network: "mainnet",
             coinset_base_url: Some("https://api.coinset.org"),
             launcher_id: "aa",
-            max_nonce: 100,
+            discovery: MemberDiscovery::nonces(100),
             start_height: None,
             include_spent,
             asset_type,
@@ -161,5 +235,30 @@ mod tests {
         let request = build_vault_scan_request(&params);
         assert!(request.requested_cat_ids.is_empty());
         assert_eq!(request.asset_type, AssetTypeFilter::Xch);
+    }
+
+    #[test]
+    fn member_discovery_hints_skip_nonce_walk() {
+        let hints = MemberDiscovery::Hints {
+            puzzle_hashes: vec!["aa".repeat(32)],
+        };
+        assert!(hints.max_nonce().is_none());
+        assert_eq!(hints.hint_puzzle_hashes().len(), 1);
+
+        let nonces = MemberDiscovery::nonces(0);
+        assert_eq!(nonces.max_nonce(), Some(0));
+        assert!(nonces.hint_puzzle_hashes().is_empty());
+    }
+
+    #[test]
+    fn member_discovery_hints_then_nonces_always_stops_empty_batches() {
+        let plan = MemberDiscovery::HintsThenNonces {
+            puzzle_hashes: vec!["aa".repeat(32)],
+            max_nonce: 3,
+            empty_batch_stop: EmptyBatchStop::Always,
+        };
+        assert_eq!(plan.max_nonce(), Some(3));
+        assert_eq!(plan.empty_batch_stop(), EmptyBatchStop::Always);
+        assert_eq!(plan.hint_puzzle_hashes().len(), 1);
     }
 }

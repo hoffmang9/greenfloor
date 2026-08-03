@@ -34,6 +34,65 @@ impl CatDetectCaches {
     }
 }
 
+/// Label CAT rows whose outer puzzle hash matches a known (`asset_id`, `inner_p2`) pair.
+///
+/// This avoids parent puzzle/solution fetches for receive-address CAT coins during
+/// `vault-asset-trace`, where the outer hash is already determined by the asset filter.
+pub fn prelabel_known_cat_outers(
+    rows: &mut HashMap<String, CoinRow>,
+    requested_cat_ids: &HashSet<String>,
+    extra_hint_puzzle_hashes: &[String],
+    nonce_to_p2: &HashMap<u32, String>,
+    asset_id_to_symbols: &BTreeMap<String, Vec<String>>,
+) {
+    if requested_cat_ids.is_empty() || rows.is_empty() {
+        return;
+    }
+
+    let mut inner_p2s: HashSet<String> = extra_hint_puzzle_hashes
+        .iter()
+        .map(|value| normalize_hex_id(value))
+        .filter(|value| !value.is_empty())
+        .collect();
+    inner_p2s.extend(
+        nonce_to_p2
+            .values()
+            .map(|value| normalize_hex_id(value))
+            .filter(|value| !value.is_empty()),
+    );
+    if inner_p2s.is_empty() {
+        return;
+    }
+
+    let mut outer_to_asset: HashMap<String, String> = HashMap::new();
+    for asset_id in requested_cat_ids {
+        for p2_hex in &inner_p2s {
+            let Some(outer) =
+                crate::vault_coinset_scan::cat_outer::cat_outer_normalized_hex(asset_id, p2_hex)
+            else {
+                continue;
+            };
+            outer_to_asset.insert(outer, asset_id.clone());
+        }
+    }
+    if outer_to_asset.is_empty() {
+        return;
+    }
+
+    for row in rows.values_mut() {
+        let puzzle = normalize_hex_id(&row.puzzle_hash);
+        let Some(asset_id) = outer_to_asset.get(&puzzle) else {
+            continue;
+        };
+        row.kind = CoinKind::Cat;
+        row.cat_asset_id = Some(asset_id.clone());
+        row.cat_symbols = asset_id_to_symbols
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default();
+    }
+}
+
 /// Classify coin rows.
 ///
 /// # Errors
@@ -53,6 +112,15 @@ pub async fn classify_coin_rows(
     let mut pending_by_parent: HashMap<String, Vec<String>> = HashMap::new();
 
     for (coin_id, row) in rows.iter_mut() {
+        if row.kind == CoinKind::Cat && row.cat_asset_id.is_some() {
+            // Already labeled (for example receive CAT outer prelabel).
+            if let Some(asset_id) = row.cat_asset_id.as_ref() {
+                caches
+                    .cat_asset_cache
+                    .insert(coin_id.clone(), asset_id.clone());
+            }
+            continue;
+        }
         if classify_xch_or_other(&row.puzzle_hash, nonce_to_p2, &row.discovered_nonces) {
             row.kind = CoinKind::Xch;
             continue;
@@ -96,6 +164,7 @@ async fn prefetch_parent_records(
 ) -> SignerResult<HashMap<String, Option<Value>>> {
     let unresolved_parent_ids: Vec<String> = rows
         .values()
+        .filter(|row| !(row.kind == CoinKind::Cat && row.cat_asset_id.is_some()))
         .filter_map(|row| {
             let parent_id = normalize_hex_id(&row.parent_coin_info);
             if parent_id.is_empty() {
@@ -364,6 +433,130 @@ mod tests {
             &nonce_to_p2,
             &[0]
         ));
+    }
+
+    #[test]
+    fn prelabel_known_cat_outers_labels_matching_receive_outer() {
+        use std::collections::{BTreeMap, HashSet};
+
+        use crate::vault_coinset_scan::cat_outer::cat_outer_normalized_hex;
+
+        let asset_id = "aa".repeat(32);
+        let receive_p2 = "bb".repeat(32);
+        let outer = cat_outer_normalized_hex(&asset_id, &receive_p2).expect("outer");
+        let coin_id = "cc".repeat(32);
+        let mut rows = HashMap::from([(
+            coin_id.clone(),
+            CoinRow {
+                coin_id: coin_id.clone(),
+                puzzle_hash: outer.clone(),
+                parent_coin_info: "dd".repeat(32),
+                amount: 1000,
+                confirmed_block_index: 1,
+                spent_block_index: 0,
+                discovered_nonces: Vec::new(),
+                discovered_by_puzzle_hash: true,
+                discovered_by_hint: false,
+                kind: CoinKind::Unknown,
+                cat_asset_id: None,
+                cat_symbols: vec![],
+            },
+        )]);
+        let symbols = BTreeMap::from([(asset_id.clone(), vec!["BYC".to_string()])]);
+        prelabel_known_cat_outers(
+            &mut rows,
+            &HashSet::from([asset_id.clone()]),
+            &[receive_p2],
+            &HashMap::new(),
+            &symbols,
+        );
+        assert_eq!(rows[&coin_id].kind, CoinKind::Cat);
+        assert_eq!(
+            rows[&coin_id].cat_asset_id.as_deref(),
+            Some(asset_id.as_str())
+        );
+        assert_eq!(rows[&coin_id].cat_symbols, vec!["BYC".to_string()]);
+    }
+
+    #[test]
+    fn prelabel_known_cat_outers_noop_without_inners_or_assets() {
+        use std::collections::{BTreeMap, HashSet};
+
+        let coin_id = "cc".repeat(32);
+        let mut rows = HashMap::from([(
+            coin_id.clone(),
+            CoinRow {
+                coin_id: coin_id.clone(),
+                puzzle_hash: "ee".repeat(32),
+                parent_coin_info: "dd".repeat(32),
+                amount: 1,
+                confirmed_block_index: 1,
+                spent_block_index: 0,
+                discovered_nonces: Vec::new(),
+                discovered_by_puzzle_hash: false,
+                discovered_by_hint: false,
+                kind: CoinKind::Unknown,
+                cat_asset_id: None,
+                cat_symbols: vec![],
+            },
+        )]);
+        prelabel_known_cat_outers(
+            &mut rows,
+            &HashSet::new(),
+            &["bb".repeat(32)],
+            &HashMap::new(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(rows[&coin_id].kind, CoinKind::Unknown);
+        prelabel_known_cat_outers(
+            &mut rows,
+            &HashSet::from(["aa".repeat(32)]),
+            &[],
+            &HashMap::new(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(rows[&coin_id].kind, CoinKind::Unknown);
+    }
+
+    #[tokio::test]
+    async fn classify_coin_rows_skips_network_for_prelabeled_cats() {
+        use std::collections::BTreeMap;
+
+        use crate::coinset::DirectCoinsetScanClient;
+
+        let coin_id = "b".repeat(64);
+        let asset_id = "a".repeat(64);
+        let mut rows = HashMap::from([(
+            coin_id.clone(),
+            CoinRow {
+                coin_id: coin_id.clone(),
+                puzzle_hash: "c".repeat(64),
+                parent_coin_info: "d".repeat(64),
+                amount: 1000,
+                confirmed_block_index: 1,
+                spent_block_index: 0,
+                discovered_nonces: Vec::new(),
+                discovered_by_puzzle_hash: true,
+                discovered_by_hint: false,
+                kind: CoinKind::Cat,
+                cat_asset_id: Some(asset_id.clone()),
+                cat_symbols: vec!["PRE".to_string()],
+            },
+        )]);
+        let mut caches = CatDetectCaches::new(HashMap::new(), HashMap::new());
+        let scanner = DirectCoinsetScanClient::new("mainnet", None);
+        classify_coin_rows(
+            &scanner,
+            &mut rows,
+            &HashMap::new(),
+            &BTreeMap::new(),
+            32,
+            &mut caches,
+        )
+        .await
+        .expect("classify");
+        assert_eq!(caches.cat_asset_cache.get(&coin_id), Some(&asset_id));
+        assert_eq!(rows[&coin_id].cat_symbols, vec!["PRE".to_string()]);
     }
 
     #[tokio::test]

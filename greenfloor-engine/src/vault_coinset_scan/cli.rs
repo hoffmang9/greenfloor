@@ -203,7 +203,7 @@ fn scan_request_from_cli_args(
         network: args.network,
         coinset_base_url: optional_trimmed(&args.coinset_base_url),
         launcher_id,
-        max_nonce: args.max_nonce,
+        discovery: crate::vault_coinset_scan::MemberDiscovery::nonces(args.max_nonce),
         include_spent: args.include_spent,
         asset_type: AssetTypeFilter::parse(&args.asset_type),
         requested_cat_ids,
@@ -300,6 +300,25 @@ mod tests {
         assert_eq!(args.network, "mainnet");
         assert_eq!(args.max_nonce, 100);
         assert!(!args.include_spent);
+    }
+
+    #[test]
+    fn scan_request_from_cli_uses_member_discovery_nonces() {
+        use std::collections::HashSet;
+
+        use crate::vault_coinset_scan::MemberDiscovery;
+
+        let args =
+            VaultCoinsetScanCliArgs::try_parse_from(["scan", "--max-nonce", "12"]).expect("parse");
+        let request = scan_request_from_cli_args(
+            args,
+            "aa".repeat(32),
+            HashSet::new(),
+            Vec::new(),
+            None,
+            None,
+        );
+        assert_eq!(request.discovery, MemberDiscovery::nonces(12));
     }
 
     #[test]
