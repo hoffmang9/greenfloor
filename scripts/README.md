@@ -53,7 +53,11 @@ EXPORT_SIGNER_FIXTURES=1 cargo test -p greenfloor-engine export_signer_fixtures_
 ## Remaining Python adapters
 
 `greenfloor_scripts/` keeps subprocess bridges used by `create_kms_vault.py` and adapter
-unit tests:
+unit tests (CI: ubuntu lint job only):
+
+```bash
+PYTHONPATH=scripts python -m unittest greenfloor_scripts.test_adapters
+```
 
 - `binaries.py` — resolve native operator binaries
 - `engine_subprocess.py` — `greenfloor-engine` JSON CLI bridge

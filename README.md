@@ -167,6 +167,12 @@ cargo nextest run --manifest-path greenfloor-engine/Cargo.toml --features test
 ```
 
 `cargo test` with the same manifest also works when `cargo-nextest` is not installed.
+Script adapter unit tests (ubuntu CI lint job / local):
+
+```bash
+PYTHONPATH=scripts python -m unittest greenfloor_scripts.test_adapters
+```
+
 Full gate details: [docs/plan.md](docs/plan.md) → **Delivery constraints**.
 
 ## Environment Variables
@@ -196,6 +202,8 @@ CI secret for optional live testnet workflow:
 Live `testnet11` proof workflow (CI-only mnemonic path):
 
 - Dispatch `.github/workflows/live-testnet-e2e.yml` from GitHub Actions.
+- Builds native operator binaries only (no Python/venv); invokes
+  `greenfloor-engine/target/debug/{greenfloor-manager,greenfloord}` directly.
 - Inputs:
   - `network_profile` (default: `testnet11`)
   - `pair` (default: `TDBX:txch`)

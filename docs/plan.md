@@ -123,11 +123,15 @@ Coin-op notes:
 
 Canonical local/CI gate commands: [README.md](../README.md) → **Local dev tooling** and **Developer Checks**.
 
-- Python 3.11+ for dev tooling (script lint/type-check).
+- Python 3.11+ for dev tooling (script lint/type-check) and `scripts/greenfloor_scripts`
+  adapter unit tests. In CI those run only on the ubuntu-latest lint job; arm/mac matrix
+  jobs are Rust-only (`cargo nextest` / `cargo audit`).
 - Node.js LTS for Prettier (YAML/JSON/Markdown); see [README.md](../README.md) → **Local dev tooling**.
 - Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`
 - Rust operator tests: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml --features test` in CI
   (`cargo test` with the same manifest works locally).
+- Live testnet e2e (`.github/workflows/live-testnet-e2e.yml`) builds native binaries only —
+  no Python/venv — and invokes them via an explicit `BIN` path.
 - Local gate: `pre-commit run --all-files` (ruff, pyright, prettier, yamllint, cargo fmt/clippy;
   ~5–10s warm with `PRE_COMMIT_HOME=.cache/pre-commit`). Run the Rust test command above
   separately before push — same split as CI.

@@ -303,7 +303,9 @@ Optional CI workflow secret contract (`.github/workflows/live-testnet-e2e.yml`):
 - Expected format is plain whitespace-delimited `12` or `24` words.
 - Current testnet receive address: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
 - For `greenfloor-manager`, global flags (like `--program-config` and `--markets-config`) must be passed before the command name.
-- This live workflow does not run pytest/simulator harness steps; it runs manager/daemon proof commands and uploads their logs.
+- This live workflow builds native operator binaries only (no Python/venv) and runs
+  manager/daemon proof commands via an explicit `BIN` path; it does not run pytest or
+  simulator harness steps.
 - Live workflow now supports manager-proof inputs: `network_profile`, `pair`, `size_base_units`, and `dry_run`.
 - Workflow sets `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT=1000` by default to reduce missed funded keys at deeper derivation indices.
 - Workflow uploads `live-testnet-e2e-artifacts` containing dry-run/live/status/reconcile/daemon logs.

@@ -1,8 +1,8 @@
 ---
-# Lint/type/fmt gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
-# That job runs clippy on `shared-key: test` (`target/`), then llvm-cov on
-# `shared-key: coverage` (`target-coverage/`) when diff coverage is in scope.
-# Cross-platform plain nextest uses `shared-key: test` on arm/macos.
+# Lint/type/fmt gate + script adapter tests — CI lint job on ubuntu-latest
+# (see .github/workflows/ci.yml). That job runs clippy on `shared-key: test`
+# (`target/`), then llvm-cov on `shared-key: coverage` (`target-coverage/`) when
+# diff coverage is in scope. Arm/mac matrix jobs are Rust-only (`shared-key: test`).
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml --features test
 #

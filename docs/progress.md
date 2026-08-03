@@ -16,6 +16,12 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-03 — Python CI isolated to ubuntu-latest
+
+Script adapter tests and Python tooling stay on the ubuntu lint job only; arm/mac
+matrix jobs are Rust-only. Live testnet e2e drops Python/venv and invokes built
+binaries via an explicit `BIN` path under `greenfloor-engine/target/debug`.
+
 ### 2026-07-31 — Soft-expiry stable maker coins (ADR 0020)
 
 Stable-quote markets omit on-chain expiry from presplit CONDITIONS; listing expiry is
