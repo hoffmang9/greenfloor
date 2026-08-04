@@ -11,7 +11,6 @@
 mod augment;
 mod cycle;
 mod transition;
-mod watch_plan;
 
 #[cfg(test)]
 #[path = "cycle_tests.rs"]
