@@ -1,7 +1,6 @@
+use crate::coin_ops::shape::ShapeFunding;
 use crate::coinset::WalletUnspentCoin;
-use crate::offer::bootstrap::{
-    BaseUnits, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome,
-};
+use crate::offer::bootstrap::{BaseUnits, BootstrapPlan, BootstrapPlanOutcome};
 
 use super::{
     bootstrap_skipped, executed_after_split, run_signer_denomination_phase,
@@ -45,9 +44,9 @@ fn bootstrap_skipped_marks_phase_not_ready() {
 #[test]
 fn executed_after_split_carries_fee_and_plan_metadata() {
     let bootstrap_plan = BootstrapPlan {
-        funding: BootstrapFundingSource::SingleCoin {
+        funding: ShapeFunding::SingleCoin {
             coin_id: "coin-a".to_string(),
-            amount: BaseUnits::new(50_000),
+            amount: 50_000,
         },
         output_amounts_base_units: vec![100, 100],
         total_output_amount: 200,

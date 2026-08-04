@@ -7,7 +7,7 @@ use crate::coin_ops::selection::{
     select_largest_spendable_coin, split_would_create_sub_cat_change, SpendableCoin,
 };
 use crate::coin_ops::shape::{
-    resolve_shape_funding, ShapeCoin, ShapeFunding, ShapeFundingOptions, ShapeFundingResolution,
+    resolve_shape_funding, ShapeCoin, ShapeFunding, ShapeFundingPolicy, ShapeFundingResolution,
 };
 use crate::coin_ops::shape_protection::SplitSourceProtection;
 
@@ -50,7 +50,7 @@ fn sub_cat_change_skip(
 /// Shared daemon auto-split planner via `coin_ops::shape::resolve_shape_funding`. Without
 /// protection, picks the **largest** eligible coin; with protection, picks the **smallest
 /// non-cannibalizing** coin for ladder-row safety. Combine-first fallback is disabled via
-/// `ShapeFundingOptions::allow_combine` when `allow_combine_prereq` is `false`.
+/// `allow_combine_prereq` on the resolved [`ShapeFundingPolicy`] variant.
 fn plan_daemon_auto_split_with_optional_protection(
     params: &DaemonAutoSplitParams<'_>,
     protection: Option<&SplitSourceProtection>,
@@ -60,22 +60,22 @@ fn plan_daemon_auto_split_with_optional_protection(
         .iter()
         .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
         .collect();
-    let options = match protection {
-        Some(protection) => ShapeFundingOptions::daemon_protected(
-            params.combine_input_cap,
-            params.canonical_asset_id,
-            protection.base_unit_mojo_multiplier,
-            params.allow_combine_prereq,
-        ),
-        None => ShapeFundingOptions::daemon_unprotected(
-            params.combine_input_cap,
-            params.canonical_asset_id,
-            params.allow_combine_prereq,
-        ),
+    let policy = match protection {
+        Some(protection) => ShapeFundingPolicy::DaemonProtected {
+            combine_input_cap: params.combine_input_cap,
+            canonical_asset_id: params.canonical_asset_id,
+            base_unit_mojo_multiplier: protection.base_unit_mojo_multiplier,
+            allow_combine: params.allow_combine_prereq,
+        },
+        None => ShapeFundingPolicy::DaemonUnprotected {
+            combine_input_cap: params.combine_input_cap,
+            canonical_asset_id: params.canonical_asset_id,
+            allow_combine: params.allow_combine_prereq,
+        },
     };
     let ladder_shape = protection.map(|protection| &protection.shape);
 
-    match resolve_shape_funding(&coins, params.required_amount_mojos, ladder_shape, &options) {
+    match resolve_shape_funding(&coins, params.required_amount_mojos, ladder_shape, &policy) {
         ShapeFundingResolution::Funded(ShapeFunding::SingleCoin { coin_id, amount }) => {
             if let Some(skip) = sub_cat_change_skip(
                 coin_id.clone(),

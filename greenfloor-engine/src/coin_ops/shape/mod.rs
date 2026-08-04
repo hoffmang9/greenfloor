@@ -14,7 +14,7 @@ mod types;
 pub use combine::{plan_combine_inputs_for_target, plan_ladder_preserving_combine};
 pub use deficit::{collect_shape_deficits, protected_slots_for_rows, shape_context_for_rows};
 pub use funding::{
-    plan_shape_from_deficits, resolve_shape_funding, ShapeFundingOptions, ShapePlan,
+    plan_shape_from_deficits, resolve_shape_funding, ShapeFundingPolicy, ShapePlan,
     ShapePlanOutcome,
 };
 pub use types::{

@@ -2,11 +2,11 @@ use serde_json::{json, Value};
 
 #[cfg(test)]
 use super::test_overrides::SignerDenominationTestOverrides;
+use crate::coin_ops::shape::ShapeFunding;
 use crate::error::SignerResult;
 use crate::hex::{hex_to_bytes32, parse_coin_ids};
 use crate::offer::bootstrap::{
-    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits,
-    BootstrapFundingSource, BootstrapPlan,
+    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits, BootstrapPlan,
 };
 use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 use crate::vault::{
@@ -64,7 +64,7 @@ pub(super) async fn submit_bootstrap_combine(
     split_asset_mojo_multiplier: i64,
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
-    let BootstrapFundingSource::CombineFirst(inputs) = &bootstrap_plan.funding else {
+    let ShapeFunding::CombineFirst(inputs) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
     let output_amounts =
@@ -96,7 +96,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
     split_asset_mojo_multiplier: i64,
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
-    let BootstrapFundingSource::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
+    let ShapeFunding::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
     let output_amounts_mojos = bootstrap_mixed_split_output_mojos(
@@ -124,17 +124,15 @@ mod tests {
     #![allow(clippy::large_futures)]
 
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
-    use crate::coin_ops::shape::CombineInputs;
-    use crate::offer::bootstrap::{
-        bootstrap_combine_vault_outputs, BaseUnits, BootstrapFundingSource, BootstrapPlan,
-    };
+    use crate::coin_ops::shape::{CombineInputs, ShapeFunding};
+    use crate::offer::bootstrap::{bootstrap_combine_vault_outputs, BootstrapPlan};
     use crate::offer::operator::build_and_post::sample_resolved_build_and_post_context;
     use crate::offer::operator::signer_denomination::test_overrides::SignerDenominationTestOverrides;
 
     fn combine_first_plan(inputs: CombineInputs) -> BootstrapPlan {
         let selected_total = inputs.selected_total;
         BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(inputs),
+            funding: ShapeFunding::CombineFirst(inputs),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,
             change_amount: selected_total - 100,
@@ -190,9 +188,9 @@ mod tests {
 
     fn sample_split_plan(source_coin_id: &str) -> BootstrapPlan {
         BootstrapPlan {
-            funding: BootstrapFundingSource::SingleCoin {
+            funding: ShapeFunding::SingleCoin {
                 coin_id: source_coin_id.to_string(),
-                amount: BaseUnits::new(1_000),
+                amount: 1_000,
             },
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

@@ -1,7 +1,7 @@
 //! Test-only daemon combine-first coverage of [`crate::coin_ops::shape::plan_combine_inputs_for_target`].
 //!
 //! Production daemon combine-first funding goes through
-//! `resolve_shape_funding`/`ShapeFundingOptions::daemon_unprotected` (see
+//! `resolve_shape_funding`/`ShapeFundingPolicy::DaemonUnprotected` (see
 //! `super::auto_split`); this thin wrapper exists only so unit tests can exercise the
 //! shared flat-combine core directly with mojo-denominated [`SpendableCoin`] inputs.
 

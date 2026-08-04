@@ -32,7 +32,7 @@ pub use assets::{
 };
 pub use bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
-    BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
+    BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow,
 };
 pub use build::build_vault_cat_offer;
 pub use build_context::{

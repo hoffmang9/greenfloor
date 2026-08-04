@@ -1,10 +1,11 @@
 use super::plan_bootstrap_mixed_outputs;
+use crate::coin_ops::shape::ShapeFunding;
 use crate::offer::bootstrap::test_fixtures::{
     bootstrap_coin as coin, bootstrap_test_context, expect_needs_shape,
     expect_needs_shape_with_cap, ladder_deficit, ladder_row as row, plan_bootstrap,
     plan_bootstrap_with_cap, DEFAULT_BOOTSTRAP_COMBINE_CAP,
 };
-use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlanOutcome};
+use crate::offer::bootstrap::BootstrapPlanOutcome;
 
 #[test]
 fn builds_deficit_outputs() {
@@ -15,10 +16,7 @@ fn builds_deficit_outputs() {
         coin("coin-hundred", 100),
     ];
     let plan = expect_needs_shape(&ladder, &spendable);
-    assert!(matches!(
-        plan.funding,
-        BootstrapFundingSource::SingleCoin { .. }
-    ));
+    assert!(matches!(plan.funding, ShapeFunding::SingleCoin { .. }));
     assert_eq!(plan.source_coin_id(), Some("coin-big"));
     let mut outputs = plan.output_amounts_base_units;
     outputs.sort_unstable();
@@ -238,10 +236,7 @@ fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
                 "must not split the satisfied 100 BU row for smaller deficits: {remaining:?}"
             );
             assert!(
-                !split
-                    .deficits
-                    .iter()
-                    .any(|deficit| deficit.size_base_units == 100),
+                !split.deficits.iter().any(|deficit| deficit.size == 100),
                 "100 BU row must stay satisfied after combine: {remaining:?}"
             );
         }

@@ -169,10 +169,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig, BootstrapWaitTimings};
+    use crate::coin_ops::shape::{ShapeDeficit, ShapeFunding};
     use crate::error::SignerError;
-    use crate::offer::bootstrap::{
-        BaseUnits, BootstrapFundingSource, BootstrapPlan, BootstrapWaitStepKind, PlannerLadderRow,
-    };
+    use crate::offer::bootstrap::{BootstrapPlan, BootstrapWaitStepKind, PlannerLadderRow};
     use crate::offer::operator::BootstrapShapeContext;
     use crate::test_support::bootstrap_shape::{
         coin_record_body, coin_records_response, eco181_cap_combine_shape_context,
@@ -318,15 +317,19 @@ mod tests {
             split_asset_mojo_multiplier: BOOTSTRAP_TEST_MOJO_MULTIPLIER,
             receive_address: BOOTSTRAP_TEST_RECEIVE.to_string(),
             bootstrap_plan: BootstrapPlan {
-                funding: BootstrapFundingSource::SingleCoin {
+                funding: ShapeFunding::SingleCoin {
                     coin_id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                         .to_string(),
-                    amount: BaseUnits::new(100),
+                    amount: 100,
                 },
                 output_amounts_base_units: vec![100],
                 total_output_amount: 100,
                 change_amount: 0,
-                deficits: vec![crate::offer::bootstrap::LadderDeficit::new(100, 2, 1)],
+                deficits: vec![ShapeDeficit {
+                    size: 100,
+                    required_count: 2,
+                    current_count: 1,
+                }],
             },
             ladder_entries: ladder,
             combine_context: crate::offer::bootstrap::BootstrapCombineContext::for_tests(),

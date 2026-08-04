@@ -3,7 +3,6 @@
 mod amounts;
 mod combine_plan;
 mod gate;
-mod ladder;
 mod phase;
 mod plan;
 mod planner;
@@ -28,10 +27,7 @@ pub(crate) use phase::{
     bootstrap_wait_event_metadata, resolve_bootstrap_wait_poll, BootstrapWaitContext,
     BootstrapWaitPoll, BootstrapWaitResolution, BootstrapWaitStepKind,
 };
-pub use plan::{
-    BootstrapCoin, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
-};
+pub use plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
 pub use planner::plan_bootstrap_mixed_outputs;
 pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
 

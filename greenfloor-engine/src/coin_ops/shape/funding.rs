@@ -12,94 +12,108 @@ use crate::coin_ops::shape_protection::{
 
 /// Explicit funding-resolution policy for [`resolve_shape_funding`] / [`plan_shape_from_deficits`].
 ///
-/// Every field is required so call sites document their policy choice rather than relying on
-/// defaults (bootstrap and daemon intentionally choose different values for every field).
-#[allow(clippy::struct_excessive_bools)] // Explicit policy flags; each documents a call-site choice.
+/// Each variant is a closed set of the funding policies bootstrap and daemon coin ops
+/// actually use; the sealed enum documents each call site's policy choice by construction
+/// instead of via independently-settable bool flags.
 #[derive(Debug, Clone, Copy)]
-pub struct ShapeFundingOptions<'a> {
-    pub unit: AmountUnit,
-    pub combine_input_cap: i64,
-    pub canonical_asset_id: &'a str,
-    /// Combine-first fallback gate. When `false`, the combine branch is skipped entirely
-    /// (no cap trick required) — used by daemon retry attempts that disable combine after
-    /// a first pass already failed.
-    pub allow_combine: bool,
-    /// Ladder-preserving combine retry (partition + release-smallest-protected-first + dust
-    /// guard). Bootstrap uses `true`; daemon (protected or not) uses `false` (flat combine,
-    /// dust checked by the caller after selection).
-    pub protect_ladder_rows: bool,
-    /// Single-coin selection heuristic: smallest non-cannibalizing coin (bootstrap, daemon
-    /// low-watermark split) vs largest available coin (daemon default / unprotected).
-    pub prefer_smallest_non_cannibalizing: bool,
-    /// Combine eligibility gate: require aggregate coverage *and* that no single coin
-    /// already covers the target (bootstrap). Daemon paths only require aggregate coverage,
-    /// since they already know single-coin selection just failed.
-    pub require_no_single_coin_covers: bool,
-}
-
-impl<'a> ShapeFundingOptions<'a> {
+pub enum ShapeFundingPolicy<'a> {
     /// Bootstrap combine-first funding: ladder base units, ladder-preserving combine retry,
     /// smallest non-cannibalizing single-coin preference, and single-coin-coverage exclusion
     /// for combine eligibility (see `offer::bootstrap::planner::plan_bootstrap_mixed_outputs`).
-    #[must_use]
-    pub fn bootstrap(
+    Bootstrap {
         combine_input_cap: i64,
         canonical_asset_id: &'a str,
         dust_mojo_multiplier: i64,
-    ) -> Self {
-        Self {
-            unit: AmountUnit::BaseUnits {
-                dust_mojo_multiplier,
-            },
-            combine_input_cap,
-            canonical_asset_id,
-            allow_combine: true,
-            protect_ladder_rows: true,
-            prefer_smallest_non_cannibalizing: true,
-            require_no_single_coin_covers: true,
-        }
-    }
-
+    },
     /// Daemon auto-split funding without ladder-row protection: largest-covering single
     /// coin, flat combine-first fallback when `allow_combine`.
-    #[must_use]
-    pub fn daemon_unprotected(
+    DaemonUnprotected {
         combine_input_cap: i64,
         canonical_asset_id: &'a str,
         allow_combine: bool,
-    ) -> Self {
-        Self {
-            unit: AmountUnit::Mojos {
-                base_unit_mojo_multiplier: 1,
-            },
-            combine_input_cap,
-            canonical_asset_id,
-            allow_combine,
-            protect_ladder_rows: false,
-            prefer_smallest_non_cannibalizing: false,
-            require_no_single_coin_covers: false,
-        }
-    }
-
+    },
     /// Daemon low-watermark funding with ladder-row cannibalization protection: smallest
     /// non-cannibalizing single coin, flat combine-first fallback when `allow_combine`.
-    #[must_use]
-    pub fn daemon_protected(
+    DaemonProtected {
         combine_input_cap: i64,
         canonical_asset_id: &'a str,
         base_unit_mojo_multiplier: i64,
         allow_combine: bool,
-    ) -> Self {
-        Self {
-            unit: AmountUnit::Mojos {
-                base_unit_mojo_multiplier,
+    },
+}
+
+/// Combine-first fallback strategy resolved from a [`ShapeFundingPolicy`] variant.
+///
+/// `LadderPreserving` always implies both ladder-row protection *and*
+/// single-coin-coverage exclusion (see [`ShapeFundingPolicy::Bootstrap`], the only variant
+/// that currently sets either); `Flat`/`Disabled` set neither (both daemon variants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CombineStrategy {
+    Disabled,
+    Flat,
+    LadderPreserving,
+}
+
+/// Resolved internal flags for a [`ShapeFundingPolicy`] variant.
+struct ShapeFundingFlags<'a> {
+    unit: AmountUnit,
+    combine_input_cap: i64,
+    canonical_asset_id: &'a str,
+    combine_strategy: CombineStrategy,
+    prefer_smallest_non_cannibalizing: bool,
+}
+
+impl<'a> ShapeFundingPolicy<'a> {
+    fn flags(&self) -> ShapeFundingFlags<'a> {
+        match *self {
+            Self::Bootstrap {
+                combine_input_cap,
+                canonical_asset_id,
+                dust_mojo_multiplier,
+            } => ShapeFundingFlags {
+                unit: AmountUnit::BaseUnits {
+                    dust_mojo_multiplier,
+                },
+                combine_input_cap,
+                canonical_asset_id,
+                combine_strategy: CombineStrategy::LadderPreserving,
+                prefer_smallest_non_cannibalizing: true,
             },
-            combine_input_cap,
-            canonical_asset_id,
-            allow_combine,
-            protect_ladder_rows: false,
-            prefer_smallest_non_cannibalizing: true,
-            require_no_single_coin_covers: false,
+            Self::DaemonUnprotected {
+                combine_input_cap,
+                canonical_asset_id,
+                allow_combine,
+            } => ShapeFundingFlags {
+                unit: AmountUnit::Mojos {
+                    base_unit_mojo_multiplier: 1,
+                },
+                combine_input_cap,
+                canonical_asset_id,
+                combine_strategy: if allow_combine {
+                    CombineStrategy::Flat
+                } else {
+                    CombineStrategy::Disabled
+                },
+                prefer_smallest_non_cannibalizing: false,
+            },
+            Self::DaemonProtected {
+                combine_input_cap,
+                canonical_asset_id,
+                base_unit_mojo_multiplier,
+                allow_combine,
+            } => ShapeFundingFlags {
+                unit: AmountUnit::Mojos {
+                    base_unit_mojo_multiplier,
+                },
+                combine_input_cap,
+                canonical_asset_id,
+                combine_strategy: if allow_combine {
+                    CombineStrategy::Flat
+                } else {
+                    CombineStrategy::Disabled
+                },
+                prefer_smallest_non_cannibalizing: true,
+            },
         }
     }
 }
@@ -138,25 +152,26 @@ fn select_smallest_non_cannibalizing_shape_coin<'a>(
 }
 
 /// Resolve funding for `required_amount` from `coins`: prefer a single covering coin per
-/// `options`, else combine-first when aggregate inventory allows.
+/// `policy`, else combine-first when aggregate inventory allows.
 ///
-/// `ladder_shape` must be `Some` whenever `options.prefer_smallest_non_cannibalizing` or
-/// `options.protect_ladder_rows` is set.
+/// `ladder_shape` must be `Some` whenever `policy` prefers smallest non-cannibalizing
+/// selection or protects ladder rows during combine (i.e. [`ShapeFundingPolicy::Bootstrap`]
+/// or [`ShapeFundingPolicy::DaemonProtected`]).
 ///
 /// # Panics
 ///
-/// Panics if `ladder_shape` is `None` while `options.prefer_smallest_non_cannibalizing` or
-/// `options.protect_ladder_rows` is `true` — every call site must supply a shape context for
-/// those policies.
+/// Panics if `ladder_shape` is `None` while `policy` requires a shape context — every such
+/// call site must supply one.
 #[must_use]
 pub fn resolve_shape_funding(
     coins: &[ShapeCoin],
     required_amount: i64,
     ladder_shape: Option<&LadderShapeContext>,
-    options: &ShapeFundingOptions<'_>,
+    policy: &ShapeFundingPolicy<'_>,
 ) -> ShapeFundingResolution {
-    let ladder_multiplier = options.unit.ladder_conversion_multiplier();
-    let selected = if options.prefer_smallest_non_cannibalizing {
+    let flags = policy.flags();
+    let ladder_multiplier = flags.unit.ladder_conversion_multiplier();
+    let selected = if flags.prefer_smallest_non_cannibalizing {
         let ctx = ladder_shape
             .expect("ladder_shape required when prefer_smallest_non_cannibalizing is set");
         select_smallest_non_cannibalizing_shape_coin(coins, required_amount, ladder_multiplier, ctx)
@@ -170,12 +185,13 @@ pub fn resolve_shape_funding(
         });
     }
 
-    if !options.allow_combine {
+    if flags.combine_strategy == CombineStrategy::Disabled {
         return ShapeFundingResolution::CannotFund { required_amount };
     }
+    let ladder_preserving = flags.combine_strategy == CombineStrategy::LadderPreserving;
 
     let amounts: Vec<i64> = coins.iter().map(|coin| coin.amount).collect();
-    let feasible = if options.require_no_single_coin_covers {
+    let feasible = if ladder_preserving {
         aggregate_covers_without_single_coin(required_amount, &amounts)
     } else {
         required_amount > 0 && amounts.iter().sum::<i64>() >= required_amount
@@ -184,18 +200,18 @@ pub fn resolve_shape_funding(
         return ShapeFundingResolution::CannotFund { required_amount };
     }
 
-    let combine = if options.protect_ladder_rows {
+    let combine = if ladder_preserving {
         let ctx = ladder_shape.expect("ladder_shape required when protect_ladder_rows is set");
         plan_ladder_preserving_combine(
             coins,
             &ctx.protected_slots,
             required_amount,
-            options.combine_input_cap,
-            options.unit.dust_change_mojo_multiplier(),
-            options.canonical_asset_id,
+            flags.combine_input_cap,
+            flags.unit.dust_change_mojo_multiplier(),
+            flags.canonical_asset_id,
         )
     } else {
-        plan_combine_inputs_for_target(coins, required_amount, options.combine_input_cap)
+        plan_combine_inputs_for_target(coins, required_amount, flags.combine_input_cap)
     };
     match combine {
         Some(inputs) => ShapeFundingResolution::Funded(ShapeFunding::CombineFirst(inputs)),
@@ -227,7 +243,7 @@ pub enum ShapePlanOutcome {
 pub fn plan_shape_from_deficits(
     sorted_rows: &[ShapeLadderRow],
     coins: &[ShapeCoin],
-    options: &ShapeFundingOptions<'_>,
+    policy: &ShapeFundingPolicy<'_>,
 ) -> ShapePlanOutcome {
     let spendable_amounts: Vec<i64> = coins.iter().map(|coin| coin.amount).collect();
     let shape_ctx = shape_context_for_rows(sorted_rows, &spendable_amounts);
@@ -237,7 +253,7 @@ pub fn plan_shape_from_deficits(
     }
 
     let total_output_amount: i64 = output_amounts.iter().sum();
-    match resolve_shape_funding(coins, total_output_amount, Some(&shape_ctx), options) {
+    match resolve_shape_funding(coins, total_output_amount, Some(&shape_ctx), policy) {
         ShapeFundingResolution::Funded(funding) => ShapePlanOutcome::NeedsShape(ShapePlan {
             funding,
             output_amounts,

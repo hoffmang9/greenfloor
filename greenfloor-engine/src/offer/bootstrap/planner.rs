@@ -5,16 +5,11 @@
 //! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
 use crate::coin_ops::shape::{
-    plan_shape_from_deficits, ShapeCoin, ShapeFunding, ShapeFundingOptions, ShapeLadderRow,
-    ShapePlanOutcome,
+    plan_shape_from_deficits, ShapeCoin, ShapeFundingPolicy, ShapeLadderRow, ShapePlanOutcome,
 };
 
-use super::amounts::BaseUnits;
 use super::combine_plan::BootstrapCombineContext;
-use super::plan::{
-    BootstrapCoin, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
-};
+use super::plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
 
 fn validate_inputs(
     ladder_entries: &[PlannerLadderRow],
@@ -34,7 +29,8 @@ fn validate_inputs(
 }
 
 /// Bootstrap ladder rows -> unit-agnostic shape rows. Shared with [`super::combine_plan`]'s
-/// test-only combine builder so bootstrap has one row/coin conversion, not two.
+/// test-only combine builder and [`super::shape_policy`] so bootstrap has one row/coin
+/// conversion, not two.
 pub(super) fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
     sorted_ladder
         .iter()
@@ -53,16 +49,6 @@ pub(super) fn to_shape_coins(coins: &[BootstrapCoin]) -> Vec<ShapeCoin> {
         .collect()
 }
 
-fn to_bootstrap_funding(funding: ShapeFunding) -> BootstrapFundingSource {
-    match funding {
-        ShapeFunding::SingleCoin { coin_id, amount } => BootstrapFundingSource::SingleCoin {
-            coin_id,
-            amount: BaseUnits::new(amount),
-        },
-        ShapeFunding::CombineFirst(inputs) => BootstrapFundingSource::CombineFirst(inputs),
-    }
-}
-
 /// Build a one-shot mixed-output bootstrap plan from ladder deficits.
 #[must_use]
 pub fn plan_bootstrap_mixed_outputs(
@@ -78,33 +64,24 @@ pub fn plan_bootstrap_mixed_outputs(
     let mut sorted_ladder = ladder_entries.to_vec();
     sorted_ladder.sort_by_key(|row| row.size_base_units);
 
-    let options = ShapeFundingOptions::bootstrap(
+    let policy = ShapeFundingPolicy::Bootstrap {
         combine_input_cap,
-        &combine_context.canonical_asset_id,
-        combine_context.mojo_multiplier,
-    );
+        canonical_asset_id: &combine_context.canonical_asset_id,
+        dust_mojo_multiplier: combine_context.mojo_multiplier,
+    };
 
     match plan_shape_from_deficits(
         &to_shape_rows(&sorted_ladder),
         &to_shape_coins(spendable_coins),
-        &options,
+        &policy,
     ) {
         ShapePlanOutcome::Ready => BootstrapPlanOutcome::Ready,
         ShapePlanOutcome::NeedsShape(plan) => {
             BootstrapPlanOutcome::NeedsShape(BootstrapPlan::needs_shape(
-                to_bootstrap_funding(plan.funding),
+                plan.funding,
                 plan.total_output_amount,
                 plan.output_amounts,
-                plan.deficits
-                    .into_iter()
-                    .map(|deficit| {
-                        LadderDeficit::new(
-                            deficit.size,
-                            deficit.required_count,
-                            deficit.current_count,
-                        )
-                    })
-                    .collect(),
+                plan.deficits,
             ))
         }
         ShapePlanOutcome::CannotFund { required_amount } => BootstrapPlanOutcome::CannotFund {

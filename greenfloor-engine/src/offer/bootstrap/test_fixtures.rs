@@ -7,9 +7,9 @@
 
 use super::planner::plan_bootstrap_mixed_outputs;
 use super::{
-    BootstrapCoin, BootstrapCombineContext, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
+    BootstrapCoin, BootstrapCombineContext, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow,
 };
+use crate::coin_ops::shape::ShapeDeficit;
 
 pub(super) const DEFAULT_BOOTSTRAP_COMBINE_CAP: i64 = 5;
 
@@ -28,8 +28,12 @@ pub(super) fn bootstrap_coin(id: &str, amount: i64) -> BootstrapCoin {
     }
 }
 
-pub(super) fn ladder_deficit(size: i64, required: i64, current: i64) -> LadderDeficit {
-    LadderDeficit::new(size, required, current)
+pub(super) fn ladder_deficit(size: i64, required: i64, current: i64) -> ShapeDeficit {
+    ShapeDeficit {
+        size,
+        required_count: required,
+        current_count: current,
+    }
 }
 
 pub(super) fn bootstrap_test_context() -> BootstrapCombineContext {

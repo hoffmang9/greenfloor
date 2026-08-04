@@ -2,8 +2,9 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::coin_ops::shape::ShapeFunding;
 use crate::offer::bootstrap::{bootstrap_offer_gate_for_status, BootstrapPhaseStatus};
-use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPlan};
+use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPlan};
 
 #[derive(Debug, Clone)]
 pub struct BootstrapPhaseResult {
@@ -72,10 +73,10 @@ struct BootstrapPlanOutput<'a> {
 impl<'a> From<&'a BootstrapPlan> for BootstrapPlanOutput<'a> {
     fn from(plan: &'a BootstrapPlan) -> Self {
         let (funding, source_coin_id, combine_input_coin_ids) = match &plan.funding {
-            BootstrapFundingSource::SingleCoin { coin_id, .. } => {
+            ShapeFunding::SingleCoin { coin_id, .. } => {
                 ("single_coin", Some(coin_id.as_str()), None)
             }
-            BootstrapFundingSource::CombineFirst(prereq) => (
+            ShapeFunding::CombineFirst(prereq) => (
                 "combine_first",
                 None,
                 Some(prereq.input_coin_ids.as_slice()),
@@ -252,10 +253,10 @@ impl BootstrapPhaseFailure {
 #[cfg(test)]
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
-    use crate::coin_ops::shape::CombineInputs;
+    use crate::coin_ops::shape::{CombineInputs, ShapeFunding};
     use crate::offer::bootstrap::{
-        bootstrap_phase_snapshot_block_error, BootstrapFundingSource, BootstrapPhaseSnapshot,
-        BootstrapPhaseStatus, BootstrapPlan,
+        bootstrap_phase_snapshot_block_error, BootstrapPhaseSnapshot, BootstrapPhaseStatus,
+        BootstrapPlan,
     };
 
     #[test]
@@ -288,7 +289,7 @@ mod tests {
     #[test]
     fn plan_output_omits_source_coin_id_for_combine_first() {
         let plan = BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(CombineInputs {
+            funding: ShapeFunding::CombineFirst(CombineInputs {
                 input_coin_ids: vec!["coin-a".to_string(), "coin-b".to_string()],
                 target_amount: 100,
                 selected_total: 100,
