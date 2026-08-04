@@ -16,9 +16,9 @@ mod test_fixtures;
 pub(crate) use amounts::bootstrap_combine_vault_outputs;
 pub use amounts::{
     base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
-    BaseUnits, BootstrapCombineInputs, Mojos,
+    BaseUnits, Mojos,
 };
-pub use combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
+pub use combine_plan::BootstrapCombineContext;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
 pub use gate::bootstrap_phase_snapshot_block_error;
 pub use phase::{

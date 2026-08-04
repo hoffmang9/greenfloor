@@ -1,7 +1,7 @@
 //! Bootstrap plan domain model and coin row helpers.
 
 use super::amounts::BaseUnits;
-use super::amounts::BootstrapCombineInputs;
+use crate::coin_ops::shape::CombineInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -47,7 +47,7 @@ pub(crate) fn bootstrap_coin_amounts(coins: &[BootstrapCoin]) -> Vec<i64> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootstrapFundingSource {
     SingleCoin { coin_id: String, amount: BaseUnits },
-    CombineFirst(BootstrapCombineInputs),
+    CombineFirst(CombineInputs),
 }
 
 #[must_use]
@@ -109,7 +109,7 @@ impl BootstrapPlan {
     }
 
     #[must_use]
-    pub fn combine_inputs(&self) -> Option<&BootstrapCombineInputs> {
+    pub fn combine_inputs(&self) -> Option<&CombineInputs> {
         match &self.funding {
             BootstrapFundingSource::CombineFirst(inputs) => Some(inputs),
             BootstrapFundingSource::SingleCoin { .. } => None,

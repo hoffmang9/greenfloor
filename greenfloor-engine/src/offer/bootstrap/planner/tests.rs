@@ -249,6 +249,38 @@ fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
     }
 }
 
+/// Regression for the `AmountUnit::BaseUnits` dust-multiplier bug: bootstrap combine-first
+/// overshoot change is in ladder **base units**, so the CAT dust check must scale by the
+/// asset's `mojo_multiplier` before comparing to `coin_op_min_amount_mojos` (mojos). The old
+/// `AmountUnit::BaseUnits` variant hard-coded that scale factor to `1`, so a 5 BU overshoot
+/// (= `5_000` mojos for a `mojo_multiplier = 1_000` CAT, well above the `1_000` mojo dust floor)
+/// was checked as `5 mojos` — under the floor — and incorrectly rejected as dust.
+#[test]
+fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_cat() {
+    let cat_asset_id = "0000000000000000000000000000000000000000000000000000000000000001";
+    let ladder = vec![row(100, 1, 0)];
+    let spendable: Vec<_> =
+        crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins()
+            .into_iter()
+            .map(|coin_row| coin(&coin_row.id, coin_row.amount))
+            .collect();
+    let combine_context =
+        crate::offer::bootstrap::BootstrapCombineContext::new(1_000, cat_asset_id);
+    let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &combine_context);
+
+    let plan = match outcome {
+        BootstrapPlanOutcome::NeedsShape(plan) => plan,
+        other => panic!(
+            "expected NeedsShape/CombineFirst funding for a non-dust CAT overshoot, got {other:?}"
+        ),
+    };
+    assert!(plan.requires_combine_first());
+    let combine = plan.combine_inputs().expect("combine inputs");
+    assert_eq!(combine.target_amount, 100);
+    // 5 BU overshoot (105 selected - 100 target) = 5_000 mojos at multiplier 1_000, not dust.
+    assert_eq!(combine.selected_total - combine.target_amount, 5);
+}
+
 // Keep a direct import so plan_bootstrap_mixed_outputs stays covered when fixtures delegate.
 #[test]
 fn plan_bootstrap_mixed_outputs_accepts_explicit_context() {

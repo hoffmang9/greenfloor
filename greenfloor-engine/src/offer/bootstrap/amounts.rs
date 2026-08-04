@@ -9,13 +9,6 @@ use crate::error::SignerResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BaseUnits(pub i64);
 
-/// Selected inputs for bootstrap combine-first (base units only).
-///
-/// Alias of the unified [`crate::coin_ops::shape::CombineInputs`] core type; `selected_total`
-/// and `target_amount` are ladder base units for this bootstrap path (convert via
-/// [`base_units_to_mojos`] only at the vault submit boundary).
-pub type BootstrapCombineInputs = crate::coin_ops::shape::CombineInputs;
-
 /// On-chain mojos for vault mixed-split I/O.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Mojos(pub i64);
@@ -80,7 +73,7 @@ pub fn bootstrap_mixed_split_output_mojos(
 ///
 /// Returns an error when output encoding fails.
 pub(crate) fn bootstrap_combine_vault_outputs(
-    inputs: &BootstrapCombineInputs,
+    inputs: &crate::coin_ops::shape::CombineInputs,
     mojo_multiplier: i64,
 ) -> SignerResult<Vec<u64>> {
     let output_mojos = base_units_to_mojos(BaseUnits::new(inputs.target_amount), mojo_multiplier);
@@ -107,7 +100,7 @@ mod tests {
 
     #[test]
     fn eco181_shape_outputs_target_not_selected_total() {
-        let inputs = BootstrapCombineInputs {
+        let inputs = crate::coin_ops::shape::CombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
             selected_total: 105,
             target_amount: 100,

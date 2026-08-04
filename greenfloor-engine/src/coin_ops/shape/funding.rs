@@ -14,11 +14,16 @@ use crate::coin_ops::shape_protection::{
 ///
 /// Every field is required so call sites document their policy choice rather than relying on
 /// defaults (bootstrap and daemon intentionally choose different values for every field).
+#[allow(clippy::struct_excessive_bools)] // Explicit policy flags; each documents a call-site choice.
 #[derive(Debug, Clone, Copy)]
 pub struct ShapeFundingOptions<'a> {
     pub unit: AmountUnit,
     pub combine_input_cap: i64,
     pub canonical_asset_id: &'a str,
+    /// Combine-first fallback gate. When `false`, the combine branch is skipped entirely
+    /// (no cap trick required) — used by daemon retry attempts that disable combine after
+    /// a first pass already failed.
+    pub allow_combine: bool,
     /// Ladder-preserving combine retry (partition + release-smallest-protected-first + dust
     /// guard). Bootstrap uses `true`; daemon (protected or not) uses `false` (flat combine,
     /// dust checked by the caller after selection).
@@ -30,6 +35,73 @@ pub struct ShapeFundingOptions<'a> {
     /// already covers the target (bootstrap). Daemon paths only require aggregate coverage,
     /// since they already know single-coin selection just failed.
     pub require_no_single_coin_covers: bool,
+}
+
+impl<'a> ShapeFundingOptions<'a> {
+    /// Bootstrap combine-first funding: ladder base units, ladder-preserving combine retry,
+    /// smallest non-cannibalizing single-coin preference, and single-coin-coverage exclusion
+    /// for combine eligibility (see `offer::bootstrap::planner::plan_bootstrap_mixed_outputs`).
+    #[must_use]
+    pub fn bootstrap(
+        combine_input_cap: i64,
+        canonical_asset_id: &'a str,
+        dust_mojo_multiplier: i64,
+    ) -> Self {
+        Self {
+            unit: AmountUnit::BaseUnits {
+                dust_mojo_multiplier,
+            },
+            combine_input_cap,
+            canonical_asset_id,
+            allow_combine: true,
+            protect_ladder_rows: true,
+            prefer_smallest_non_cannibalizing: true,
+            require_no_single_coin_covers: true,
+        }
+    }
+
+    /// Daemon auto-split funding without ladder-row protection: largest-covering single
+    /// coin, flat combine-first fallback when `allow_combine`.
+    #[must_use]
+    pub fn daemon_unprotected(
+        combine_input_cap: i64,
+        canonical_asset_id: &'a str,
+        allow_combine: bool,
+    ) -> Self {
+        Self {
+            unit: AmountUnit::Mojos {
+                base_unit_mojo_multiplier: 1,
+            },
+            combine_input_cap,
+            canonical_asset_id,
+            allow_combine,
+            protect_ladder_rows: false,
+            prefer_smallest_non_cannibalizing: false,
+            require_no_single_coin_covers: false,
+        }
+    }
+
+    /// Daemon low-watermark funding with ladder-row cannibalization protection: smallest
+    /// non-cannibalizing single coin, flat combine-first fallback when `allow_combine`.
+    #[must_use]
+    pub fn daemon_protected(
+        combine_input_cap: i64,
+        canonical_asset_id: &'a str,
+        base_unit_mojo_multiplier: i64,
+        allow_combine: bool,
+    ) -> Self {
+        Self {
+            unit: AmountUnit::Mojos {
+                base_unit_mojo_multiplier,
+            },
+            combine_input_cap,
+            canonical_asset_id,
+            allow_combine,
+            protect_ladder_rows: false,
+            prefer_smallest_non_cannibalizing: true,
+            require_no_single_coin_covers: false,
+        }
+    }
 }
 
 fn select_largest_shape_coin(coins: &[ShapeCoin], required_amount: i64) -> Option<&ShapeCoin> {
@@ -83,11 +155,11 @@ pub fn resolve_shape_funding(
     ladder_shape: Option<&LadderShapeContext>,
     options: &ShapeFundingOptions<'_>,
 ) -> ShapeFundingResolution {
-    let mojo_multiplier = options.unit.base_unit_mojo_multiplier();
+    let ladder_multiplier = options.unit.ladder_conversion_multiplier();
     let selected = if options.prefer_smallest_non_cannibalizing {
         let ctx = ladder_shape
             .expect("ladder_shape required when prefer_smallest_non_cannibalizing is set");
-        select_smallest_non_cannibalizing_shape_coin(coins, required_amount, mojo_multiplier, ctx)
+        select_smallest_non_cannibalizing_shape_coin(coins, required_amount, ladder_multiplier, ctx)
     } else {
         select_largest_shape_coin(coins, required_amount.max(0))
     };
@@ -96,6 +168,10 @@ pub fn resolve_shape_funding(
             coin_id: coin.id.clone(),
             amount: coin.amount,
         });
+    }
+
+    if !options.allow_combine {
+        return ShapeFundingResolution::CannotFund { required_amount };
     }
 
     let amounts: Vec<i64> = coins.iter().map(|coin| coin.amount).collect();
@@ -115,7 +191,7 @@ pub fn resolve_shape_funding(
             &ctx.protected_slots,
             required_amount,
             options.combine_input_cap,
-            mojo_multiplier,
+            options.unit.dust_change_mojo_multiplier(),
             options.canonical_asset_id,
         )
     } else {

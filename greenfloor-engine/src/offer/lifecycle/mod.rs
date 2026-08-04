@@ -34,9 +34,8 @@ pub use cancel_eligibility::{
 pub use dexie_index::build_dexie_size_by_offer_id;
 pub(crate) use expired_maker::plan_soft_expire_reclaims;
 pub use expired_maker::{
-    finalize_maker_claim_synced, mark_listings_soft_expired, reclaim_expired_maker_if_unspent,
-    restore_maker_claim_synced, restore_stale_maker_claims_synced, try_claim_expired_maker_synced,
-    ExpiredMakerLease, ReclaimMakerOutcome,
+    mark_listings_soft_expired, reclaim_expired_maker_if_unspent,
+    restore_stale_maker_claims_synced, ExpiredMakerLease, ReclaimMakerOutcome,
 };
 pub use market_reconcile::{
     run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,

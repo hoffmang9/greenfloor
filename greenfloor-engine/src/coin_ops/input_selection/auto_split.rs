@@ -7,8 +7,7 @@ use crate::coin_ops::selection::{
     select_largest_spendable_coin, split_would_create_sub_cat_change, SpendableCoin,
 };
 use crate::coin_ops::shape::{
-    resolve_shape_funding, AmountUnit, ShapeCoin, ShapeFunding, ShapeFundingOptions,
-    ShapeFundingResolution,
+    resolve_shape_funding, ShapeCoin, ShapeFunding, ShapeFundingOptions, ShapeFundingResolution,
 };
 use crate::coin_ops::shape_protection::SplitSourceProtection;
 
@@ -50,10 +49,8 @@ fn sub_cat_change_skip(
 
 /// Shared daemon auto-split planner via `coin_ops::shape::resolve_shape_funding`. Without
 /// protection, picks the **largest** eligible coin; with protection, picks the **smallest
-/// non-cannibalizing** coin for ladder-row safety. Combine-first fallback is disabled by
-/// forcing an unusable cap when `allow_combine_prereq` is `false` (mirrors the historical
-/// `required_amount_mojos > 0`-gated combine attempt exactly, since `resolve_shape_funding`'s
-/// aggregate-feasibility check already rejects non-positive required amounts).
+/// non-cannibalizing** coin for ladder-row safety. Combine-first fallback is disabled via
+/// `ShapeFundingOptions::allow_combine` when `allow_combine_prereq` is `false`.
 fn plan_daemon_auto_split_with_optional_protection(
     params: &DaemonAutoSplitParams<'_>,
     protection: Option<&SplitSourceProtection>,
@@ -63,20 +60,18 @@ fn plan_daemon_auto_split_with_optional_protection(
         .iter()
         .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
         .collect();
-    let combine_input_cap = if params.allow_combine_prereq {
-        params.combine_input_cap
-    } else {
-        0
-    };
-    let options = ShapeFundingOptions {
-        unit: AmountUnit::Mojos {
-            base_unit_mojo_multiplier: protection.map_or(1, |p| p.base_unit_mojo_multiplier),
-        },
-        combine_input_cap,
-        canonical_asset_id: params.canonical_asset_id,
-        protect_ladder_rows: false,
-        prefer_smallest_non_cannibalizing: protection.is_some(),
-        require_no_single_coin_covers: false,
+    let options = match protection {
+        Some(protection) => ShapeFundingOptions::daemon_protected(
+            params.combine_input_cap,
+            params.canonical_asset_id,
+            protection.base_unit_mojo_multiplier,
+            params.allow_combine_prereq,
+        ),
+        None => ShapeFundingOptions::daemon_unprotected(
+            params.combine_input_cap,
+            params.canonical_asset_id,
+            params.allow_combine_prereq,
+        ),
     };
     let ladder_shape = protection.map(|protection| &protection.shape);
 

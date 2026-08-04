@@ -1,4 +1,5 @@
 use crate::coin_ops::selection::SpendableCoin;
+use crate::coin_ops::shape::CombineInputs;
 
 /// Inputs for daemon automatic split-source selection.
 #[derive(Debug, Clone, Copy)]
@@ -9,12 +10,6 @@ pub struct DaemonAutoSplitParams<'a> {
     pub combine_input_cap: i64,
     pub allow_combine_prereq: bool,
 }
-
-/// Daemon combine-first input set covering a required amount (on-chain mojos).
-///
-/// Alias of the unified [`crate::coin_ops::shape::CombineInputs`] core type; `selected_total`
-/// and `target_amount` are on-chain mojos for this daemon path.
-pub type SplitCombinePrereqPlan = crate::coin_ops::shape::CombineInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitCoinPlan {
@@ -58,6 +53,6 @@ pub enum CliSplitSelection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SplitAutoSelectPlan {
     Coin(SplitCoinPlan),
-    CombinePrereq(SplitCombinePrereqPlan),
+    CombinePrereq(CombineInputs),
     Skip(SplitSkipReason),
 }

@@ -7,14 +7,14 @@ Accepted (2026-08-03).
 ## Context
 
 After [#177](https://github.com/Chia-Network/greenfloor/pull/177) unified vault mixed-split
-*submit* and moved market-cycle reconcile apply into `offer::lifecycle::market_reconcile`,
+_submit_ and moved market-cycle reconcile apply into `offer::lifecycle::market_reconcile`,
 three residual ownership forks remained:
 
 1. Soft-expire surplus reclaim planning lived in `daemon/` while mark/lease lived in
    `offer/lifecycle/` (ADR 0020 complexity).
 2. Market reconcile prepare/heal/watch helpers were private to `market_reconcile/watch_plan`
    while CLI `reconcile_watched_offers` duplicated Dexie `get_offer` match arms.
-3. Bootstrap and managed auto-split still forked *planning* (combine-first funding, ladder
+3. Bootstrap and managed auto-split still forked _planning_ (combine-first funding, ladder
    deficits) despite sharing submit via `CatSelection`.
 
 ## Decision
@@ -44,7 +44,7 @@ Behavior-preserving ownership moves only (no policy changes).
 - Soft-expire and ensure PreferExisting share one lease + reclaim spine under lifecycle.
 - Reconcile HTTP paths share Dexie fetch/apply helpers without forcing CLI/daemon parity.
 - Bootstrap vs daemon funding policy stays explicit (smallest non-cannibalizing vs largest;
-   ladder protect flag) rather than silently merging selectors.
+  ladder protect flag) rather than silently merging selectors.
 - Daemon remains phase orchestrator (not a thin shell); path-specific gates, fee budgets,
   and dust Preselected submit stay path-local.
 

@@ -5,8 +5,8 @@
 //! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
 use crate::coin_ops::shape::{
-    plan_shape_from_deficits, AmountUnit, ShapeCoin, ShapeFunding, ShapeFundingOptions,
-    ShapeLadderRow, ShapePlanOutcome,
+    plan_shape_from_deficits, ShapeCoin, ShapeFunding, ShapeFundingOptions, ShapeLadderRow,
+    ShapePlanOutcome,
 };
 
 use super::amounts::BaseUnits;
@@ -33,7 +33,9 @@ fn validate_inputs(
     None
 }
 
-fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
+/// Bootstrap ladder rows -> unit-agnostic shape rows. Shared with [`super::combine_plan`]'s
+/// test-only combine builder so bootstrap has one row/coin conversion, not two.
+pub(super) fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
     sorted_ladder
         .iter()
         .map(|row| ShapeLadderRow {
@@ -44,7 +46,7 @@ fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
         .collect()
 }
 
-fn to_shape_coins(coins: &[BootstrapCoin]) -> Vec<ShapeCoin> {
+pub(super) fn to_shape_coins(coins: &[BootstrapCoin]) -> Vec<ShapeCoin> {
     coins
         .iter()
         .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount.get()))
@@ -76,14 +78,11 @@ pub fn plan_bootstrap_mixed_outputs(
     let mut sorted_ladder = ladder_entries.to_vec();
     sorted_ladder.sort_by_key(|row| row.size_base_units);
 
-    let options = ShapeFundingOptions {
-        unit: AmountUnit::BaseUnits,
+    let options = ShapeFundingOptions::bootstrap(
         combine_input_cap,
-        canonical_asset_id: &combine_context.canonical_asset_id,
-        protect_ladder_rows: true,
-        prefer_smallest_non_cannibalizing: true,
-        require_no_single_coin_covers: true,
-    };
+        &combine_context.canonical_asset_id,
+        combine_context.mojo_multiplier,
+    );
 
     match plan_shape_from_deficits(
         &to_shape_rows(&sorted_ladder),

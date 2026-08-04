@@ -8,8 +8,5 @@ mod mark;
 mod plan;
 
 pub use lease::{reclaim_expired_maker_if_unspent, ExpiredMakerLease, ReclaimMakerOutcome};
-pub use mark::{
-    finalize_maker_claim_synced, mark_listings_soft_expired, restore_maker_claim_synced,
-    restore_stale_maker_claims_synced, try_claim_expired_maker_synced,
-};
+pub use mark::{mark_listings_soft_expired, restore_stale_maker_claims_synced};
 pub(crate) use plan::plan_soft_expire_reclaims;

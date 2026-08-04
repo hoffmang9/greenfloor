@@ -104,14 +104,16 @@ pub async fn reconcile_offers_batch(
     let mut items = Vec::with_capacity(rows.len());
     let mut changed_count = 0u64;
 
+    let persist_options = batch_persist_options(venue);
     for row in rows {
-        let (transition, last_seen_status) = reconcile_one_dexie_offer(
+        let (transition, last_seen_status) = fetch_and_apply_watched_offer(
             &store,
             &dexie,
-            venue,
-            &row,
-            Some(&cancel_submitted_by_offer),
-            now,
+            &row.market_id,
+            &row.offer_id,
+            &row.state,
+            WatchedOfferTransitionEnv::new(now, Some(&cancel_submitted_by_offer)),
+            &persist_options,
         )
         .await?;
 
@@ -139,28 +141,6 @@ fn batch_persist_options(venue: crate::config::Venue) -> ReconcilePersistOptions
         venue: Some(venue),
         dexie_error: None,
     }
-}
-
-async fn reconcile_one_dexie_offer(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    venue: crate::config::Venue,
-    row: &crate::storage::OfferStateListRow,
-    cancel_by_offer: Option<
-        &std::collections::HashMap<String, crate::cycle::reconcile::CancelSubmittedContext>,
-    >,
-    now: chrono::DateTime<Utc>,
-) -> SignerResult<(crate::cycle::CycleOfferTransition, Option<i64>)> {
-    fetch_and_apply_watched_offer(
-        store,
-        dexie,
-        &row.market_id,
-        &row.offer_id,
-        &row.state,
-        WatchedOfferTransitionEnv::new(now, cancel_by_offer),
-        &batch_persist_options(venue),
-    )
-    .await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

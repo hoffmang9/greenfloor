@@ -12,7 +12,7 @@ use crate::storage::SqliteStore;
 
 use super::super::dexie_index::index_list_offers_by_local_ids;
 use super::super::reconcile_prep::{
-    ensure_watches_from_dexie_payload, fetch_dexie_offer, DexieOfferFetch,
+    ensure_watches_from_dexie_payload, fetch_dexie_offer, DexieFetchMode, DexieOfferFetch,
 };
 use super::super::{persist_missing_watched_offer, ReconcilePersistOptions};
 use super::transition::{note_reconcile_transition_side_effects, ReconcileMarketCycleMetrics};
@@ -53,8 +53,12 @@ fn apply_missing_watched_offer(
     Ok(())
 }
 
-fn record_watchlist_augment_error(
+/// Shared Dexie watch-error audit for the daemon cycle heal callback and watchlist augment —
+/// same `market_id`/`offer_id`/`error` payload shape and `DEXIE_WATCHLIST_AUGMENT_ERROR`
+/// event, differing only in the human-readable `message` for each call site.
+pub(super) fn dexie_watch_error_dual_audit(
     store: &SqliteStore,
+    message: &'static str,
     market_id: &str,
     offer_id: &str,
     error: &str,
@@ -64,7 +68,7 @@ fn record_watchlist_augment_error(
     LogContext::MARKET_CYCLE.dual_audit(
         store,
         Level::WARN,
-        "dexie watchlist augment failed",
+        message,
         DEXIE_WATCHLIST_AUGMENT_ERROR,
         &serde_json::json!({
             "market_id": market_id,
@@ -72,6 +76,23 @@ fn record_watchlist_augment_error(
             "error": error,
         }),
         Some(market_id),
+    )
+}
+
+fn record_watchlist_augment_error(
+    store: &SqliteStore,
+    market_id: &str,
+    offer_id: &str,
+    error: &str,
+    metrics: &mut ReconcileMarketCycleMetrics,
+) -> SignerResult<()> {
+    dexie_watch_error_dual_audit(
+        store,
+        "dexie watchlist augment failed",
+        market_id,
+        offer_id,
+        error,
+        metrics,
     )
 }
 
@@ -88,7 +109,7 @@ async fn fetch_missing_watched_offers(
         if augmented_by_local_id.contains_key(watched_offer_id) {
             continue;
         }
-        match fetch_dexie_offer(dexie, watched_offer_id, true).await {
+        match fetch_dexie_offer(dexie, watched_offer_id, DexieFetchMode::HealStrict).await {
             DexieOfferFetch::Found(body) => {
                 augmented_by_local_id.insert(watched_offer_id.clone(), body);
             }

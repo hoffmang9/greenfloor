@@ -252,9 +252,10 @@ impl BootstrapPhaseFailure {
 #[cfg(test)]
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
+    use crate::coin_ops::shape::CombineInputs;
     use crate::offer::bootstrap::{
-        bootstrap_phase_snapshot_block_error, BootstrapCombineInputs, BootstrapFundingSource,
-        BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlan,
+        bootstrap_phase_snapshot_block_error, BootstrapFundingSource, BootstrapPhaseSnapshot,
+        BootstrapPhaseStatus, BootstrapPlan,
     };
 
     #[test]
@@ -287,7 +288,7 @@ mod tests {
     #[test]
     fn plan_output_omits_source_coin_id_for_combine_first() {
         let plan = BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
+            funding: BootstrapFundingSource::CombineFirst(CombineInputs {
                 input_coin_ids: vec!["coin-a".to_string(), "coin-b".to_string()],
                 target_amount: 100,
                 selected_total: 100,

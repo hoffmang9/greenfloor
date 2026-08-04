@@ -21,7 +21,7 @@ use crate::storage::SqliteStore;
 use super::cancel_context::{
     cancel_submitted_context_for_offer, chain_confirmed_tx_ids_for_transition,
 };
-use super::reconcile_prep::{fetch_dexie_offer, DexieOfferFetch};
+use super::reconcile_prep::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
 use crate::cycle::reconcile::CoinsetTxSignals;
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
@@ -164,7 +164,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     current_state: &str,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    match fetch_dexie_offer(dexie, offer_id, false).await {
+    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::LifecycleLoose).await {
         DexieOfferFetch::Found(offer_body) => {
             let (transition, status) =
                 transition_from_offer_body(store, offer_id, current_state, &offer_body, env)?;
@@ -175,12 +175,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
             Ok((transition, None, Some(error_text)))
         }
         DexieOfferFetch::Mismatch => {
-            let transition = unchanged_offer_transition(
-                current_state,
-                "dexie_get_offer_payload_did_not_match_local_offer_id".to_string(),
-            )
-            .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
-            Ok((transition, None, None))
+            unreachable!("DexieFetchMode::LifecycleLoose never produces Mismatch")
         }
         DexieOfferFetch::LookupError(err) => {
             let transition =

@@ -124,14 +124,14 @@ mod tests {
     #![allow(clippy::large_futures)]
 
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
+    use crate::coin_ops::shape::CombineInputs;
     use crate::offer::bootstrap::{
-        bootstrap_combine_vault_outputs, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
-        BootstrapPlan,
+        bootstrap_combine_vault_outputs, BaseUnits, BootstrapFundingSource, BootstrapPlan,
     };
     use crate::offer::operator::build_and_post::sample_resolved_build_and_post_context;
     use crate::offer::operator::signer_denomination::test_overrides::SignerDenominationTestOverrides;
 
-    fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
+    fn combine_first_plan(inputs: CombineInputs) -> BootstrapPlan {
         let selected_total = inputs.selected_total;
         BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(inputs),
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn bootstrap_combine_vault_outputs_match_eco181_shape() {
-        let inputs = BootstrapCombineInputs {
+        let inputs = CombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
             selected_total: 105,
             target_amount: 100,
@@ -161,7 +161,7 @@ mod tests {
     async fn submit_bootstrap_combine_delegates_to_vault_outputs() {
         let overrides = SignerDenominationTestOverrides::default();
         overrides.enqueue_sample_vault_mixed_split_stub();
-        let plan = combine_first_plan(BootstrapCombineInputs {
+        let plan = combine_first_plan(CombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
             selected_total: 105,
             target_amount: 100,

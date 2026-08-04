@@ -132,18 +132,19 @@ mod tests {
         bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
         sub_primary_shape_deferred_to_coin_ops,
     };
+    use crate::coin_ops::shape::CombineInputs;
     use crate::offer::bootstrap::test_fixtures::{
         bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
     };
     use crate::offer::bootstrap::{
-        bootstrap_replan_after_combine, BootstrapCombineInputs, BootstrapFundingSource,
-        BootstrapPlan, BootstrapPlanOutcome, BootstrapReplanAfterCombine,
+        bootstrap_replan_after_combine, BootstrapFundingSource, BootstrapPlan,
+        BootstrapPlanOutcome, BootstrapReplanAfterCombine,
     };
 
     #[test]
     fn sub_primary_deferred_rejects_combine_first_for_second_primary_row() {
         let replanned = BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
+            funding: BootstrapFundingSource::CombineFirst(CombineInputs {
                 input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
                 selected_total: 105,
                 target_amount: 100,

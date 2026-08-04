@@ -5,23 +5,44 @@
 
 /// Which unit system amounts use for a shape planning call.
 ///
-/// `Mojos`' `base_unit_mojo_multiplier` converts ladder base-unit row sizes to mojos for
-/// cannibalization checks and combine dust-change math; `BaseUnits` amounts are already
-/// ladder base units, so the effective multiplier is always `1`.
+/// Ladder-row cannibalization checks and combine dust-change math need *different*
+/// conversion factors depending which unit `amount` fields are already in — conflating them
+/// (as a single `base_unit_mojo_multiplier` once did) silently mis-scales dust checks for the
+/// `BaseUnits` case. See [`Self::ladder_conversion_multiplier`] and
+/// [`Self::dust_change_mojo_multiplier`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AmountUnit {
-    BaseUnits,
+    /// Amounts are ladder base units. `dust_mojo_multiplier` converts overshoot change to
+    /// on-chain mojos for dust checks. Cannibalization treats amounts as already-base-units
+    /// (conversion factor 1).
+    BaseUnits { dust_mojo_multiplier: i64 },
+    /// Amounts are on-chain mojos. `base_unit_mojo_multiplier` converts ladder row sizes for
+    /// cannibalization. Dust change is already mojos (factor 1).
     Mojos { base_unit_mojo_multiplier: i64 },
 }
 
 impl AmountUnit {
+    /// Multiplier to convert `amount`-unit values to ladder base units for cannibalization
+    /// checks (`1` when amounts are already base units).
     #[must_use]
-    pub(super) fn base_unit_mojo_multiplier(self) -> i64 {
+    pub(super) fn ladder_conversion_multiplier(self) -> i64 {
         match self {
-            Self::BaseUnits => 1,
+            Self::BaseUnits { .. } => 1,
             Self::Mojos {
                 base_unit_mojo_multiplier,
             } => base_unit_mojo_multiplier.max(1),
+        }
+    }
+
+    /// Multiplier to convert `amount`-unit overshoot change to on-chain mojos for combine
+    /// dust checks (`1` when amounts are already mojos).
+    #[must_use]
+    pub(super) fn dust_change_mojo_multiplier(self) -> i64 {
+        match self {
+            Self::BaseUnits {
+                dust_mojo_multiplier,
+            } => dust_mojo_multiplier.max(1),
+            Self::Mojos { .. } => 1,
         }
     }
 }
@@ -51,8 +72,7 @@ impl ShapeCoin {
 
 /// Combine-first inputs selected to cover a target amount (unit per caller's [`AmountUnit`]).
 ///
-/// Unifies the former `offer::bootstrap::BootstrapCombineInputs` (base units) and
-/// `coin_ops::SplitCombinePrereqPlan` (mojos), which are now aliases of this type.
+/// Shared by bootstrap (base units) and daemon coin ops (mojos) combine-first funding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CombineInputs {
     pub input_coin_ids: Vec<String>,

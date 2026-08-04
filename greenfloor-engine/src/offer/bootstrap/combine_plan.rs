@@ -1,11 +1,13 @@
 //! Bootstrap combine-first input selection (base units only) — thin wrapper over
 //! `coin_ops::shape::plan_ladder_preserving_combine`.
+//!
+//! [`build_bootstrap_combine_plan`] is test-only: `plan_bootstrap_mixed_outputs` (via
+//! `coin_ops::shape::plan_shape_from_deficits`) is the sole production door for bootstrap
+//! combine-first funding. This module's regression tests exercise the shared
+//! `plan_ladder_preserving_combine` core directly at the bootstrap unit boundary.
 
-use super::amounts::{BaseUnits, BootstrapCombineInputs};
+#[cfg(test)]
 use super::plan::{BootstrapCoin, PlannerLadderRow};
-use crate::coin_ops::shape::{
-    plan_ladder_preserving_combine, protected_slots_for_rows, ShapeCoin, ShapeLadderRow,
-};
 
 /// Asset context for bootstrap combine dust validation at plan time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,37 +31,17 @@ impl BootstrapCombineContext {
     }
 }
 
-fn to_shape_rows(ladder_entries: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
-    ladder_entries
-        .iter()
-        .map(|row| ShapeLadderRow {
-            size: row.size_base_units,
-            target_count: row.target_count,
-            split_buffer_count: row.split_buffer_count,
-        })
-        .collect()
-}
-
-fn to_shape_coins(coins: &[BootstrapCoin]) -> Vec<ShapeCoin> {
-    coins
-        .iter()
-        .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount.get()))
-        .collect()
-}
-
-/// Build combine-first inputs for bootstrap shaping (`BootstrapCoin` amounts are base units).
-///
-/// When `ladder_entries` is non-empty, eligible inputs exclude coins reserved for exact ladder
-/// sizes until a preserving selection is impossible (see
-/// [`crate::coin_ops::shape::plan_ladder_preserving_combine`]).
-#[must_use]
-pub fn build_bootstrap_combine_plan(
+#[cfg(test)]
+fn build_bootstrap_combine_plan(
     coins: &[BootstrapCoin],
     ladder_entries: &[PlannerLadderRow],
-    target_amount_base_units: BaseUnits,
+    target_amount_base_units: super::amounts::BaseUnits,
     combine_input_cap: i64,
     combine_context: &BootstrapCombineContext,
-) -> Option<BootstrapCombineInputs> {
+) -> Option<crate::coin_ops::shape::CombineInputs> {
+    use super::planner::{to_shape_coins, to_shape_rows};
+    use crate::coin_ops::shape::{plan_ladder_preserving_combine, protected_slots_for_rows};
+
     let protected_slots = protected_slots_for_rows(&to_shape_rows(ladder_entries));
     plan_ladder_preserving_combine(
         &to_shape_coins(coins),
@@ -74,6 +56,7 @@ pub fn build_bootstrap_combine_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offer::bootstrap::amounts::BaseUnits;
     use crate::test_support::eco181_bootstrap_inventory::{
         eco181_bootstrap_coins, eco181_bootstrap_ladder,
     };

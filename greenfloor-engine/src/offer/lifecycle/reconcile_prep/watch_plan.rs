@@ -17,7 +17,7 @@ use crate::storage::OfferStateListRow;
 use crate::storage::SqliteStore;
 
 use super::super::dexie_index::index_list_offers_by_local_ids;
-use super::dexie_fetch::{fetch_dexie_offer, DexieOfferFetch};
+use super::dexie_fetch::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
 
 /// Dexie HTTP roles after local metadata heal (pure classify result).
 #[derive(Debug, Clone, Default)]
@@ -192,7 +192,7 @@ async fn fetch_dexie_offer_body_for_heal(
     offer_id: &str,
     on_lookup_error: &mut dyn FnMut(&str, &str, &str) -> SignerResult<()>,
 ) -> SignerResult<Option<Value>> {
-    match fetch_dexie_offer(dexie, offer_id, true).await {
+    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::HealStrict).await {
         DexieOfferFetch::Found(body) => Ok(Some(body)),
         DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch => Ok(None),
         DexieOfferFetch::LookupError(err) => {

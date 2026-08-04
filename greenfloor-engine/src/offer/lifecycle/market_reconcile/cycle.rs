@@ -9,13 +9,13 @@ use tracing::Level;
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
 use crate::error::SignerResult;
-use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR, DEXIE_WATCHLIST_AUGMENT_ERROR};
+use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
 use super::super::dexie_index::{build_dexie_size_by_offer_id, dexie_status_index};
 use super::super::reconcile_prep::{fetch_and_ensure_watches, prepare_market_reconcile_local};
 use super::super::{apply_cancel_submitted_rows, ReconcilePersistOptions};
-use super::augment::augment_dexie_offers_for_watchlist;
+use super::augment::{augment_dexie_offers_for_watchlist, dexie_watch_error_dual_audit};
 use super::transition::{apply_dexie_lifecycle_transitions, ReconcileMarketCycleMetrics};
 
 #[derive(Debug, Clone)]
@@ -111,18 +111,13 @@ pub async fn run_reconcile_market_cycle(
         &plan.heal_only,
         &list_offers,
         &mut |market_id, offer_id, err| {
-            metrics.cycle_errors += 1;
-            LogContext::MARKET_CYCLE.dual_audit(
+            dexie_watch_error_dual_audit(
                 store,
-                Level::WARN,
                 "dexie watch heal fetch failed",
-                DEXIE_WATCHLIST_AUGMENT_ERROR,
-                &json!({
-                    "market_id": market_id,
-                    "offer_id": offer_id,
-                    "error": err,
-                }),
-                Some(market_id),
+                market_id,
+                offer_id,
+                err,
+                &mut metrics,
             )
         },
     )

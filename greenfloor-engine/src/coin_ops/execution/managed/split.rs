@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::shape::CombineInputs;
 use crate::coin_ops::{
     coin_op_non_negative_u64, defer_low_watermark_split_from_spendable, i64_to_usize,
     plan_daemon_auto_split_selection, plan_daemon_low_watermark_split, usize_to_i64, CoinOpPlan,
-    CoinOpPlanReason, DaemonAutoSplitParams, SpendableCoin, SplitAutoSelectPlan,
-    SplitCombinePrereqPlan, SplitSkipReason, SplitSourceProtection,
+    CoinOpPlanReason, DaemonAutoSplitParams, SpendableCoin, SplitAutoSelectPlan, SplitSkipReason,
+    SplitSourceProtection,
 };
 
 use super::items::{
@@ -88,7 +89,7 @@ enum SplitAttemptFlow {
 async fn submit_combine_prereq_for_split(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
-    prereq: &SplitCombinePrereqPlan,
+    prereq: &CombineInputs,
 ) -> Result<SplitAttemptFlow, PlanSkip> {
     let combine_count = skip_on_signer_err_for_plan(
         plan,
