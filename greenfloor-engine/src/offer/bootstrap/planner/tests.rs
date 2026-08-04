@@ -4,7 +4,7 @@ use crate::offer::bootstrap::test_fixtures::{
     expect_needs_shape_with_cap, ladder_deficit, ladder_row as row, plan_bootstrap,
     plan_bootstrap_with_cap, DEFAULT_BOOTSTRAP_COMBINE_CAP,
 };
-use crate::offer::bootstrap::{BaseUnits, BootstrapFundingSource, BootstrapPlanOutcome};
+use crate::offer::bootstrap::{BootstrapFundingSource, BootstrapPlanOutcome};
 
 #[test]
 fn builds_deficit_outputs() {
@@ -201,9 +201,9 @@ fn plans_combine_first_for_fragmented_inventory_with_cap_five() {
     assert!(plan.requires_combine_first());
     assert_eq!(plan.total_output_amount, 100);
     let combine = plan.combine_inputs().expect("combine inputs");
-    assert_eq!(combine.target_amount, BaseUnits::new(100));
-    assert!(combine.selected_total.get() >= 100);
-    assert_eq!(plan.change_amount, combine.selected_total.get() - 100);
+    assert_eq!(combine.target_amount, 100);
+    assert!(combine.selected_total >= 100);
+    assert_eq!(plan.change_amount, combine.selected_total - 100);
     let inputs = combine.input_coin_ids.as_slice();
     assert!(inputs.len() >= 2);
     assert!(inputs.len() <= 5);

@@ -10,14 +10,11 @@ use crate::error::SignerResult;
 pub struct BaseUnits(pub i64);
 
 /// Selected inputs for bootstrap combine-first (base units only).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootstrapCombineInputs {
-    pub input_coin_ids: Vec<String>,
-    pub selected_total: BaseUnits,
-    pub target_amount: BaseUnits,
-    pub exact_match: bool,
-    pub cap_applied: bool,
-}
+///
+/// Alias of the unified [`crate::coin_ops::shape::CombineInputs`] core type; `selected_total`
+/// and `target_amount` are ladder base units for this bootstrap path (convert via
+/// [`base_units_to_mojos`] only at the vault submit boundary).
+pub type BootstrapCombineInputs = crate::coin_ops::shape::CombineInputs;
 
 /// On-chain mojos for vault mixed-split I/O.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,7 +83,7 @@ pub(crate) fn bootstrap_combine_vault_outputs(
     inputs: &BootstrapCombineInputs,
     mojo_multiplier: i64,
 ) -> SignerResult<Vec<u64>> {
-    let output_mojos = base_units_to_mojos(inputs.target_amount, mojo_multiplier);
+    let output_mojos = base_units_to_mojos(BaseUnits::new(inputs.target_amount), mojo_multiplier);
     combine_output_amounts(output_mojos, COMBINE_SINGLE_OUTPUT_COUNT)
 }
 
@@ -112,10 +109,12 @@ mod tests {
     fn eco181_shape_outputs_target_not_selected_total() {
         let inputs = BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: BaseUnits::new(105),
-            target_amount: BaseUnits::new(100),
+            selected_total: 105,
+            target_amount: 100,
             exact_match: false,
             cap_applied: true,
+            selected_count_before_cap: 2,
+            combine_input_cap: 5,
         };
         let outputs = bootstrap_combine_vault_outputs(&inputs, 1_000).expect("outputs");
         assert_eq!(outputs, vec![100_000]);

@@ -21,6 +21,7 @@ use crate::storage::SqliteStore;
 use super::cancel_context::{
     cancel_submitted_context_for_offer, chain_confirmed_tx_ids_for_transition,
 };
+use super::reconcile_prep::{fetch_dexie_offer, DexieOfferFetch};
 use crate::cycle::reconcile::CoinsetTxSignals;
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
@@ -163,23 +164,25 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     current_state: &str,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    match dexie.get_offer(offer_id).await {
-        Ok(response) => {
-            let payload = response.body();
-            if let Some(error_text) = missing_offer_error_from_payload(payload) {
-                let transition = missing_watched_offer_transition(current_state)?;
-                return Ok((transition, None, Some(error_text)));
-            }
-            let offer_body = payload.get("offer").unwrap_or(payload);
+    match fetch_dexie_offer(dexie, offer_id, false).await {
+        DexieOfferFetch::Found(offer_body) => {
             let (transition, status) =
-                transition_from_offer_body(store, offer_id, current_state, offer_body, env)?;
+                transition_from_offer_body(store, offer_id, current_state, &offer_body, env)?;
             Ok((transition, status, None))
         }
-        Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
+        DexieOfferFetch::Missing(error_text) => {
             let transition = missing_watched_offer_transition(current_state)?;
-            Ok((transition, None, Some(err.to_string())))
+            Ok((transition, None, Some(error_text)))
         }
-        Err(err) => {
+        DexieOfferFetch::Mismatch => {
+            let transition = unchanged_offer_transition(
+                current_state,
+                "dexie_get_offer_payload_did_not_match_local_offer_id".to_string(),
+            )
+            .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
+            Ok((transition, None, None))
+        }
+        DexieOfferFetch::LookupError(err) => {
             let transition =
                 unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))
                     .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;

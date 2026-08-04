@@ -253,8 +253,8 @@ impl BootstrapPhaseFailure {
 mod tests {
     use super::{BootstrapPhaseResult, BootstrapPlanOutput};
     use crate::offer::bootstrap::{
-        bootstrap_phase_snapshot_block_error, BaseUnits, BootstrapCombineInputs,
-        BootstrapFundingSource, BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlan,
+        bootstrap_phase_snapshot_block_error, BootstrapCombineInputs, BootstrapFundingSource,
+        BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlan,
     };
 
     #[test]
@@ -289,10 +289,12 @@ mod tests {
         let plan = BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
                 input_coin_ids: vec!["coin-a".to_string(), "coin-b".to_string()],
-                target_amount: BaseUnits::new(100),
-                selected_total: BaseUnits::new(100),
+                target_amount: 100,
+                selected_total: 100,
                 exact_match: true,
                 cap_applied: false,
+                selected_count_before_cap: 2,
+                combine_input_cap: 5,
             }),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

@@ -39,26 +39,9 @@ pub struct BootstrapCoin {
     pub amount: BaseUnits,
 }
 
-impl BootstrapCoin {
-    /// Coin has a non-empty id and positive amount (eligible for combine input selection).
-    #[must_use]
-    pub(crate) fn is_spendable(&self) -> bool {
-        !self.id.trim().is_empty() && self.amount.get() > 0
-    }
-}
-
 #[must_use]
 pub(crate) fn bootstrap_coin_amounts(coins: &[BootstrapCoin]) -> Vec<i64> {
     coins.iter().map(|coin| coin.amount.get()).collect()
-}
-
-#[must_use]
-pub(crate) fn spendable_bootstrap_coins(coins: &[BootstrapCoin]) -> Vec<BootstrapCoin> {
-    coins
-        .iter()
-        .filter(|coin| coin.is_spendable())
-        .cloned()
-        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +54,7 @@ pub enum BootstrapFundingSource {
 fn funding_source_amount(funding: &BootstrapFundingSource) -> i64 {
     match funding {
         BootstrapFundingSource::SingleCoin { amount, .. } => amount.get(),
-        BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total.get(),
+        BootstrapFundingSource::CombineFirst(inputs) => inputs.selected_total,
     }
 }
 

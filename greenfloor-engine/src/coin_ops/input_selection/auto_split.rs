@@ -1,4 +1,3 @@
-use super::combine_prereq_plan::build_combine_prereq_plan;
 use super::types::{
     CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan, SplitSkipReason,
     SubCatChangeSkipData,
@@ -6,6 +5,10 @@ use super::types::{
 use crate::coin_ops::policy::coin_op_min_amount_mojos;
 use crate::coin_ops::selection::{
     select_largest_spendable_coin, split_would_create_sub_cat_change, SpendableCoin,
+};
+use crate::coin_ops::shape::{
+    resolve_shape_funding, AmountUnit, ShapeCoin, ShapeFunding, ShapeFundingOptions,
+    ShapeFundingResolution,
 };
 use crate::coin_ops::shape_protection::SplitSourceProtection;
 
@@ -15,10 +18,10 @@ fn skip_no_spendable_coin() -> SplitSkipReason {
     SplitSkipReason::NoSpendableMeetsRequired
 }
 
-fn coin_plan(coin: &SpendableCoin) -> SplitCoinPlan {
+fn coin_plan(coin_id: &str, amount_mojos: i64) -> SplitCoinPlan {
     SplitCoinPlan {
-        coin_id: coin.id.clone(),
-        selected_amount_mojos: coin.amount,
+        coin_id: coin_id.to_string(),
+        selected_amount_mojos: amount_mojos,
     }
 }
 
@@ -45,64 +48,65 @@ fn sub_cat_change_skip(
     }))
 }
 
-/// Shared daemon auto-split planner. Without protection, picks the **largest** eligible coin;
-/// with protection, picks the **smallest non-cannibalizing** coin for ladder-row safety.
+/// Shared daemon auto-split planner via `coin_ops::shape::resolve_shape_funding`. Without
+/// protection, picks the **largest** eligible coin; with protection, picks the **smallest
+/// non-cannibalizing** coin for ladder-row safety. Combine-first fallback is disabled by
+/// forcing an unusable cap when `allow_combine_prereq` is `false` (mirrors the historical
+/// `required_amount_mojos > 0`-gated combine attempt exactly, since `resolve_shape_funding`'s
+/// aggregate-feasibility check already rejects non-positive required amounts).
 fn plan_daemon_auto_split_with_optional_protection(
     params: &DaemonAutoSplitParams<'_>,
     protection: Option<&SplitSourceProtection>,
 ) -> SplitAutoSelectPlan {
-    let min_amount = if params.required_amount_mojos > 0 {
-        params.required_amount_mojos
+    let coins: Vec<ShapeCoin> = params
+        .candidate_spendable
+        .iter()
+        .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
+        .collect();
+    let combine_input_cap = if params.allow_combine_prereq {
+        params.combine_input_cap
     } else {
         0
     };
-    let exclude = HashSet::new();
-    let selected_coin = if let Some(protection) = protection {
-        let required_base_units =
-            params.required_amount_mojos / protection.base_unit_mojo_multiplier.max(1);
-        protection.select_spendable_coin(params.candidate_spendable, required_base_units, &exclude)
-    } else {
-        select_largest_spendable_coin(params.candidate_spendable, min_amount, &exclude)
+    let options = ShapeFundingOptions {
+        unit: AmountUnit::Mojos {
+            base_unit_mojo_multiplier: protection.map_or(1, |p| p.base_unit_mojo_multiplier),
+        },
+        combine_input_cap,
+        canonical_asset_id: params.canonical_asset_id,
+        protect_ladder_rows: false,
+        prefer_smallest_non_cannibalizing: protection.is_some(),
+        require_no_single_coin_covers: false,
     };
+    let ladder_shape = protection.map(|protection| &protection.shape);
 
-    if let Some(selected_coin) = selected_coin {
-        if let Some(skip) = sub_cat_change_skip(
-            selected_coin.id.clone(),
-            selected_coin.amount,
-            params.required_amount_mojos,
-            params.canonical_asset_id,
-        ) {
-            return SplitAutoSelectPlan::Skip(skip);
-        }
-        return SplitAutoSelectPlan::Coin(coin_plan(selected_coin));
-    }
-
-    if params.allow_combine_prereq && params.required_amount_mojos > 0 {
-        let aggregate: i64 = params
-            .candidate_spendable
-            .iter()
-            .map(|coin| coin.amount)
-            .sum();
-        if aggregate >= params.required_amount_mojos {
-            if let Some(prereq) = build_combine_prereq_plan(
-                params.candidate_spendable,
+    match resolve_shape_funding(&coins, params.required_amount_mojos, ladder_shape, &options) {
+        ShapeFundingResolution::Funded(ShapeFunding::SingleCoin { coin_id, amount }) => {
+            if let Some(skip) = sub_cat_change_skip(
+                coin_id.clone(),
+                amount,
                 params.required_amount_mojos,
-                params.combine_input_cap,
+                params.canonical_asset_id,
             ) {
-                if let Some(skip) = sub_cat_change_skip(
-                    prereq.input_coin_ids.first().cloned().unwrap_or_default(),
-                    prereq.selected_total_mojos,
-                    prereq.target_amount_mojos,
-                    params.canonical_asset_id,
-                ) {
-                    return SplitAutoSelectPlan::Skip(skip);
-                }
-                return SplitAutoSelectPlan::CombinePrereq(prereq);
+                return SplitAutoSelectPlan::Skip(skip);
             }
+            SplitAutoSelectPlan::Coin(coin_plan(&coin_id, amount))
+        }
+        ShapeFundingResolution::Funded(ShapeFunding::CombineFirst(prereq)) => {
+            if let Some(skip) = sub_cat_change_skip(
+                prereq.input_coin_ids.first().cloned().unwrap_or_default(),
+                prereq.selected_total,
+                prereq.target_amount,
+                params.canonical_asset_id,
+            ) {
+                return SplitAutoSelectPlan::Skip(skip);
+            }
+            SplitAutoSelectPlan::CombinePrereq(prereq)
+        }
+        ShapeFundingResolution::CannotFund { .. } => {
+            SplitAutoSelectPlan::Skip(skip_no_spendable_coin())
         }
     }
-
-    SplitAutoSelectPlan::Skip(skip_no_spendable_coin())
 }
 
 /// CLI auto split: pick the largest spendable coin without enforcing required amount.
@@ -111,7 +115,7 @@ pub fn plan_cli_auto_split_selection(candidate_spendable: &[SpendableCoin]) -> C
     if let Some(selected_coin) =
         select_largest_spendable_coin(candidate_spendable, 0, &HashSet::new())
     {
-        return CliSplitSelection::Coin(coin_plan(selected_coin));
+        return CliSplitSelection::Coin(coin_plan(&selected_coin.id, selected_coin.amount));
     }
     CliSplitSelection::Skip(skip_no_spendable_coin())
 }

@@ -46,8 +46,7 @@ mod tests {
         bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
     };
     use crate::offer::bootstrap::{
-        BaseUnits, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
-        BootstrapPlanOutcome,
+        BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome,
     };
 
     #[test]
@@ -87,10 +86,12 @@ mod tests {
         let replanned = BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
                 input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-                selected_total: BaseUnits::new(105),
-                target_amount: BaseUnits::new(100),
+                selected_total: 105,
+                target_amount: 100,
                 exact_match: false,
                 cap_applied: true,
+                selected_count_before_cap: 2,
+                combine_input_cap: 5,
             }),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

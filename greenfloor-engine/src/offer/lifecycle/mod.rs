@@ -5,12 +5,12 @@ mod cancel_cli;
 mod cancel_context;
 mod cancel_eligibility;
 pub(crate) mod dexie_index;
-mod expired_maker_lease;
-mod listing_expire;
+pub(crate) mod expired_maker;
 pub mod market_reconcile;
 mod orphan_presplit_cli;
 mod persist;
 mod reclaim_cli;
+pub(crate) mod reconcile_prep;
 mod reconcile_watched_offers;
 mod signal_apply;
 mod status_cli;
@@ -32,12 +32,11 @@ pub use cancel_eligibility::{
     collect_market_cancel_target_offer_ids, filter_cancel_target_offer_ids, row_cancel_eligible,
 };
 pub use dexie_index::build_dexie_size_by_offer_id;
-pub use expired_maker_lease::{
-    reclaim_expired_maker_if_unspent, ExpiredMakerLease, ReclaimMakerOutcome,
-};
-pub use listing_expire::{
-    finalize_maker_claim_synced, mark_listings_soft_expired, restore_maker_claim_synced,
-    restore_stale_maker_claims_synced, try_claim_expired_maker_synced,
+pub(crate) use expired_maker::plan_soft_expire_reclaims;
+pub use expired_maker::{
+    finalize_maker_claim_synced, mark_listings_soft_expired, reclaim_expired_maker_if_unspent,
+    restore_maker_claim_synced, restore_stale_maker_claims_synced, try_claim_expired_maker_synced,
+    ExpiredMakerLease, ReclaimMakerOutcome,
 };
 pub use market_reconcile::{
     run_reconcile_market_cycle, ReconcileMarketCycleMetrics, ReconcileMarketCycleResult,

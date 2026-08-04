@@ -1,4 +1,4 @@
-//! Pure soft-expire planning: group expired makers and choose reclaim vs leave-for-strategy.
+//! Pure surplus reclaim planning: group expired makers and choose reclaim vs leave-for-strategy.
 
 use std::collections::HashMap;
 

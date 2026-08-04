@@ -132,7 +132,7 @@ mod tests {
     use crate::offer::operator::signer_denomination::test_overrides::SignerDenominationTestOverrides;
 
     fn combine_first_plan(inputs: BootstrapCombineInputs) -> BootstrapPlan {
-        let selected_total = inputs.selected_total.get();
+        let selected_total = inputs.selected_total;
         BootstrapPlan {
             funding: BootstrapFundingSource::CombineFirst(inputs),
             output_amounts_base_units: vec![100],
@@ -146,10 +146,12 @@ mod tests {
     fn bootstrap_combine_vault_outputs_match_eco181_shape() {
         let inputs = BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: BaseUnits::new(105),
-            target_amount: BaseUnits::new(100),
+            selected_total: 105,
+            target_amount: 100,
             exact_match: false,
             cap_applied: true,
+            selected_count_before_cap: 2,
+            combine_input_cap: 5,
         };
         let outputs = bootstrap_combine_vault_outputs(&inputs, 1_000).expect("outputs");
         assert_eq!(outputs, vec![100_000]);
@@ -161,10 +163,12 @@ mod tests {
         overrides.enqueue_sample_vault_mixed_split_stub();
         let plan = combine_first_plan(BootstrapCombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: BaseUnits::new(105),
-            target_amount: BaseUnits::new(100),
+            selected_total: 105,
+            target_amount: 100,
             exact_match: false,
             cap_applied: true,
+            selected_count_before_cap: 2,
+            combine_input_cap: 5,
         });
         let build_ctx = sample_resolved_build_and_post_context();
         let result = submit_bootstrap_combine(

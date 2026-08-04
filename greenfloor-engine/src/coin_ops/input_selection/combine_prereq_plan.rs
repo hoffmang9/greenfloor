@@ -1,6 +1,6 @@
-use super::combine_selection::{select_combine_inputs_for_target, TargetAmountCoin};
 use super::types::SplitCombinePrereqPlan;
 use crate::coin_ops::selection::SpendableCoin;
+use crate::coin_ops::shape::{plan_combine_inputs_for_target, ShapeCoin};
 
 /// Build a daemon combine-first input set covering `target_amount_mojos`.
 ///
@@ -11,22 +11,9 @@ pub fn build_combine_prereq_plan(
     target_amount_mojos: i64,
     combine_input_cap: i64,
 ) -> Option<SplitCombinePrereqPlan> {
-    let coins: Vec<TargetAmountCoin> = candidate_spendable
+    let coins: Vec<ShapeCoin> = candidate_spendable
         .iter()
-        .map(|coin| TargetAmountCoin {
-            id: coin.id.clone(),
-            amount: coin.amount,
-        })
+        .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
         .collect();
-    select_combine_inputs_for_target(&coins, target_amount_mojos, combine_input_cap).map(
-        |selection| SplitCombinePrereqPlan {
-            input_coin_ids: selection.input_coin_ids,
-            target_amount_mojos: selection.target,
-            selected_total_mojos: selection.selected_total,
-            exact_match: selection.exact_match,
-            cap_applied: selection.cap_applied,
-            selected_count_before_cap: selection.selected_count_before_cap,
-            combine_input_cap: selection.combine_input_cap,
-        },
-    )
+    plan_combine_inputs_for_target(&coins, target_amount_mojos, combine_input_cap)
 }

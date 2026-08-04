@@ -7,6 +7,7 @@ accepted decision** when onboarding.
 
 | ADR                                                              | Topic                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [0021](decisions/0021-three-ownership-simplifications.md)        | **Ownership spines** — expired maker, reconcile prep, `coin_ops::shape` |
 | [0020](decisions/0020-soft-expiry-stable-makers.md)              | **Soft listing expiry** — stable makers, `ensure_size_n_offer`          |
 | [0018](decisions/0018-coinset-parse-decomposition.md)            | **Coinset submodule layout** — parse, pagination, rpc_result, json_util |
 | [0017](decisions/0017-offer-submodule-decompositions.md)         | **Offer submodule layout** — bootstrap planner/phase + presplit         |

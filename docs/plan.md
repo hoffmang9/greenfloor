@@ -30,9 +30,16 @@ adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
   FetchFromCoinset convenience (bootstrap, managed/manager coin-ops via
   `CoinOpExecContext::execute_mixed_split`). Dust uses `submit_*` with
   `CatSelection::Preselected`.
-- **Daemon market-cycle reconcile:** `offer::lifecycle::market_reconcile` (CLI offer-id
-  reconcile stays in `reconcile_watched_offers`). Daemon still owns market phase
-  orchestration; cycle requeue merge lives on `MarketCycleResultState`.
+- **Shared shape planning:** `coin_ops::shape` (deficit → combine-first / single-coin
+  funding → output amounts). Bootstrap planner and managed auto-split are thin wrappers;
+  `plan_coin_ops` remains the batch count/fee scheduler. See ADR 0021.
+- **Expired / surplus makers:** `offer::lifecycle::expired_maker` (soft-mark, CAS lease,
+  surplus reclaim plan). Daemon `soft_expire_phase` is a thin adapter; cancel stays
+  separate (ADR 0015).
+- **Daemon market-cycle reconcile:** `offer::lifecycle::market_reconcile` plus shared
+  prepare/heal/fetch in `offer::lifecycle::reconcile_prep`. CLI offer-id reconcile stays
+  in `reconcile_watched_offers` (shared fetch+apply; no heal/orphan prep). Daemon still
+  owns market phase orchestration; cycle requeue merge lives on `MarketCycleResultState`.
 - **Config policy for operators:** Rust (`config/program.rs`, `config/markets.rs`, `config/signer.rs`).
 - **Script-facing config reads:** `greenfloor-manager program-fields`, `markets-fields`,
   `cats-fields` (via `greenfloor-manager`); not direct YAML policy walks.

@@ -10,18 +10,11 @@ pub struct DaemonAutoSplitParams<'a> {
     pub allow_combine_prereq: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SplitCombinePrereqPlan {
-    pub input_coin_ids: Vec<String>,
-    /// Required combine output in on-chain mojos.
-    pub target_amount_mojos: i64,
-    /// Sum of selected input coin amounts in mojos.
-    pub selected_total_mojos: i64,
-    pub exact_match: bool,
-    pub cap_applied: bool,
-    pub selected_count_before_cap: usize,
-    pub combine_input_cap: i64,
-}
+/// Daemon combine-first input set covering a required amount (on-chain mojos).
+///
+/// Alias of the unified [`crate::coin_ops::shape::CombineInputs`] core type; `selected_total`
+/// and `target_amount` are on-chain mojos for this daemon path.
+pub type SplitCombinePrereqPlan = crate::coin_ops::shape::CombineInputs;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitCoinPlan {
