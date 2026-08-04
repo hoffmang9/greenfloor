@@ -34,7 +34,6 @@ mod program_runtime;
 mod reload;
 mod run_once;
 mod soft_expire_phase;
-mod soft_expire_plan;
 mod stale_sweep;
 mod strategy_phase;
 mod strategy_support;

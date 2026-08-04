@@ -3,7 +3,6 @@
 mod amounts;
 mod combine_plan;
 mod gate;
-mod ladder;
 mod phase;
 mod plan;
 mod planner;
@@ -16,9 +15,9 @@ mod test_fixtures;
 pub(crate) use amounts::bootstrap_combine_vault_outputs;
 pub use amounts::{
     base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
-    BaseUnits, BootstrapCombineInputs, Mojos,
+    BaseUnits, Mojos,
 };
-pub use combine_plan::{build_bootstrap_combine_plan, BootstrapCombineContext};
+pub use combine_plan::BootstrapCombineContext;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
 pub use gate::bootstrap_phase_snapshot_block_error;
 pub use phase::{
@@ -28,10 +27,7 @@ pub(crate) use phase::{
     bootstrap_wait_event_metadata, resolve_bootstrap_wait_poll, BootstrapWaitContext,
     BootstrapWaitPoll, BootstrapWaitResolution, BootstrapWaitStepKind,
 };
-pub use plan::{
-    BootstrapCoin, BootstrapFundingSource, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
-};
+pub use plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
 pub use planner::plan_bootstrap_mixed_outputs;
 pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
 

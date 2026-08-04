@@ -181,7 +181,7 @@ fn combine_prereq_plan_exact_match_when_cap_covers_all_inputs() {
     assert_eq!(plan.input_coin_ids.len(), 2);
     assert!(!plan.cap_applied);
     assert!(plan.exact_match);
-    assert_eq!(plan.target_amount_mojos, 10_000);
+    assert_eq!(plan.target_amount, 10_000);
 }
 
 #[test]

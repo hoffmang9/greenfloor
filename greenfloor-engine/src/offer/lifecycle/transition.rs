@@ -12,7 +12,7 @@ use crate::cycle::reconcile::CancelSubmittedContext;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    unsupported_venue_offer_transition, CycleOfferTransition,
+    CycleOfferTransition,
 };
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::{dexie_offer_status, extract_coinset_tx_ids_from_offer_payload};
@@ -21,6 +21,7 @@ use crate::storage::SqliteStore;
 use super::cancel_context::{
     cancel_submitted_context_for_offer, chain_confirmed_tx_ids_for_transition,
 };
+use super::reconcile_prep::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
 use crate::cycle::reconcile::CoinsetTxSignals;
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
@@ -163,59 +164,26 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     current_state: &str,
     env: WatchedOfferTransitionEnv<'_>,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    match dexie.get_offer(offer_id).await {
-        Ok(response) => {
-            let payload = response.body();
-            if let Some(error_text) = missing_offer_error_from_payload(payload) {
-                let transition = missing_watched_offer_transition(current_state)?;
-                return Ok((transition, None, Some(error_text)));
-            }
-            let offer_body = payload.get("offer").unwrap_or(payload);
+    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::LifecycleLoose).await {
+        DexieOfferFetch::Found(offer_body) => {
             let (transition, status) =
-                transition_from_offer_body(store, offer_id, current_state, offer_body, env)?;
+                transition_from_offer_body(store, offer_id, current_state, &offer_body, env)?;
             Ok((transition, status, None))
         }
-        Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
+        DexieOfferFetch::Missing(error_text) => {
             let transition = missing_watched_offer_transition(current_state)?;
-            Ok((transition, None, Some(err.to_string())))
+            Ok((transition, None, Some(error_text)))
         }
-        Err(err) => {
+        DexieOfferFetch::Mismatch => {
+            unreachable!("DexieFetchMode::LifecycleLoose never produces Mismatch")
+        }
+        DexieOfferFetch::LookupError(err) => {
             let transition =
                 unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))
                     .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
             Ok((transition, None, None))
         }
     }
-}
-
-/// Resolve watched offer transition for venue.
-///
-/// HTTP reconcile is Dexie-only. Coinset/splash lifecycle is driven by Coinset WS +
-/// local watches — callers must filter those rows out before invoking this.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_watched_offer_transition_for_venue(
-    store: &SqliteStore,
-    dexie: Option<&DexieClient>,
-    target_venue: crate::config::Venue,
-    offer_id: &str,
-    current_state: &str,
-    env: WatchedOfferTransitionEnv<'_>,
-) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    if !target_venue.is_dexie() {
-        let transition = unsupported_venue_offer_transition(current_state, target_venue.as_str())
-            .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-        return Ok((transition, None, None));
-    }
-    let Some(dexie) = dexie else {
-        return Err(crate::error::SignerError::Other(
-            "dexie client required for dexie venue reconcile".to_string(),
-        ));
-    };
-    resolve_watched_offer_transition_from_dexie_fetch(store, dexie, offer_id, current_state, env)
-        .await
 }
 
 #[cfg(test)]
@@ -253,24 +221,5 @@ mod tests {
         );
         assert!(status.is_none());
         assert!(error.is_some());
-    }
-
-    #[tokio::test]
-    async fn non_dexie_venue_is_unsupported_for_http_reconcile() {
-        let dir = tempdir().expect("tempdir");
-        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
-        let (transition, status, error) = resolve_watched_offer_transition_for_venue(
-            &store,
-            None,
-            crate::config::Venue::Coinset,
-            &"ab".repeat(32),
-            "open",
-            WatchedOfferTransitionEnv::at_now(None),
-        )
-        .await
-        .expect("transition");
-        assert_eq!(transition.new_state.as_str(), "reconcile_unsupported_venue");
-        assert!(status.is_none());
-        assert!(error.is_none());
     }
 }

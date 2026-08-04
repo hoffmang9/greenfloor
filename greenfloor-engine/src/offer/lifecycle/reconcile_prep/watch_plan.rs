@@ -6,7 +6,6 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use tracing::Level;
 
 use crate::adapters::DexieClient;
 use crate::coinset::extract_maker_watch_keys_from_offer_text;
@@ -14,13 +13,11 @@ use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
 use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOfferPayload};
-use crate::operator_log::{LogContext, DEXIE_WATCHLIST_AUGMENT_ERROR};
+use crate::storage::OfferStateListRow;
 use crate::storage::SqliteStore;
 
-use crate::storage::OfferStateListRow;
-
-use super::super::dexie_index::{index_list_offers_by_local_ids, offer_matches_local_id};
-use super::transition::ReconcileMarketCycleMetrics;
+use super::super::dexie_index::index_list_offers_by_local_ids;
+use super::dexie_fetch::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
 
 /// Dexie HTTP roles after local metadata heal (pure classify result).
 #[derive(Debug, Clone, Default)]
@@ -189,36 +186,17 @@ fn maker_p2s_present(raw: &Value) -> bool {
     !maker_watch_keys_from_dexie_payload(raw).1.is_empty()
 }
 
-async fn fetch_dexie_offer_body(
+async fn fetch_dexie_offer_body_for_heal(
     dexie: &DexieClient,
-    store: &SqliteStore,
     market_id: &str,
     offer_id: &str,
-    metrics: &mut ReconcileMarketCycleMetrics,
+    on_lookup_error: &mut dyn FnMut(&str, &str, &str) -> SignerResult<()>,
 ) -> SignerResult<Option<Value>> {
-    match dexie.get_offer(offer_id).await {
-        Ok(response) => {
-            if let Some(single) = response.body().get("offer") {
-                if offer_matches_local_id(single, offer_id) {
-                    return Ok(Some(single.clone()));
-                }
-            }
-            Ok(None)
-        }
-        Err(err) => {
-            metrics.cycle_errors += 1;
-            LogContext::MARKET_CYCLE.dual_audit(
-                store,
-                Level::WARN,
-                "dexie watch heal fetch failed",
-                DEXIE_WATCHLIST_AUGMENT_ERROR,
-                &serde_json::json!({
-                    "market_id": market_id,
-                    "offer_id": offer_id,
-                    "error": err.to_string(),
-                }),
-                Some(market_id),
-            )?;
+    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::HealStrict).await {
+        DexieOfferFetch::Found(body) => Ok(Some(body)),
+        DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch => Ok(None),
+        DexieOfferFetch::LookupError(err) => {
+            on_lookup_error(market_id, offer_id, &err)?;
             Ok(None)
         }
     }
@@ -238,7 +216,7 @@ pub async fn fetch_and_ensure_watches(
     market_id: &str,
     heal_only: &HashSet<String>,
     list_offers: &[Value],
-    metrics: &mut ReconcileMarketCycleMetrics,
+    on_lookup_error: &mut dyn FnMut(&str, &str, &str) -> SignerResult<()>,
 ) -> SignerResult<()> {
     if heal_only.is_empty() {
         return Ok(());
@@ -251,7 +229,9 @@ pub async fn fetch_and_ensure_watches(
         let list_raw = by_local_id.get(offer_id).cloned();
         let needs_offer_file = list_raw.as_ref().is_none_or(|raw| !maker_p2s_present(raw));
         let raw = if needs_offer_file {
-            match fetch_dexie_offer_body(dexie, store, market_id, offer_id, metrics).await? {
+            match fetch_dexie_offer_body_for_heal(dexie, market_id, offer_id, on_lookup_error)
+                .await?
+            {
                 Some(single) => Some(single),
                 None => list_raw,
             }

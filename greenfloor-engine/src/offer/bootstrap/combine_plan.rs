@@ -1,12 +1,13 @@
-//! Bootstrap combine-first input selection (base units only).
+//! Bootstrap combine-first input selection (base units only) — thin wrapper over
+//! `coin_ops::shape::plan_ladder_preserving_combine`.
+//!
+//! [`build_bootstrap_combine_plan`] is test-only: `plan_bootstrap_mixed_outputs` (via
+//! `coin_ops::shape::plan_shape_from_deficits`) is the sole production door for bootstrap
+//! combine-first funding. This module's regression tests exercise the shared
+//! `plan_ladder_preserving_combine` core directly at the bootstrap unit boundary.
 
-use std::collections::HashSet;
-
-use super::amounts::{bootstrap_overshoot_change_mojos, BaseUnits, BootstrapCombineInputs};
-use super::ladder::ladder_shape_context_for_bootstrap;
-use super::plan::{spendable_bootstrap_coins, BootstrapCoin, PlannerLadderRow};
-use crate::coin_ops::cat_overshoot_change_would_be_dust;
-use crate::coin_ops::{select_combine_inputs_for_target_in, TargetAmountCoin};
+#[cfg(test)]
+use super::plan::{BootstrapCoin, PlannerLadderRow};
 
 /// Asset context for bootstrap combine dust validation at plan time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,130 +31,32 @@ impl BootstrapCombineContext {
     }
 }
 
-fn partition_ladder_coins(
+#[cfg(test)]
+fn build_bootstrap_combine_plan(
     coins: &[BootstrapCoin],
     ladder_entries: &[PlannerLadderRow],
-) -> (Vec<BootstrapCoin>, Vec<BootstrapCoin>) {
-    let mut protected_remaining =
-        ladder_shape_context_for_bootstrap(ladder_entries, &[]).protected_slots;
-    let mut sorted = coins.to_vec();
-    sorted.sort_by(|left, right| left.id.cmp(&right.id));
-
-    let mut eligible = Vec::new();
-    let mut excluded = Vec::new();
-    for coin in sorted {
-        let amount = coin.amount.get();
-        if let Some(remaining) = protected_remaining.get_mut(&amount) {
-            if *remaining > 0 {
-                *remaining -= 1;
-                excluded.push(coin);
-                continue;
-            }
-        }
-        eligible.push(coin);
-    }
-    excluded.sort_by(|left, right| {
-        left.amount
-            .get()
-            .cmp(&right.amount.get())
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    (eligible, excluded)
-}
-
-fn selection_candidates(coins: &[BootstrapCoin]) -> Vec<TargetAmountCoin> {
-    spendable_bootstrap_coins(coins)
-        .into_iter()
-        .map(|coin| TargetAmountCoin {
-            id: coin.id,
-            amount: coin.amount.get(),
-        })
-        .collect()
-}
-
-fn build_bootstrap_combine_plan_in(
-    coins: &[BootstrapCoin],
-    target_amount_base_units: BaseUnits,
+    target_amount_base_units: super::amounts::BaseUnits,
     combine_input_cap: i64,
     combine_context: &BootstrapCombineContext,
-    allowed_coin_ids: Option<&HashSet<String>>,
-) -> Option<BootstrapCombineInputs> {
-    let candidates = selection_candidates(coins);
-    let selection = select_combine_inputs_for_target_in(
-        &candidates,
+) -> Option<crate::coin_ops::shape::CombineInputs> {
+    use super::planner::{to_shape_coins, to_shape_rows};
+    use crate::coin_ops::shape::{plan_ladder_preserving_combine, protected_slots_for_rows};
+
+    let protected_slots = protected_slots_for_rows(&to_shape_rows(ladder_entries));
+    plan_ladder_preserving_combine(
+        &to_shape_coins(coins),
+        &protected_slots,
         target_amount_base_units.get(),
         combine_input_cap,
-        allowed_coin_ids,
-    )?;
-    let selected_total = BaseUnits::new(selection.selected_total);
-    let target_amount = BaseUnits::new(selection.target);
-    let change_mojos = bootstrap_overshoot_change_mojos(
-        selected_total,
-        target_amount,
         combine_context.mojo_multiplier,
-    );
-    if cat_overshoot_change_would_be_dust(change_mojos, &combine_context.canonical_asset_id) {
-        return None;
-    }
-    Some(BootstrapCombineInputs {
-        input_coin_ids: selection.input_coin_ids,
-        selected_total,
-        target_amount,
-        exact_match: selection.exact_match,
-        cap_applied: selection.cap_applied,
-    })
-}
-
-/// Build combine-first inputs for bootstrap shaping (`BootstrapCoin` amounts are base units).
-///
-/// When `ladder_entries` is non-empty, eligible inputs exclude coins reserved for exact ladder
-/// sizes until a preserving selection is impossible.
-#[must_use]
-pub fn build_bootstrap_combine_plan(
-    coins: &[BootstrapCoin],
-    ladder_entries: &[PlannerLadderRow],
-    target_amount_base_units: BaseUnits,
-    combine_input_cap: i64,
-    combine_context: &BootstrapCombineContext,
-) -> Option<BootstrapCombineInputs> {
-    let (eligible, excluded) = partition_ladder_coins(coins, ladder_entries);
-    let mut allowed_ids: HashSet<String> = eligible.iter().map(|coin| coin.id.clone()).collect();
-
-    if let Some(plan) = build_bootstrap_combine_plan_in(
-        coins,
-        target_amount_base_units,
-        combine_input_cap,
-        combine_context,
-        Some(&allowed_ids),
-    ) {
-        return Some(plan);
-    }
-
-    for coin in excluded {
-        allowed_ids.insert(coin.id.clone());
-        if let Some(plan) = build_bootstrap_combine_plan_in(
-            coins,
-            target_amount_base_units,
-            combine_input_cap,
-            combine_context,
-            Some(&allowed_ids),
-        ) {
-            return Some(plan);
-        }
-    }
-
-    build_bootstrap_combine_plan_in(
-        coins,
-        target_amount_base_units,
-        combine_input_cap,
-        combine_context,
-        None,
+        &combine_context.canonical_asset_id,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offer::bootstrap::amounts::BaseUnits;
     use crate::test_support::eco181_bootstrap_inventory::{
         eco181_bootstrap_coins, eco181_bootstrap_ladder,
     };
@@ -183,9 +86,9 @@ mod tests {
         .expect("fragmented inventory should combine within cap=5");
         assert!(inputs.cap_applied);
         assert_eq!(inputs.input_coin_ids.len(), 4);
-        assert_eq!(inputs.selected_total, BaseUnits::new(105));
+        assert_eq!(inputs.selected_total, 105);
         assert!(!inputs.exact_match);
-        assert_eq!(inputs.target_amount, BaseUnits::new(100));
+        assert_eq!(inputs.target_amount, 100);
     }
 
     #[test]
@@ -195,31 +98,6 @@ mod tests {
         assert!(
             build_bootstrap_combine_plan(&spendable, &[], BaseUnits::new(100), 10, &ctx).is_none()
         );
-    }
-
-    #[test]
-    fn partition_protects_ladder_exact_inventory() {
-        let ladder = eco181_bootstrap_ladder();
-        let spendable = vec![
-            coin("one_0", 1),
-            coin("one_1", 1),
-            coin("one_2", 1),
-            coin("one_3", 1),
-            coin("one_4", 1),
-            coin("one_5", 1),
-            coin("ten_0", 10),
-            coin("ten_1", 10),
-            coin("ten_2", 10),
-            coin("five", 5),
-            coin("eighty", 80),
-        ];
-        let (eligible, excluded) = partition_ladder_coins(&spendable, &ladder);
-        let eligible_amounts: Vec<i64> = eligible.iter().map(|coin| coin.amount.get()).collect();
-        assert!(!eligible_amounts.contains(&10));
-        assert!(!eligible_amounts.contains(&1));
-        assert!(eligible_amounts.contains(&80));
-        assert!(eligible_amounts.contains(&5));
-        assert_eq!(excluded.len(), 9);
     }
 
     #[test]
@@ -240,6 +118,6 @@ mod tests {
                 .count()
                 <= 1
         );
-        assert_eq!(inputs.target_amount, BaseUnits::new(100));
+        assert_eq!(inputs.target_amount, 100);
     }
 }

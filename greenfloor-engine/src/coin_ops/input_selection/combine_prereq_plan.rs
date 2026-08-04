@@ -1,32 +1,21 @@
-use super::combine_selection::{select_combine_inputs_for_target, TargetAmountCoin};
-use super::types::SplitCombinePrereqPlan;
-use crate::coin_ops::selection::SpendableCoin;
+//! Test-only daemon combine-first coverage of [`crate::coin_ops::shape::plan_combine_inputs_for_target`].
+//!
+//! Production daemon combine-first funding goes through
+//! `resolve_shape_funding`/`ShapeFundingPolicy::DaemonUnprotected` (see
+//! `super::auto_split`); this thin wrapper exists only so unit tests can exercise the
+//! shared flat-combine core directly with mojo-denominated [`SpendableCoin`] inputs.
 
-/// Build a daemon combine-first input set covering `target_amount_mojos`.
-///
-/// All amounts are on-chain **mojos** (wallet coin-op paths).
-#[must_use]
-pub fn build_combine_prereq_plan(
+use crate::coin_ops::selection::SpendableCoin;
+use crate::coin_ops::shape::{plan_combine_inputs_for_target, CombineInputs, ShapeCoin};
+
+pub(super) fn build_combine_prereq_plan(
     candidate_spendable: &[SpendableCoin],
     target_amount_mojos: i64,
     combine_input_cap: i64,
-) -> Option<SplitCombinePrereqPlan> {
-    let coins: Vec<TargetAmountCoin> = candidate_spendable
+) -> Option<CombineInputs> {
+    let coins: Vec<ShapeCoin> = candidate_spendable
         .iter()
-        .map(|coin| TargetAmountCoin {
-            id: coin.id.clone(),
-            amount: coin.amount,
-        })
+        .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
         .collect();
-    select_combine_inputs_for_target(&coins, target_amount_mojos, combine_input_cap).map(
-        |selection| SplitCombinePrereqPlan {
-            input_coin_ids: selection.input_coin_ids,
-            target_amount_mojos: selection.target,
-            selected_total_mojos: selection.selected_total,
-            exact_match: selection.exact_match,
-            cap_applied: selection.cap_applied,
-            selected_count_before_cap: selection.selected_count_before_cap,
-            combine_input_cap: selection.combine_input_cap,
-        },
-    )
+    plan_combine_inputs_for_target(&coins, target_amount_mojos, combine_input_cap)
 }

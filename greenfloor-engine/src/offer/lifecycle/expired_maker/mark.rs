@@ -5,6 +5,25 @@ use tracing::info;
 use crate::error::SignerResult;
 use crate::storage::{CycleWriteStore, SqliteStore};
 
+/// Run a maker-claim CAS transition unless `dry_run` (dry runs report success without
+/// touching the store). Shared by [`try_claim_expired_maker_synced`],
+/// [`restore_maker_claim_synced`], [`renew_maker_claim_synced`], and
+/// [`finalize_maker_claim_synced`], which differ only in which [`SqliteStore`] CAS method
+/// they call.
+fn maker_claim_cas(
+    write_store: &CycleWriteStore,
+    market_id: &str,
+    offer_id: &str,
+    claim_token: &str,
+    dry_run: bool,
+    op: fn(&SqliteStore, &str, &str, &str) -> SignerResult<bool>,
+) -> SignerResult<bool> {
+    if dry_run {
+        return Ok(true);
+    }
+    write_store.sync(|store| op(store, offer_id, market_id, claim_token))
+}
+
 /// Mark durable (presplit) listings past soft `listing_expires_at` as expired (Dexie status 6).
 ///
 /// CAS per row: only transitions when still in `open` / `refresh_due` / `mempool_observed`,
@@ -48,17 +67,21 @@ pub fn mark_listings_soft_expired(
 /// # Errors
 ///
 /// Returns an error when the store update fails.
-pub fn try_claim_expired_maker_synced(
+pub(crate) fn try_claim_expired_maker_synced(
     write_store: &CycleWriteStore,
     market_id: &str,
     offer_id: &str,
     claim_token: &str,
     dry_run: bool,
 ) -> SignerResult<bool> {
-    if dry_run {
-        return Ok(true);
-    }
-    write_store.sync(|store| store.try_claim_expired_maker(offer_id, market_id, claim_token))
+    maker_claim_cas(
+        write_store,
+        market_id,
+        offer_id,
+        claim_token,
+        dry_run,
+        SqliteStore::try_claim_expired_maker,
+    )
 }
 
 /// Undo [`try_claim_expired_maker_synced`] when I/O left the maker coin reusable.
@@ -68,17 +91,21 @@ pub fn try_claim_expired_maker_synced(
 /// # Errors
 ///
 /// Returns an error when the store update fails.
-pub fn restore_maker_claim_synced(
+pub(crate) fn restore_maker_claim_synced(
     write_store: &CycleWriteStore,
     market_id: &str,
     offer_id: &str,
     claim_token: &str,
     dry_run: bool,
 ) -> SignerResult<bool> {
-    if dry_run {
-        return Ok(true);
-    }
-    write_store.sync(|store| store.restore_maker_claim(offer_id, market_id, claim_token))
+    maker_claim_cas(
+        write_store,
+        market_id,
+        offer_id,
+        claim_token,
+        dry_run,
+        SqliteStore::restore_maker_claim,
+    )
 }
 
 /// Extend an in-flight claim lease (`updated_at`) while PreferExisting/reclaim I/O runs.
@@ -88,17 +115,21 @@ pub fn restore_maker_claim_synced(
 /// # Errors
 ///
 /// Returns an error when the store update fails.
-pub fn renew_maker_claim_synced(
+pub(crate) fn renew_maker_claim_synced(
     write_store: &CycleWriteStore,
     market_id: &str,
     offer_id: &str,
     claim_token: &str,
     dry_run: bool,
 ) -> SignerResult<bool> {
-    if dry_run {
-        return Ok(true);
-    }
-    write_store.sync(|store| store.renew_maker_claim(offer_id, market_id, claim_token))
+    maker_claim_cas(
+        write_store,
+        market_id,
+        offer_id,
+        claim_token,
+        dry_run,
+        SqliteStore::renew_maker_claim,
+    )
 }
 
 /// Commit a successful claim (`maker_claimed` → `cancelled`).
@@ -108,17 +139,21 @@ pub fn renew_maker_claim_synced(
 /// # Errors
 ///
 /// Returns an error when the store update fails.
-pub fn finalize_maker_claim_synced(
+pub(crate) fn finalize_maker_claim_synced(
     write_store: &CycleWriteStore,
     market_id: &str,
     offer_id: &str,
     claim_token: &str,
     dry_run: bool,
 ) -> SignerResult<bool> {
-    if dry_run {
-        return Ok(true);
-    }
-    write_store.sync(|store| store.finalize_maker_claim(offer_id, market_id, claim_token))
+    maker_claim_cas(
+        write_store,
+        market_id,
+        offer_id,
+        claim_token,
+        dry_run,
+        SqliteStore::finalize_maker_claim,
+    )
 }
 
 /// Restore stale `maker_claimed` rows left by crashed workers.

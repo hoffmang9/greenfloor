@@ -2,8 +2,8 @@
 
 mod auto_split;
 mod combine_inputs;
+#[cfg(test)]
 mod combine_prereq_plan;
-mod combine_selection;
 mod types;
 
 #[cfg(test)]
@@ -14,9 +14,9 @@ pub use auto_split::{
     plan_daemon_low_watermark_split,
 };
 pub use combine_inputs::{plan_exact_amount_combine_inputs, plan_largest_combine_inputs};
-pub use combine_prereq_plan::build_combine_prereq_plan;
-pub(crate) use combine_selection::{select_combine_inputs_for_target_in, TargetAmountCoin};
+#[cfg(test)]
+use combine_prereq_plan::build_combine_prereq_plan;
 pub use types::{
-    CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan,
-    SplitCombinePrereqPlan, SplitSkipReason, SubCatChangeSkipData,
+    CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan, SplitSkipReason,
+    SubCatChangeSkipData,
 };

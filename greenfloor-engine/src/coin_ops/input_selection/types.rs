@@ -1,4 +1,5 @@
 use crate::coin_ops::selection::SpendableCoin;
+use crate::coin_ops::shape::CombineInputs;
 
 /// Inputs for daemon automatic split-source selection.
 #[derive(Debug, Clone, Copy)]
@@ -8,19 +9,6 @@ pub struct DaemonAutoSplitParams<'a> {
     pub canonical_asset_id: &'a str,
     pub combine_input_cap: i64,
     pub allow_combine_prereq: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SplitCombinePrereqPlan {
-    pub input_coin_ids: Vec<String>,
-    /// Required combine output in on-chain mojos.
-    pub target_amount_mojos: i64,
-    /// Sum of selected input coin amounts in mojos.
-    pub selected_total_mojos: i64,
-    pub exact_match: bool,
-    pub cap_applied: bool,
-    pub selected_count_before_cap: usize,
-    pub combine_input_cap: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +53,6 @@ pub enum CliSplitSelection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SplitAutoSelectPlan {
     Coin(SplitCoinPlan),
-    CombinePrereq(SplitCombinePrereqPlan),
+    CombinePrereq(CombineInputs),
     Skip(SplitSkipReason),
 }

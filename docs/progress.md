@@ -16,6 +16,15 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-03 — Three ownership spines (ADR 0021)
+
+1. **Expired maker** — Soft-mark, CAS lease, and surplus reclaim plan live in
+   `offer::lifecycle::expired_maker`; daemon soft-expire phase is a thin adapter.
+2. **Reconcile prep** — Prepare/heal/Dexie fetch helpers in
+   `offer::lifecycle::reconcile_prep`; CLI keeps per-id reconcile without heal/orphan.
+3. **Shape planning** — `coin_ops::shape` unifies bootstrap + managed combine/funding
+   planning; `plan_coin_ops` and dust batching stay path-specific.
+
 ### 2026-08-03 — Python CI isolated to ubuntu-latest
 
 Script adapter tests and Python tooling stay on the ubuntu lint job only; arm/mac

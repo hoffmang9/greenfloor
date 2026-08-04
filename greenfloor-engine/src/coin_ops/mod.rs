@@ -13,6 +13,7 @@ mod plan;
 mod policy;
 mod scalars;
 mod selection;
+pub mod shape;
 mod shape_defer;
 pub mod shape_protection;
 mod wallet_coin;
@@ -31,12 +32,11 @@ pub use gate::{
     CoinCombineGateResult, CoinSplitGateResult,
 };
 pub use input_selection::{
-    build_combine_prereq_plan, plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
+    plan_cli_auto_split_selection, plan_daemon_auto_split_selection,
     plan_daemon_low_watermark_split, plan_exact_amount_combine_inputs, plan_largest_combine_inputs,
-    CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan,
-    SplitCombinePrereqPlan, SplitSkipReason, SubCatChangeSkipData,
+    CliSplitSelection, DaemonAutoSplitParams, SplitAutoSelectPlan, SplitCoinPlan, SplitSkipReason,
+    SubCatChangeSkipData,
 };
-pub(crate) use input_selection::{select_combine_inputs_for_target_in, TargetAmountCoin};
 pub use inventory::compute_bucket_counts_from_coins;
 pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,

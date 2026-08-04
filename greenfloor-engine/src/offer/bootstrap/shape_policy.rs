@@ -4,8 +4,9 @@
 //! (the largest configured rung — see [`crate::coin_ops::shape_protection`]). Sub-primary buffer
 //! deficits are daemon coin-op scope; see [`crate::coin_ops::defer_low_watermark_split_to_post_bootstrap`].
 
-use super::ladder::ladder_shape_context_for_bootstrap;
 use super::plan::{bootstrap_coin_amounts, BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
+use super::planner::to_shape_rows;
+use crate::coin_ops::shape::shape_context_for_rows;
 use crate::coin_ops::shape_protection::primary_row_satisfied;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +45,7 @@ pub(crate) fn sub_primary_shape_deferred_to_coin_ops(
             ) && plan
                 .deficits
                 .iter()
-                .all(|deficit| deficit.size_base_units < primary_size)
+                .all(|deficit| deficit.size < primary_size)
         }
         _ => false,
     }
@@ -56,8 +57,8 @@ fn bootstrap_shape_deferred_to_coin_ops(
     spendable_coins: &[BootstrapCoin],
     scope: BootstrapDeferScope,
 ) -> bool {
-    let shape_ctx = ladder_shape_context_for_bootstrap(
-        ladder_entries,
+    let shape_ctx = shape_context_for_rows(
+        &to_shape_rows(ladder_entries),
         &bootstrap_coin_amounts(spendable_coins),
     );
     match scope {
@@ -132,23 +133,26 @@ mod tests {
         bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
         sub_primary_shape_deferred_to_coin_ops,
     };
+    use crate::coin_ops::shape::{CombineInputs, ShapeFunding};
     use crate::offer::bootstrap::test_fixtures::{
         bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
     };
     use crate::offer::bootstrap::{
-        bootstrap_replan_after_combine, BaseUnits, BootstrapCombineInputs, BootstrapFundingSource,
-        BootstrapPlan, BootstrapPlanOutcome, BootstrapReplanAfterCombine,
+        bootstrap_replan_after_combine, BootstrapPlan, BootstrapPlanOutcome,
+        BootstrapReplanAfterCombine,
     };
 
     #[test]
     fn sub_primary_deferred_rejects_combine_first_for_second_primary_row() {
         let replanned = BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
+            funding: ShapeFunding::CombineFirst(CombineInputs {
                 input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-                selected_total: BaseUnits::new(105),
-                target_amount: BaseUnits::new(100),
+                selected_total: 105,
+                target_amount: 100,
                 exact_match: false,
                 cap_applied: true,
+                selected_count_before_cap: 2,
+                combine_input_cap: 5,
             }),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

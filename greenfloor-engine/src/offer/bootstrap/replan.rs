@@ -42,13 +42,12 @@ pub(crate) fn bootstrap_replan_after_combine(
 #[cfg(test)]
 mod tests {
     use super::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
+    use crate::coin_ops::shape::CombineInputs;
+    use crate::coin_ops::shape::ShapeFunding;
     use crate::offer::bootstrap::test_fixtures::{
         bootstrap_coin as coin, ladder_deficit, ladder_row as row, plan_bootstrap,
     };
-    use crate::offer::bootstrap::{
-        BaseUnits, BootstrapCombineInputs, BootstrapFundingSource, BootstrapPlan,
-        BootstrapPlanOutcome,
-    };
+    use crate::offer::bootstrap::{BootstrapPlan, BootstrapPlanOutcome};
 
     #[test]
     fn replan_continues_split_for_non_ladder_combine_product() {
@@ -85,12 +84,14 @@ mod tests {
         let ladder = vec![row(100, 2, 0)];
         let spendable = vec![coin("first", 100)];
         let replanned = BootstrapPlanOutcome::NeedsShape(BootstrapPlan {
-            funding: BootstrapFundingSource::CombineFirst(BootstrapCombineInputs {
+            funding: ShapeFunding::CombineFirst(CombineInputs {
                 input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-                selected_total: BaseUnits::new(105),
-                target_amount: BaseUnits::new(100),
+                selected_total: 105,
+                target_amount: 100,
                 exact_match: false,
                 cap_applied: true,
+                selected_count_before_cap: 2,
+                combine_input_cap: 5,
             }),
             output_amounts_base_units: vec![100],
             total_output_amount: 100,

@@ -1,10 +1,11 @@
 use super::plan_bootstrap_mixed_outputs;
+use crate::coin_ops::shape::ShapeFunding;
 use crate::offer::bootstrap::test_fixtures::{
     bootstrap_coin as coin, bootstrap_test_context, expect_needs_shape,
     expect_needs_shape_with_cap, ladder_deficit, ladder_row as row, plan_bootstrap,
     plan_bootstrap_with_cap, DEFAULT_BOOTSTRAP_COMBINE_CAP,
 };
-use crate::offer::bootstrap::{BaseUnits, BootstrapFundingSource, BootstrapPlanOutcome};
+use crate::offer::bootstrap::BootstrapPlanOutcome;
 
 #[test]
 fn builds_deficit_outputs() {
@@ -15,10 +16,7 @@ fn builds_deficit_outputs() {
         coin("coin-hundred", 100),
     ];
     let plan = expect_needs_shape(&ladder, &spendable);
-    assert!(matches!(
-        plan.funding,
-        BootstrapFundingSource::SingleCoin { .. }
-    ));
+    assert!(matches!(plan.funding, ShapeFunding::SingleCoin { .. }));
     assert_eq!(plan.source_coin_id(), Some("coin-big"));
     let mut outputs = plan.output_amounts_base_units;
     outputs.sort_unstable();
@@ -201,9 +199,9 @@ fn plans_combine_first_for_fragmented_inventory_with_cap_five() {
     assert!(plan.requires_combine_first());
     assert_eq!(plan.total_output_amount, 100);
     let combine = plan.combine_inputs().expect("combine inputs");
-    assert_eq!(combine.target_amount, BaseUnits::new(100));
-    assert!(combine.selected_total.get() >= 100);
-    assert_eq!(plan.change_amount, combine.selected_total.get() - 100);
+    assert_eq!(combine.target_amount, 100);
+    assert!(combine.selected_total >= 100);
+    assert_eq!(plan.change_amount, combine.selected_total - 100);
     let inputs = combine.input_coin_ids.as_slice();
     assert!(inputs.len() >= 2);
     assert!(inputs.len() <= 5);
@@ -238,15 +236,44 @@ fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
                 "must not split the satisfied 100 BU row for smaller deficits: {remaining:?}"
             );
             assert!(
-                !split
-                    .deficits
-                    .iter()
-                    .any(|deficit| deficit.size_base_units == 100),
+                !split.deficits.iter().any(|deficit| deficit.size == 100),
                 "100 BU row must stay satisfied after combine: {remaining:?}"
             );
         }
         other => panic!("unexpected post-combine outcome: {other:?}"),
     }
+}
+
+/// Regression for the `AmountUnit::BaseUnits` dust-multiplier bug: bootstrap combine-first
+/// overshoot change is in ladder **base units**, so the CAT dust check must scale by the
+/// asset's `mojo_multiplier` before comparing to `coin_op_min_amount_mojos` (mojos). The old
+/// `AmountUnit::BaseUnits` variant hard-coded that scale factor to `1`, so a 5 BU overshoot
+/// (= `5_000` mojos for a `mojo_multiplier = 1_000` CAT, well above the `1_000` mojo dust floor)
+/// was checked as `5 mojos` — under the floor — and incorrectly rejected as dust.
+#[test]
+fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_cat() {
+    let cat_asset_id = "0000000000000000000000000000000000000000000000000000000000000001";
+    let ladder = vec![row(100, 1, 0)];
+    let spendable: Vec<_> =
+        crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins()
+            .into_iter()
+            .map(|coin_row| coin(&coin_row.id, coin_row.amount))
+            .collect();
+    let combine_context =
+        crate::offer::bootstrap::BootstrapCombineContext::new(1_000, cat_asset_id);
+    let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &combine_context);
+
+    let plan = match outcome {
+        BootstrapPlanOutcome::NeedsShape(plan) => plan,
+        other => panic!(
+            "expected NeedsShape/CombineFirst funding for a non-dust CAT overshoot, got {other:?}"
+        ),
+    };
+    assert!(plan.requires_combine_first());
+    let combine = plan.combine_inputs().expect("combine inputs");
+    assert_eq!(combine.target_amount, 100);
+    // 5 BU overshoot (105 selected - 100 target) = 5_000 mojos at multiplier 1_000, not dust.
+    assert_eq!(combine.selected_total - combine.target_amount, 5);
 }
 
 // Keep a direct import so plan_bootstrap_mixed_outputs stays covered when fixtures delegate.

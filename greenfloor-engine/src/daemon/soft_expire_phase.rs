@@ -13,11 +13,10 @@ use tracing::{info, warn};
 use crate::config::market_uses_soft_listing_expiry;
 use crate::config::MarketConfig;
 use crate::daemon::market_context::MarketCycleContext;
-use crate::daemon::soft_expire_plan::plan_soft_expire_reclaims;
 use crate::daemon::strategy_support::active_capacity_counts_for_market;
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
-    mark_listings_soft_expired, reclaim_expired_maker_if_unspent,
+    mark_listings_soft_expired, plan_soft_expire_reclaims, reclaim_expired_maker_if_unspent,
     restore_stale_maker_claims_synced, ReclaimMakerOutcome,
 };
 use crate::offer::request::effective_offer_side;

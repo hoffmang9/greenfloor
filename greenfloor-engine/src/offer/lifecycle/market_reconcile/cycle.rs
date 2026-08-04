@@ -13,10 +13,10 @@ use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
 use super::super::dexie_index::{build_dexie_size_by_offer_id, dexie_status_index};
+use super::super::reconcile_prep::{fetch_and_ensure_watches, prepare_market_reconcile_local};
 use super::super::{apply_cancel_submitted_rows, ReconcilePersistOptions};
-use super::augment::augment_dexie_offers_for_watchlist;
+use super::augment::{augment_dexie_offers_for_watchlist, dexie_watch_error_dual_audit};
 use super::transition::{apply_dexie_lifecycle_transitions, ReconcileMarketCycleMetrics};
-use super::watch_plan::{fetch_and_ensure_watches, prepare_market_reconcile_local};
 
 #[derive(Debug, Clone)]
 pub struct ReconcileMarketCycleResult {
@@ -110,7 +110,16 @@ pub async fn run_reconcile_market_cycle(
         market_id,
         &plan.heal_only,
         &list_offers,
-        &mut metrics,
+        &mut |market_id, offer_id, err| {
+            dexie_watch_error_dual_audit(
+                store,
+                "dexie watch heal fetch failed",
+                market_id,
+                offer_id,
+                err,
+                &mut metrics,
+            )
+        },
     )
     .await?;
 
