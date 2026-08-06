@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use crate::config::LadderEntry;
 
 use super::selection::SpendableCoin;
-use super::shape_defer::spendable_amounts_in_base_units;
+use super::shape_defer::spendable_exact_ladder_unit_amounts;
 
 /// Canonical `(size_base_units, target_count + split_buffer_count)` slot for a ladder row.
 #[must_use]
@@ -111,7 +111,7 @@ impl SplitSourceProtection {
     ) -> Self {
         Self::from_required_rows(
             &required_rows_from_ladder_entries(entries),
-            &spendable_amounts_in_base_units(spendable, base_unit_mojo_multiplier),
+            &spendable_exact_ladder_unit_amounts(spendable, base_unit_mojo_multiplier),
             base_unit_mojo_multiplier,
         )
     }
@@ -279,7 +279,12 @@ pub fn select_smallest_non_cannibalizing_spendable<'a>(
         })
         .map(|coin| SplittableCandidate {
             id: coin.id.as_str(),
-            amount_base_units: coin.amount / multiplier,
+            // Fractional CAT coins (e.g. 10.5) stay selectable; not protected ladder clips.
+            amount_base_units: crate::coin_ops::exact_whole_units_from_mojos(
+                coin.amount,
+                multiplier,
+            )
+            .unwrap_or(0),
         })
         .collect();
     let selected_id = select_smallest_non_cannibalizing_candidate_id(

@@ -9,7 +9,9 @@ pub use bytes::{fixed_bytes, hex_to_bytes, hex_to_bytes32, parse_coin_ids};
 pub use clvm::{bytes32_to_hex, hex_to_tree_hash, tree_hash_nil, tree_hash_to_hex};
 
 const CANONICAL_XCH_MOJOS: i64 = 1_000_000_000_000;
-const CANONICAL_CAT_MOJOS: i64 = 1_000;
+/// On-chain mojos per one CAT config/display unit. Fractional units are valid
+/// (e.g. `10.5` CAT = `10_500` mojos).
+pub const CANONICAL_CAT_MOJOS: i64 = 1_000;
 
 /// Canonical hex normalization: trim, strip optional ``0x``, lowercase, hex digits only.
 #[must_use]

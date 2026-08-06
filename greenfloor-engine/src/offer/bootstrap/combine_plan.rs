@@ -1,4 +1,4 @@
-//! Bootstrap combine-first input selection (base units only) — thin wrapper over
+//! Bootstrap combine-first input selection — thin wrapper over
 //! `coin_ops::shape::plan_ladder_preserving_combine`.
 //!
 //! [`build_bootstrap_combine_plan`] is test-only: `plan_bootstrap_mixed_outputs` (via
@@ -6,28 +6,44 @@
 //! combine-first funding. This module's regression tests exercise the shared
 //! `plan_ladder_preserving_combine` core directly at the bootstrap unit boundary.
 
+use crate::coin_ops::shape::AmountUnit;
+
 #[cfg(test)]
 use super::plan::{BootstrapCoin, PlannerLadderRow};
 
-/// Asset context for bootstrap combine dust validation at plan time.
+/// Asset + amount-unit context for bootstrap combine dust validation at plan time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapCombineContext {
-    pub mojo_multiplier: i64,
+    pub unit: AmountUnit,
     pub canonical_asset_id: String,
 }
 
 impl BootstrapCombineContext {
+    /// Denomination path: ladder and coins are already mojos.
     #[must_use]
-    pub fn new(mojo_multiplier: i64, canonical_asset_id: impl Into<String>) -> Self {
+    pub fn mojos(canonical_asset_id: impl Into<String>) -> Self {
         Self {
-            mojo_multiplier,
+            unit: AmountUnit::Mojos {
+                base_unit_mojo_multiplier: 1,
+            },
+            canonical_asset_id: canonical_asset_id.into(),
+        }
+    }
+
+    /// Planner fixtures that still plan in config/plan units with a dust scale to mojos.
+    #[must_use]
+    pub fn plan_units(dust_mojo_multiplier: i64, canonical_asset_id: impl Into<String>) -> Self {
+        Self {
+            unit: AmountUnit::PlanUnits {
+                dust_mojo_multiplier,
+            },
             canonical_asset_id: canonical_asset_id.into(),
         }
     }
 
     #[must_use]
     pub fn for_tests() -> Self {
-        Self::new(1_000, "xch")
+        Self::plan_units(1_000, "xch")
     }
 }
 
@@ -35,7 +51,7 @@ impl BootstrapCombineContext {
 fn build_bootstrap_combine_plan(
     coins: &[BootstrapCoin],
     ladder_entries: &[PlannerLadderRow],
-    target_amount_base_units: super::amounts::BaseUnits,
+    target_amount: super::amounts::PlanAmount,
     combine_input_cap: i64,
     combine_context: &BootstrapCombineContext,
 ) -> Option<crate::coin_ops::shape::CombineInputs> {
@@ -46,9 +62,9 @@ fn build_bootstrap_combine_plan(
     plan_ladder_preserving_combine(
         &to_shape_coins(coins),
         &protected_slots,
-        target_amount_base_units.get(),
+        target_amount.get(),
         combine_input_cap,
-        combine_context.mojo_multiplier,
+        combine_context.unit.dust_change_mojo_multiplier(),
         &combine_context.canonical_asset_id,
     )
 }
@@ -56,7 +72,7 @@ fn build_bootstrap_combine_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offer::bootstrap::amounts::BaseUnits;
+    use crate::offer::bootstrap::amounts::PlanAmount;
     use crate::test_support::eco181_bootstrap_inventory::{
         eco181_bootstrap_coins, eco181_bootstrap_ladder,
     };
@@ -67,7 +83,7 @@ mod tests {
     const CAT_ASSET: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
     fn cat_combine_context() -> BootstrapCombineContext {
-        BootstrapCombineContext::new(1_000, CAT_ASSET)
+        BootstrapCombineContext::plan_units(1_000, CAT_ASSET)
     }
 
     #[test]
@@ -79,7 +95,7 @@ mod tests {
         let inputs = build_bootstrap_combine_plan(
             &spendable,
             &[],
-            BaseUnits::new(100),
+            PlanAmount::new(100),
             5,
             &cat_combine_context(),
         )
@@ -93,10 +109,10 @@ mod tests {
 
     #[test]
     fn rejects_combine_when_overshoot_change_would_be_cat_dust() {
-        let ctx = BootstrapCombineContext::new(1, CAT_ASSET);
+        let ctx = BootstrapCombineContext::mojos(CAT_ASSET);
         let spendable = vec![coin("a", 51), coin("b", 50)];
         assert!(
-            build_bootstrap_combine_plan(&spendable, &[], BaseUnits::new(100), 10, &ctx).is_none()
+            build_bootstrap_combine_plan(&spendable, &[], PlanAmount::new(100), 10, &ctx).is_none()
         );
     }
 
@@ -105,7 +121,7 @@ mod tests {
         let inputs = build_bootstrap_combine_plan(
             &eco181_bootstrap_coins(),
             &eco181_bootstrap_ladder(),
-            BaseUnits::new(100),
+            PlanAmount::new(100),
             5,
             &cat_combine_context(),
         )

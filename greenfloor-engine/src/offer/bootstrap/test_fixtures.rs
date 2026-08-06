@@ -15,7 +15,7 @@ pub(super) const DEFAULT_BOOTSTRAP_COMBINE_CAP: i64 = 5;
 
 pub(super) fn ladder_row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
     PlannerLadderRow {
-        size_base_units: size,
+        size,
         target_count: target,
         split_buffer_count: buffer,
     }
@@ -24,7 +24,7 @@ pub(super) fn ladder_row(size: i64, target: i64, buffer: i64) -> PlannerLadderRo
 pub(super) fn bootstrap_coin(id: &str, amount: i64) -> BootstrapCoin {
     BootstrapCoin {
         id: id.to_string(),
-        amount: super::BaseUnits::new(amount),
+        amount: super::PlanAmount::new(amount),
     }
 }
 

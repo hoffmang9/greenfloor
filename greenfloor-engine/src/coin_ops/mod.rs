@@ -16,6 +16,7 @@ mod selection;
 pub mod shape;
 mod shape_defer;
 pub mod shape_protection;
+mod unit_convert;
 mod wallet_coin;
 
 pub use amounts::{combine_output_amounts, total_for_coin_ids, COMBINE_SINGLE_OUTPUT_COUNT};
@@ -55,8 +56,13 @@ pub use selection::{
 };
 pub use shape_defer::{
     aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,
-    defer_low_watermark_split_to_post_bootstrap, spendable_amounts_in_base_units,
+    defer_low_watermark_split_to_post_bootstrap, spendable_exact_ladder_unit_amounts,
     LOW_WATERMARK_BUFFER_DEFICIT,
 };
 pub use shape_protection::{LadderShapeContext, SplitSourceProtection};
+pub use unit_convert::{
+    cat_units_display_from_mojos, cat_units_display_from_mojos_with_multiplier,
+    cat_units_string_from_mojos, exact_whole_units_from_mojos, mojos_from_whole_units,
+    CAT_MOJOS_PER_UNIT,
+};
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};

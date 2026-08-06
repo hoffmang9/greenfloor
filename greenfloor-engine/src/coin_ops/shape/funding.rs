@@ -17,13 +17,17 @@ use crate::coin_ops::shape_protection::{
 /// instead of via independently-settable bool flags.
 #[derive(Debug, Clone, Copy)]
 pub enum ShapeFundingPolicy<'a> {
-    /// Bootstrap combine-first funding: ladder base units, ladder-preserving combine retry,
-    /// smallest non-cannibalizing single-coin preference, and single-coin-coverage exclusion
-    /// for combine eligibility (see `offer::bootstrap::planner::plan_bootstrap_mixed_outputs`).
+    /// Bootstrap combine-first funding: ladder-preserving combine retry, smallest
+    /// non-cannibalizing single-coin preference, and single-coin-coverage exclusion for
+    /// combine eligibility (see `offer::bootstrap::planner::plan_bootstrap_mixed_outputs`).
+    ///
+    /// `unit` is [`AmountUnit::Mojos`] on the signer denomination path (ladder already in
+    /// mojos) and [`AmountUnit::PlanUnits`] for planner fixtures that still plan in config
+    /// units with a dust scale.
     Bootstrap {
         combine_input_cap: i64,
         canonical_asset_id: &'a str,
-        dust_mojo_multiplier: i64,
+        unit: AmountUnit,
     },
     /// Daemon auto-split funding without ladder-row protection: largest-covering single
     /// coin, flat combine-first fallback when `allow_combine`.
@@ -69,11 +73,9 @@ impl<'a> ShapeFundingPolicy<'a> {
             Self::Bootstrap {
                 combine_input_cap,
                 canonical_asset_id,
-                dust_mojo_multiplier,
+                unit,
             } => ShapeFundingFlags {
-                unit: AmountUnit::BaseUnits {
-                    dust_mojo_multiplier,
-                },
+                unit,
                 combine_input_cap,
                 canonical_asset_id,
                 combine_strategy: CombineStrategy::LadderPreserving,
@@ -125,10 +127,12 @@ fn select_largest_shape_coin(coins: &[ShapeCoin], required_amount: i64) -> Optio
         .max_by_key(|coin| coin.amount)
 }
 
-/// Smallest coin that funds `required_amount` (in `options` units) without cannibalizing a
-/// protected ladder row. Converts to ladder base units via `mojo_multiplier` exactly like the
-/// historical `SplitSourceProtection` daemon path (integer division, so `mojo_multiplier > 1`
-/// callers inherit the same base-unit rounding as before).
+/// Smallest coin that funds `required_amount` (same unit as `coins`) without cannibalizing a
+/// protected ladder row.
+///
+/// `mojo_multiplier` converts coin amounts into whole ladder units for protection checks only.
+/// Fractional CAT coins remain valid funding sources; they are not classified as exact ladder
+/// clips (`10_500` mojos is `10.5` units, not size `10`).
 fn select_smallest_non_cannibalizing_shape_coin<'a>(
     coins: &'a [ShapeCoin],
     required_amount: i64,
@@ -136,18 +140,22 @@ fn select_smallest_non_cannibalizing_shape_coin<'a>(
     ctx: &LadderShapeContext,
 ) -> Option<&'a ShapeCoin> {
     let multiplier = mojo_multiplier.max(1);
-    let required_base_units = required_amount / multiplier;
-    let required_amount_floor = required_base_units.saturating_mul(multiplier);
+    let required_ladder_units =
+        crate::coin_ops::exact_whole_units_from_mojos(required_amount, multiplier).unwrap_or(0);
     let candidates: Vec<SplittableCandidate<'_>> = coins
         .iter()
-        .filter(|coin| coin.is_spendable() && coin.amount >= required_amount_floor)
+        .filter(|coin| coin.is_spendable() && coin.amount >= required_amount)
         .map(|coin| SplittableCandidate {
             id: coin.id.as_str(),
-            amount_base_units: coin.amount / multiplier,
+            amount_base_units: crate::coin_ops::exact_whole_units_from_mojos(
+                coin.amount,
+                multiplier,
+            )
+            .unwrap_or(0),
         })
         .collect();
     let selected_id =
-        select_smallest_non_cannibalizing_candidate_id(&candidates, required_base_units, ctx)?;
+        select_smallest_non_cannibalizing_candidate_id(&candidates, required_ladder_units, ctx)?;
     coins.iter().find(|coin| coin.id == selected_id)
 }
 

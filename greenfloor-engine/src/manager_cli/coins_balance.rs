@@ -155,18 +155,7 @@ pub async fn run_coins_balance(
 /// CAT display units: 1000 mojos = 1 unit (fractional units preserved exactly).
 #[must_use]
 fn cat_units_from_mojos(mojos: u64) -> serde_json::Value {
-    let whole = mojos / 1000;
-    let frac = mojos % 1000;
-    if frac == 0 {
-        return serde_json::json!(whole);
-    }
-    let frac_text = format!("{frac:03}");
-    let frac_text = frac_text.trim_end_matches('0');
-    let text = format!("{whole}.{frac_text}");
-    serde_json::Value::Number(
-        text.parse()
-            .expect("CAT mojo units format always parses as a JSON number"),
-    )
+    crate::coin_ops::cat_units_display_from_mojos(mojos)
 }
 
 #[cfg(test)]
@@ -179,6 +168,7 @@ mod tests {
     #[test]
     fn cat_units_preserve_fractional_mojos() {
         assert_eq!(cat_units_from_mojos(239_950).to_string(), "239.95");
+        assert_eq!(cat_units_from_mojos(10_500).to_string(), "10.5");
         assert_eq!(cat_units_from_mojos(1_000).to_string(), "1");
         assert_eq!(cat_units_from_mojos(100).to_string(), "0.1");
         assert_eq!(cat_units_from_mojos(0).to_string(), "0");

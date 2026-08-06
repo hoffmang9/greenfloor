@@ -13,7 +13,7 @@ use crate::offer::bootstrap::{
     BootstrapWaitResolution, BootstrapWaitStepKind,
 };
 
-use super::planning::bootstrap_coins_in_base_units;
+use super::planning::bootstrap_coins_as_plan_mojos;
 use super::BootstrapShapeContext;
 
 /// Sleep pacing for [`wait_for_bootstrap_shape_step`] (same pattern as
@@ -55,10 +55,7 @@ async fn fetch_bootstrap_spendable(
         &ctx.split_asset_id,
     )
     .await?;
-    Ok(bootstrap_coins_in_base_units(
-        &coins,
-        ctx.split_asset_mojo_multiplier,
-    ))
+    Ok(bootstrap_coins_as_plan_mojos(&coins))
 }
 
 #[derive(Debug)]
@@ -175,7 +172,7 @@ mod tests {
     use crate::offer::operator::BootstrapShapeContext;
     use crate::test_support::bootstrap_shape::{
         coin_record_body, coin_records_response, eco181_cap_combine_shape_context,
-        BOOTSTRAP_TEST_MOJO_MULTIPLIER, BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_RECEIVE,
+        BOOTSTRAP_TEST_MOJO_PER_UNIT, BOOTSTRAP_TEST_RECEIVE,
     };
     use crate::test_support::signer_config::test_signer_config;
 
@@ -223,7 +220,7 @@ mod tests {
             .await;
         let signer = test_signer_config(&server.url());
         let ladder = vec![PlannerLadderRow {
-            size_base_units: 100,
+            size: 100_000,
             target_count: 1,
             split_buffer_count: 0,
         }];
@@ -263,7 +260,7 @@ mod tests {
             .await;
         let signer = test_signer_config(&server.url());
         let ladder = vec![PlannerLadderRow {
-            size_base_units: 100,
+            size: 100_000,
             target_count: 1,
             split_buffer_count: 0,
         }];
@@ -308,31 +305,30 @@ mod tests {
             .await;
         let signer = test_signer_config(&server.url());
         let ladder = vec![PlannerLadderRow {
-            size_base_units: 100,
+            size: 100_000,
             target_count: 2,
             split_buffer_count: 0,
         }];
         let ctx = BootstrapShapeContext {
             split_asset_id: "xch".to_string(),
-            split_asset_mojo_multiplier: BOOTSTRAP_TEST_MOJO_MULTIPLIER,
             receive_address: BOOTSTRAP_TEST_RECEIVE.to_string(),
             bootstrap_plan: BootstrapPlan {
                 funding: ShapeFunding::SingleCoin {
                     coin_id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                         .to_string(),
-                    amount: 100,
+                    amount: 100_000,
                 },
-                output_amounts_base_units: vec![100],
-                total_output_amount: 100,
+                output_amounts: vec![100_000],
+                total_output_amount: 100_000,
                 change_amount: 0,
                 deficits: vec![ShapeDeficit {
-                    size: 100,
+                    size: 100_000,
                     required_count: 2,
                     current_count: 1,
                 }],
             },
             ladder_entries: ladder,
-            combine_context: crate::offer::bootstrap::BootstrapCombineContext::for_tests(),
+            combine_context: crate::offer::bootstrap::BootstrapCombineContext::mojos("xch"),
             fee_mojos: 0,
             fee_source: String::new(),
             fee_lookup_error: None,

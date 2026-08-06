@@ -37,8 +37,8 @@ pub struct OffersOrphanPresplitCliRequest {
 pub struct OffersOrphanPresplitCliItem {
     pub coin_id: String,
     pub amount: u64,
-    /// CAT display units (1000 mojos = 1 unit). Integer units only for CLI summary.
-    pub units: u64,
+    /// CAT display units (1000 mojos = 1 unit), including fractions (`10.5`).
+    pub units: serde_json::Value,
     pub confirmed_block_index: u64,
     pub fixed_delegated_puzzle_hash: Option<String>,
     pub recovery: &'static str,
@@ -80,11 +80,18 @@ fn tracked_cancel_input_coin_ids(
         .collect())
 }
 
-fn item_from_candidate(candidate: &OrphanPresplitCandidate) -> OffersOrphanPresplitCliItem {
+fn item_from_candidate(
+    candidate: &OrphanPresplitCandidate,
+    asset_id: &str,
+) -> OffersOrphanPresplitCliItem {
+    let multiplier = crate::hex::default_mojo_multiplier_for_asset(asset_id);
     OffersOrphanPresplitCliItem {
         coin_id: candidate.coin_id.clone(),
         amount: candidate.amount,
-        units: candidate.amount / 1000,
+        units: crate::coin_ops::cat_units_display_from_mojos_with_multiplier(
+            candidate.amount,
+            multiplier,
+        ),
         confirmed_block_index: candidate.confirmed_block_index,
         fixed_delegated_puzzle_hash: candidate.fixed_delegated_puzzle_hash.clone(),
         recovery: candidate.recovery_label(),
@@ -143,8 +150,10 @@ pub async fn offers_orphan_presplit_cli(
     )
     .await?;
 
-    let orphans: Vec<OffersOrphanPresplitCliItem> =
-        candidates.iter().map(item_from_candidate).collect();
+    let orphans: Vec<OffersOrphanPresplitCliItem> = candidates
+        .iter()
+        .map(|candidate| item_from_candidate(candidate, &asset))
+        .collect();
     let pairs = reclaimable_pairs(&candidates);
     let unreclaimable_count =
         u64::try_from(candidates.len().saturating_sub(pairs.len())).unwrap_or(u64::MAX);

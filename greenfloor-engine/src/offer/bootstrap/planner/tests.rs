@@ -18,7 +18,7 @@ fn builds_deficit_outputs() {
     let plan = expect_needs_shape(&ladder, &spendable);
     assert!(matches!(plan.funding, ShapeFunding::SingleCoin { .. }));
     assert_eq!(plan.source_coin_id(), Some("coin-big"));
-    let mut outputs = plan.output_amounts_base_units;
+    let mut outputs = plan.output_amounts;
     outputs.sort_unstable();
     assert_eq!(outputs, vec![1, 1, 10, 10, 10]);
     assert_eq!(plan.total_output_amount, 32);
@@ -44,7 +44,7 @@ fn selects_smallest_non_cannibalizing_funding_coin() {
     let spendable = vec![coin("coin-big-object", 100)];
     let plan = expect_needs_shape(&ladder, &spendable);
     assert_eq!(plan.source_coin_id(), Some("coin-big-object"));
-    assert_eq!(plan.output_amounts_base_units, vec![10, 10]);
+    assert_eq!(plan.output_amounts, vec![10, 10]);
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn single_output_plan_when_only_one_deficit_coin_needed() {
     let ladder = vec![row(10, 1, 0)];
     let spendable = vec![coin("coin-big", 100)];
     let plan = expect_needs_shape(&ladder, &spendable);
-    assert_eq!(plan.output_amounts_base_units, vec![10]);
+    assert_eq!(plan.output_amounts, vec![10]);
     assert_eq!(plan.total_output_amount, 10);
 }
 
@@ -141,7 +141,7 @@ fn plans_combine_first_when_aggregate_covers_deficit_without_single_coin() {
     let plan = expect_needs_shape(&ladder, &spendable);
     assert!(plan.requires_combine_first());
     assert_eq!(plan.total_output_amount, 100);
-    assert_eq!(plan.output_amounts_base_units, vec![100]);
+    assert_eq!(plan.output_amounts, vec![100]);
     let input_ids = plan
         .combine_inputs()
         .expect("combine inputs")
@@ -244,12 +244,12 @@ fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
     }
 }
 
-/// Regression for the `AmountUnit::BaseUnits` dust-multiplier bug: bootstrap combine-first
-/// overshoot change is in ladder **base units**, so the CAT dust check must scale by the
-/// asset's `mojo_multiplier` before comparing to `coin_op_min_amount_mojos` (mojos). The old
-/// `AmountUnit::BaseUnits` variant hard-coded that scale factor to `1`, so a 5 BU overshoot
-/// (= `5_000` mojos for a `mojo_multiplier = 1_000` CAT, well above the `1_000` mojo dust floor)
-/// was checked as `5 mojos` — under the floor — and incorrectly rejected as dust.
+/// Regression for the `AmountUnit::PlanUnits` dust-multiplier bug: bootstrap combine-first
+/// overshoot change is in ladder **plan units**, so the CAT dust check must scale by the
+/// asset's `dust_mojo_multiplier` before comparing to `coin_op_min_amount_mojos` (mojos). The
+/// old variant hard-coded that scale factor to `1`, so a 5 BU overshoot (= `5_000` mojos for a
+/// `mojo_multiplier = 1_000` CAT, well above the `1_000` mojo dust floor) was checked as
+/// `5 mojos` — under the floor — and incorrectly rejected as dust.
 #[test]
 fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_cat() {
     let cat_asset_id = "0000000000000000000000000000000000000000000000000000000000000001";
@@ -260,7 +260,7 @@ fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_ca
             .map(|coin_row| coin(&coin_row.id, coin_row.amount))
             .collect();
     let combine_context =
-        crate::offer::bootstrap::BootstrapCombineContext::new(1_000, cat_asset_id);
+        crate::offer::bootstrap::BootstrapCombineContext::plan_units(1_000, cat_asset_id);
     let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &combine_context);
 
     let plan = match outcome {
