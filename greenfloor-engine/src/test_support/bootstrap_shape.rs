@@ -41,7 +41,7 @@ pub fn coin_records_response(records: &[String]) -> String {
 }
 
 /// ECO.181-style inventory (60k + four 10k plan mojos) for cap-aware combine-first
-/// bootstrap tests. Amounts are already in plan mojos (`mojo_multiplier = 1`).
+/// bootstrap tests. Amounts are already in plan mojos.
 #[must_use]
 pub fn eco181_cap_combine_spendable() -> Vec<BootstrapCoin> {
     vec![
@@ -72,16 +72,11 @@ pub fn eco181_cap_combine_spendable() -> Vec<BootstrapCoin> {
 pub fn combine_first_shape_context(
     receive_address: &str,
     split_asset_id: &str,
-    mojo_multiplier: i64,
+    combine_context: BootstrapCombineContext,
     ladder: Vec<PlannerLadderRow>,
     spendable: &[BootstrapCoin],
     combine_input_cap: i64,
 ) -> BootstrapShapeContext {
-    let combine_context = if mojo_multiplier <= 1 {
-        BootstrapCombineContext::mojos(split_asset_id)
-    } else {
-        BootstrapCombineContext::plan_units(mojo_multiplier, split_asset_id)
-    };
     let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) =
         plan_bootstrap_mixed_outputs(&ladder, spendable, combine_input_cap, &combine_context)
     else {
@@ -104,5 +99,12 @@ pub fn combine_first_shape_context(
 #[must_use]
 pub fn eco181_cap_combine_shape_context(ladder: Vec<PlannerLadderRow>) -> BootstrapShapeContext {
     let spendable = eco181_cap_combine_spendable();
-    combine_first_shape_context(BOOTSTRAP_TEST_RECEIVE, "xch", 1, ladder, &spendable, 5)
+    combine_first_shape_context(
+        BOOTSTRAP_TEST_RECEIVE,
+        "xch",
+        BootstrapCombineContext::mojos("xch"),
+        ladder,
+        &spendable,
+        5,
+    )
 }

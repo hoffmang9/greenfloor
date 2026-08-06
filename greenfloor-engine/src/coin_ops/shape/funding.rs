@@ -140,19 +140,13 @@ fn select_smallest_non_cannibalizing_shape_coin<'a>(
     ctx: &LadderShapeContext,
 ) -> Option<&'a ShapeCoin> {
     let multiplier = mojo_multiplier.max(1);
+    // Capacity uses floored units; cannibalization uses exact clips only (see SplittableCandidate).
     let required_ladder_units =
-        crate::coin_ops::exact_whole_units_from_mojos(required_amount, multiplier).unwrap_or(0);
+        crate::coin_ops::floored_units_from_mojos(required_amount, multiplier);
     let candidates: Vec<SplittableCandidate<'_>> = coins
         .iter()
         .filter(|coin| coin.is_spendable() && coin.amount >= required_amount)
-        .map(|coin| SplittableCandidate {
-            id: coin.id.as_str(),
-            amount_base_units: crate::coin_ops::exact_whole_units_from_mojos(
-                coin.amount,
-                multiplier,
-            )
-            .unwrap_or(0),
-        })
+        .map(|coin| SplittableCandidate::from_mojos(coin.id.as_str(), coin.amount, multiplier))
         .collect();
     let selected_id =
         select_smallest_non_cannibalizing_candidate_id(&candidates, required_ladder_units, ctx)?;

@@ -20,6 +20,18 @@ pub fn mojos_from_whole_units(whole_units: i64, mojo_multiplier: i64) -> i64 {
     whole_units.saturating_mul(mojo_multiplier.max(1))
 }
 
+/// Floored ladder/config units from mojos (`10_500` / `1000` → `10`).
+///
+/// Use for funding capacity and “smallest covering coin” ordering. Do **not** use this for
+/// ladder-clip identity — prefer [`exact_whole_units_from_mojos`].
+#[must_use]
+pub fn floored_units_from_mojos(amount_mojos: i64, mojo_multiplier: i64) -> i64 {
+    if amount_mojos <= 0 {
+        return 0;
+    }
+    amount_mojos / mojo_multiplier.max(1)
+}
+
 /// Whole ladder/config units only when `amount_mojos` is an exact multiple of the multiplier.
 ///
 /// `10_500` mojos with multiplier `1000` → `None` (valid `10.5` CAT coin, not size `10`).
@@ -70,7 +82,7 @@ pub fn cat_units_display_from_mojos_with_multiplier(
 mod tests {
     use super::{
         cat_units_display_from_mojos, cat_units_string_from_mojos, exact_whole_units_from_mojos,
-        mojos_from_whole_units, CAT_MOJOS_PER_UNIT,
+        floored_units_from_mojos, mojos_from_whole_units, CAT_MOJOS_PER_UNIT,
     };
 
     #[test]
@@ -80,6 +92,13 @@ mod tests {
         assert_eq!(exact_whole_units_from_mojos(10_010, 1_000), None);
         assert_eq!(exact_whole_units_from_mojos(0, 1_000), None);
         assert_eq!(exact_whole_units_from_mojos(5_000, 1), Some(5_000));
+    }
+
+    #[test]
+    fn floored_units_allows_fractional_capacity() {
+        assert_eq!(floored_units_from_mojos(10_500, 1_000), 10);
+        assert_eq!(floored_units_from_mojos(10_000, 1_000), 10);
+        assert_eq!(floored_units_from_mojos(999, 1_000), 0);
     }
 
     #[test]
