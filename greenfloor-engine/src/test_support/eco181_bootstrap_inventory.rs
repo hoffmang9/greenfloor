@@ -1,12 +1,12 @@
 //! ECO.181-style fragmented bootstrap inventory for ladder/combine tests.
 
-use crate::offer::bootstrap::{BaseUnits, BootstrapCoin, PlannerLadderRow};
+use crate::offer::bootstrap::{BootstrapCoin, PlanAmount, PlannerLadderRow};
 
 fn bootstrap_coins_from_rows(rows: &[(String, i64)]) -> Vec<BootstrapCoin> {
     rows.iter()
         .map(|(id, amount)| BootstrapCoin {
             id: id.clone(),
-            amount: BaseUnits::new(*amount),
+            amount: PlanAmount::new(*amount),
         })
         .collect()
 }
@@ -45,17 +45,17 @@ pub fn eco181_after_combine_inventory_rows() -> Vec<(String, i64)> {
 pub fn eco181_bootstrap_ladder() -> Vec<PlannerLadderRow> {
     vec![
         PlannerLadderRow {
-            size_base_units: 1,
+            size: 1,
             target_count: 5,
             split_buffer_count: 1,
         },
         PlannerLadderRow {
-            size_base_units: 10,
+            size: 10,
             target_count: 2,
             split_buffer_count: 1,
         },
         PlannerLadderRow {
-            size_base_units: 100,
+            size: 100,
             target_count: 1,
             split_buffer_count: 0,
         },
@@ -72,7 +72,7 @@ pub fn eco181_after_combine_coins() -> Vec<BootstrapCoin> {
     bootstrap_coins_from_rows(&eco181_after_combine_inventory_rows())
 }
 
-/// john-deere live inventory mapped to base units (`amount_mojos / 1000`).
+/// john-deere live inventory as whole ladder/plan units (fixture scale, not truncated mojos).
 #[must_use]
 pub fn john_deere_current_inventory_rows() -> Vec<(String, i64)> {
     let mut rows = Vec::with_capacity(17);

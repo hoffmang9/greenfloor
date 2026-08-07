@@ -22,7 +22,6 @@ use crate::offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs,
     BootstrapCombineContext, BootstrapPlanOutcome,
 };
-use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
@@ -35,13 +34,13 @@ pub(crate) use test_overrides::SignerDenominationTestOverrides;
 use bootstrap_execute::execute_bootstrap_shape;
 use futures::SignerDenominationPhaseFuture;
 use planning::{
-    bootstrap_coins_in_base_units, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
+    bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
 };
 use types::{BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure};
 
 #[cfg(test)]
 fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
-    bootstrap_coins_in_base_units(coins, 1)
+    bootstrap_coins_as_plan_mojos(coins)
 }
 
 fn bootstrap_skipped(reason: impl Into<String>) -> BootstrapPhaseResult {
@@ -133,11 +132,12 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         &side_ladder,
         &ctx.gated.market_row.pricing,
         quote_price,
+        &ctx.offer_assets.base_asset_id,
         &ctx.offer_assets.quote_asset_id,
     )?;
     if ladder_entries.is_empty() {
         return Ok(Err(bootstrap_skipped(format!(
-            "empty_{side}_ladder_after_quote_conversion"
+            "empty_{side}_ladder_after_mojo_conversion"
         ))));
     }
 
@@ -151,13 +151,6 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
             "missing_{side}_asset_for_bootstrap"
         ))));
     }
-    let mojo_field = if side == "buy" {
-        "quote_unit_mojo_multiplier"
-    } else {
-        "base_unit_mojo_multiplier"
-    };
-    let split_asset_mojo_multiplier =
-        mojo_multiplier_for_leg(&ctx.gated.market_row.pricing, mojo_field, &split_asset_id).max(1);
 
     let receive_address = ctx.gated.market_row.receive_address.trim();
     if receive_address.is_empty() {
@@ -178,10 +171,9 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         Err(result) => return Ok(Err(result)),
     };
 
-    let spendable_coins =
-        bootstrap_coins_in_base_units(&asset_scoped_coins, split_asset_mojo_multiplier);
-    let combine_context =
-        BootstrapCombineContext::new(split_asset_mojo_multiplier, &split_asset_id);
+    // Ladder ingress converts both sides to mojos; coins and submit stay in mojos.
+    let spendable_coins = bootstrap_coins_as_plan_mojos(&asset_scoped_coins);
+    let combine_context = BootstrapCombineContext::mojos(&split_asset_id);
     let outcome = plan_bootstrap_mixed_outputs(
         &ladder_entries,
         &spendable_coins,
@@ -195,7 +187,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) = outcome else {
         return Ok(Err(bootstrap_skipped("bootstrap_precheck_failed")));
     };
-    let output_count = bootstrap_plan.output_amounts_base_units.len();
+    let output_count = bootstrap_plan.output_amounts.len();
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
         &ctx.gated.signer,
         &ctx.gated.operator_network,
@@ -214,7 +206,6 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 
     Ok(Ok(BootstrapShapeContext {
         split_asset_id,
-        split_asset_mojo_multiplier,
         receive_address: receive_address.to_string(),
         bootstrap_plan,
         ladder_entries,

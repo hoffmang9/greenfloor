@@ -18,15 +18,12 @@ pub async fn list_spendable_base_unit_amounts_for_signer(
         list_wallet_unspent_coins_for_signer(network, signer, receive_address, resolved_asset_id)
             .await?;
     let multiplier = base_unit_multiplier.max(1);
+    // Exact whole ladder units only — fractional CAT coins (10.5) are valid but not a clip size.
     Ok(coins
         .into_iter()
         .filter_map(|coin| {
             let amount_mojos = i64::try_from(coin.amount).ok()?;
-            if amount_mojos <= 0 {
-                return None;
-            }
-            let base_units = amount_mojos / multiplier;
-            (base_units > 0).then_some(base_units)
+            crate::coin_ops::exact_whole_units_from_mojos(amount_mojos, multiplier)
         })
         .collect())
 }

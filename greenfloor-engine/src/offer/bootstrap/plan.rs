@@ -1,11 +1,12 @@
 //! Bootstrap plan domain model and coin row helpers.
 
-use super::amounts::BaseUnits;
+use super::amounts::PlanAmount;
 use crate::coin_ops::shape::{CombineInputs, ShapeDeficit, ShapeFunding};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
-    pub size_base_units: i64,
+    /// Plan amount for this ladder clip (mojos on the signer denomination path).
+    pub size: i64,
     pub target_count: i64,
     pub split_buffer_count: i64,
 }
@@ -13,7 +14,7 @@ pub struct PlannerLadderRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapCoin {
     pub id: String,
-    pub amount: BaseUnits,
+    pub amount: PlanAmount,
 }
 
 #[must_use]
@@ -24,9 +25,10 @@ pub(crate) fn bootstrap_coin_amounts(coins: &[BootstrapCoin]) -> Vec<i64> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapPlan {
     pub funding: ShapeFunding,
-    pub output_amounts_base_units: Vec<i64>,
+    /// Mixed-split outputs in plan amounts (mojos on the signer denomination path).
+    pub output_amounts: Vec<i64>,
     pub total_output_amount: i64,
-    /// Leftover base units after shaping (not mojos). Convert before CAT dust checks.
+    /// Leftover plan amount after shaping (same unit as ladder/coins for this plan).
     pub change_amount: i64,
     pub deficits: Vec<ShapeDeficit>,
 }
@@ -36,18 +38,18 @@ impl BootstrapPlan {
     pub(crate) fn needs_shape(
         funding: ShapeFunding,
         total_output_amount: i64,
-        output_amounts_base_units: Vec<i64>,
+        output_amounts: Vec<i64>,
         deficits: Vec<ShapeDeficit>,
     ) -> Self {
         debug_assert_eq!(
             total_output_amount,
-            output_amounts_base_units.iter().sum::<i64>(),
-            "total_output_amount must match output_amounts_base_units"
+            output_amounts.iter().sum::<i64>(),
+            "total_output_amount must match output_amounts"
         );
         Self {
             change_amount: funding.amount() - total_output_amount,
             funding,
-            output_amounts_base_units,
+            output_amounts,
             total_output_amount,
             deficits,
         }

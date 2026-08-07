@@ -51,6 +51,9 @@ fn sub_cat_change_skip(
 /// protection, picks the **largest** eligible coin; with protection, picks the **smallest
 /// non-cannibalizing** coin for ladder-row safety. Combine-first fallback is disabled via
 /// `allow_combine_prereq` on the resolved [`ShapeFundingPolicy`] variant.
+///
+/// Single-coin CAT dust is filtered inside [`resolve_shape_funding`]. Flat combine-first
+/// still post-checks overshoot here (ladder-preserving combine has its own dust guard).
 fn plan_daemon_auto_split_with_optional_protection(
     params: &DaemonAutoSplitParams<'_>,
     protection: Option<&SplitSourceProtection>,
@@ -77,14 +80,6 @@ fn plan_daemon_auto_split_with_optional_protection(
 
     match resolve_shape_funding(&coins, params.required_amount_mojos, ladder_shape, &policy) {
         ShapeFundingResolution::Funded(ShapeFunding::SingleCoin { coin_id, amount }) => {
-            if let Some(skip) = sub_cat_change_skip(
-                coin_id.clone(),
-                amount,
-                params.required_amount_mojos,
-                params.canonical_asset_id,
-            ) {
-                return SplitAutoSelectPlan::Skip(skip);
-            }
             SplitAutoSelectPlan::Coin(coin_plan(&coin_id, amount))
         }
         ShapeFundingResolution::Funded(ShapeFunding::CombineFirst(prereq)) => {

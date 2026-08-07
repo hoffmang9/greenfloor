@@ -1,33 +1,35 @@
 //! Unit-tagged types shared by bootstrap and daemon coin-shape planning.
 //!
 //! All planning in [`super`] is unit-agnostic: callers pick [`AmountUnit`] to say whether
-//! `amount` fields are ladder base units (bootstrap) or on-chain mojos (daemon coin ops).
+//! `amount` fields are plan units (same scale as ladder rows) or on-chain mojos.
 
 /// Which unit system amounts use for a shape planning call.
 ///
 /// Ladder-row cannibalization checks and combine dust-change math need *different*
 /// conversion factors depending which unit `amount` fields are already in — conflating them
 /// (as a single `base_unit_mojo_multiplier` once did) silently mis-scales dust checks for the
-/// `BaseUnits` case. See [`Self::ladder_conversion_multiplier`] and
+/// [`Self::PlanUnits`] case. See [`Self::ladder_conversion_multiplier`] and
 /// [`Self::dust_change_mojo_multiplier`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AmountUnit {
-    /// Amounts are ladder base units. `dust_mojo_multiplier` converts overshoot change to
-    /// on-chain mojos for dust checks. Cannibalization treats amounts as already-base-units
+    /// Amounts share the ladder row unit (config/test “base units”, or mojos when the ladder
+    /// was already converted). `dust_mojo_multiplier` converts overshoot change to on-chain
+    /// mojos for dust checks. Cannibalization treats amounts as already ladder-sized
     /// (conversion factor 1).
-    BaseUnits { dust_mojo_multiplier: i64 },
-    /// Amounts are on-chain mojos. `base_unit_mojo_multiplier` converts ladder row sizes for
-    /// cannibalization. Dust change is already mojos (factor 1).
+    PlanUnits { dust_mojo_multiplier: i64 },
+    /// Amounts are on-chain mojos. `base_unit_mojo_multiplier` converts coin amounts into
+    /// whole ladder units for cannibalization when ladder rows are still config units.
+    /// Dust change is already mojos (factor 1).
     Mojos { base_unit_mojo_multiplier: i64 },
 }
 
 impl AmountUnit {
-    /// Multiplier to convert `amount`-unit values to ladder base units for cannibalization
-    /// checks (`1` when amounts are already base units).
+    /// Multiplier to convert `amount`-unit values to ladder units for cannibalization
+    /// checks (`1` when amounts are already plan/ladder units).
     #[must_use]
-    pub(super) fn ladder_conversion_multiplier(self) -> i64 {
+    pub(crate) fn ladder_conversion_multiplier(self) -> i64 {
         match self {
-            Self::BaseUnits { .. } => 1,
+            Self::PlanUnits { .. } => 1,
             Self::Mojos {
                 base_unit_mojo_multiplier,
             } => base_unit_mojo_multiplier.max(1),
@@ -37,9 +39,9 @@ impl AmountUnit {
     /// Multiplier to convert `amount`-unit overshoot change to on-chain mojos for combine
     /// dust checks (`1` when amounts are already mojos).
     #[must_use]
-    pub(super) fn dust_change_mojo_multiplier(self) -> i64 {
+    pub(crate) fn dust_change_mojo_multiplier(self) -> i64 {
         match self {
-            Self::BaseUnits {
+            Self::PlanUnits {
                 dust_mojo_multiplier,
             } => dust_mojo_multiplier.max(1),
             Self::Mojos { .. } => 1,
@@ -72,7 +74,7 @@ impl ShapeCoin {
 
 /// Combine-first inputs selected to cover a target amount (unit per caller's [`AmountUnit`]).
 ///
-/// Shared by bootstrap (base units) and daemon coin ops (mojos) combine-first funding.
+/// Shared by bootstrap and daemon coin ops combine-first funding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CombineInputs {
     pub input_coin_ids: Vec<String>,

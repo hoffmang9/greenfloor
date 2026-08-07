@@ -1,7 +1,10 @@
 //! Deterministic bootstrap mixed-output planner for offer denomination preflight — thin
-//! wrapper over `coin_ops::shape` (base units, ladder-row protection always on).
+//! wrapper over `coin_ops::shape` (ladder-row protection always on).
 //!
-//! `output_amounts_base_units` is the authoritative mixed-split output list for
+//! Plan amounts and ladder sizes share one unit: mojos on the signer denomination path,
+//! or config/plan units in planner fixtures (see [`BootstrapCombineContext`]).
+//!
+//! `output_amounts` is the authoritative mixed-split output list for
 //! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
 use crate::coin_ops::shape::{
@@ -16,9 +19,9 @@ fn validate_inputs(
     spendable_coins: &[BootstrapCoin],
 ) -> Option<BootstrapPlanOutcome> {
     if ladder_entries.is_empty()
-        || !ladder_entries.iter().all(|row| {
-            row.size_base_units > 0 && row.target_count >= 0 && row.split_buffer_count >= 0
-        })
+        || !ladder_entries
+            .iter()
+            .all(|row| row.size > 0 && row.target_count >= 0 && row.split_buffer_count >= 0)
     {
         return Some(BootstrapPlanOutcome::InvalidLadder);
     }
@@ -35,7 +38,7 @@ pub(super) fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadd
     sorted_ladder
         .iter()
         .map(|row| ShapeLadderRow {
-            size: row.size_base_units,
+            size: row.size,
             target_count: row.target_count,
             split_buffer_count: row.split_buffer_count,
         })
@@ -62,12 +65,12 @@ pub fn plan_bootstrap_mixed_outputs(
     }
 
     let mut sorted_ladder = ladder_entries.to_vec();
-    sorted_ladder.sort_by_key(|row| row.size_base_units);
+    sorted_ladder.sort_by_key(|row| row.size);
 
     let policy = ShapeFundingPolicy::Bootstrap {
         combine_input_cap,
         canonical_asset_id: &combine_context.canonical_asset_id,
-        dust_mojo_multiplier: combine_context.mojo_multiplier,
+        unit: combine_context.unit,
     };
 
     match plan_shape_from_deficits(
