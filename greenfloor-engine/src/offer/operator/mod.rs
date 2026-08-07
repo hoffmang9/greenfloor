@@ -6,6 +6,7 @@ mod logging;
 mod signer_denomination;
 #[cfg(test)]
 mod test_overrides;
+mod unique_maker;
 
 #[cfg(test)]
 pub(crate) use build_and_post::empty_persist_artifacts_for_test;
@@ -28,3 +29,7 @@ pub(crate) use signer_denomination::BootstrapShapeContext;
 pub(crate) use signer_denomination::SignerDenominationTestOverrides;
 #[cfg(test)]
 pub use test_overrides::BuildOfferTestOverrides;
+pub use unique_maker::{
+    pick_unique_direct_maker_coin_id, resolve_unique_maker_offer_coin_ids,
+    UniqueMakerResolveRequest,
+};

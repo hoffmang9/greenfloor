@@ -30,6 +30,7 @@ mod tests {
         MarketConfig {
             market_id: market_id.to_string(),
             enabled,
+            unique_maker_coins: true,
             base_asset: "asset1".to_string(),
             base_symbol: "AS1".to_string(),
             quote_asset: "xch".to_string(),

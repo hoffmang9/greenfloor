@@ -43,8 +43,13 @@ async fn create_offer_for_post(
     started: Instant,
 ) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
-    let created = match create_offer(ctx, request.size_base_units, request.maker_reuse.clone())
-        .await
+    let created = match create_offer(
+        ctx,
+        request.size_base_units,
+        request.maker_reuse.clone(),
+        request.offer_coin_ids.clone(),
+    )
+    .await
     {
         Ok(result) => result,
         Err(err) => {

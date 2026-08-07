@@ -509,6 +509,7 @@ async fn dry_run_returns_preview_payload_in_process() {
         },
         action_side: None,
         maker_reuse: None,
+        offer_coin_ids: Vec::new(),
         test_overrides: crate::offer::operator::BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
         },

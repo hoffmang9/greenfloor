@@ -9,6 +9,7 @@ pub(super) fn build_create_offer_request(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
     maker_reuse: Option<PresplitMakerReuse>,
+    offer_coin_ids: Vec<String>,
 ) -> SignerResult<BuildOfferForActionRequest> {
     let reuse = maker_reuse.is_some();
     Ok(BuildOfferForActionRequest {
@@ -24,7 +25,7 @@ pub(super) fn build_create_offer_request(
         // Maker reuse skips split (coin already exists).
         split_input_coins: !reuse,
         broadcast_split: !reuse,
-        offer_coin_ids: Vec::new(),
+        offer_coin_ids,
         quote_asset_type: ctx.gated.market_row.quote_asset_type.clone(),
         maker_reuse,
     })
@@ -34,6 +35,7 @@ pub(super) async fn create_offer(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
     maker_reuse: Option<PresplitMakerReuse>,
+    offer_coin_ids: Vec<String>,
 ) -> SignerResult<BuildOfferForActionResult> {
     #[cfg(test)]
     if let Some(offer_text) = ctx.test_overrides.stub_offer_text() {
@@ -47,7 +49,7 @@ pub(super) async fn create_offer(
             create_result: None,
         });
     }
-    let request = build_create_offer_request(ctx, size_base_units, maker_reuse)?;
+    let request = build_create_offer_request(ctx, size_base_units, maker_reuse, offer_coin_ids)?;
     build_signer_offer_for_action(
         ctx.gated.signer.clone(),
         request,
@@ -73,9 +75,20 @@ mod tests {
             quote_asset_for_offer: "txch".to_string(),
         };
 
-        let request = build_create_offer_request(&ctx, 100, None).expect("create offer request");
+        let request =
+            build_create_offer_request(&ctx, 100, None, Vec::new()).expect("create offer request");
 
         assert_eq!(request.quote_asset, "txch");
         assert_ne!(request.quote_asset, ctx.gated.market_row.quote_asset);
+        assert!(request.offer_coin_ids.is_empty());
+    }
+
+    #[test]
+    fn create_offer_request_pins_non_empty_offer_coin_ids() {
+        let ctx = sample_resolved_build_and_post_context();
+        let coin = "aa".repeat(32);
+        let request = build_create_offer_request(&ctx, 100, None, vec![coin.clone()])
+            .expect("create offer request");
+        assert_eq!(request.offer_coin_ids, vec![coin]);
     }
 }

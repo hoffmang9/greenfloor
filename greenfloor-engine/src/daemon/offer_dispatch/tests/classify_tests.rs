@@ -3,13 +3,14 @@ use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 use super::super::{
-    classify_parallel_dispatch, parallel_managed_dispatch_enabled, parallel_max_workers,
-    record_parallel_fallback_audit, reservation_release_status, OfferDispatchOutput,
-    ParallelDispatchDecision,
+    classify_parallel_dispatch, parallel_dispatch_allowed, parallel_managed_dispatch_enabled,
+    parallel_max_workers, record_parallel_fallback_audit, reservation_release_status,
+    OfferDispatchOutput, ParallelDispatchDecision,
 };
 use crate::config::ManagerProgramConfig;
 use crate::error::SignerError;
 use crate::storage::{lock_shared_store_for_test, CycleWriteStore};
+use crate::test_support::market_config::sample_market;
 
 #[test]
 fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
@@ -27,6 +28,23 @@ fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
     program.runtime_offer_parallelism_enabled = true;
     program.runtime_dry_run = true;
     assert!(!parallel_managed_dispatch_enabled(&program));
+}
+
+#[test]
+fn unique_maker_coins_forces_sequential_even_when_parallelism_enabled() {
+    let program = ManagerProgramConfig {
+        runtime_market_slot_count: 1,
+        runtime_offer_parallelism_enabled: true,
+        runtime_offer_parallelism_max_workers: 2,
+        tx_block_websocket_reconnect_interval_seconds: 1,
+        tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
+    };
+    let mut market = sample_market("xch1test");
+    market.unique_maker_coins = true;
+    assert!(!parallel_dispatch_allowed(&program, &market));
+    market.unique_maker_coins = false;
+    assert!(parallel_dispatch_allowed(&program, &market));
 }
 
 #[test]

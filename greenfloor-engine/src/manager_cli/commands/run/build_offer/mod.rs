@@ -58,6 +58,7 @@ pub(crate) fn build_and_post_request(
                 },
                 action_side: None,
                 maker_reuse: None,
+                offer_coin_ids: Vec::new(),
             },
         ),
     )

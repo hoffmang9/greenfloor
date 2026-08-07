@@ -403,6 +403,7 @@ mod tests {
         let market = MarketConfig {
             market_id: "m".to_string(),
             enabled: true,
+            unique_maker_coins: true,
             base_asset: "unrelated".to_string(),
             base_symbol: "BYC".to_string(),
             quote_asset: "xch".to_string(),
@@ -432,6 +433,7 @@ mod tests {
         let market = MarketConfig {
             market_id: "byc-xch".to_string(),
             enabled: true,
+            unique_maker_coins: true,
             base_asset: "BYC".to_string(),
             base_symbol: "BYC".to_string(),
             quote_asset: "xch".to_string(),

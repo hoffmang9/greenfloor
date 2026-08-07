@@ -186,6 +186,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             market_row: MarketConfig {
                 market_id: "m1".to_string(),
                 enabled: true,
+                unique_maker_coins: true,
                 base_asset: "a1".to_string(),
                 base_symbol: "A1".to_string(),
                 quote_asset: "xch".to_string(),
@@ -269,6 +270,7 @@ mod tests {
         let market = MarketConfig {
             market_id: "m1".to_string(),
             enabled: true,
+            unique_maker_coins: true,
             base_asset: cat.clone(),
             base_symbol: "A1".to_string(),
             quote_asset: "xch".to_string(),

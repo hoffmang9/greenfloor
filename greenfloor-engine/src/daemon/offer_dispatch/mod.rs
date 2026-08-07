@@ -33,6 +33,13 @@ fn parallel_managed_dispatch_enabled(program: &ManagerProgramConfig) -> bool {
     program.runtime_offer_parallelism_enabled && !program.runtime_dry_run
 }
 
+/// Parallel managed dispatch when program enables it and the market does not require
+/// unique Direct makers (those must persist binding coins before the next pick).
+#[must_use]
+fn parallel_dispatch_allowed(program: &ManagerProgramConfig, market: &MarketConfig) -> bool {
+    parallel_managed_dispatch_enabled(program) && !market.unique_maker_coins
+}
+
 #[must_use]
 pub(super) fn parallel_max_workers(submission_count: usize, configured_max: usize) -> usize {
     submission_count.min(configured_max.max(1))
@@ -141,7 +148,7 @@ async fn execute_strategy_actions_async(
     }
 
     let program = ctx.resources.program();
-    if parallel_managed_dispatch_enabled(program) {
+    if parallel_dispatch_allowed(program, market) {
         match classify_parallel_dispatch(
             parallel::execute_actions_parallel(ctx, signer_config, market, &expanded).await,
         ) {

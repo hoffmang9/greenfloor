@@ -18,11 +18,13 @@ use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::offer::request::normalize_offer_side;
+use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
 use crate::paths::resolve_cats_config_path;
 use crate::storage::{
     state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
 };
+
+use super::unique_maker::{resolve_unique_maker_offer_coin_ids, UniqueMakerResolveRequest};
 
 use context::resolve_build_and_post_context;
 pub(crate) use context::ResolvedBuildAndPostContext;
@@ -88,6 +90,9 @@ pub struct BuildAndPostOfferRequest {
     /// Reuse an unspent soft-expiry maker via `PresplitExisting`.
     #[serde(default)]
     pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
+    /// When non-empty, pin these coin ids on create (`unique_maker_coins` Direct path).
+    #[serde(default)]
+    pub offer_coin_ids: Vec<String>,
     #[cfg(test)]
     #[serde(default, skip)]
     pub test_overrides: crate::offer::operator::BuildOfferTestOverrides,
@@ -112,6 +117,7 @@ pub struct BuildAndPostOfferRequestParts {
     pub run: BuildAndPostRunOptions,
     pub action_side: Option<String>,
     pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
+    pub offer_coin_ids: Vec<String>,
 }
 
 /// Program/markets config paths for managed ensure / build-and-post callers.
@@ -156,6 +162,7 @@ impl BuildAndPostOfferRequestParts {
             },
             action_side: Some(normalize_offer_side(&side.into()).to_string()),
             maker_reuse: None,
+            offer_coin_ids: Vec::new(),
         }
     }
 }
@@ -180,6 +187,7 @@ impl BuildAndPostOfferRequest {
             run: parts.run,
             action_side: parts.action_side,
             maker_reuse: parts.maker_reuse,
+            offer_coin_ids: parts.offer_coin_ids,
             #[cfg(test)]
             test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
         }
@@ -288,14 +296,52 @@ pub(crate) fn flush_build_and_post_persist(
     )
 }
 
+async fn maybe_pin_unique_maker_coin(
+    request: &mut BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+) -> SignerResult<()> {
+    if !ctx.gated.market_row.unique_maker_coins || !request.offer_coin_ids.is_empty() {
+        return Ok(());
+    }
+    let side = ctx.action_side();
+    let size_i64 =
+        i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let leg = compute_signer_offer_leg_amounts(
+        size_i64,
+        ctx.quote_price()?,
+        &ctx.offer_assets.base_asset_id,
+        &ctx.offer_assets.quote_asset_id,
+        &side,
+        &ctx.gated.market_row.pricing,
+    )?;
+    let excludes = {
+        let store = SqliteStore::open(&state_db_path_for_home(&ctx.gated.program.home_dir))?;
+        store.list_binding_maker_coin_ids(&ctx.gated.market_row.market_id)?
+    };
+    request.offer_coin_ids = resolve_unique_maker_offer_coin_ids(UniqueMakerResolveRequest {
+        unique_maker_coins: true,
+        maker_reuse: request.maker_reuse.as_ref(),
+        existing: std::mem::take(&mut request.offer_coin_ids),
+        excludes: &excludes,
+        operator_network: &ctx.gated.operator_network,
+        signer: &ctx.gated.signer,
+        receive_address: &ctx.gated.market_row.receive_address,
+        offered_asset_id: &leg.offer_asset_id,
+        target_amount_mojos: leg.offer_amount_mojos,
+    })
+    .await?;
+    Ok(())
+}
+
 async fn run_build_and_post_offer(
-    request: &BuildAndPostOfferRequest,
+    request: &mut BuildAndPostOfferRequest,
     persist: Option<&mut OfferPostPersistSink<'_>>,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
     Option<BuildAndPostPersistArtifacts>,
 )> {
     let ctx = resolve_build_and_post_context(request).await?;
+    maybe_pin_unique_maker_coin(request, &ctx).await?;
     let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
 
     let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
@@ -395,7 +441,7 @@ async fn build_and_post_offer_async(
 ///
 /// Returns an error if the operation fails.
 pub(crate) async fn build_and_post_offer_with_persist_artifacts(
-    request: BuildAndPostOfferRequest,
+    mut request: BuildAndPostOfferRequest,
     persist: Option<&mut OfferPostPersistSink<'_>>,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
@@ -409,7 +455,7 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     if request.repeat == 0 {
         return Err(SignerError::Other("repeat must be positive".to_string()));
     }
-    run_build_and_post_offer(&request, persist).await
+    run_build_and_post_offer(&mut request, persist).await
 }
 
 #[cfg(test)]

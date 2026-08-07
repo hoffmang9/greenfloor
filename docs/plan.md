@@ -107,6 +107,9 @@ Coin-op notes:
 - Offer files are Bech32m `offer1...` strings; Rust validates structure before Dexie post.
 - Reconciliation prefers Coinset tx-signal evidence over venue-status heuristics.
 - Vault-controlled CAT balance (receive + known makers): `coins-balance --asset …`.
+- **Unique Direct makers (ADR 0022):** `unique_maker_coins` (default true) pins a distinct
+  exact-size receive-address CAT per open Direct offer and forces sequential dispatch for
+  that market.
 
 ### On-chain cancel (ADR 0015)
 

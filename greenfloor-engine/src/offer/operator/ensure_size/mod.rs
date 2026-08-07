@@ -89,6 +89,7 @@ async fn post_offer(
     write_store: &CycleWriteStore,
     reuse: Option<&ReusablePresplitMakerRow>,
 ) -> SignerResult<bool> {
+    // Unique Direct pin lives in build_and_post (after market context resolve).
     let post_request = BuildAndPostOfferRequest::from_parts(with_maker_reuse(parts, reuse));
     let persist_store = write_store.clone();
     let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {

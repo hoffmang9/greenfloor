@@ -1,6 +1,8 @@
 markets:
   - id: m1
     enabled: true
+    # Offline stubbed build-and-post tests: disable unique pin (avoids Coinset).
+    unique_maker_coins: false
     base_asset: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     base_symbol: "TCAT"
     quote_asset: "xch"

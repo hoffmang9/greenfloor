@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::cycle::reconcile::LADDER_CAPACITY_QUERY_STATES;
 use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
-use crate::hex::canonical_tx_id;
+use crate::hex::{canonical_tx_id, normalize_hex_id};
 use rusqlite::{params, OptionalExtension};
 
 use super::{db_err, in_placeholders, query_mapped, utcnow_iso, OfferStateListRow, SqliteStore};
@@ -373,5 +373,114 @@ impl SqliteStore {
             )
             .optional()
             .map_err(|err| db_err("offer_state by id", err))
+    }
+
+    /// Maker coin ids still bound to an open/in-flight offer for `market_id`.
+    ///
+    /// Includes rows watched for reconcile plus `maker_claimed`. Used to pin distinct
+    /// Direct makers when `unique_maker_coins` is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_binding_maker_coin_ids(&self, market_id: &str) -> SignerResult<Vec<String>> {
+        let market = market_id.trim();
+        if market.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(String, String)> = query_mapped(
+            &self.conn,
+            r"
+            SELECT cancel_input_coin_id, state
+            FROM offer_state
+            WHERE market_id = ?1
+              AND cancel_input_coin_id IS NOT NULL
+              AND TRIM(cancel_input_coin_id) != ''
+            ",
+            params![market],
+            "binding maker coin ids",
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for (raw_coin_id, state) in rows {
+            let Ok(parsed) = ReconcileState::parse(&state) else {
+                continue;
+            };
+            if !(parsed.is_watched_for_reconcile()
+                || matches!(parsed, ReconcileState::MakerClaimed))
+            {
+                continue;
+            }
+            let coin_id = normalize_hex_id(&raw_coin_id);
+            if coin_id.is_empty() || !seen.insert(coin_id.clone()) {
+                continue;
+            }
+            out.push(coin_id);
+        }
+        out.sort();
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
+    use crate::storage::sqlite::offer_cancel::{OfferCancelWrite, OfferListingWrite};
+    use tempfile::tempdir;
+
+    fn insert_maker(
+        store: &SqliteStore,
+        offer_id: &str,
+        state: &str,
+        coin_byte: u8,
+        dexie_status: Option<i64>,
+    ) {
+        let coin = hex::encode([coin_byte; 32]);
+        let fields = OfferCancelFields::from_presplit_build(coin, "bb".repeat(32), "cc".repeat(32));
+        store
+            .upsert_offer_state_with_metadata_at(
+                offer_id,
+                "m1",
+                state,
+                dexie_status,
+                "2026-01-01T00:00:00Z",
+                OfferCancelWrite {
+                    fields: Some(&fields),
+                    execution_mode: Some(OfferExecutionMode::Direct),
+                    listing: OfferListingWrite {
+                        publish_venue: Some("dexie"),
+                        listing_expires_at: None,
+                        size_base_units: Some(10),
+                        offer_nonce: None,
+                        offer_side: Some("sell"),
+                    },
+                    ..OfferCancelWrite::default()
+                },
+            )
+            .expect("upsert");
+    }
+
+    #[test]
+    fn list_binding_maker_coin_ids_includes_open_and_pending_excludes_expired() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        insert_maker(&store, "o-open", "open", 0xaa, None);
+        insert_maker(&store, "o-pending", "pending_visibility", 0xbb, None);
+        insert_maker(&store, "o-expired", "expired", 0xcc, Some(6));
+        insert_maker(&store, "o-claimed", "maker_claimed", 0xdd, None);
+
+        let ids = store
+            .list_binding_maker_coin_ids("m1")
+            .expect("binding makers");
+        assert_eq!(
+            ids,
+            vec![
+                hex::encode([0xaa; 32]),
+                hex::encode([0xbb; 32]),
+                hex::encode([0xdd; 32]),
+            ]
+        );
     }
 }
