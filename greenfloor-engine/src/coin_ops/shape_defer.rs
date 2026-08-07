@@ -4,16 +4,18 @@
 //! splits defer to bootstrap via [`defer_low_watermark_split_to_post_bootstrap`]. After
 //! bootstrap completes a primary row, see `offer::bootstrap::shape_policy`.
 
-use super::unit_convert::{exact_whole_units_from_mojos, mojos_from_whole_units};
+use super::unit_convert::exact_whole_units_from_mojos;
 use super::{CoinOpKind, CoinOpPlan, CoinOpPlanReason, SpendableCoin};
 
 /// Reason tag for a single low-watermark split plan emitted by coin-op planning.
 pub const LOW_WATERMARK_BUFFER_DEFICIT: &str = "low_watermark_buffer_deficit";
 
-/// Exact whole ladder-unit amounts from spendable coins (for bucket / protection counts).
+/// Exact whole ladder-unit amounts from spendable coins (for bucket / protection / defer).
 ///
 /// Fractional CAT coins (e.g. `10_500` mojos = `10.5` units) are valid inventory but are
-/// omitted here — they are not an exact ladder clip.
+/// omitted here — they are not an exact ladder clip. Daemon low-watermark defer must not
+/// treat fractional fragments as bootstrap combine coverage (that would skip managed splits
+/// after bootstrap has finished the primary row).
 #[must_use]
 pub fn spendable_exact_ladder_unit_amounts(
     spendable: &[SpendableCoin],
@@ -56,26 +58,19 @@ pub fn defer_low_watermark_split_to_post_bootstrap(
 
 /// Skip daemon execution using live spendable coins (sync; safe before split orchestration).
 ///
-/// Coverage is evaluated in **mojos** so fractional CAT coins (e.g. `10.5`) count fully.
+/// Coverage uses **exact whole ladder units** only. Fractional CAT fragments must not trip
+/// `bootstrap_primary_shape_deferred` — after primary bootstrap completes, those deficits are
+/// daemon coin-op scope.
 #[must_use]
 pub fn defer_low_watermark_split_from_spendable(
     plan: &CoinOpPlan,
     spendable: &[SpendableCoin],
     base_unit_mojo_multiplier: i64,
 ) -> bool {
-    if plan.op_type != CoinOpKind::Split
-        || plan.op_count != 1
-        || plan.reason != CoinOpPlanReason::LowWatermarkBufferDeficit
-    {
-        return false;
-    }
-    let required_mojos = mojos_from_whole_units(plan.size_base_units, base_unit_mojo_multiplier);
-    let spendable_mojos: Vec<i64> = spendable
-        .iter()
-        .map(|coin| coin.amount)
-        .filter(|amount| *amount > 0)
-        .collect();
-    aggregate_covers_without_single_coin(required_mojos, &spendable_mojos)
+    defer_low_watermark_split_to_post_bootstrap(
+        plan,
+        &spendable_exact_ladder_unit_amounts(spendable, base_unit_mojo_multiplier),
+    )
 }
 
 #[cfg(test)]
@@ -125,25 +120,26 @@ mod tests {
     }
 
     #[test]
-    fn defer_from_spendable_counts_fractional_cat_mojos() {
+    fn defer_from_spendable_ignores_fractional_only_mojo_coverage() {
         let plan = CoinOpPlan {
             op_type: CoinOpKind::Split,
-            size_base_units: 100,
+            size_base_units: 10,
             op_count: 1,
             reason: CoinOpPlanReason::LowWatermarkBufferDeficit,
         };
-        // 65.5 + 34.5 = 100 CAT units in mojos; neither coin alone covers.
+        // 6.5 + 3.5 CAT = 10 units in mojos, but neither is an exact ladder clip.
+        // Must not defer to bootstrap — daemon owns this buffer deficit.
         let spendable = vec![
-            SpendableCoin::new("a".to_string(), 65_500),
-            SpendableCoin::new("b".to_string(), 34_500),
+            SpendableCoin::new("a".to_string(), 6_500),
+            SpendableCoin::new("b".to_string(), 3_500),
         ];
-        assert!(defer_low_watermark_split_from_spendable(
+        assert!(!defer_low_watermark_split_from_spendable(
             &plan, &spendable, 1_000
         ));
     }
 
     #[test]
-    fn defer_from_spendable_matches_whole_unit_mojos() {
+    fn defer_from_spendable_matches_exact_whole_unit_amounts() {
         let plan = CoinOpPlan {
             op_type: CoinOpKind::Split,
             size_base_units: 100,
