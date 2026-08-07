@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use super::*;
 use crate::coin_ops::selection::SpendableCoin;
 
+const TEST_CAT_ASSET_ID: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
 fn coins(rows: &[(&str, i64)]) -> Vec<SpendableCoin> {
     rows.iter()
         .map(|(id, amount)| SpendableCoin::new((*id).to_string(), *amount))
@@ -137,16 +139,20 @@ fn combine_largest_by_amount_picks_top_coins_respecting_exclude() {
 }
 
 #[test]
-fn daemon_auto_rejects_sub_cat_change_dust() {
-    let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
+fn daemon_auto_skips_when_only_funding_coin_would_create_sub_cat_change() {
+    // Dust filter runs inside resolve_shape_funding, so a sole 10_500→10_000 CAT funder
+    // never becomes a Coin plan (and never needs the post-select SubCatChange skip).
     let spendable = coins(&[("Coin_cat", 10_500)]);
-    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, cat_id, false));
-    match plan {
-        SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(data)) => {
-            assert_eq!(data.remainder_mojos, 500);
-        }
-        other => panic!("unexpected plan: {other:?}"),
-    }
+    let plan = plan_daemon_auto_split_selection(&daemon_params(
+        &spendable,
+        10_000,
+        TEST_CAT_ASSET_ID,
+        false,
+    ));
+    assert!(matches!(
+        plan,
+        SplitAutoSelectPlan::Skip(SplitSkipReason::NoSpendableMeetsRequired)
+    ));
 }
 
 #[test]
@@ -186,9 +192,13 @@ fn combine_prereq_plan_exact_match_when_cap_covers_all_inputs() {
 
 #[test]
 fn daemon_auto_skips_combine_prereq_when_overshoot_would_be_cat_dust() {
-    let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
     let spendable = coins(&[("Coin_a", 6000), ("Coin_b", 4500)]);
-    let plan = plan_daemon_auto_split_selection(&daemon_params(&spendable, 10_000, cat_id, true));
+    let plan = plan_daemon_auto_split_selection(&daemon_params(
+        &spendable,
+        10_000,
+        TEST_CAT_ASSET_ID,
+        true,
+    ));
     match plan {
         SplitAutoSelectPlan::Skip(SplitSkipReason::SubCatChange(data)) => {
             assert_eq!(data.remainder_mojos, 500);

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{CombineInputs, ShapeCoin};
-use crate::coin_ops::cat_overshoot_change_would_be_dust;
+use crate::coin_ops::overshoot_change_would_be_dust;
 use crate::coin_ops::selection::{
     select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
@@ -53,7 +53,7 @@ pub(crate) fn plan_combine_inputs_for_target_in(
         select_spendable_coins_for_target_amount_with_options(
             &spendable,
             target_amount,
-            TargetAmountSelectionOptions::default(),
+            TargetAmountSelectionOptions::combine_unconstrained(),
         );
     let selected_count_before_cap = unconstrained_ids.len();
     if selected_count_before_cap < 2 {
@@ -147,8 +147,7 @@ fn combine_with_dust_guard(
     let change = selection
         .selected_total
         .saturating_sub(selection.target_amount);
-    let change_mojos = change.saturating_mul(mojo_multiplier.max(1));
-    if cat_overshoot_change_would_be_dust(change_mojos, canonical_asset_id) {
+    if overshoot_change_would_be_dust(change, mojo_multiplier, canonical_asset_id) {
         return None;
     }
     Some(selection)

@@ -3,7 +3,7 @@ use crate::coin_ops::shape::ShapeFunding;
 use crate::offer::bootstrap::test_fixtures::{
     bootstrap_coin as coin, bootstrap_test_context, expect_needs_shape,
     expect_needs_shape_with_cap, ladder_deficit, ladder_row as row, plan_bootstrap,
-    plan_bootstrap_with_cap, DEFAULT_BOOTSTRAP_COMBINE_CAP,
+    plan_bootstrap_with_cap, DEFAULT_BOOTSTRAP_COMBINE_CAP, TEST_CAT_ASSET_ID,
 };
 use crate::offer::bootstrap::BootstrapPlanOutcome;
 
@@ -252,7 +252,6 @@ fn eco181_inventory_replan_after_combine_preserves_hundred_row() {
 /// `5 mojos` — under the floor — and incorrectly rejected as dust.
 #[test]
 fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_cat() {
-    let cat_asset_id = "0000000000000000000000000000000000000000000000000000000000000001";
     let ladder = vec![row(100, 1, 0)];
     let spendable: Vec<_> =
         crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins()
@@ -260,7 +259,7 @@ fn combine_first_dust_check_scales_base_unit_overshoot_by_mojo_multiplier_for_ca
             .map(|coin_row| coin(&coin_row.id, coin_row.amount))
             .collect();
     let combine_context =
-        crate::offer::bootstrap::BootstrapCombineContext::plan_units(1_000, cat_asset_id);
+        crate::offer::bootstrap::BootstrapCombineContext::plan_units(1_000, TEST_CAT_ASSET_ID);
     let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &combine_context);
 
     let plan = match outcome {
@@ -288,4 +287,75 @@ fn plan_bootstrap_mixed_outputs_accepts_explicit_context() {
         ),
         BootstrapPlanOutcome::Ready
     );
+}
+
+/// Plan-mojos sell bootstrap: a fractional oversize CAT coin (`10_500` for a `10_000` clip)
+/// must not be selected as single-coin funding — vault rejects the `500` mojo change when
+/// `allow_sub_cat_output` is false. Prefer `CannotFund` over an unsplittable plan.
+#[test]
+fn mojos_fractional_oversize_cat_coin_does_not_plan_dust_split() {
+    let ladder = vec![row(10_000, 1, 0)];
+    let spendable = vec![coin("frac-oversize", 10_500)];
+    let ctx = crate::offer::bootstrap::BootstrapCombineContext::mojos(TEST_CAT_ASSET_ID);
+    let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &ctx);
+    assert!(
+        matches!(
+            outcome,
+            BootstrapPlanOutcome::CannotFund {
+                total_output_amount: 10_000
+            }
+        ),
+        "expected CannotFund for sole dust-change CAT funder, got {outcome:?}"
+    );
+}
+
+/// Same denomination path: a whole-unit overshoot (`11_000` → `10_000`) is valid single-coin
+/// funding (change `1_000` mojos meets the CAT floor).
+#[test]
+fn mojos_whole_unit_oversize_cat_coin_plans_single_coin_split() {
+    let ladder = vec![row(10_000, 1, 0)];
+    let spendable = vec![coin("whole-oversize", 11_000)];
+    let ctx = crate::offer::bootstrap::BootstrapCombineContext::mojos(TEST_CAT_ASSET_ID);
+    let plan = match plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &ctx) {
+        BootstrapPlanOutcome::NeedsShape(plan) => plan,
+        other => panic!("expected NeedsShape, got {other:?}"),
+    };
+    assert!(matches!(plan.funding, ShapeFunding::SingleCoin { .. }));
+    assert_eq!(plan.source_coin_id(), Some("whole-oversize"));
+    assert_eq!(plan.change_amount, 1_000);
+}
+
+/// Prefer a non-dust covering coin when a smaller dust-change candidate also exists.
+#[test]
+fn mojos_skips_dust_candidate_in_favor_of_valid_oversize() {
+    let ladder = vec![row(10_000, 1, 0)];
+    let spendable = vec![
+        coin("frac-oversize", 10_500),
+        coin("whole-oversize", 11_000),
+    ];
+    let ctx = crate::offer::bootstrap::BootstrapCombineContext::mojos(TEST_CAT_ASSET_ID);
+    let plan = match plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &ctx) {
+        BootstrapPlanOutcome::NeedsShape(plan) => plan,
+        other => panic!("expected NeedsShape, got {other:?}"),
+    };
+    assert_eq!(plan.source_coin_id(), Some("whole-oversize"));
+    assert_eq!(plan.change_amount, 1_000);
+}
+
+/// Dust-creating oversize is unusable alone, but with a second fragment combine-first can
+/// fund the clip (oversize no longer blocks combine via `max_single` coverage).
+#[test]
+fn mojos_fractional_oversize_plus_fragment_can_combine_first() {
+    let ladder = vec![row(10_000, 1, 0)];
+    let spendable = vec![coin("frac-oversize", 10_500), coin("fragment", 6_000)];
+    let ctx = crate::offer::bootstrap::BootstrapCombineContext::mojos(TEST_CAT_ASSET_ID);
+    let plan = match plan_bootstrap_mixed_outputs(&ladder, &spendable, 5, &ctx) {
+        BootstrapPlanOutcome::NeedsShape(plan) => plan,
+        other => panic!("expected NeedsShape/CombineFirst, got {other:?}"),
+    };
+    assert!(plan.requires_combine_first());
+    let combine = plan.combine_inputs().expect("combine inputs");
+    assert_eq!(combine.target_amount, 10_000);
+    assert!(combine.selected_total >= 10_000);
+    assert!(combine.input_coin_ids.len() >= 2);
 }

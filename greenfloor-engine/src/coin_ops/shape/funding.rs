@@ -5,10 +5,45 @@ use super::deficit::{collect_shape_deficits, shape_context_for_rows};
 use super::types::{
     AmountUnit, ShapeCoin, ShapeDeficit, ShapeFunding, ShapeFundingResolution, ShapeLadderRow,
 };
-use crate::coin_ops::aggregate_covers_without_single_coin;
+use crate::coin_ops::overshoot_change_would_be_dust;
 use crate::coin_ops::shape_protection::{
     select_smallest_non_cannibalizing_candidate_id, LadderShapeContext, SplittableCandidate,
 };
+
+/// Spendable coin that covers `required_amount` without leaving CAT dust change.
+fn coin_funds_without_dust_change(
+    coin: &ShapeCoin,
+    required_amount: i64,
+    unit: AmountUnit,
+    canonical_asset_id: &str,
+) -> bool {
+    coin.is_spendable()
+        && coin.amount >= required_amount
+        && !overshoot_change_would_be_dust(
+            coin.amount - required_amount,
+            unit.dust_change_mojo_multiplier(),
+            canonical_asset_id,
+        )
+}
+
+/// Aggregate covers `required_amount`, but no single coin can fund it without CAT dust.
+///
+/// Dust-creating oversize coins are not "usable singles", so combine-first can still run
+/// when multiple coins can fund the target (combine always requires ≥2 inputs).
+fn aggregate_covers_without_usable_single_coin(
+    required_amount: i64,
+    coins: &[ShapeCoin],
+    unit: AmountUnit,
+    canonical_asset_id: &str,
+) -> bool {
+    let aggregate: i64 = coins.iter().map(|coin| coin.amount).sum();
+    if required_amount <= 0 || aggregate < required_amount {
+        return false;
+    }
+    !coins
+        .iter()
+        .any(|coin| coin_funds_without_dust_change(coin, required_amount, unit, canonical_asset_id))
+}
 
 /// Explicit funding-resolution policy for [`resolve_shape_funding`] / [`plan_shape_from_deficits`].
 ///
@@ -120,32 +155,42 @@ impl<'a> ShapeFundingPolicy<'a> {
     }
 }
 
-fn select_largest_shape_coin(coins: &[ShapeCoin], required_amount: i64) -> Option<&ShapeCoin> {
+fn select_largest_shape_coin<'a>(
+    coins: &'a [ShapeCoin],
+    required_amount: i64,
+    unit: AmountUnit,
+    canonical_asset_id: &str,
+) -> Option<&'a ShapeCoin> {
     coins
         .iter()
-        .filter(|coin| !coin.id.is_empty() && coin.amount >= required_amount)
+        .filter(|coin| {
+            coin_funds_without_dust_change(coin, required_amount, unit, canonical_asset_id)
+        })
         .max_by_key(|coin| coin.amount)
 }
 
-/// Smallest coin that funds `required_amount` (same unit as `coins`) without cannibalizing a
-/// protected ladder row.
+/// Smallest coin that funds `required_amount` without cannibalizing a protected ladder row
+/// and without leaving CAT dust change.
 ///
-/// `mojo_multiplier` converts coin amounts into whole ladder units for protection checks only.
-/// Fractional CAT coins remain valid funding sources; they are not classified as exact ladder
-/// clips (`10_500` mojos is `10.5` units, not size `10`).
+/// Ladder conversion uses [`AmountUnit::ladder_conversion_multiplier`]. Fractional CAT coins
+/// remain valid funding sources when change is not dust; they are not classified as exact
+/// ladder clips (`10_500` mojos is `10.5` units, not size `10`).
 fn select_smallest_non_cannibalizing_shape_coin<'a>(
     coins: &'a [ShapeCoin],
     required_amount: i64,
-    mojo_multiplier: i64,
+    unit: AmountUnit,
+    canonical_asset_id: &str,
     ctx: &LadderShapeContext,
 ) -> Option<&'a ShapeCoin> {
-    let multiplier = mojo_multiplier.max(1);
+    let multiplier = unit.ladder_conversion_multiplier().max(1);
     // Capacity uses floored units; cannibalization uses exact clips only (see SplittableCandidate).
     let required_ladder_units =
         crate::coin_ops::floored_units_from_mojos(required_amount, multiplier);
     let candidates: Vec<SplittableCandidate<'_>> = coins
         .iter()
-        .filter(|coin| coin.is_spendable() && coin.amount >= required_amount)
+        .filter(|coin| {
+            coin_funds_without_dust_change(coin, required_amount, unit, canonical_asset_id)
+        })
         .map(|coin| SplittableCandidate::from_mojos(coin.id.as_str(), coin.amount, multiplier))
         .collect();
     let selected_id =
@@ -172,13 +217,23 @@ pub fn resolve_shape_funding(
     policy: &ShapeFundingPolicy<'_>,
 ) -> ShapeFundingResolution {
     let flags = policy.flags();
-    let ladder_multiplier = flags.unit.ladder_conversion_multiplier();
     let selected = if flags.prefer_smallest_non_cannibalizing {
         let ctx = ladder_shape
             .expect("ladder_shape required when prefer_smallest_non_cannibalizing is set");
-        select_smallest_non_cannibalizing_shape_coin(coins, required_amount, ladder_multiplier, ctx)
+        select_smallest_non_cannibalizing_shape_coin(
+            coins,
+            required_amount,
+            flags.unit,
+            flags.canonical_asset_id,
+            ctx,
+        )
     } else {
-        select_largest_shape_coin(coins, required_amount.max(0))
+        select_largest_shape_coin(
+            coins,
+            required_amount.max(0),
+            flags.unit,
+            flags.canonical_asset_id,
+        )
     };
     if let Some(coin) = selected {
         return ShapeFundingResolution::Funded(ShapeFunding::SingleCoin {
@@ -194,7 +249,12 @@ pub fn resolve_shape_funding(
 
     let amounts: Vec<i64> = coins.iter().map(|coin| coin.amount).collect();
     let feasible = if ladder_preserving {
-        aggregate_covers_without_single_coin(required_amount, &amounts)
+        aggregate_covers_without_usable_single_coin(
+            required_amount,
+            coins,
+            flags.unit,
+            flags.canonical_asset_id,
+        )
     } else {
         required_amount > 0 && amounts.iter().sum::<i64>() >= required_amount
     };

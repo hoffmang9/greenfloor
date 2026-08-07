@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::policy::cat_overshoot_change_would_be_dust;
+use super::policy::overshoot_change_would_be_dust;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetAmountOvershootRank {
@@ -28,6 +28,16 @@ impl Default for TargetAmountSelectionOptions {
 }
 
 impl TargetAmountSelectionOptions {
+    /// Unconstrained combine-first pick: at least two inputs (a solo covering coin is the
+    /// single-coin funding path, including dust-rejected oversize coins).
+    pub(crate) fn combine_unconstrained() -> Self {
+        Self {
+            max_input_count: None,
+            min_input_count: 2,
+            overshoot_rank: TargetAmountOvershootRank::MinOvershoot,
+        }
+    }
+
     pub(crate) fn combine_cap(cap: usize) -> Self {
         Self {
             max_input_count: Some(cap),
@@ -125,7 +135,7 @@ pub fn split_would_create_sub_cat_change(
 ) -> (bool, i64) {
     let remainder = selected_amount_mojos - required_amount_mojos;
     (
-        cat_overshoot_change_would_be_dust(remainder, canonical_asset_id),
+        overshoot_change_would_be_dust(remainder, 1, canonical_asset_id),
         remainder,
     )
 }

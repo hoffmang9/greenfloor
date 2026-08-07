@@ -78,12 +78,10 @@ mod tests {
     };
     use crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_spendable_coins;
 
-    use crate::offer::bootstrap::test_fixtures::bootstrap_coin as coin;
-
-    const CAT_ASSET: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+    use crate::offer::bootstrap::test_fixtures::{bootstrap_coin as coin, TEST_CAT_ASSET_ID};
 
     fn cat_combine_context() -> BootstrapCombineContext {
-        BootstrapCombineContext::plan_units(1_000, CAT_ASSET)
+        BootstrapCombineContext::plan_units(1_000, TEST_CAT_ASSET_ID)
     }
 
     #[test]
@@ -109,7 +107,7 @@ mod tests {
 
     #[test]
     fn rejects_combine_when_overshoot_change_would_be_cat_dust() {
-        let ctx = BootstrapCombineContext::mojos(CAT_ASSET);
+        let ctx = BootstrapCombineContext::mojos(TEST_CAT_ASSET_ID);
         let spendable = vec![coin("a", 51), coin("b", 50)];
         assert!(
             build_bootstrap_combine_plan(&spendable, &[], PlanAmount::new(100), 10, &ctx).is_none()

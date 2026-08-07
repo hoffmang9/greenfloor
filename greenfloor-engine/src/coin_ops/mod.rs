@@ -45,7 +45,7 @@ pub use plan::{
 };
 pub use policy::{
     amount_meets_coin_op_min_mojos, cat_overshoot_change_would_be_dust, coin_op_min_amount_mojos,
-    coin_op_target_amount_allowed,
+    coin_op_target_amount_allowed, overshoot_change_would_be_dust,
 };
 pub use scalars::{
     coin_op_non_negative_u64, coin_op_non_negative_u64_saturating, i64_to_usize, usize_to_i64,
