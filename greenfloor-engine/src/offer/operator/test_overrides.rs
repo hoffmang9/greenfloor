@@ -12,6 +12,9 @@ pub struct BuildOfferTestOverrides {
     /// When set, unique-maker live pin returns this error (no Coinset call).
     #[serde(default)]
     pub unique_pin_error: Option<String>,
+    /// When set, unique-maker live pin returns this coin id (no Coinset call).
+    #[serde(default)]
+    pub unique_pin_coin_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -22,5 +25,9 @@ impl BuildOfferTestOverrides {
 
     pub(crate) fn unique_pin_error(&self) -> Option<&str> {
         self.unique_pin_error.as_deref()
+    }
+
+    pub(crate) fn unique_pin_coin_id(&self) -> Option<&str> {
+        self.unique_pin_coin_id.as_deref()
     }
 }

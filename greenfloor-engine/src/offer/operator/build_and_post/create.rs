@@ -9,7 +9,7 @@ pub(super) fn build_create_offer_request(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
     maker_reuse: Option<PresplitMakerReuse>,
-    offer_coin_ids: Vec<String>,
+    offer_coin_ids: &[String],
 ) -> SignerResult<BuildOfferForActionRequest> {
     let reuse = maker_reuse.is_some();
     Ok(BuildOfferForActionRequest {
@@ -25,7 +25,7 @@ pub(super) fn build_create_offer_request(
         // Maker reuse skips split (coin already exists).
         split_input_coins: !reuse,
         broadcast_split: !reuse,
-        offer_coin_ids,
+        offer_coin_ids: offer_coin_ids.to_vec(),
         quote_asset_type: ctx.gated.market_row.quote_asset_type.clone(),
         maker_reuse,
     })
@@ -35,7 +35,7 @@ pub(super) async fn create_offer(
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
     maker_reuse: Option<PresplitMakerReuse>,
-    offer_coin_ids: Vec<String>,
+    offer_coin_ids: &[String],
 ) -> SignerResult<BuildOfferForActionResult> {
     #[cfg(test)]
     if let Some(offer_text) = ctx.test_overrides.stub_offer_text() {
@@ -76,7 +76,7 @@ mod tests {
         };
 
         let request =
-            build_create_offer_request(&ctx, 100, None, Vec::new()).expect("create offer request");
+            build_create_offer_request(&ctx, 100, None, &[]).expect("create offer request");
 
         assert_eq!(request.quote_asset, "txch");
         assert_ne!(request.quote_asset, ctx.gated.market_row.quote_asset);
@@ -87,7 +87,7 @@ mod tests {
     fn create_offer_request_pins_non_empty_offer_coin_ids() {
         let ctx = sample_resolved_build_and_post_context();
         let coin = "aa".repeat(32);
-        let request = build_create_offer_request(&ctx, 100, None, vec![coin.clone()])
+        let request = build_create_offer_request(&ctx, 100, None, std::slice::from_ref(&coin))
             .expect("create offer request");
         assert_eq!(request.offer_coin_ids, vec![coin]);
     }

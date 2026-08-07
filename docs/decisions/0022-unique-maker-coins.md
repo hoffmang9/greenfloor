@@ -40,9 +40,10 @@ On live `byc_two_sided_wusdbc` (ladder: 1 buy + 3 sell × 10):
    `build_and_post` iteration after denomination bootstrap succeeds and before create
    (`needs_live_unique_pin` + `pin_unique_exact_maker_coin_id`), so shaping cannot spend
    the pinned coin. The batch seeds excludes from SQLite bindings (daemon: cycle write
-   store; CLI: persist store / home DB), then records each pin into an in-memory session
-   set immediately so in-batch uniqueness does not depend on persist side effects.
-   Dry-run skips Coinset pin. Daemon `ensure_size` reuses that path.
+   store; CLI: persist store / home DB). Pinned ids join the in-memory session set only
+   after a successful venue publish, so a failed create/publish can reuse the coin on a
+   later `repeat` iteration. Dry-run skips Coinset pin. Daemon `ensure_size` reuses that
+   path.
 
 5. **Sequential dispatch** when unique: managed parallel dispatch is disabled for that
    market so cross-process binding rows are visible before the next ensure.

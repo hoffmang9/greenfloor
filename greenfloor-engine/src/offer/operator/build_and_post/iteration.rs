@@ -58,15 +58,16 @@ fn post_phase_failure(
 
 /// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
 ///
-/// Session excludes are seeded from DB bindings and extended immediately after each pin
-/// so in-batch uniqueness does not depend on persist side effects.
+/// Session excludes are seeded from DB bindings; successful venue publishes append the
+/// pinned ids via [`commit_session_pins_after_publish`] so a failed create/publish can
+/// reuse the coin on a later `repeat` iteration.
 ///
 /// Soft pin/leg failures return `Ok(Err(Failure))` — same nested shape as
 /// [`create_offer_for_post`] — so `ensure_size` / sequential dispatch can continue.
 async fn offer_coin_ids_after_bootstrap(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
-    session_excludes: &mut HashSet<String>,
+    session_excludes: &HashSet<String>,
     started: Instant,
 ) -> SignerResult<Result<Vec<String>, PostIterationOutcome>> {
     if !needs_live_unique_pin(
@@ -79,6 +80,10 @@ async fn offer_coin_ids_after_bootstrap(
     #[cfg(test)]
     if let Some(message) = ctx.test_overrides.unique_pin_error() {
         return Ok(Err(post_phase_failure(message, started, None)));
+    }
+    #[cfg(test)]
+    if let Some(coin_id) = ctx.test_overrides.unique_pin_coin_id() {
+        return Ok(Ok(vec![coin_id.to_string()]));
     }
     let side = ctx.action_side();
     let Ok(size_i64) = i64::try_from(request.size_base_units) else {
@@ -113,11 +118,25 @@ async fn offer_coin_ids_after_bootstrap(
     })
     .await
     {
-        Ok(coin_id) => {
-            record_session_pin(session_excludes, &coin_id);
-            Ok(Ok(vec![coin_id]))
-        }
+        Ok(coin_id) => Ok(Ok(vec![coin_id])),
         Err(err) => Ok(Err(post_phase_failure(err.to_string(), started, None))),
+    }
+}
+
+/// Commit pinned maker ids into the batch session only after the venue accepts the offer.
+fn commit_session_pins_after_publish(
+    session_excludes: &mut HashSet<String>,
+    offer_coin_ids: &[String],
+    outcome: &PostIterationOutcome,
+) {
+    let PostIterationOutcome::Success(success) = outcome else {
+        return;
+    };
+    if !success.success {
+        return;
+    }
+    for coin_id in offer_coin_ids {
+        record_session_pin(session_excludes, coin_id);
     }
 }
 
@@ -125,7 +144,7 @@ async fn create_offer_for_post(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
     started: Instant,
-    offer_coin_ids: Vec<String>,
+    offer_coin_ids: &[String],
 ) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
     let created = match create_offer(
@@ -278,7 +297,7 @@ pub(super) async fn run_post_iteration(
             Err(outcome) => return Ok((bootstrap_action, outcome)),
         };
     let (created, create_phase_ms) =
-        match create_offer_for_post(request, ctx, started, offer_coin_ids).await? {
+        match create_offer_for_post(request, ctx, started, &offer_coin_ids).await? {
             Ok(values) => values,
             Err(outcome) => return Ok((bootstrap_action, outcome)),
         };
@@ -303,6 +322,7 @@ pub(super) async fn run_post_iteration(
         coinset,
     )
     .await?;
+    commit_session_pins_after_publish(session_excludes, &offer_coin_ids, &outcome);
 
     Ok((bootstrap_action, outcome))
 }
@@ -312,7 +332,7 @@ mod tests {
     use std::collections::HashSet;
     use std::time::Instant;
 
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use super::create_offer_for_post;
     use super::PostIterationOutcome;
@@ -328,7 +348,7 @@ mod tests {
         let request = unused_post_iteration_request(false, Some(offer_text));
         let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
 
-        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), Vec::new())
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), &[])
             .await
             .expect("iteration result")
             .expect_err("verify failure");
@@ -347,7 +367,7 @@ mod tests {
         ctx.test_overrides.offer_text = Some(String::new());
         let request = unused_post_iteration_request(false, None);
 
-        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), Vec::new())
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), &[])
             .await
             .expect("iteration result")
             .expect_err("empty offer");
@@ -448,10 +468,10 @@ mod tests {
         let mut ctx = sample_resolved_build_and_post_context();
         ctx.test_overrides.unique_pin_error = Some("no_free_exact_maker".to_string());
         let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let mut session = HashSet::new();
+        let session = HashSet::new();
 
         let outcome =
-            super::offer_coin_ids_after_bootstrap(&request, &ctx, &mut session, Instant::now())
+            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
                 .await
                 .expect("outer SignerResult must stay Ok for soft pin failures");
 
@@ -469,5 +489,73 @@ mod tests {
             session.is_empty(),
             "failed pin must not reserve a session coin"
         );
+    }
+
+    #[tokio::test]
+    async fn offer_coin_ids_after_bootstrap_does_not_commit_session_on_pin() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        let coin = "aa".repeat(32);
+        ctx.test_overrides.unique_pin_coin_id = Some(coin.clone());
+        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        let session = HashSet::new();
+
+        let outcome =
+            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
+                .await
+                .expect("pin");
+        let Ok(pinned) = outcome else {
+            panic!("expected pinned ids");
+        };
+
+        assert_eq!(pinned, vec![coin]);
+        assert!(
+            session.is_empty(),
+            "pin alone must not reserve; commit only after publish success"
+        );
+    }
+
+    #[test]
+    fn commit_session_pins_only_after_successful_publish() {
+        let coin = "bb".repeat(32);
+        let mut session = HashSet::new();
+        let failure = PostIterationOutcome::Failure(super::PostFailure {
+            error: "create_failed".to_string(),
+            started: Instant::now(),
+            create_phase_ms: None,
+            execution_mode: None,
+            bootstrap: None,
+        });
+        super::commit_session_pins_after_publish(
+            &mut session,
+            std::slice::from_ref(&coin),
+            &failure,
+        );
+        assert!(session.is_empty());
+
+        let publish_failed = PostIterationOutcome::Success(Box::new(super::PostAttemptSuccess {
+            publish_venue: "dexie".to_string(),
+            result: json!({}),
+            success: false,
+            persist_record: None,
+        }));
+        super::commit_session_pins_after_publish(
+            &mut session,
+            std::slice::from_ref(&coin),
+            &publish_failed,
+        );
+        assert!(session.is_empty());
+
+        let published = PostIterationOutcome::Success(Box::new(super::PostAttemptSuccess {
+            publish_venue: "dexie".to_string(),
+            result: json!({}),
+            success: true,
+            persist_record: None,
+        }));
+        super::commit_session_pins_after_publish(
+            &mut session,
+            std::slice::from_ref(&coin),
+            &published,
+        );
+        assert!(session.contains(&coin));
     }
 }

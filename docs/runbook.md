@@ -137,10 +137,11 @@ Optional developer bootstrap for testnet markets:
 - Unique Direct makers (ADR 0022): market field `unique_maker_coins` defaults **true**
   when omitted. Each new Direct offer pins a free **exact-size** receive-address CAT (via
   create `offer_coin_ids`) after bootstrap and before create, excluding binding makers
-  plus in-batch session pins; posting fails closed when no free exact-size coin remains
-  (oversize coins are not pinned). Dry-run does not live-pin. Unique markets always use
-  sequential strategy dispatch (program parallel is skipped). Set
-  `unique_maker_coins: false` only when intentional shared Direct makers are required.
+  plus session pins from earlier successful publishes in the batch; posting fails closed
+  when no free exact-size coin remains (oversize coins are not pinned). Dry-run does not
+  live-pin. Unique markets always use sequential strategy dispatch (program parallel is
+  skipped). Set `unique_maker_coins: false` only when intentional shared Direct makers are
+  required.
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 
