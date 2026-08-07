@@ -1,9 +1,10 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
@@ -19,6 +20,10 @@ use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
     run_signer_denomination_phase, BootstrapPhaseResult,
 };
+use crate::offer::operator::{
+    needs_live_unique_pin, pin_unique_exact_maker_coin_id, record_session_pin, UniqueMakerLivePin,
+};
+use crate::offer::request::compute_signer_offer_leg_amounts;
 use crate::offer::types::effective_maker_reuse;
 
 async fn run_bootstrap_phase(
@@ -37,17 +42,58 @@ async fn run_bootstrap_phase(
     Ok((bootstrap_action, Some(bootstrap_result)))
 }
 
+/// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
+///
+/// Session excludes are seeded from DB bindings and extended immediately after each pin
+/// so in-batch uniqueness does not depend on persist side effects.
+async fn offer_coin_ids_after_bootstrap(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    session_excludes: &mut HashSet<String>,
+) -> SignerResult<Vec<String>> {
+    if !needs_live_unique_pin(
+        request.run.dry_run,
+        ctx.gated.market_row.unique_maker_coins,
+        request.maker_reuse.as_ref(),
+    ) {
+        return Ok(Vec::new());
+    }
+    let side = ctx.action_side();
+    let size_i64 =
+        i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let leg = compute_signer_offer_leg_amounts(
+        size_i64,
+        ctx.quote_price()?,
+        &ctx.offer_assets.base_asset_id,
+        &ctx.offer_assets.quote_asset_id,
+        &side,
+        &ctx.gated.market_row.pricing,
+    )?;
+    let coin_id = pin_unique_exact_maker_coin_id(UniqueMakerLivePin {
+        excludes: session_excludes,
+        operator_network: &ctx.gated.operator_network,
+        signer: &ctx.gated.signer,
+        receive_address: &ctx.gated.market_row.receive_address,
+        offered_asset_id: &leg.offer_asset_id,
+        target_amount_mojos: leg.offer_amount_mojos,
+    })
+    .await?;
+    record_session_pin(session_excludes, &coin_id);
+    Ok(vec![coin_id])
+}
+
 async fn create_offer_for_post(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
     started: Instant,
+    offer_coin_ids: Vec<String>,
 ) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
     let created = match create_offer(
         ctx,
         request.size_base_units,
         request.maker_reuse.clone(),
-        request.offer_coin_ids.clone(),
+        offer_coin_ids,
     )
     .await
     {
@@ -169,6 +215,7 @@ pub(super) async fn run_post_iteration(
     ctx: &ResolvedBuildAndPostContext,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
+    session_excludes: &mut HashSet<String>,
 ) -> SignerResult<(Value, PostIterationOutcome)> {
     let started = Instant::now();
 
@@ -188,10 +235,12 @@ pub(super) async fn run_post_iteration(
         }
     }
 
-    let (created, create_phase_ms) = match create_offer_for_post(request, ctx, started).await? {
-        Ok(values) => values,
-        Err(outcome) => return Ok((bootstrap_action, outcome)),
-    };
+    let offer_coin_ids = offer_coin_ids_after_bootstrap(request, ctx, session_excludes).await?;
+    let (created, create_phase_ms) =
+        match create_offer_for_post(request, ctx, started, offer_coin_ids).await? {
+            Ok(values) => values,
+            Err(outcome) => return Ok((bootstrap_action, outcome)),
+        };
 
     let coinset = if ctx.publish_venue == "coinset" {
         let base = ctx.gated.signer.coinset_base_url.trim();
@@ -219,6 +268,7 @@ pub(super) async fn run_post_iteration(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::time::Instant;
 
     use serde_json::Value;
@@ -237,7 +287,7 @@ mod tests {
         let request = unused_post_iteration_request(false, Some(offer_text));
         let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
 
-        let outcome = create_offer_for_post(&request, &ctx, Instant::now())
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), Vec::new())
             .await
             .expect("iteration result")
             .expect_err("verify failure");
@@ -256,7 +306,7 @@ mod tests {
         ctx.test_overrides.offer_text = Some(String::new());
         let request = unused_post_iteration_request(false, None);
 
-        let outcome = create_offer_for_post(&request, &ctx, Instant::now())
+        let outcome = create_offer_for_post(&request, &ctx, Instant::now(), Vec::new())
             .await
             .expect("iteration result")
             .expect_err("empty offer");
@@ -273,10 +323,12 @@ mod tests {
     async fn run_post_iteration_blocks_when_bootstrap_not_ready() {
         let ctx = sample_resolved_build_and_post_context();
         let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        let mut session = HashSet::new();
 
-        let (_bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
-            .await
-            .expect("iteration");
+        let (_bootstrap_action, outcome) =
+            super::run_post_iteration(&request, &ctx, None, None, &mut session)
+                .await
+                .expect("iteration");
 
         match outcome {
             PostIterationOutcome::Failure(failure) => {
@@ -303,10 +355,12 @@ mod tests {
             offer_nonce: "bb".repeat(32),
         });
         let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
+        let mut session = HashSet::new();
 
-        let (bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
-            .await
-            .expect("iteration");
+        let (bootstrap_action, outcome) =
+            super::run_post_iteration(&request, &ctx, None, None, &mut session)
+                .await
+                .expect("iteration");
 
         assert_eq!(
             bootstrap_action.get("reason").and_then(Value::as_str),
@@ -329,10 +383,12 @@ mod tests {
             coin_id: String::new(),
             offer_nonce: "bb".repeat(32),
         });
+        let mut session = HashSet::new();
 
-        let (_bootstrap_action, outcome) = super::run_post_iteration(&request, &ctx, None, None)
-            .await
-            .expect("iteration");
+        let (_bootstrap_action, outcome) =
+            super::run_post_iteration(&request, &ctx, None, None, &mut session)
+                .await
+                .expect("iteration");
 
         match outcome {
             PostIterationOutcome::Failure(failure) => {

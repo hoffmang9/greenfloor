@@ -29,7 +29,7 @@ pub(crate) use signer_denomination::BootstrapShapeContext;
 pub(crate) use signer_denomination::SignerDenominationTestOverrides;
 #[cfg(test)]
 pub use test_overrides::BuildOfferTestOverrides;
-pub use unique_maker::{
-    pick_unique_direct_maker_coin_id, resolve_unique_maker_offer_coin_ids,
-    UniqueMakerResolveRequest,
+pub(crate) use unique_maker::{
+    needs_live_unique_pin, pin_unique_exact_maker_coin_id, record_session_pin,
+    session_excludes_from_binding, UniqueMakerLivePin,
 };

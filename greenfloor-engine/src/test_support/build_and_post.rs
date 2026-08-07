@@ -37,7 +37,6 @@ pub fn post_iteration_request(
         },
         action_side: None,
         maker_reuse: None,
-        offer_coin_ids: Vec::new(),
         test_overrides: BuildOfferTestOverrides {
             offer_text: offer_text.map(str::to_string),
         },

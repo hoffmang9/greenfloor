@@ -148,6 +148,14 @@ impl ReconcileState {
     pub fn is_timed_ladder_capacity_candidate(&self) -> bool {
         matches!(self, Self::Lifecycle(OfferLifecycleState::MempoolObserved))
     }
+
+    /// Whether this state's maker coin must stay excluded from a new Direct unique pin.
+    ///
+    /// Watched reconcile rows plus `maker_claimed` (capacity lock, not Dexie-watched).
+    #[must_use]
+    pub fn binds_unique_maker_coin(&self) -> bool {
+        self.is_watched_for_reconcile() || matches!(self, Self::MakerClaimed)
+    }
 }
 
 /// Persistable states loaded for ladder capacity (includes mempool for timed filter).
@@ -156,6 +164,19 @@ pub(crate) const LADDER_CAPACITY_QUERY_STATES: &[&str] = &[
     "refresh_due",
     STATE_MAKER_CLAIMED,
     "mempool_observed",
+];
+
+/// Persistable states whose `cancel_input_coin_id` binds a Direct maker (ADR 0022).
+///
+/// Must stay aligned with [`ReconcileState::binds_unique_maker_coin`].
+pub(crate) const BINDING_MAKER_QUERY_STATES: &[&str] = &[
+    "open",
+    "refresh_due",
+    "mempool_observed",
+    "pending_visibility",
+    "cancel_submitted",
+    "unknown_orphaned",
+    STATE_MAKER_CLAIMED,
 ];
 
 impl Serialize for ReconcileState {
@@ -206,5 +227,27 @@ mod tests {
             !ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved)
                 .counts_toward_ladder_capacity()
         );
+    }
+
+    #[test]
+    fn binds_unique_maker_includes_watched_and_maker_claimed() {
+        assert!(ReconcileState::MakerClaimed.binds_unique_maker_coin());
+        assert!(ReconcileState::PendingVisibility.binds_unique_maker_coin());
+        assert!(ReconcileState::CancelSubmitted.binds_unique_maker_coin());
+        assert!(ReconcileState::UnknownOrphaned.binds_unique_maker_coin());
+        assert!(ReconcileState::Lifecycle(OfferLifecycleState::Open).binds_unique_maker_coin());
+        assert!(!ReconcileState::Cancelled.binds_unique_maker_coin());
+        assert!(!ReconcileState::Lifecycle(OfferLifecycleState::Expired).binds_unique_maker_coin());
+    }
+
+    #[test]
+    fn binding_maker_query_states_match_predicate() {
+        for raw in BINDING_MAKER_QUERY_STATES {
+            let parsed = ReconcileState::parse(raw).expect("query state parses");
+            assert!(
+                parsed.binds_unique_maker_coin(),
+                "{raw} must bind unique makers"
+            );
+        }
     }
 }

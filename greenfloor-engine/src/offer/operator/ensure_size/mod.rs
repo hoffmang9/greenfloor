@@ -91,12 +91,19 @@ async fn post_offer(
 ) -> SignerResult<bool> {
     // Unique Direct pin lives in build_and_post (after market context resolve).
     let post_request = BuildAndPostOfferRequest::from_parts(with_maker_reuse(parts, reuse));
+    let market_id = post_request.market_id.clone().unwrap_or_default();
+    let binding_excludes_seed =
+        write_store.sync(|store| store.list_binding_maker_coin_ids(&market_id))?;
     let persist_store = write_store.clone();
     let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
         persist_store.sync(|store| upsert_offer_post_record(store, record))
     };
-    let (response, artifacts) =
-        build_and_post_offer_with_persist_artifacts(post_request, Some(&mut persist)).await?;
+    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(
+        post_request,
+        Some(&mut persist),
+        Some(binding_excludes_seed),
+    )
+    .await?;
     if let Some(artifacts) = artifacts {
         let store = write_store.lock()?;
         flush_build_and_post_persist(&store, &artifacts)?;

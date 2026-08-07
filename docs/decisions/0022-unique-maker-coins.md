@@ -22,13 +22,13 @@ On live `byc_two_sided_wusdbc` (ladder: 1 buy + 3 sell × 10):
 ## Decision
 
 1. **Market flag `unique_maker_coins`** (default **true** when omitted). When true, each
-   new Direct offer pins a distinct receive-address CAT via existing `offer_coin_ids` on
-   the create request. Opt out with `unique_maker_coins: false` for intentional shared
+   new Direct offer pins a distinct receive-address CAT via existing create-path
+   `offer_coin_ids`. Opt out with `unique_maker_coins: false` for intentional shared
    Direct makers.
 
 2. **Binding excludes** are per `market_id` only: non-empty `cancel_input_coin_id` rows
-   whose state is `ReconcileState::is_watched_for_reconcile() || MakerClaimed`. Terminal
-   states such as `expired` do not bind.
+   whose state satisfies `ReconcileState::binds_unique_maker_coin()` (SQL allowlist
+   `BINDING_MAKER_QUERY_STATES`). Terminal states such as `expired` do not bind.
 
 3. **Exact-size pin only.** Pick a free coin with `amount ==` the offered-leg mojo target
    (same multiplier path as create). Never pin oversize coins — that would force a
@@ -36,12 +36,16 @@ On live `byc_two_sided_wusdbc` (ladder: 1 buy + 3 sell × 10):
    (`InsufficientCatCoins` / `NoUnspentCatCoins` family) when no free exact-size coin
    remains. Skip pick when `maker_reuse` is set (PreferExisting).
 
-4. **Single pin site.** Operator pin runs once in `build_and_post` after market context
-   resolve (`resolve_unique_maker_offer_coin_ids`). Daemon `ensure_size` does not pin
-   separately — it reuses that path.
+4. **Single pin site, after bootstrap, with a session exclude set.** Pin runs in each
+   `build_and_post` iteration after denomination bootstrap succeeds and before create
+   (`needs_live_unique_pin` + `pin_unique_exact_maker_coin_id`), so shaping cannot spend
+   the pinned coin. The batch seeds excludes from SQLite bindings (daemon: cycle write
+   store; CLI: persist store / home DB), then records each pin into an in-memory session
+   set immediately so in-batch uniqueness does not depend on persist side effects.
+   Dry-run skips Coinset pin. Daemon `ensure_size` reuses that path.
 
 5. **Sequential dispatch** when unique: managed parallel dispatch is disabled for that
-   market so persist completes before the next pick.
+   market so cross-process binding rows are visible before the next ensure.
 
 ## Non-goals
 

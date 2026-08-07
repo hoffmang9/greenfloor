@@ -8,12 +8,19 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::types::{effective_maker_reuse, PresplitMakerReuse};
 
-/// Inputs for resolving `offer_coin_ids` under `unique_maker_coins`.
-pub struct UniqueMakerResolveRequest<'a> {
-    pub unique_maker_coins: bool,
-    pub maker_reuse: Option<&'a PresplitMakerReuse>,
-    pub existing: Vec<String>,
-    pub excludes: &'a [String],
+/// Whether this post should live-pin a unique exact-size maker via Coinset.
+#[must_use]
+pub(crate) fn needs_live_unique_pin(
+    dry_run: bool,
+    unique_maker_coins: bool,
+    maker_reuse: Option<&PresplitMakerReuse>,
+) -> bool {
+    !dry_run && unique_maker_coins && effective_maker_reuse(maker_reuse).is_none()
+}
+
+/// Live pin inputs (caller already checked [`needs_live_unique_pin`] and owns excludes).
+pub(crate) struct UniqueMakerLivePin<'a> {
+    pub excludes: &'a HashSet<String>,
     pub operator_network: &'a str,
     pub signer: &'a SignerConfig,
     pub receive_address: &'a str,
@@ -21,62 +28,45 @@ pub struct UniqueMakerResolveRequest<'a> {
     pub target_amount_mojos: u64,
 }
 
-/// When unique mode applies, pick one free exact-size maker and return it as
-/// `offer_coin_ids`; otherwise return `existing` unchanged.
-///
-/// Callers load binding excludes synchronously (via
-/// `SqliteStore::list_binding_maker_coin_ids`) before awaiting so futures stay `Send`.
+/// Pin one free exact-size receive coin, excluding binding + in-batch session coins.
 ///
 /// # Errors
 ///
-/// Returns an error when Coinset listing fails or no free exact-size coin remains.
-pub async fn resolve_unique_maker_offer_coin_ids(
-    request: UniqueMakerResolveRequest<'_>,
-) -> SignerResult<Vec<String>> {
-    if !request.unique_maker_coins
-        || effective_maker_reuse(request.maker_reuse).is_some()
-        || !request.existing.is_empty()
-    {
-        return Ok(request.existing);
-    }
-    let coin_id = pick_unique_direct_maker_coin_id(
-        request.excludes,
-        request.operator_network,
-        request.signer,
-        request.receive_address,
-        request.offered_asset_id,
-        request.target_amount_mojos,
+/// Returns an error when Coinset listing fails, or no free exact-size coin remains.
+pub(crate) async fn pin_unique_exact_maker_coin_id(
+    pin: UniqueMakerLivePin<'_>,
+) -> SignerResult<String> {
+    let coins = list_wallet_unspent_coins_for_signer(
+        pin.operator_network,
+        pin.signer,
+        pin.receive_address,
+        pin.offered_asset_id,
     )
     .await?;
-    Ok(vec![coin_id])
+    pick_from_unspent(
+        &coins,
+        pin.excludes,
+        pin.offered_asset_id,
+        pin.target_amount_mojos,
+    )
 }
 
-/// Pick a free exact-size receive-address coin given preloaded binding excludes.
-///
-/// Only pins `amount == target_amount_mojos` so unique mode never forces an oversize
-/// coin into a split/CONDITIONS path.
-///
-/// # Errors
-///
-/// Returns an error when Coinset listing fails, no free coins remain, or no free
-/// exact-size coin is available.
-pub async fn pick_unique_direct_maker_coin_id(
-    excludes: &[String],
-    operator_network: &str,
-    signer: &SignerConfig,
-    receive_address: &str,
-    offered_asset_id: &str,
-    target_amount_mojos: u64,
-) -> SignerResult<String> {
-    let exclude_set: HashSet<String> = excludes.iter().cloned().collect();
-    let coins = list_wallet_unspent_coins_for_signer(
-        operator_network,
-        signer,
-        receive_address,
-        offered_asset_id,
-    )
-    .await?;
-    pick_from_unspent(&coins, &exclude_set, offered_asset_id, target_amount_mojos)
+/// Record a pinned maker in the in-batch session exclude set.
+pub(crate) fn record_session_pin(session_excludes: &mut HashSet<String>, coin_id: &str) {
+    let id = normalize_hex_id(coin_id);
+    if !id.is_empty() {
+        session_excludes.insert(id);
+    }
+}
+
+/// Seed session excludes from normalized binding coin ids.
+#[must_use]
+pub(crate) fn session_excludes_from_binding(binding_coin_ids: &[String]) -> HashSet<String> {
+    let mut out = HashSet::with_capacity(binding_coin_ids.len());
+    for coin_id in binding_coin_ids {
+        record_session_pin(&mut out, coin_id);
+    }
+    out
 }
 
 fn pick_from_unspent(
@@ -164,47 +154,22 @@ mod tests {
         let coins = vec![coin(0xaa, 10_000), coin(0xbb, 10_000)];
         let asset = "ab".repeat(32);
         let first = pick_from_unspent(&coins, &HashSet::new(), &asset, 10_000).expect("first");
-        let second = pick_from_unspent(&coins, &HashSet::from([first.clone()]), &asset, 10_000)
-            .expect("second");
+        let mut session = HashSet::from([first.clone()]);
+        let second = pick_from_unspent(&coins, &session, &asset, 10_000).expect("second");
         assert_ne!(first, second);
-        let expected = [hex::encode([0xaa; 32]), hex::encode([0xbb; 32])];
-        assert!(expected.contains(&first) && expected.contains(&second));
+        record_session_pin(&mut session, &second);
+        assert_eq!(session.len(), 2);
     }
 
-    #[tokio::test]
-    async fn resolve_skips_when_unique_disabled_or_ids_already_set() {
-        let signer =
-            crate::test_support::signer_config::test_signer_config("https://api.coinset.org");
-        let existing = vec!["aa".repeat(32)];
-        let asset = "ab".repeat(32);
-        let out = resolve_unique_maker_offer_coin_ids(UniqueMakerResolveRequest {
-            unique_maker_coins: false,
-            maker_reuse: None,
-            existing: existing.clone(),
-            excludes: &[],
-            operator_network: "mainnet",
-            signer: &signer,
-            receive_address: "xch1test",
-            offered_asset_id: &asset,
-            target_amount_mojos: 10_000,
-        })
-        .await
-        .expect("resolve");
-        assert_eq!(out, existing);
-
-        let out = resolve_unique_maker_offer_coin_ids(UniqueMakerResolveRequest {
-            unique_maker_coins: true,
-            maker_reuse: None,
-            existing: existing.clone(),
-            excludes: &[],
-            operator_network: "mainnet",
-            signer: &signer,
-            receive_address: "xch1test",
-            offered_asset_id: &asset,
-            target_amount_mojos: 10_000,
-        })
-        .await
-        .expect("resolve");
-        assert_eq!(out, existing);
+    #[test]
+    fn needs_live_unique_pin_gates() {
+        assert!(!needs_live_unique_pin(true, true, None));
+        assert!(!needs_live_unique_pin(false, false, None));
+        let reuse = PresplitMakerReuse {
+            coin_id: "aa".repeat(32),
+            offer_nonce: "bb".repeat(32),
+        };
+        assert!(!needs_live_unique_pin(false, true, Some(&reuse)));
+        assert!(needs_live_unique_pin(false, true, None));
     }
 }

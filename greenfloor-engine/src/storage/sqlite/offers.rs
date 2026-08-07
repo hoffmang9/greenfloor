@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::cycle::reconcile::LADDER_CAPACITY_QUERY_STATES;
+use crate::cycle::reconcile::{BINDING_MAKER_QUERY_STATES, LADDER_CAPACITY_QUERY_STATES};
 use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{canonical_tx_id, normalize_hex_id};
@@ -377,8 +377,7 @@ impl SqliteStore {
 
     /// Maker coin ids still bound to an open/in-flight offer for `market_id`.
     ///
-    /// Includes rows watched for reconcile plus `maker_claimed`. Used to pin distinct
-    /// Direct makers when `unique_maker_coins` is enabled.
+    /// Uses `BINDING_MAKER_QUERY_STATES` / `ReconcileState::binds_unique_maker_coin`.
     ///
     /// # Errors
     ///
@@ -388,30 +387,33 @@ impl SqliteStore {
         if market.is_empty() {
             return Ok(Vec::new());
         }
-        let rows: Vec<(String, String)> = query_mapped(
-            &self.conn,
+        let state_placeholders = in_placeholders(BINDING_MAKER_QUERY_STATES.len());
+        let market_idx = BINDING_MAKER_QUERY_STATES.len() + 1;
+        let sql = format!(
             r"
-            SELECT cancel_input_coin_id, state
+            SELECT cancel_input_coin_id
             FROM offer_state
-            WHERE market_id = ?1
+            WHERE state IN ({state_placeholders})
+              AND market_id = ?{market_idx}
               AND cancel_input_coin_id IS NOT NULL
               AND TRIM(cancel_input_coin_id) != ''
-            ",
-            params![market],
+            "
+        );
+        let mut values: Vec<rusqlite::types::Value> = BINDING_MAKER_QUERY_STATES
+            .iter()
+            .map(|state| (*state).to_string().into())
+            .collect();
+        values.push(market.to_string().into());
+        let rows: Vec<String> = query_mapped(
+            &self.conn,
+            &sql,
+            rusqlite::params_from_iter(values),
             "binding maker coin ids",
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )?;
         let mut out = Vec::new();
         let mut seen = HashSet::new();
-        for (raw_coin_id, state) in rows {
-            let Ok(parsed) = ReconcileState::parse(&state) else {
-                continue;
-            };
-            if !(parsed.is_watched_for_reconcile()
-                || matches!(parsed, ReconcileState::MakerClaimed))
-            {
-                continue;
-            }
+        for raw_coin_id in rows {
             let coin_id = normalize_hex_id(&raw_coin_id);
             if coin_id.is_empty() || !seen.insert(coin_id.clone()) {
                 continue;

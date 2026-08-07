@@ -136,9 +136,9 @@ Optional developer bootstrap for testnet markets:
   or CONDITIONS no longer match current price.
 - Unique Direct makers (ADR 0022): market field `unique_maker_coins` defaults **true**
   when omitted. Each new Direct offer pins a free **exact-size** receive-address CAT (via
-  `offer_coin_ids`) that is not already bound by an open/in-flight offer on that market;
-  posting fails closed when no free exact-size coin remains (oversize coins are not
-  pinned, so unique mode never forces a new CONDITIONS maker). Unique markets always use
+  create `offer_coin_ids`) after bootstrap and before create, excluding binding makers
+  plus in-batch session pins; posting fails closed when no free exact-size coin remains
+  (oversize coins are not pinned). Dry-run does not live-pin. Unique markets always use
   sequential strategy dispatch (program parallel is skipped). Set
   `unique_maker_coins: false` only when intentional shared Direct makers are required.
 
