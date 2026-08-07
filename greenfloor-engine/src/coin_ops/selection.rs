@@ -28,9 +28,10 @@ impl Default for TargetAmountSelectionOptions {
 }
 
 impl TargetAmountSelectionOptions {
-    /// Unconstrained combine-first pick: at least two inputs (a solo covering coin is the
-    /// single-coin funding path, including dust-rejected oversize coins).
-    pub(crate) fn combine_unconstrained() -> Self {
+    /// Multi-coin combine retry: at least two inputs. Used when a solo covering pick would
+    /// leave CAT dust change (that coin belongs on the single-coin path only when change is
+    /// valid; when it is dust, force a multi-coin selection instead).
+    pub(crate) fn combine_multi_coin() -> Self {
         Self {
             max_input_count: None,
             min_input_count: 2,
