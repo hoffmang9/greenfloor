@@ -9,11 +9,18 @@ use serde::Deserialize;
 pub struct BuildOfferTestOverrides {
     #[serde(default)]
     pub offer_text: Option<String>,
+    /// When set, unique-maker live pin returns this error (no Coinset call).
+    #[serde(default)]
+    pub unique_pin_error: Option<String>,
 }
 
 #[cfg(test)]
 impl BuildOfferTestOverrides {
     pub(crate) fn stub_offer_text(&self) -> Option<&str> {
         self.offer_text.as_deref()
+    }
+
+    pub(crate) fn unique_pin_error(&self) -> Option<&str> {
+        self.unique_pin_error.as_deref()
     }
 }

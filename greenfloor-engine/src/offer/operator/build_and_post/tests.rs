@@ -511,6 +511,7 @@ async fn dry_run_returns_preview_payload_in_process() {
         maker_reuse: None,
         test_overrides: crate::offer::operator::BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
+            ..Default::default()
         },
     })
     .await

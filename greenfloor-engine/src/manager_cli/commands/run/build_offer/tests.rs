@@ -113,6 +113,7 @@ async fn run_command_dry_run_returns_success_exit_code() {
         &harness.ctx,
         BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
+            ..Default::default()
         },
     )
     .await

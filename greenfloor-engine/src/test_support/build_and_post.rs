@@ -39,6 +39,7 @@ pub fn post_iteration_request(
         maker_reuse: None,
         test_overrides: BuildOfferTestOverrides {
             offer_text: offer_text.map(str::to_string),
+            ..Default::default()
         },
     }
 }

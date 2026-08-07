@@ -42,34 +42,68 @@ async fn run_bootstrap_phase(
     Ok((bootstrap_action, Some(bootstrap_result)))
 }
 
+fn post_phase_failure(
+    error: impl Into<String>,
+    started: Instant,
+    create_phase_ms: Option<u64>,
+) -> PostIterationOutcome {
+    PostIterationOutcome::Failure(PostFailure {
+        error: error.into(),
+        started,
+        create_phase_ms,
+        execution_mode: None,
+        bootstrap: None,
+    })
+}
+
 /// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
 ///
 /// Session excludes are seeded from DB bindings and extended immediately after each pin
 /// so in-batch uniqueness does not depend on persist side effects.
+///
+/// Soft pin/leg failures return `Ok(Err(Failure))` — same nested shape as
+/// [`create_offer_for_post`] — so `ensure_size` / sequential dispatch can continue.
 async fn offer_coin_ids_after_bootstrap(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
     session_excludes: &mut HashSet<String>,
-) -> SignerResult<Vec<String>> {
+    started: Instant,
+) -> SignerResult<Result<Vec<String>, PostIterationOutcome>> {
     if !needs_live_unique_pin(
         request.run.dry_run,
         ctx.gated.market_row.unique_maker_coins,
         request.maker_reuse.as_ref(),
     ) {
-        return Ok(Vec::new());
+        return Ok(Ok(Vec::new()));
+    }
+    #[cfg(test)]
+    if let Some(message) = ctx.test_overrides.unique_pin_error() {
+        return Ok(Err(post_phase_failure(message, started, None)));
     }
     let side = ctx.action_side();
-    let size_i64 =
-        i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
-    let leg = compute_signer_offer_leg_amounts(
+    let Ok(size_i64) = i64::try_from(request.size_base_units) else {
+        return Ok(Err(post_phase_failure(
+            SignerError::InvalidSizeBaseUnits.to_string(),
+            started,
+            None,
+        )));
+    };
+    let quote_price = match ctx.quote_price() {
+        Ok(price) => price,
+        Err(err) => return Ok(Err(post_phase_failure(err.to_string(), started, None))),
+    };
+    let leg = match compute_signer_offer_leg_amounts(
         size_i64,
-        ctx.quote_price()?,
+        quote_price,
         &ctx.offer_assets.base_asset_id,
         &ctx.offer_assets.quote_asset_id,
         &side,
         &ctx.gated.market_row.pricing,
-    )?;
-    let coin_id = pin_unique_exact_maker_coin_id(UniqueMakerLivePin {
+    ) {
+        Ok(leg) => leg,
+        Err(err) => return Ok(Err(post_phase_failure(err.to_string(), started, None))),
+    };
+    match pin_unique_exact_maker_coin_id(UniqueMakerLivePin {
         excludes: session_excludes,
         operator_network: &ctx.gated.operator_network,
         signer: &ctx.gated.signer,
@@ -77,9 +111,14 @@ async fn offer_coin_ids_after_bootstrap(
         offered_asset_id: &leg.offer_asset_id,
         target_amount_mojos: leg.offer_amount_mojos,
     })
-    .await?;
-    record_session_pin(session_excludes, &coin_id);
-    Ok(vec![coin_id])
+    .await
+    {
+        Ok(coin_id) => {
+            record_session_pin(session_excludes, &coin_id);
+            Ok(Ok(vec![coin_id]))
+        }
+        Err(err) => Ok(Err(post_phase_failure(err.to_string(), started, None))),
+    }
 }
 
 async fn create_offer_for_post(
@@ -99,13 +138,11 @@ async fn create_offer_for_post(
     {
         Ok(result) => result,
         Err(err) => {
-            return Ok(Err(PostIterationOutcome::Failure(PostFailure {
-                error: err.to_string(),
+            return Ok(Err(post_phase_failure(
+                err.to_string(),
                 started,
-                create_phase_ms: Some(metric_millis_to_u64(create_started.elapsed().as_millis())),
-                execution_mode: None,
-                bootstrap: None,
-            })));
+                Some(metric_millis_to_u64(create_started.elapsed().as_millis())),
+            )));
         }
     };
     let create_phase_ms = metric_millis_to_u64(create_started.elapsed().as_millis());
@@ -235,7 +272,11 @@ pub(super) async fn run_post_iteration(
         }
     }
 
-    let offer_coin_ids = offer_coin_ids_after_bootstrap(request, ctx, session_excludes).await?;
+    let offer_coin_ids =
+        match offer_coin_ids_after_bootstrap(request, ctx, session_excludes, started).await? {
+            Ok(ids) => ids,
+            Err(outcome) => return Ok((bootstrap_action, outcome)),
+        };
     let (created, create_phase_ms) =
         match create_offer_for_post(request, ctx, started, offer_coin_ids).await? {
             Ok(values) => values,
@@ -400,5 +441,33 @@ mod tests {
             }
             _ => panic!("expected bootstrap block for unusable maker_reuse"),
         }
+    }
+
+    #[tokio::test]
+    async fn offer_coin_ids_after_bootstrap_soft_fails_unique_pin_errors() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.test_overrides.unique_pin_error = Some("no_free_exact_maker".to_string());
+        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        let mut session = HashSet::new();
+
+        let outcome =
+            super::offer_coin_ids_after_bootstrap(&request, &ctx, &mut session, Instant::now())
+                .await
+                .expect("outer SignerResult must stay Ok for soft pin failures");
+
+        match outcome {
+            Err(PostIterationOutcome::Failure(failure)) => {
+                assert_eq!(failure.error, "no_free_exact_maker");
+                assert!(failure.create_phase_ms.is_none());
+            }
+            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
+                panic!("expected Failure variant")
+            }
+            Ok(_) => panic!("expected soft Failure outcome for unique pin error"),
+        }
+        assert!(
+            session.is_empty(),
+            "failed pin must not reserve a session coin"
+        );
     }
 }
