@@ -93,7 +93,7 @@ mod tests {
                 selected_count_before_cap: 2,
                 combine_input_cap: 5,
             }),
-            output_amounts_base_units: vec![100],
+            output_amounts: vec![100],
             total_output_amount: 100,
             change_amount: 5,
             deficits: vec![ladder_deficit(100, 2, 1)],

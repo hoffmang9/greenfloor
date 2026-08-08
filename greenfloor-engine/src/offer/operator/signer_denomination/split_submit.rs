@@ -6,7 +6,8 @@ use crate::coin_ops::shape::ShapeFunding;
 use crate::error::SignerResult;
 use crate::hex::{hex_to_bytes32, parse_coin_ids};
 use crate::offer::bootstrap::{
-    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos, BaseUnits, BootstrapPlan,
+    bootstrap_combine_vault_outputs_as_mojos, vault_output_mojos_from_plan_amounts, BootstrapPlan,
+    PlanAmount,
 };
 use crate::offer::operator::build_and_post::ResolvedBuildAndPostContext;
 use crate::vault::{
@@ -61,14 +62,13 @@ pub(super) async fn submit_bootstrap_combine(
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
-    split_asset_mojo_multiplier: i64,
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
     let ShapeFunding::CombineFirst(inputs) = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
-    let output_amounts =
-        bootstrap_combine_vault_outputs(inputs, split_asset_mojo_multiplier.max(1))?;
+    // Plan amounts are mojos on the denomination path.
+    let output_amounts = bootstrap_combine_vault_outputs_as_mojos(inputs)?;
     let mut result = submit_bootstrap_vault_mixed_split(
         build_ctx,
         split_asset_id,
@@ -93,19 +93,17 @@ pub(super) async fn submit_bootstrap_mixed_split(
     bootstrap_plan: &BootstrapPlan,
     split_asset_id: &str,
     receive_address: &str,
-    split_asset_mojo_multiplier: i64,
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
     let ShapeFunding::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
         return Err(crate::error::SignerError::InvalidPlanValues);
     };
-    let output_amounts_mojos = bootstrap_mixed_split_output_mojos(
+    let output_amounts_mojos = vault_output_mojos_from_plan_amounts(
         &bootstrap_plan
-            .output_amounts_base_units
+            .output_amounts
             .iter()
-            .map(|amount| BaseUnits::new(*amount))
+            .map(|amount| PlanAmount::new(*amount))
             .collect::<Vec<_>>(),
-        split_asset_mojo_multiplier.max(1),
     )?;
     submit_bootstrap_vault_mixed_split(
         build_ctx,
@@ -125,17 +123,20 @@ mod tests {
 
     use super::{submit_bootstrap_combine, submit_bootstrap_mixed_split};
     use crate::coin_ops::shape::{CombineInputs, ShapeFunding};
-    use crate::offer::bootstrap::{bootstrap_combine_vault_outputs, BootstrapPlan};
+    use crate::offer::bootstrap::{
+        bootstrap_combine_vault_outputs, bootstrap_combine_vault_outputs_as_mojos, BootstrapPlan,
+    };
     use crate::offer::operator::build_and_post::sample_resolved_build_and_post_context;
     use crate::offer::operator::signer_denomination::test_overrides::SignerDenominationTestOverrides;
 
     fn combine_first_plan(inputs: CombineInputs) -> BootstrapPlan {
         let selected_total = inputs.selected_total;
+        let target = inputs.target_amount;
         BootstrapPlan {
             funding: ShapeFunding::CombineFirst(inputs),
-            output_amounts_base_units: vec![100],
-            total_output_amount: 100,
-            change_amount: selected_total - 100,
+            output_amounts: vec![target],
+            total_output_amount: target,
+            change_amount: selected_total - target,
             deficits: Vec::new(),
         }
     }
@@ -153,6 +154,10 @@ mod tests {
         };
         let outputs = bootstrap_combine_vault_outputs(&inputs, 1_000).expect("outputs");
         assert_eq!(outputs, vec![100_000]);
+        assert_eq!(
+            bootstrap_combine_vault_outputs_as_mojos(&inputs).expect("mojos"),
+            vec![100]
+        );
     }
 
     #[tokio::test]
@@ -161,8 +166,8 @@ mod tests {
         overrides.enqueue_sample_vault_mixed_split_stub();
         let plan = combine_first_plan(CombineInputs {
             input_coin_ids: vec!["a".repeat(64), "b".repeat(64)],
-            selected_total: 105,
-            target_amount: 100,
+            selected_total: 105_000,
+            target_amount: 100_000,
             exact_match: false,
             cap_applied: true,
             selected_count_before_cap: 2,
@@ -174,7 +179,6 @@ mod tests {
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-            1_000,
             &overrides,
         )
         .await
@@ -192,7 +196,7 @@ mod tests {
                 coin_id: source_coin_id.to_string(),
                 amount: 1_000,
             },
-            output_amounts_base_units: vec![100],
+            output_amounts: vec![100],
             total_output_amount: 100,
             change_amount: 900,
             deficits: Vec::new(),
@@ -210,7 +214,6 @@ mod tests {
             &plan,
             "not-a-valid-asset-id",
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-            1,
             &overrides,
         )
         .await
@@ -230,7 +233,6 @@ mod tests {
             &plan,
             &"aa".repeat(64),
             "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-            1,
             &overrides,
         )
         .await

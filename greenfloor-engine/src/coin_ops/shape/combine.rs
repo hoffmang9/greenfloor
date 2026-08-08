@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{CombineInputs, ShapeCoin};
-use crate::coin_ops::cat_overshoot_change_would_be_dust;
+use crate::coin_ops::overshoot_change_would_be_dust;
 use crate::coin_ops::selection::{
     select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
@@ -23,12 +23,39 @@ pub fn plan_combine_inputs_for_target(
 }
 
 /// [`plan_combine_inputs_for_target`] restricted to `allowed_coin_ids` when provided.
+///
+/// When `dust` is set and the unconstrained pick is a single covering coin whose overshoot
+/// would be CAT dust, retries with a forced multi-coin selection so dust oversize + fragments
+/// can still combine. Without `dust` (daemon flat combine), a solo covering pick still means
+/// "not a combine" — matching the historical skip when only protected singles cover.
 #[must_use]
 pub(crate) fn plan_combine_inputs_for_target_in(
     coins: &[ShapeCoin],
     target_amount: i64,
     combine_input_cap: i64,
     allowed_coin_ids: Option<&HashSet<String>>,
+) -> Option<CombineInputs> {
+    plan_combine_inputs_for_target_in_with_dust(
+        coins,
+        target_amount,
+        combine_input_cap,
+        allowed_coin_ids,
+        None,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct CombineDustContext<'a> {
+    mojo_multiplier: i64,
+    canonical_asset_id: &'a str,
+}
+
+fn plan_combine_inputs_for_target_in_with_dust(
+    coins: &[ShapeCoin],
+    target_amount: i64,
+    combine_input_cap: i64,
+    allowed_coin_ids: Option<&HashSet<String>>,
+    dust: Option<CombineDustContext<'_>>,
 ) -> Option<CombineInputs> {
     if target_amount <= 0 {
         return None;
@@ -49,15 +76,37 @@ pub(crate) fn plan_combine_inputs_for_target_in(
         .map(|coin| SpendableCoin::new(coin.id.clone(), coin.amount))
         .collect();
 
-    let (unconstrained_ids, unconstrained_total, unconstrained_exact) =
+    let (mut unconstrained_ids, mut unconstrained_total, mut unconstrained_exact) =
         select_spendable_coins_for_target_amount_with_options(
             &spendable,
             target_amount,
             TargetAmountSelectionOptions::default(),
         );
-    let selected_count_before_cap = unconstrained_ids.len();
+    let mut selected_count_before_cap = unconstrained_ids.len();
     if selected_count_before_cap < 2 {
-        return None;
+        let retry_multi = selected_count_before_cap == 1
+            && dust.is_some_and(|ctx| {
+                overshoot_change_would_be_dust(
+                    unconstrained_total.saturating_sub(target_amount),
+                    ctx.mojo_multiplier,
+                    ctx.canonical_asset_id,
+                )
+            });
+        if !retry_multi {
+            return None;
+        }
+        let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
+            &spendable,
+            target_amount,
+            TargetAmountSelectionOptions::combine_multi_coin(),
+        );
+        if ids.len() < 2 {
+            return None;
+        }
+        unconstrained_ids = ids;
+        unconstrained_total = total;
+        unconstrained_exact = exact;
+        selected_count_before_cap = unconstrained_ids.len();
     }
 
     let cap_applied = selected_count_before_cap > cap;
@@ -138,17 +187,20 @@ fn combine_with_dust_guard(
     canonical_asset_id: &str,
     allowed_coin_ids: Option<&HashSet<String>>,
 ) -> Option<CombineInputs> {
-    let selection = plan_combine_inputs_for_target_in(
+    let selection = plan_combine_inputs_for_target_in_with_dust(
         coins,
         target_amount,
         combine_input_cap,
         allowed_coin_ids,
+        Some(CombineDustContext {
+            mojo_multiplier,
+            canonical_asset_id,
+        }),
     )?;
     let change = selection
         .selected_total
         .saturating_sub(selection.target_amount);
-    let change_mojos = change.saturating_mul(mojo_multiplier.max(1));
-    if cat_overshoot_change_would_be_dust(change_mojos, canonical_asset_id) {
+    if overshoot_change_would_be_dust(change, mojo_multiplier, canonical_asset_id) {
         return None;
     }
     Some(selection)

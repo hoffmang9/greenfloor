@@ -1,15 +1,14 @@
 //! Shared bootstrap shape / coinset fixtures for signer denomination tests.
 
 use crate::offer::bootstrap::{
-    plan_bootstrap_mixed_outputs, BaseUnits, BootstrapCoin, BootstrapCombineContext,
-    BootstrapPlanOutcome, PlannerLadderRow,
+    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapCombineContext, BootstrapPlanOutcome,
+    PlanAmount, PlannerLadderRow,
 };
 use crate::offer::operator::{BootstrapShapeContext, SignerDenominationTestOverrides};
 
 pub const BOOTSTRAP_TEST_RECEIVE: &str =
     "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
 pub const BOOTSTRAP_TEST_MOJO_PER_UNIT: u64 = 1_000;
-pub const BOOTSTRAP_TEST_MOJO_MULTIPLIER: i64 = 1_000;
 pub const BOOTSTRAP_TEST_MOJO_PER_XCH: u64 = 1_000_000_000_000;
 
 #[must_use]
@@ -41,29 +40,30 @@ pub fn coin_records_response(records: &[String]) -> String {
     )
 }
 
-/// ECO.181-style inventory (60 + four 10 BU) for cap-aware combine-first bootstrap tests.
+/// ECO.181-style inventory (60k + four 10k plan mojos) for cap-aware combine-first
+/// bootstrap tests. Amounts are already in plan mojos.
 #[must_use]
 pub fn eco181_cap_combine_spendable() -> Vec<BootstrapCoin> {
     vec![
         BootstrapCoin {
             id: "sixty".to_string(),
-            amount: BaseUnits::new(60),
+            amount: PlanAmount::new(60_000),
         },
         BootstrapCoin {
             id: "ten-a".to_string(),
-            amount: BaseUnits::new(10),
+            amount: PlanAmount::new(10_000),
         },
         BootstrapCoin {
             id: "ten-b".to_string(),
-            amount: BaseUnits::new(10),
+            amount: PlanAmount::new(10_000),
         },
         BootstrapCoin {
             id: "ten-c".to_string(),
-            amount: BaseUnits::new(10),
+            amount: PlanAmount::new(10_000),
         },
         BootstrapCoin {
             id: "ten-d".to_string(),
-            amount: BaseUnits::new(10),
+            amount: PlanAmount::new(10_000),
         },
     ]
 }
@@ -72,12 +72,11 @@ pub fn eco181_cap_combine_spendable() -> Vec<BootstrapCoin> {
 pub fn combine_first_shape_context(
     receive_address: &str,
     split_asset_id: &str,
-    mojo_multiplier: i64,
+    combine_context: BootstrapCombineContext,
     ladder: Vec<PlannerLadderRow>,
     spendable: &[BootstrapCoin],
     combine_input_cap: i64,
 ) -> BootstrapShapeContext {
-    let combine_context = BootstrapCombineContext::new(mojo_multiplier, split_asset_id);
     let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) =
         plan_bootstrap_mixed_outputs(&ladder, spendable, combine_input_cap, &combine_context)
     else {
@@ -85,7 +84,6 @@ pub fn combine_first_shape_context(
     };
     BootstrapShapeContext {
         split_asset_id: split_asset_id.to_string(),
-        split_asset_mojo_multiplier: mojo_multiplier,
         receive_address: receive_address.to_string(),
         bootstrap_plan,
         ladder_entries: ladder,
@@ -104,7 +102,7 @@ pub fn eco181_cap_combine_shape_context(ladder: Vec<PlannerLadderRow>) -> Bootst
     combine_first_shape_context(
         BOOTSTRAP_TEST_RECEIVE,
         "xch",
-        BOOTSTRAP_TEST_MOJO_MULTIPLIER,
+        BootstrapCombineContext::mojos("xch"),
         ladder,
         &spendable,
         5,

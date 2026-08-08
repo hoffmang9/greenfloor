@@ -12,11 +12,13 @@ mod shape_policy;
 #[cfg(test)]
 mod test_fixtures;
 
-pub(crate) use amounts::bootstrap_combine_vault_outputs;
+pub(crate) use amounts::bootstrap_combine_vault_outputs_as_mojos;
+#[cfg(test)]
 pub use amounts::{
-    base_units_to_mojos, bootstrap_mixed_split_output_mojos, bootstrap_overshoot_change_mojos,
-    BaseUnits, Mojos,
+    bootstrap_combine_vault_outputs, bootstrap_mixed_split_output_mojos,
+    bootstrap_overshoot_change_mojos, plan_amount_to_mojos,
 };
+pub use amounts::{vault_output_mojos_from_plan_amounts, PlanAmount};
 pub use combine_plan::BootstrapCombineContext;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
 pub use gate::bootstrap_phase_snapshot_block_error;

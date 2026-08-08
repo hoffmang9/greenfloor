@@ -1,6 +1,6 @@
 use crate::coin_ops::shape::ShapeFunding;
 use crate::coinset::WalletUnspentCoin;
-use crate::offer::bootstrap::{BaseUnits, BootstrapPlan, BootstrapPlanOutcome};
+use crate::offer::bootstrap::{BootstrapPlan, BootstrapPlanOutcome, PlanAmount};
 
 use super::{
     bootstrap_skipped, executed_after_split, run_signer_denomination_phase,
@@ -30,7 +30,7 @@ fn spendable_bootstrap_coins_filters_unconfirmed_wallet_rows() {
     let spendable = spendable_bootstrap_coins(&coins);
     assert_eq!(spendable.len(), 1);
     assert_eq!(spendable[0].id, "confirmed");
-    assert_eq!(spendable[0].amount, BaseUnits::new(1000));
+    assert_eq!(spendable[0].amount, PlanAmount::new(1000));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn executed_after_split_carries_fee_and_plan_metadata() {
             coin_id: "coin-a".to_string(),
             amount: 50_000,
         },
-        output_amounts_base_units: vec![100, 100],
+        output_amounts: vec![100, 100],
         total_output_amount: 200,
         change_amount: 49_800,
         deficits: Vec::new(),
@@ -345,7 +345,7 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
     assert!(!plan_ctx.bootstrap_plan.requires_combine_first());
     assert_eq!(plan_ctx.fee_mojos, 0);
     assert_eq!(plan_ctx.fee_source, "config_minimum_fee_fallback");
-    assert!(!plan_ctx.bootstrap_plan.output_amounts_base_units.is_empty());
+    assert!(!plan_ctx.bootstrap_plan.output_amounts.is_empty());
 }
 
 #[tokio::test]
@@ -398,4 +398,120 @@ async fn prepare_bootstrap_execution_plan_continues_eco181_after_combine_buffer_
     };
     assert_eq!(result.reason, "already_ready");
     assert!(result.offer_creation_block_error().is_none());
+}
+
+#[test]
+fn buy_cat_bootstrap_plan_ready_with_quote_mojo_coins() {
+    use crate::config::{LadderEntry, MarketPricing};
+    use crate::offer::bootstrap::{plan_bootstrap_mixed_outputs, BootstrapCombineContext};
+
+    // Regression: buy clip 10 @ 1.001 → 10010 quote mojos; coins stay mojos (no /1000).
+    let ladder = vec![LadderEntry {
+        size_base_units: 10,
+        target_count: 1,
+        split_buffer_count: 1,
+        combine_when_excess_factor: 2.0,
+    }];
+    let pricing = MarketPricing {
+        quote_unit_mojo_multiplier: Some(1_000),
+        ..MarketPricing::default()
+    };
+    let quote_cat = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let entries = super::planning::bootstrap_ladder_entries_for_side(
+        "buy",
+        &ladder,
+        &pricing,
+        1.001,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        quote_cat,
+    )
+    .expect("ladder");
+    assert_eq!(entries[0].size, 10_010);
+
+    let wallet_coins = vec![
+        WalletUnspentCoin {
+            id: "1".repeat(64),
+            name: "1".repeat(64),
+            amount: 10_010,
+            state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
+        },
+        WalletUnspentCoin {
+            id: "2".repeat(64),
+            name: "2".repeat(64),
+            amount: 10_010,
+            state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
+        },
+    ];
+    let spendable = super::planning::bootstrap_coins_as_plan_mojos(&wallet_coins);
+    let outcome = plan_bootstrap_mixed_outputs(
+        &entries,
+        &spendable,
+        50,
+        &BootstrapCombineContext::mojos(quote_cat),
+    );
+    assert!(
+        matches!(outcome, BootstrapPlanOutcome::Ready),
+        "expected Ready, got {outcome:?}"
+    );
+}
+
+#[test]
+fn sell_cat_bootstrap_plan_ready_with_base_mojo_coins() {
+    use crate::config::{LadderEntry, MarketPricing};
+    use crate::offer::bootstrap::{plan_bootstrap_mixed_outputs, BootstrapCombineContext};
+
+    // Sell ladder size 10 CAT units → 10_000 plan mojos; coins are raw mojos.
+    let ladder = vec![LadderEntry {
+        size_base_units: 10,
+        target_count: 2,
+        split_buffer_count: 1,
+        combine_when_excess_factor: 2.0,
+    }];
+    let pricing = MarketPricing {
+        base_unit_mojo_multiplier: Some(1_000),
+        ..MarketPricing::default()
+    };
+    let base_cat = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let entries = super::planning::bootstrap_ladder_entries_for_side(
+        "sell", &ladder, &pricing, 1.0, base_cat, "xch",
+    )
+    .expect("ladder");
+    assert_eq!(entries[0].size, 10_000);
+
+    let wallet_coins = vec![
+        WalletUnspentCoin {
+            id: "1".repeat(64),
+            name: "1".repeat(64),
+            amount: 10_000,
+            state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
+        },
+        WalletUnspentCoin {
+            id: "2".repeat(64),
+            name: "2".repeat(64),
+            amount: 10_000,
+            state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
+        },
+        WalletUnspentCoin {
+            id: "3".repeat(64),
+            name: "3".repeat(64),
+            amount: 10_000,
+            state: "CONFIRMED".to_string(),
+            puzzle_hash: String::new(),
+        },
+    ];
+    let spendable = super::planning::bootstrap_coins_as_plan_mojos(&wallet_coins);
+    let outcome = plan_bootstrap_mixed_outputs(
+        &entries,
+        &spendable,
+        50,
+        &BootstrapCombineContext::mojos(base_cat),
+    );
+    assert!(
+        matches!(outcome, BootstrapPlanOutcome::Ready),
+        "expected Ready, got {outcome:?}"
+    );
 }

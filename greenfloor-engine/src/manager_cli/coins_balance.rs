@@ -140,11 +140,11 @@ pub async fn run_coins_balance(
         "asset": list_asset_id,
         "receive_address": receive_address,
         "receive_amount": receive_amount,
-        "receive_units": cat_units_from_mojos(receive_amount),
+        "receive_units": crate::coin_ops::cat_units_display_from_mojos(receive_amount),
         "unreturned_amount": unreturned_amount,
-        "unreturned_units": cat_units_from_mojos(unreturned_amount),
+        "unreturned_units": crate::coin_ops::cat_units_display_from_mojos(unreturned_amount),
         "vault_controlled_amount": vault_controlled_amount,
-        "vault_controlled_units": cat_units_from_mojos(vault_controlled_amount),
+        "vault_controlled_units": crate::coin_ops::cat_units_display_from_mojos(vault_controlled_amount),
         "unreturned_coins": unreturned_coins,
         "note": "Open makers are listed with reclaimable=false; reclaim idle/expired via offers-reclaim-presplit.",
     });
@@ -152,36 +152,35 @@ pub async fn run_coins_balance(
     Ok(0)
 }
 
-/// CAT display units: 1000 mojos = 1 unit (fractional units preserved exactly).
-#[must_use]
-fn cat_units_from_mojos(mojos: u64) -> serde_json::Value {
-    let whole = mojos / 1000;
-    let frac = mojos % 1000;
-    if frac == 0 {
-        return serde_json::json!(whole);
-    }
-    let frac_text = format!("{frac:03}");
-    let frac_text = frac_text.trim_end_matches('0');
-    let text = format!("{whole}.{frac_text}");
-    serde_json::Value::Number(
-        text.parse()
-            .expect("CAT mojo units format always parses as a JSON number"),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        cat_matches_asset_filter, cat_units_from_mojos, state_is_reclaimable,
-        unreturned_row_priority, vault_controlled_total,
+        cat_matches_asset_filter, state_is_reclaimable, unreturned_row_priority,
+        vault_controlled_total,
     };
 
     #[test]
     fn cat_units_preserve_fractional_mojos() {
-        assert_eq!(cat_units_from_mojos(239_950).to_string(), "239.95");
-        assert_eq!(cat_units_from_mojos(1_000).to_string(), "1");
-        assert_eq!(cat_units_from_mojos(100).to_string(), "0.1");
-        assert_eq!(cat_units_from_mojos(0).to_string(), "0");
+        assert_eq!(
+            crate::coin_ops::cat_units_display_from_mojos(239_950).to_string(),
+            "239.95"
+        );
+        assert_eq!(
+            crate::coin_ops::cat_units_display_from_mojos(10_500).to_string(),
+            "10.5"
+        );
+        assert_eq!(
+            crate::coin_ops::cat_units_display_from_mojos(1_000).to_string(),
+            "1"
+        );
+        assert_eq!(
+            crate::coin_ops::cat_units_display_from_mojos(100).to_string(),
+            "0.1"
+        );
+        assert_eq!(
+            crate::coin_ops::cat_units_display_from_mojos(0).to_string(),
+            "0"
+        );
     }
 
     #[test]

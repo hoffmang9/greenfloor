@@ -64,7 +64,7 @@ struct BootstrapPlanOutput<'a> {
     source_amount: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     combine_input_coin_ids: Option<&'a [String]>,
-    output_amounts_base_units: &'a [i64],
+    output_amounts: &'a [i64],
     total_output_amount: i64,
     change_amount: i64,
     output_count: usize,
@@ -87,10 +87,10 @@ impl<'a> From<&'a BootstrapPlan> for BootstrapPlanOutput<'a> {
             source_coin_id,
             source_amount: plan.source_amount(),
             combine_input_coin_ids,
-            output_amounts_base_units: &plan.output_amounts_base_units,
+            output_amounts: &plan.output_amounts,
             total_output_amount: plan.total_output_amount,
             change_amount: plan.change_amount,
-            output_count: plan.output_amounts_base_units.len(),
+            output_count: plan.output_amounts.len(),
         }
     }
 }
@@ -298,7 +298,7 @@ mod tests {
                 selected_count_before_cap: 2,
                 combine_input_cap: 5,
             }),
-            output_amounts_base_units: vec![100],
+            output_amounts: vec![100],
             total_output_amount: 100,
             change_amount: 0,
             deficits: Vec::new(),

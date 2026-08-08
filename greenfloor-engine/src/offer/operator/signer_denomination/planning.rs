@@ -1,39 +1,51 @@
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
 use crate::config::{LadderEntry, MarketPricing, SignerConfig};
-use crate::error::SignerResult;
-use crate::offer::bootstrap::{BaseUnits, BootstrapCoin, PlannerLadderRow};
+use crate::error::{SignerError, SignerResult};
+use crate::offer::bootstrap::{BootstrapCoin, PlanAmount, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 use crate::offer::request::normalize_offer_side;
 
+/// Convert market ladder sizes into bootstrap plan mojos for both sides.
+///
+/// Sell: `size_base_units * base_mojo_multiplier`.
+/// Buy: quote mojos for the base clip at `quote_price` (already mojos).
 pub(super) fn bootstrap_ladder_entries_for_side(
     side: &str,
     side_ladder: &[LadderEntry],
     pricing: &MarketPricing,
     quote_price: f64,
+    resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
 ) -> SignerResult<Vec<PlannerLadderRow>> {
     let side = normalize_offer_side(side);
-    let mut quote_unit_multiplier: Option<i64> = None;
-    if side == "buy" {
-        quote_unit_multiplier = Some(mojo_multiplier_for_leg(
-            pricing,
-            "quote_unit_mojo_multiplier",
-            resolved_quote_asset_id,
-        ));
-    }
     let mut entries = Vec::new();
     for entry in side_ladder {
-        let mut size_base_units = entry.size_base_units;
-        if let Some(multiplier) = quote_unit_multiplier {
-            size_base_units = quote_mojos_for_base_size(size_base_units, quote_price, multiplier)?;
-            if size_base_units <= 0 {
-                continue;
-            }
+        let size_mojos = if side == "buy" {
+            let quote_mult = mojo_multiplier_for_leg(
+                pricing,
+                "quote_unit_mojo_multiplier",
+                resolved_quote_asset_id,
+            );
+            quote_mojos_for_base_size(entry.size_base_units, quote_price, quote_mult)?
+        } else {
+            let base_mult = mojo_multiplier_for_leg(
+                pricing,
+                "base_unit_mojo_multiplier",
+                resolved_base_asset_id,
+            )
+            .max(1);
+            entry
+                .size_base_units
+                .checked_mul(base_mult)
+                .ok_or(SignerError::InvalidOfferRequestAmount)?
+        };
+        if size_mojos <= 0 {
+            continue;
         }
         entries.push(PlannerLadderRow {
-            size_base_units,
+            size: size_mojos,
             target_count: entry.target_count,
             split_buffer_count: entry.split_buffer_count,
         });
@@ -80,21 +92,16 @@ pub(super) fn wallet_coin_spendable(coin: &WalletUnspentCoin) -> bool {
     is_spendable_coin_state(&coin.state)
 }
 
-/// Map on-chain coin amounts (mojos) to ladder `size_base_units` for bootstrap planning.
-pub(super) fn bootstrap_coins_in_base_units(
-    coins: &[WalletUnspentCoin],
-    mojo_multiplier: i64,
-) -> Vec<BootstrapCoin> {
-    let multiplier = mojo_multiplier.max(1);
+/// Map wallet coin mojos onto bootstrap plan amounts (also mojos).
+pub(super) fn bootstrap_coins_as_plan_mojos(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
     coins
         .iter()
         .filter(|coin| wallet_coin_spendable(coin))
         .filter_map(|coin| {
             let amount_mojos = i64::try_from(coin.amount).ok()?;
-            let base_units = amount_mojos / multiplier;
-            (base_units > 0).then(|| BootstrapCoin {
+            (amount_mojos > 0).then(|| BootstrapCoin {
                 id: coin.id.clone(),
-                amount: BaseUnits::new(base_units),
+                amount: PlanAmount::new(amount_mojos),
             })
         })
         .collect()
@@ -103,30 +110,36 @@ pub(super) fn bootstrap_coins_in_base_units(
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
+        bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side,
+        resolve_bootstrap_split_fee, wallet_coin_spendable,
     };
     use crate::coinset::WalletUnspentCoin;
     use crate::config::{LadderEntry, MarketPricing};
     use crate::test_support::signer_config::test_signer_config;
 
     #[test]
-    fn bootstrap_ladder_entries_for_sell_side_preserves_sizes() {
+    fn bootstrap_ladder_entries_for_sell_side_converts_to_mojos() {
         let ladder = vec![LadderEntry {
             size_base_units: 25,
             target_count: 3,
             split_buffer_count: 1,
             combine_when_excess_factor: 2.0,
         }];
+        let pricing = MarketPricing {
+            base_unit_mojo_multiplier: Some(1_000),
+            ..MarketPricing::default()
+        };
         let entries = bootstrap_ladder_entries_for_side(
             "sell",
             &ladder,
-            &MarketPricing::default(),
+            &pricing,
             1.0,
+            "0000000000000000000000000000000000000000000000000000000000000001",
             "xch",
         )
         .expect("entries");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].size_base_units, 25);
+        assert_eq!(entries[0].size, 25_000);
         assert_eq!(entries[0].target_count, 3);
     }
 
@@ -147,23 +160,48 @@ mod tests {
             &ladder,
             &pricing,
             2.0,
+            "xch",
             "0000000000000000000000000000000000000000000000000000000000000001",
         )
         .expect("entries");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].size_base_units, 20_000);
+        assert_eq!(entries[0].size, 20_000);
     }
 
     #[test]
-    fn bootstrap_coins_in_base_units_divides_cat_mojos() {
-        use super::bootstrap_coins_in_base_units;
-        use crate::offer::bootstrap::BaseUnits;
+    fn bootstrap_ladder_entries_for_buy_side_keeps_fractional_quote_clip_in_mojos() {
+        let ladder = vec![LadderEntry {
+            size_base_units: 10,
+            target_count: 1,
+            split_buffer_count: 1,
+            combine_when_excess_factor: 2.0,
+        }];
+        let pricing = MarketPricing {
+            quote_unit_mojo_multiplier: Some(1000),
+            ..MarketPricing::default()
+        };
+        let entries = bootstrap_ladder_entries_for_side(
+            "buy",
+            &ladder,
+            &pricing,
+            1.001,
+            "00000000000000000000000000000000000000000000000000000000000000aa",
+            "00000000000000000000000000000000000000000000000000000000000000bb",
+        )
+        .expect("entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].size, 10_010);
+    }
+
+    #[test]
+    fn bootstrap_coins_as_plan_mojos_keeps_raw_mojo_amounts() {
+        use crate::offer::bootstrap::PlanAmount;
 
         let coins = vec![
             WalletUnspentCoin {
                 id: "a".repeat(64),
                 name: "a".repeat(64),
-                amount: 5_000,
+                amount: 10_010,
                 state: "CONFIRMED".to_string(),
                 puzzle_hash: String::new(),
             },
@@ -175,9 +213,10 @@ mod tests {
                 puzzle_hash: String::new(),
             },
         ];
-        let base = bootstrap_coins_in_base_units(&coins, 1_000);
-        assert_eq!(base.len(), 1);
-        assert_eq!(base[0].amount, BaseUnits::new(5));
+        let plan_coins = bootstrap_coins_as_plan_mojos(&coins);
+        assert_eq!(plan_coins.len(), 2);
+        assert_eq!(plan_coins[0].amount, PlanAmount::new(10_010));
+        assert_eq!(plan_coins[1].amount, PlanAmount::new(500));
     }
 
     #[test]

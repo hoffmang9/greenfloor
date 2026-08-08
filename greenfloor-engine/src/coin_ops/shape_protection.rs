@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use crate::config::LadderEntry;
 
 use super::selection::SpendableCoin;
-use super::shape_defer::spendable_amounts_in_base_units;
+use super::shape_defer::spendable_exact_ladder_unit_amounts;
 
 /// Canonical `(size_base_units, target_count + split_buffer_count)` slot for a ladder row.
 #[must_use]
@@ -111,7 +111,7 @@ impl SplitSourceProtection {
     ) -> Self {
         Self::from_required_rows(
             &required_rows_from_ladder_entries(entries),
-            &spendable_amounts_in_base_units(spendable, base_unit_mojo_multiplier),
+            &spendable_exact_ladder_unit_amounts(spendable, base_unit_mojo_multiplier),
             base_unit_mojo_multiplier,
         )
     }
@@ -148,7 +148,37 @@ impl SplitSourceProtection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SplittableCandidate<'a> {
     pub id: &'a str,
-    pub amount_base_units: i64,
+    /// Floored units for funding capacity and smallest-wins ordering (not ladder-clip identity).
+    pub funding_units: i64,
+    /// Exact ladder clip size when the amount is a clean multiple of the unit multiplier.
+    /// `None` for fractional coins: they remain valid funding sources but never count as a
+    /// protected ladder row for cannibalization checks.
+    pub exact_ladder_units: Option<i64>,
+}
+
+impl<'a> SplittableCandidate<'a> {
+    /// Build a candidate from on-chain mojos (or any amount scaled by `mojo_multiplier`).
+    #[must_use]
+    pub fn from_mojos(id: &'a str, amount_mojos: i64, mojo_multiplier: i64) -> Self {
+        Self {
+            id,
+            funding_units: crate::coin_ops::floored_units_from_mojos(amount_mojos, mojo_multiplier),
+            exact_ladder_units: crate::coin_ops::exact_whole_units_from_mojos(
+                amount_mojos,
+                mojo_multiplier,
+            ),
+        }
+    }
+
+    /// Build a candidate already expressed in ladder/plan units (exact clip when positive).
+    #[must_use]
+    pub fn from_plan_units(id: &'a str, funding_units: i64) -> Self {
+        Self {
+            id,
+            funding_units,
+            exact_ladder_units: (funding_units > 0).then_some(funding_units),
+        }
+    }
 }
 
 /// Count spendable coins whose amount exactly matches a configured ladder size.
@@ -233,17 +263,19 @@ pub fn select_smallest_non_cannibalizing_index(
     candidates
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| candidate.amount_base_units >= required_output_base_units)
+        .filter(|(_, candidate)| candidate.funding_units >= required_output_base_units)
         .filter(|(_, candidate)| {
-            !split_would_cannibalize_protected_row(
-                candidate.amount_base_units,
-                required_output_base_units,
-                &ctx.ladder_sizes,
-                &ctx.protected_slots,
-                &ctx.exact_ladder_counts,
-            )
+            candidate.exact_ladder_units.is_none_or(|clip_units| {
+                !split_would_cannibalize_protected_row(
+                    clip_units,
+                    required_output_base_units,
+                    &ctx.ladder_sizes,
+                    &ctx.protected_slots,
+                    &ctx.exact_ladder_counts,
+                )
+            })
         })
-        .min_by_key(|(_, candidate)| candidate.amount_base_units)
+        .min_by_key(|(_, candidate)| candidate.funding_units)
         .map(|(index, _)| index)
 }
 
@@ -277,10 +309,7 @@ pub fn select_smallest_non_cannibalizing_spendable<'a>(
                 && !exclude_coin_ids.contains(&coin.id)
                 && coin.amount >= required_mojos
         })
-        .map(|coin| SplittableCandidate {
-            id: coin.id.as_str(),
-            amount_base_units: coin.amount / multiplier,
-        })
+        .map(|coin| SplittableCandidate::from_mojos(coin.id.as_str(), coin.amount, multiplier))
         .collect();
     let selected_id = select_smallest_non_cannibalizing_candidate_id(
         candidates.as_slice(),
@@ -346,6 +375,24 @@ mod tests {
     }
 
     #[test]
+    fn spendable_selector_accepts_fractional_cat_funding_coin() {
+        // 10.5 CAT (10_500 mojos) covers a 10-unit request and is not an exact ladder clip,
+        // so it must remain selectable even when a protected size-10 row is underfilled.
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[10, 10]);
+        let spendable = vec![SpendableCoin::new("frac".to_string(), 10_500)];
+        let selected = select_smallest_non_cannibalizing_spendable(
+            &spendable,
+            10,
+            1_000,
+            &HashSet::new(),
+            &ctx,
+        )
+        .expect("fractional CAT coin should fund");
+        assert_eq!(selected.id, "frac");
+        assert_eq!(selected.amount, 10_500);
+    }
+
+    #[test]
     fn detects_cannibalizing_satisfied_primary_row() {
         let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[]);
         let counts = HashMap::from([(100, 1), (10, 2)]);
@@ -364,21 +411,25 @@ mod tests {
     fn unified_selector_picks_smallest_eligible_candidate() {
         let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[100, 50, 10, 10]);
         let candidates = [
-            SplittableCandidate {
-                id: "combined",
-                amount_base_units: 100,
-            },
-            SplittableCandidate {
-                id: "spare",
-                amount_base_units: 50,
-            },
-            SplittableCandidate {
-                id: "ten",
-                amount_base_units: 10,
-            },
+            SplittableCandidate::from_plan_units("combined", 100),
+            SplittableCandidate::from_plan_units("spare", 50),
+            SplittableCandidate::from_plan_units("ten", 10),
         ];
         let index =
             select_smallest_non_cannibalizing_index(&candidates, 20, &ctx).expect("eligible");
         assert_eq!(candidates[index].id, "spare");
+    }
+
+    #[test]
+    fn unified_selector_prefers_fractional_over_cannibalizing_exact_clip() {
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (100, 1)], &[10, 10]);
+        let candidates = [
+            SplittableCandidate::from_mojos("exact-ten", 10_000, 1_000),
+            SplittableCandidate::from_mojos("frac", 10_500, 1_000),
+        ];
+        let index =
+            select_smallest_non_cannibalizing_index(&candidates, 10, &ctx).expect("eligible");
+        assert_eq!(candidates[index].id, "frac");
+        assert_eq!(candidates[index].exact_ladder_units, None);
     }
 }

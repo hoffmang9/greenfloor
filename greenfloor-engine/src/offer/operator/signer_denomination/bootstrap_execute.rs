@@ -26,7 +26,6 @@ fn bootstrap_wait_timeout(timeout_seconds: u64) -> Duration {
 
 pub(crate) struct BootstrapShapeContext {
     pub(crate) split_asset_id: String,
-    pub(crate) split_asset_mojo_multiplier: i64,
     pub(crate) receive_address: String,
     pub(crate) bootstrap_plan: crate::offer::bootstrap::BootstrapPlan,
     pub(crate) ladder_entries: Vec<PlannerLadderRow>,
@@ -123,7 +122,6 @@ async fn execute_bootstrap_combine_step(
         &shape.bootstrap_plan,
         &shape.split_asset_id,
         &shape.receive_address,
-        shape.split_asset_mojo_multiplier,
         #[cfg(test)]
         &shape.test_overrides,
     )
@@ -235,7 +233,6 @@ pub(super) async fn execute_bootstrap_shape(
         &bootstrap_plan,
         &shape.split_asset_id,
         &shape.receive_address,
-        shape.split_asset_mojo_multiplier,
         #[cfg(test)]
         &shape.test_overrides,
     )

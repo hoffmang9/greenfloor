@@ -180,11 +180,20 @@ pub(super) async fn generous_spendable_profiles(
         .expect("reservation ctx");
     let mut spendable_profiles = BTreeMap::new();
     for asset_id in parallel_reservation_asset_ids(&reservation_ctx) {
+        let multiplier = if asset_id == reservation_ctx.base_asset_id {
+            reservation_ctx.base_unit_mojo_multiplier
+        } else if asset_id == reservation_ctx.quote_asset_id {
+            reservation_ctx.quote_unit_mojo_multiplier
+        } else {
+            // Fee (or other) asset not on a trade leg.
+            crate::hex::default_mojo_multiplier_for_asset(&asset_id)
+        };
+        let generous_total = multiplier.saturating_mul(2).max(2);
         spendable_profiles.insert(
             asset_id,
             SpendableAssetProfile {
-                total: 999_999_999,
-                max_single: 999_999_999,
+                total: generous_total,
+                max_single: generous_total,
                 max_single_known: true,
             },
         );
