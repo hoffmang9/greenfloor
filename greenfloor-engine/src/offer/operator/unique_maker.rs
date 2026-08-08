@@ -133,12 +133,7 @@ async fn pin_unique_exact_maker_coin_id(
         offered_asset_id,
     )
     .await?;
-    pick_from_unspent(
-        &coins,
-        excludes,
-        offered_asset_id,
-        target_amount_mojos,
-    )
+    pick_from_unspent(&coins, excludes, offered_asset_id, target_amount_mojos)
 }
 
 /// Record a pinned maker in the in-batch session exclude set.
@@ -325,9 +320,8 @@ mod tests {
     #[test]
     fn offered_leg_for_unique_pin_matches_create_path() {
         let cat = "ab".repeat(32);
-        let mut market = sample_market(
-            "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-        );
+        let mut market =
+            sample_market("xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h");
         market.base_asset = cat.clone();
         market.pricing = MarketPricing {
             fixed_quote_per_base: Some(1.0),
@@ -386,16 +380,10 @@ mod tests {
         .expect("pin exact xch");
         assert_eq!(pinned.len(), 64);
         let excluded = HashSet::from([pinned]);
-        let err = pin_unique_exact_maker_coin_id(
-            "mainnet",
-            &signer,
-            RECEIVE,
-            "xch",
-            5000,
-            &excluded,
-        )
-        .await
-        .expect_err("excluded");
+        let err =
+            pin_unique_exact_maker_coin_id("mainnet", &signer, RECEIVE, "xch", 5000, &excluded)
+                .await
+                .expect_err("excluded");
         assert!(matches!(err, SignerError::NoUnspentOfferXchCoins));
     }
 

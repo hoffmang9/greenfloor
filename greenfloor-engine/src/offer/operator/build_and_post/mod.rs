@@ -294,7 +294,9 @@ pub(crate) fn flush_build_and_post_persist(
     )
 }
 
-fn lock_cli_store(store: &Arc<Mutex<SqliteStore>>) -> SignerResult<std::sync::MutexGuard<'_, SqliteStore>> {
+fn lock_cli_store(
+    store: &Arc<Mutex<SqliteStore>>,
+) -> SignerResult<std::sync::MutexGuard<'_, SqliteStore>> {
     store
         .lock()
         .map_err(|err| SignerError::Other(format!("CLI persist store lock: {err}")))

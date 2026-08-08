@@ -239,14 +239,7 @@ pub async fn ensure_size_n_offer(
         }
         return match kind {
             ReuseKind::Reoffer => {
-                apply_reoffer(
-                    write_store,
-                    &parts,
-                    &candidate,
-                    lease,
-                    unique_maker_coins,
-                )
-                .await
+                apply_reoffer(write_store, &parts, &candidate, lease, unique_maker_coins).await
             }
             ReuseKind::ReclaimAndPost => {
                 apply_reclaim_and_post(
@@ -475,8 +468,9 @@ mod tests {
             markets_path: dir.path().join("markets.yaml"),
             testnet_markets_path: None,
         };
-        let mut parts =
-            BuildAndPostOfferRequestParts::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
+        let mut parts = BuildAndPostOfferRequestParts::for_ensure_size(
+            &paths, &program, "mainnet", "m1", 1, "sell",
+        );
         parts.market_id = None;
         let err = post_offer(&parts, &write_store, None, true)
             .await
@@ -488,8 +482,8 @@ mod tests {
     async fn post_offer_preloads_binding_excludes_from_write_store() {
         use crate::config::ManagerProgramConfig;
         use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
-        use crate::storage::{OfferCancelWrite, OfferListingWrite};
         use crate::storage::CycleWriteStore;
+        use crate::storage::{OfferCancelWrite, OfferListingWrite};
         use crate::test_support::minimal_program::{
             write_minimal_program_with_signer, MinimalProgramParams,
         };
@@ -554,8 +548,9 @@ mod tests {
             markets_path,
             testnet_markets_path: None,
         };
-        let parts =
-            BuildAndPostOfferRequestParts::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
+        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
+            &paths, &program, "mainnet", "m1", 1, "sell",
+        );
 
         // Dry-run gates live pin, so binding load is skipped; post still runs.
         let posted = post_offer(&parts, &write_store, None, true)
