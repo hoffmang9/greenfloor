@@ -54,6 +54,7 @@ fn parse_market_row(row: &Map<String, Value>) -> SignerResult<MarketConfig> {
     Ok(MarketConfig {
         market_id,
         enabled: optional_bool_value(row.get("enabled"), false),
+        unique_maker_coins: optional_bool_value(row.get("unique_maker_coins"), true),
         base_asset,
         base_symbol: optional_str(row, "base_symbol", ""),
         quote_asset,
@@ -100,4 +101,51 @@ fn parse_ladder_entry(market_id: &str, side: &str, entry: &Value) -> SignerResul
         split_buffer_count: optional_i64(entry, "split_buffer_count", 0)?,
         combine_when_excess_factor: optional_f64(entry, "combine_when_excess_factor", 2.0)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn minimal_market_row(extra: &Value) -> Value {
+        let mut row = json!({
+            "id": "m1",
+            "enabled": true,
+            "base_asset": "a1",
+            "base_symbol": "A1",
+            "quote_asset": "xch",
+            "quote_asset_type": "unstable",
+            "receive_address": "xch1test",
+            "signer_key_id": "key-1",
+            "mode": "sell_only",
+            "pricing": {
+                "fixed_quote_per_base": 1.0,
+            },
+        });
+        if let (Some(obj), Some(extra_obj)) = (row.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_obj {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        row
+    }
+
+    #[test]
+    fn unique_maker_coins_defaults_true_when_omitted() {
+        let cfg = parse_markets_config(&json!({
+            "markets": [minimal_market_row(&json!({}))]
+        }))
+        .expect("parse");
+        assert!(cfg.markets[0].unique_maker_coins);
+    }
+
+    #[test]
+    fn unique_maker_coins_false_when_explicit() {
+        let cfg = parse_markets_config(&json!({
+            "markets": [minimal_market_row(&json!({ "unique_maker_coins": false }))]
+        }))
+        .expect("parse");
+        assert!(!cfg.markets[0].unique_maker_coins);
+    }
 }

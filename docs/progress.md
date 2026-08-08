@@ -16,6 +16,16 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-07 — Unique Direct maker coins (ADR 0022)
+
+Market `unique_maker_coins` (default true) pins distinct **exact-size** receive-address
+CATs for Direct offers via create `offer_coin_ids`, excludes binding makers
+(`ReconcileState::binds_unique_maker_coin`) plus session pins committed after successful
+venue publish, fails closed when none remain (no oversize→split), and forces sequential
+strategy dispatch so parallel workers cannot share one maker coin (BYC
+three-sells-one-coin / `0ad7485d…` class of bug). Opt out with
+`unique_maker_coins: false`.
+
 ### 2026-08-03 — Three ownership spines (ADR 0021)
 
 1. **Expired maker** — Soft-mark, CAS lease, and surplus reclaim plan live in

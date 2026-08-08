@@ -31,6 +31,8 @@ pub struct LadderEntry {
 pub struct MarketConfig {
     pub market_id: String,
     pub enabled: bool,
+    /// When true (default), each Direct offer pins a distinct receive-address maker coin.
+    pub unique_maker_coins: bool,
     pub base_asset: String,
     pub base_symbol: String,
     pub quote_asset: String,
@@ -183,6 +185,7 @@ mod soft_expiry_tests {
         let market = MarketConfig {
             market_id: "m1".to_string(),
             enabled: true,
+            unique_maker_coins: true,
             base_asset: "a".to_string(),
             base_symbol: "A".to_string(),
             quote_asset: "xch".to_string(),

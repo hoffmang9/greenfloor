@@ -172,6 +172,7 @@ mod tests {
         MarketConfig {
             market_id: "m1".to_string(),
             enabled: true,
+            unique_maker_coins: true,
             base_asset: base_asset.to_string(),
             base_symbol: "AS1".to_string(),
             quote_asset: "xch".to_string(),

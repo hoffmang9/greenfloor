@@ -57,6 +57,9 @@ pub(super) fn test_context_from_program_file(
 pub(super) fn sample_market() -> MarketConfig {
     let mut market = market_config::sample_market("xch1test");
     market.quote_asset_type = "stable".to_string();
+    // Parallel-path harness tests require shared Direct makers; unique-maker
+    // sequential forcing is covered in classify_tests.
+    market.unique_maker_coins = false;
     market
 }
 

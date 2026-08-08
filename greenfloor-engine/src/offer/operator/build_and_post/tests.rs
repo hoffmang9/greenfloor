@@ -511,6 +511,7 @@ async fn dry_run_returns_preview_payload_in_process() {
         maker_reuse: None,
         test_overrides: crate::offer::operator::BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
+            ..Default::default()
         },
     })
     .await
@@ -533,8 +534,9 @@ async fn run_post_iteration_dry_run_skips_bootstrap_and_returns_preview() {
     ctx.test_overrides.offer_text = Some("offer1dryrunpreviewstub".to_string());
     let request = unused_post_iteration_request(true, Some("offer1dryrunpreviewstub"));
 
+    let mut session = std::collections::HashSet::new();
     let (bootstrap_action, outcome) =
-        super::iteration::run_post_iteration(&request, &ctx, None, None)
+        super::iteration::run_post_iteration(&request, &ctx, None, None, &mut session)
             .await
             .expect("iteration");
 
