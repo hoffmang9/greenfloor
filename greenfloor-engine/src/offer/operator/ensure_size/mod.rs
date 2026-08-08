@@ -24,6 +24,7 @@ use super::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
     BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
 };
+use crate::offer::operator::{load_binding_maker_coin_ids, needs_live_unique_pin};
 
 /// Shared plan inputs for hash compare (must match create/post asset resolution).
 struct EnsurePlan {
@@ -88,12 +89,25 @@ async fn post_offer(
     parts: &BuildAndPostOfferRequestParts,
     write_store: &CycleWriteStore,
     reuse: Option<&ReusablePresplitMakerRow>,
+    unique_maker_coins: bool,
 ) -> SignerResult<bool> {
     // Unique Direct pin lives in build_and_post (after market context resolve).
     let post_request = BuildAndPostOfferRequest::from_parts(with_maker_reuse(parts, reuse));
-    let market_id = post_request.market_id.clone().unwrap_or_default();
-    let binding_excludes_seed =
-        write_store.sync(|store| store.list_binding_maker_coin_ids(&market_id))?;
+    let market_id = post_request
+        .market_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| SignerError::Other("ensure_size post requires market_id".to_string()))?;
+    let binding_excludes = if needs_live_unique_pin(
+        post_request.run.dry_run,
+        unique_maker_coins,
+        post_request.maker_reuse.as_ref(),
+    ) {
+        write_store.sync(|store| load_binding_maker_coin_ids(store, market_id))?
+    } else {
+        Vec::new()
+    };
     let persist_store = write_store.clone();
     let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
         persist_store.sync(|store| upsert_offer_post_record(store, record))
@@ -101,7 +115,7 @@ async fn post_offer(
     let (response, artifacts) = build_and_post_offer_with_persist_artifacts(
         post_request,
         Some(&mut persist),
-        Some(binding_excludes_seed),
+        binding_excludes,
     )
     .await?;
     if let Some(artifacts) = artifacts {
@@ -197,9 +211,10 @@ pub async fn ensure_size_n_offer(
     // Claim the locally chosen PreferExisting/reclaim candidate, then Coinset-verify unspent.
     // Spent pirates are retired without blocking PreferExisting of another coin. Lost CAS:
     // drop and continue so parallel gap fill still fills this worker's slot.
+    let unique_maker_coins = market.unique_maker_coins;
     loop {
         let Some((idx, kind)) = pick_local_reuse(&plan, &candidates)? else {
-            return post_offer(&parts, write_store, None).await;
+            return post_offer(&parts, write_store, None, unique_maker_coins).await;
         };
         let candidate = candidates[idx].clone();
         let Some(lease) = ExpiredMakerLease::try_claim(
@@ -223,9 +238,26 @@ pub async fn ensure_size_n_offer(
             continue;
         }
         return match kind {
-            ReuseKind::Reoffer => apply_reoffer(write_store, &parts, &candidate, lease).await,
+            ReuseKind::Reoffer => {
+                apply_reoffer(
+                    write_store,
+                    &parts,
+                    &candidate,
+                    lease,
+                    unique_maker_coins,
+                )
+                .await
+            }
             ReuseKind::ReclaimAndPost => {
-                apply_reclaim_and_post(write_store, signer, &parts, &candidate, lease).await
+                apply_reclaim_and_post(
+                    write_store,
+                    signer,
+                    &parts,
+                    &candidate,
+                    lease,
+                    unique_maker_coins,
+                )
+                .await
             }
         };
     }
@@ -236,6 +268,7 @@ async fn apply_reoffer(
     parts: &BuildAndPostOfferRequestParts,
     candidate: &ReusablePresplitMakerRow,
     lease: ExpiredMakerLease<'_>,
+    unique_maker_coins: bool,
 ) -> SignerResult<bool> {
     info!(
         offer_id = %candidate.offer_id,
@@ -243,7 +276,12 @@ async fn apply_reoffer(
         "ensure_size_n_offer: PresplitExisting re-offer"
     );
     let posted = lease
-        .run_with_heartbeat(post_offer(parts, write_store, Some(candidate)))
+        .run_with_heartbeat(post_offer(
+            parts,
+            write_store,
+            Some(candidate),
+            unique_maker_coins,
+        ))
         .await?;
     if posted {
         lease.commit()?;
@@ -258,6 +296,7 @@ async fn apply_reclaim_and_post(
     parts: &BuildAndPostOfferRequestParts,
     candidate: &ReusablePresplitMakerRow,
     lease: ExpiredMakerLease<'_>,
+    unique_maker_coins: bool,
 ) -> SignerResult<bool> {
     if candidate.offer_nonce.is_some() {
         info!(
@@ -282,7 +321,7 @@ async fn apply_reclaim_and_post(
         .await?;
     // Coin spent: finalize claim even if the replacement post fails.
     lease.commit()?;
-    post_offer(parts, write_store, None).await
+    post_offer(parts, write_store, None, unique_maker_coins).await
 }
 
 #[cfg(test)]
@@ -420,6 +459,117 @@ mod tests {
         .await
         .expect("ensure");
         assert!(!posted);
+    }
+
+    #[tokio::test]
+    async fn post_offer_requires_market_id() {
+        use crate::config::ManagerProgramConfig;
+        use crate::storage::CycleWriteStore;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let write_store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
+        let program = ManagerProgramConfig::default();
+        let paths = super::super::OperatorConfigPaths {
+            program_path: dir.path().join("program.yaml"),
+            markets_path: dir.path().join("markets.yaml"),
+            testnet_markets_path: None,
+        };
+        let mut parts =
+            BuildAndPostOfferRequestParts::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
+        parts.market_id = None;
+        let err = post_offer(&parts, &write_store, None, true)
+            .await
+            .expect_err("missing market_id");
+        assert!(err.to_string().contains("market_id"));
+    }
+
+    #[tokio::test]
+    async fn post_offer_preloads_binding_excludes_from_write_store() {
+        use crate::config::ManagerProgramConfig;
+        use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
+        use crate::storage::{OfferCancelWrite, OfferListingWrite};
+        use crate::storage::CycleWriteStore;
+        use crate::test_support::minimal_program::{
+            write_minimal_program_with_signer, MinimalProgramParams,
+        };
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        let markets_path = dir.path().join("markets.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                dry_run: true,
+                ..Default::default()
+            },
+        );
+        std::fs::write(
+            &markets_path,
+            include_str!("../../../../tests/fixtures/data/build_offer_markets.yaml"),
+        )
+        .expect("write markets");
+
+        let write_store = CycleWriteStore::open(&dir.path().join("state.db")).expect("open");
+        let coin = "aa".repeat(32);
+        let fields =
+            OfferCancelFields::from_presplit_build(coin.clone(), "bb".repeat(32), "cc".repeat(32));
+        write_store
+            .sync(|store| {
+                store.upsert_offer_state_with_metadata_at(
+                    "o1",
+                    "m1",
+                    "open",
+                    None,
+                    "2026-01-01T00:00:00Z",
+                    OfferCancelWrite {
+                        fields: Some(&fields),
+                        execution_mode: Some(OfferExecutionMode::Direct),
+                        listing: OfferListingWrite {
+                            publish_venue: Some("dexie"),
+                            listing_expires_at: None,
+                            size_base_units: Some(1),
+                            offer_nonce: None,
+                            offer_side: Some("sell"),
+                        },
+                        ..OfferCancelWrite::default()
+                    },
+                )
+            })
+            .expect("seed binding");
+
+        let loaded = write_store
+            .sync(|store| load_binding_maker_coin_ids(store, "m1"))
+            .expect("load");
+        assert_eq!(loaded, vec![coin.clone()]);
+
+        let program = ManagerProgramConfig {
+            runtime_dry_run: true,
+            ..ManagerProgramConfig::default()
+        };
+        let paths = super::super::OperatorConfigPaths {
+            program_path,
+            markets_path,
+            testnet_markets_path: None,
+        };
+        let parts =
+            BuildAndPostOfferRequestParts::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
+
+        // Dry-run gates live pin, so binding load is skipped; post still runs.
+        let posted = post_offer(&parts, &write_store, None, true)
+            .await
+            .expect("post_offer after gated binding path");
+        assert!(!posted);
+        assert!(
+            needs_live_unique_pin(false, true, None),
+            "live pin gate must still allow binding preload when not dry-run"
+        );
+        let binding = write_store
+            .sync(|store| load_binding_maker_coin_ids(store, "m1"))
+            .expect("load for live pin");
+        assert_eq!(binding, vec![coin]);
     }
 
     #[test]

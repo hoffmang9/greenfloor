@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
@@ -21,9 +21,8 @@ use crate::offer::operator::signer_denomination::{
     run_signer_denomination_phase, BootstrapPhaseResult,
 };
 use crate::offer::operator::{
-    needs_live_unique_pin, pin_unique_exact_maker_coin_id, record_session_pin, UniqueMakerLivePin,
+    needs_live_unique_pin, record_session_pin, resolve_unique_offer_coin_ids,
 };
-use crate::offer::request::compute_signer_offer_leg_amounts;
 use crate::offer::types::effective_maker_reuse;
 
 async fn run_bootstrap_phase(
@@ -58,10 +57,6 @@ fn post_phase_failure(
 
 /// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
 ///
-/// Session excludes are seeded from DB bindings; successful venue publishes append the
-/// pinned ids via [`commit_session_pins_after_publish`] so a failed create/publish can
-/// reuse the coin on a later `repeat` iteration.
-///
 /// Soft pin/leg failures return `Ok(Err(Failure))` — same nested shape as
 /// [`create_offer_for_post`] — so `ensure_size` / sequential dispatch can continue.
 async fn offer_coin_ids_after_bootstrap(
@@ -78,47 +73,25 @@ async fn offer_coin_ids_after_bootstrap(
         return Ok(Ok(Vec::new()));
     }
     #[cfg(test)]
-    if let Some(message) = ctx.test_overrides.unique_pin_error() {
-        return Ok(Err(post_phase_failure(message, started, None)));
-    }
-    #[cfg(test)]
-    if let Some(coin_id) = ctx.test_overrides.unique_pin_coin_id() {
-        return Ok(Ok(vec![coin_id.to_string()]));
+    if let Some(result) = ctx.test_overrides.unique_pin_result() {
+        return Ok(match result {
+            Ok(coin_id) => Ok(vec![coin_id.to_string()]),
+            Err(message) => Err(post_phase_failure(message, started, None)),
+        });
     }
     let side = ctx.action_side();
-    let Ok(size_i64) = i64::try_from(request.size_base_units) else {
-        return Ok(Err(post_phase_failure(
-            SignerError::InvalidSizeBaseUnits.to_string(),
-            started,
-            None,
-        )));
-    };
-    let quote_price = match ctx.quote_price() {
-        Ok(price) => price,
-        Err(err) => return Ok(Err(post_phase_failure(err.to_string(), started, None))),
-    };
-    let leg = match compute_signer_offer_leg_amounts(
-        size_i64,
-        quote_price,
-        &ctx.offer_assets.base_asset_id,
-        &ctx.offer_assets.quote_asset_id,
+    match resolve_unique_offer_coin_ids(
+        &ctx.gated.market_row,
+        &ctx.offer_assets,
+        request.size_base_units,
         &side,
-        &ctx.gated.market_row.pricing,
-    ) {
-        Ok(leg) => leg,
-        Err(err) => return Ok(Err(post_phase_failure(err.to_string(), started, None))),
-    };
-    match pin_unique_exact_maker_coin_id(UniqueMakerLivePin {
-        excludes: session_excludes,
-        operator_network: &ctx.gated.operator_network,
-        signer: &ctx.gated.signer,
-        receive_address: &ctx.gated.market_row.receive_address,
-        offered_asset_id: &leg.offer_asset_id,
-        target_amount_mojos: leg.offer_amount_mojos,
-    })
+        &ctx.gated.operator_network,
+        &ctx.gated.signer,
+        session_excludes,
+    )
     .await
     {
-        Ok(coin_id) => Ok(Ok(vec![coin_id])),
+        Ok(ids) => Ok(Ok(ids)),
         Err(err) => Ok(Err(post_phase_failure(err.to_string(), started, None))),
     }
 }
@@ -466,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn offer_coin_ids_after_bootstrap_soft_fails_unique_pin_errors() {
         let mut ctx = sample_resolved_build_and_post_context();
-        ctx.test_overrides.unique_pin_error = Some("no_free_exact_maker".to_string());
+        ctx.test_overrides.unique_pin_result = Some(Err("no_free_exact_maker".to_string()));
         let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
         let session = HashSet::new();
 
@@ -495,7 +468,7 @@ mod tests {
     async fn offer_coin_ids_after_bootstrap_does_not_commit_session_on_pin() {
         let mut ctx = sample_resolved_build_and_post_context();
         let coin = "aa".repeat(32);
-        ctx.test_overrides.unique_pin_coin_id = Some(coin.clone());
+        ctx.test_overrides.unique_pin_result = Some(Ok(coin.clone()));
         let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
         let session = HashSet::new();
 
@@ -512,6 +485,89 @@ mod tests {
             session.is_empty(),
             "pin alone must not reserve; commit only after publish success"
         );
+    }
+
+    #[tokio::test]
+    async fn offer_coin_ids_after_bootstrap_live_pins_via_coinset() {
+        use crate::config::MarketPricing;
+        use crate::offer::ResolvedMarketOfferAssets;
+        use crate::test_support::signer_config::test_signer_config;
+
+        const RECEIVE: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
+        let cat = "ab".repeat(32);
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(r#"{"success":true,"coin_records":[]}"#)
+            .create_async()
+            .await;
+
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.gated.signer = test_signer_config(&server.url());
+        ctx.gated.market_row.receive_address = RECEIVE.to_string();
+        ctx.gated.market_row.base_asset = cat.clone();
+        ctx.gated.market_row.pricing = MarketPricing {
+            fixed_quote_per_base: Some(1.0),
+            base_unit_mojo_multiplier: Some(1_000),
+            quote_unit_mojo_multiplier: Some(1_000_000_000_000),
+            ..MarketPricing::default()
+        };
+        ctx.offer_assets = ResolvedMarketOfferAssets {
+            base_asset_id: cat,
+            quote_asset_id: "xch".to_string(),
+            quote_asset_for_offer: "xch".to_string(),
+        };
+        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        let mut session = HashSet::new();
+        session.insert("prebound".repeat(8));
+
+        let outcome =
+            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
+                .await
+                .expect("outer SignerResult stays Ok for soft pin failures");
+
+        match outcome {
+            Err(PostIterationOutcome::Failure(failure)) => {
+                assert_eq!(failure.error, "no unspent cat coins");
+                assert!(failure.create_phase_ms.is_none());
+            }
+            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
+                panic!("expected Failure variant")
+            }
+            Ok(_) => panic!("empty Coinset list must soft-fail unique pin"),
+        }
+        assert_eq!(
+            session.len(),
+            1,
+            "soft pin failure must leave session excludes unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn offer_coin_ids_after_bootstrap_soft_fails_invalid_offered_leg() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.gated.market_row.pricing.fixed_quote_per_base = Some(0.0);
+        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
+        let session = HashSet::new();
+
+        let outcome =
+            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
+                .await
+                .expect("outer ok");
+
+        match outcome {
+            Err(PostIterationOutcome::Failure(failure)) => {
+                assert!(
+                    !failure.error.is_empty(),
+                    "leg failure must surface as soft Failure"
+                );
+            }
+            Ok(_) => panic!("expected soft Failure for bad pricing"),
+            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
+                panic!("expected Failure variant for bad pricing")
+            }
+        }
     }
 
     #[test]

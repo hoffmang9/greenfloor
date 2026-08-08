@@ -30,6 +30,6 @@ pub(crate) use signer_denomination::SignerDenominationTestOverrides;
 #[cfg(test)]
 pub use test_overrides::BuildOfferTestOverrides;
 pub(crate) use unique_maker::{
-    needs_live_unique_pin, pin_unique_exact_maker_coin_id, record_session_pin,
-    session_excludes_from_binding, UniqueMakerLivePin,
+    load_binding_maker_coin_ids, needs_live_unique_pin, record_session_pin,
+    resolve_unique_offer_coin_ids, session_excludes_for_unique_pin,
 };
