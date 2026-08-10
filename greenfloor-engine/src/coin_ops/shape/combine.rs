@@ -303,4 +303,77 @@ mod tests {
         assert!(plan.input_coin_ids.contains(&"five".to_string()));
         assert_eq!(plan.input_coin_ids.len(), 2);
     }
+
+    const TEST_CAT_ASSET_ID: &str =
+        "0000000000000000000000000000000000000000000000000000000000000001";
+
+    #[test]
+    fn fragmented_inventory_within_cap_five() {
+        let spendable: Vec<ShapeCoin> =
+            crate::test_support::fragmented_combine_cap_inventory::fragmented_combine_cap_inventory_rows()
+                .into_iter()
+                .map(|(id, amount)| ShapeCoin::new(id, amount))
+                .collect();
+        let inputs = plan_ladder_preserving_combine(
+            &spendable,
+            &HashMap::new(),
+            100,
+            5,
+            1_000,
+            TEST_CAT_ASSET_ID,
+        )
+        .expect("fragmented inventory should combine within cap=5");
+        assert!(inputs.cap_applied);
+        assert_eq!(inputs.input_coin_ids.len(), 4);
+        assert_eq!(inputs.selected_total, 105);
+        assert!(!inputs.exact_match);
+        assert_eq!(inputs.target_amount, 100);
+    }
+
+    #[test]
+    fn rejects_combine_when_overshoot_change_would_be_cat_dust() {
+        let spendable = coins(&[("a", 51), ("b", 50)]);
+        assert!(plan_ladder_preserving_combine(
+            &spendable,
+            &HashMap::new(),
+            100,
+            10,
+            1,
+            TEST_CAT_ASSET_ID,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn preserving_ladder_combine_minimizes_ten_bu_inputs_for_eco181() {
+        use crate::coin_ops::shape::protected_slots_for_rows;
+        use crate::test_support::eco181_bootstrap_inventory::{
+            eco181_bootstrap_inventory_rows, eco181_shape_ladder,
+        };
+
+        let spendable: Vec<ShapeCoin> = eco181_bootstrap_inventory_rows()
+            .into_iter()
+            .map(|(id, amount)| ShapeCoin::new(id, amount))
+            .collect();
+        let ladder = eco181_shape_ladder();
+        let protected = protected_slots_for_rows(&ladder);
+        let inputs = plan_ladder_preserving_combine(
+            &spendable,
+            &protected,
+            100,
+            5,
+            1_000,
+            TEST_CAT_ASSET_ID,
+        )
+        .expect("eco181 inventory should combine");
+        assert!(
+            inputs
+                .input_coin_ids
+                .iter()
+                .filter(|id| id.starts_with("ten_"))
+                .count()
+                <= 1
+        );
+        assert_eq!(inputs.target_amount, 100);
+    }
 }

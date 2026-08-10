@@ -1,7 +1,6 @@
 //! Bootstrap mixed-output planner and phase policy for offer denomination preflight.
 
 mod amounts;
-mod combine_plan;
 mod gate;
 mod phase;
 mod plan;
@@ -19,7 +18,6 @@ pub use amounts::{
     bootstrap_overshoot_change_mojos, plan_amount_to_mojos,
 };
 pub use amounts::{vault_output_mojos_from_plan_amounts, PlanAmount};
-pub use combine_plan::BootstrapCombineContext;
 pub(crate) use gate::bootstrap_offer_gate_for_status;
 pub use gate::bootstrap_phase_snapshot_block_error;
 pub use phase::{
@@ -30,7 +28,7 @@ pub(crate) use phase::{
     BootstrapWaitPoll, BootstrapWaitResolution, BootstrapWaitStepKind,
 };
 pub use plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
-pub use planner::plan_bootstrap_mixed_outputs;
+pub use planner::{plan_bootstrap_mixed_outputs, BootstrapCombineContext};
 pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
 
 #[cfg(test)]
