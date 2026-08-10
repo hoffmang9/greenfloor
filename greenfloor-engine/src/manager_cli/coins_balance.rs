@@ -11,19 +11,12 @@ use crate::coinset::{
 use crate::config::{
     load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
+use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::manager_cli::asset_resolve::resolve_market_inventory_asset_id;
 use crate::manager_cli::context::ManagerContext;
 use crate::storage::{resolve_state_db_path, SqliteStore};
-
-/// Allowlisted idle/terminal states eligible for ops reclaim (open listings are never reclaimable).
-fn state_is_reclaimable(state: &str) -> bool {
-    matches!(
-        state.trim().to_ascii_lowercase().as_str(),
-        "expired" | "maker_claimed" | "cancelled" | "cancel_submitted"
-    )
-}
 
 #[must_use]
 fn vault_controlled_total(receive_amount: u64, unreturned_amount: u64) -> u64 {
@@ -31,10 +24,18 @@ fn vault_controlled_total(receive_amount: u64, unreturned_amount: u64) -> u64 {
 }
 
 /// Prefer open/active rows when multiple `offer_state` rows share a maker coin id.
-fn unreturned_row_priority(state: &str) -> u8 {
-    match state.trim().to_ascii_lowercase().as_str() {
-        "open" | "refresh_due" | "pending_visibility" | "mempool_observed" => 0,
-        "expired" => 1,
+#[must_use]
+fn unreturned_row_priority(state: Option<&ReconcileState>) -> u8 {
+    match state {
+        Some(
+            ReconcileState::Lifecycle(
+                OfferLifecycleState::Open
+                | OfferLifecycleState::RefreshDue
+                | OfferLifecycleState::MempoolObserved,
+            )
+            | ReconcileState::PendingVisibility,
+        ) => 0,
+        Some(ReconcileState::Lifecycle(OfferLifecycleState::Expired)) => 1,
         _ => 2,
     }
 }
@@ -88,10 +89,17 @@ pub async fn run_coins_balance(
 
     let db_path = resolve_state_db_path(&loaded.program.home_dir, mgr.state_db_override());
     let store = SqliteStore::open(&db_path)?;
-    let mut makers = store.list_unreturned_presplit_makers(Some(&market.market_id))?;
-    makers.sort_by(|a, b| {
-        unreturned_row_priority(&a.state)
-            .cmp(&unreturned_row_priority(&b.state))
+    let mut makers: Vec<_> = store
+        .list_unreturned_presplit_makers(Some(&market.market_id))?
+        .into_iter()
+        .map(|row| {
+            let state = ReconcileState::parse(&row.state).ok();
+            (row, state)
+        })
+        .collect();
+    makers.sort_by(|(a, a_state), (b, b_state)| {
+        unreturned_row_priority(a_state.as_ref())
+            .cmp(&unreturned_row_priority(b_state.as_ref()))
             .then_with(|| a.offer_id.cmp(&b.offer_id))
     });
 
@@ -101,7 +109,7 @@ pub async fn run_coins_balance(
     let mut seen_coins = HashSet::new();
     let mut unreturned_amount = 0u64;
     let mut unreturned_coins = Vec::new();
-    for row in makers {
+    for (row, state) in makers {
         let coin_id = normalize_hex_id(&row.cancel_input_coin_id);
         if !seen_coins.insert(coin_id.clone()) {
             continue;
@@ -128,7 +136,7 @@ pub async fn run_coins_balance(
             "offer_id": row.offer_id,
             "state": row.state,
             "size_base_units": row.size_base_units,
-            "reclaimable": state_is_reclaimable(&row.state),
+            "reclaimable": state.as_ref().is_some_and(ReconcileState::is_ops_reclaimable),
         }));
     }
 
@@ -154,10 +162,12 @@ pub async fn run_coins_balance(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cat_matches_asset_filter, state_is_reclaimable, unreturned_row_priority,
-        vault_controlled_total,
-    };
+    use super::{cat_matches_asset_filter, unreturned_row_priority, vault_controlled_total};
+    use crate::cycle::{OfferLifecycleState, ReconcileState};
+
+    fn priority_for(raw: &str) -> u8 {
+        unreturned_row_priority(ReconcileState::parse(raw).ok().as_ref())
+    }
 
     #[test]
     fn cat_units_preserve_fractional_mojos() {
@@ -184,22 +194,26 @@ mod tests {
     }
 
     #[test]
-    fn reclaimable_uses_idle_state_allowlist() {
-        assert!(!state_is_reclaimable("open"));
-        assert!(!state_is_reclaimable("refresh_due"));
-        assert!(state_is_reclaimable("expired"));
-        assert!(state_is_reclaimable("maker_claimed"));
-        assert!(state_is_reclaimable("cancelled"));
-        assert!(state_is_reclaimable("cancel_submitted"));
-    }
-
-    #[test]
     fn unreturned_priority_orders_open_before_expired() {
-        assert!(unreturned_row_priority("open") < unreturned_row_priority("expired"));
-        assert!(unreturned_row_priority("expired") < unreturned_row_priority("cancelled"));
-        assert_eq!(unreturned_row_priority("refresh_due"), 0);
-        assert_eq!(unreturned_row_priority("pending_visibility"), 0);
-        assert_eq!(unreturned_row_priority("mempool_observed"), 0);
+        assert!(priority_for("open") < priority_for("expired"));
+        assert!(priority_for("expired") < priority_for("cancelled"));
+        assert_eq!(
+            unreturned_row_priority(Some(&ReconcileState::Lifecycle(
+                OfferLifecycleState::RefreshDue
+            ))),
+            0
+        );
+        assert_eq!(
+            unreturned_row_priority(Some(&ReconcileState::PendingVisibility)),
+            0
+        );
+        assert_eq!(
+            unreturned_row_priority(Some(&ReconcileState::Lifecycle(
+                OfferLifecycleState::MempoolObserved
+            ))),
+            0
+        );
+        assert_eq!(unreturned_row_priority(None), 2);
     }
 
     #[test]

@@ -111,6 +111,20 @@ impl ReconcileState {
         )
     }
 
+    /// Whether a known unreturned maker in this state is idle/terminal for ops reclaim.
+    ///
+    /// Open listings and other active states are never reclaimable (ADR 0020).
+    #[must_use]
+    pub fn is_ops_reclaimable(&self) -> bool {
+        matches!(
+            self,
+            Self::Lifecycle(OfferLifecycleState::Expired)
+                | Self::MakerClaimed
+                | Self::Cancelled
+                | Self::CancelSubmitted
+        )
+    }
+
     /// Whether offers in this state stay on the daemon reconcile watchlist.
     #[must_use]
     pub fn is_watched_for_reconcile(&self) -> bool {
@@ -213,6 +227,18 @@ mod tests {
         assert!(ReconcileState::Lifecycle(OfferLifecycleState::Open).is_cancel_eligible());
         assert!(ReconcileState::PendingVisibility.is_cancel_eligible());
         assert!(!ReconcileState::CancelSubmitted.is_cancel_eligible());
+    }
+
+    #[test]
+    fn ops_reclaimable_uses_idle_terminal_allowlist() {
+        assert!(!ReconcileState::Lifecycle(OfferLifecycleState::Open).is_ops_reclaimable());
+        assert!(!ReconcileState::Lifecycle(OfferLifecycleState::RefreshDue).is_ops_reclaimable());
+        assert!(ReconcileState::Lifecycle(OfferLifecycleState::Expired).is_ops_reclaimable());
+        assert!(ReconcileState::MakerClaimed.is_ops_reclaimable());
+        assert!(ReconcileState::Cancelled.is_ops_reclaimable());
+        assert!(ReconcileState::CancelSubmitted.is_ops_reclaimable());
+        assert!(!ReconcileState::PendingVisibility.is_ops_reclaimable());
+        assert!(!ReconcileState::UnknownOrphaned.is_ops_reclaimable());
     }
 
     #[test]
