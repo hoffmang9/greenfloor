@@ -6,9 +6,8 @@ use crate::coin_ops::{
     SplitSkipReason,
 };
 use crate::offer::bootstrap::{
-    bootstrap_early_phase, bootstrap_phase_snapshot_block_error,
-    bootstrap_preflight_deferred_to_coin_ops, bootstrap_replan_after_combine,
-    offer_bootstrap_primary_row_complete, plan_bootstrap_mixed_outputs,
+    bootstrap_after_combine_handoff, bootstrap_early_phase, bootstrap_phase_snapshot_block_error,
+    bootstrap_preflight_handoff, bootstrap_replan_after_combine, plan_bootstrap_mixed_outputs,
     resolve_bootstrap_wait_poll, BootstrapCombineContext, BootstrapPlanOutcome,
     BootstrapReplanAfterCombine, BootstrapWaitContext, BootstrapWaitPoll, BootstrapWaitResolution,
 };
@@ -149,16 +148,20 @@ pub fn run_eco181_shape_case(case: &Eco181ShapeCase) {
                 "{}",
                 case.name
             );
-            assert!(bootstrap_preflight_deferred_to_coin_ops(
-                &outcome, &ladder, &coins
-            ));
+            assert!(
+                bootstrap_preflight_handoff(&outcome, &ladder, &coins).yields(),
+                "{}",
+                case.name
+            );
         }
         Eco181ShapeExpect::PrimaryRowComplete => {
             let coins = eco181_after_combine_coins();
             let outcome = plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &combine_context());
-            assert!(offer_bootstrap_primary_row_complete(
-                100, &outcome, &ladder, &coins,
-            ));
+            assert!(
+                bootstrap_after_combine_handoff(100, &outcome, &ladder, &coins).yields(),
+                "{}",
+                case.name
+            );
         }
         Eco181ShapeExpect::LowWatermarkSplitSkips => {
             let spendable = spendable_mojos(&eco181_after_combine_inventory_rows());

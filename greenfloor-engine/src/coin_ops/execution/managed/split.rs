@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::shape::CombineInputs;
 use crate::coin_ops::{
-    coin_op_non_negative_u64, defer_low_watermark_split_from_spendable, i64_to_usize,
+    coin_op_non_negative_u64, daemon_low_watermark_handoff_from_spendable, i64_to_usize,
     plan_daemon_auto_split_selection, plan_daemon_low_watermark_split, usize_to_i64, CoinOpPlan,
     CoinOpPlanReason, DaemonAutoSplitParams, SpendableCoin, SplitAutoSelectPlan, SplitSkipReason,
     SplitSourceProtection,
@@ -234,7 +234,9 @@ async fn execute_managed_split_plan_inner(
         list_spendable_coins_for_plan(ctx, plan).await?,
         "no_spendable_split_coin_available",
     )?;
-    if defer_low_watermark_split_from_spendable(plan, &spendable, ctx.base_unit_mojo_multiplier) {
+    if daemon_low_watermark_handoff_from_spendable(plan, &spendable, ctx.base_unit_mojo_multiplier)
+        .yields()
+    {
         return Err(plan_skip(plan, "bootstrap_primary_shape_deferred"));
     }
     let split_protection = low_watermark_split_protection(ctx, plan, &spendable);

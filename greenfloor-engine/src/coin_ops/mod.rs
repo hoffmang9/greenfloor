@@ -14,7 +14,7 @@ mod policy;
 mod scalars;
 mod selection;
 pub mod shape;
-mod shape_defer;
+pub mod shape_ownership;
 pub mod shape_protection;
 mod unit_convert;
 mod wallet_coin;
@@ -54,12 +54,14 @@ pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
     select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
 };
-pub use shape_defer::{
-    aggregate_covers_without_single_coin, defer_low_watermark_split_from_spendable,
-    defer_low_watermark_split_to_post_bootstrap, spendable_exact_ladder_unit_amounts,
-    LOW_WATERMARK_BUFFER_DEFICIT,
+pub use shape_ownership::{
+    aggregate_covers_without_single_coin, bootstrap_handoff, daemon_low_watermark_handoff,
+    daemon_low_watermark_handoff_from_spendable, remaining_shape_below_primary_row,
+    BootstrapRemainingWork, ShapeHandoff, LOW_WATERMARK_BUFFER_DEFICIT,
 };
-pub use shape_protection::{LadderShapeContext, SplitSourceProtection};
+pub use shape_protection::{
+    spendable_exact_ladder_unit_amounts, LadderShapeContext, SplitSourceProtection,
+};
 pub use unit_convert::{
     cat_units_display_from_mojos, cat_units_display_from_mojos_with_multiplier,
     cat_units_string_from_mojos, exact_whole_units_from_mojos, floored_units_from_mojos,

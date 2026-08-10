@@ -32,7 +32,7 @@ fn validate_inputs(
 }
 
 /// Bootstrap ladder rows -> unit-agnostic shape rows. Shared with [`super::combine_plan`]'s
-/// test-only combine builder and [`super::shape_policy`] so bootstrap has one row/coin
+/// test-only combine builder and [`super::shape_policy`] (bootstrap ownership adapter) so bootstrap has one row/coin
 /// conversion, not two.
 pub(super) fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
     sorted_ladder

@@ -1,7 +1,7 @@
 //! Post-combine replan policy for bootstrap shape execution.
 
 use super::plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
-use super::shape_policy::offer_bootstrap_primary_row_complete;
+use super::shape_policy::bootstrap_after_combine_handoff;
 
 /// Next step after replanning inventory post-combine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,12 +18,14 @@ pub(crate) fn bootstrap_replan_after_combine(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
 ) -> BootstrapReplanAfterCombine {
-    if offer_bootstrap_primary_row_complete(
+    if bootstrap_after_combine_handoff(
         combine_target_amount,
         &replanned,
         ladder_entries,
         spendable_coins,
-    ) {
+    )
+    .yields()
+    {
         return BootstrapReplanAfterCombine::Complete(BootstrapPlanOutcome::Ready);
     }
     match replanned {

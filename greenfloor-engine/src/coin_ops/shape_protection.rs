@@ -12,7 +12,23 @@ use std::collections::{HashMap, HashSet};
 use crate::config::LadderEntry;
 
 use super::selection::SpendableCoin;
-use super::shape_defer::spendable_exact_ladder_unit_amounts;
+use super::unit_convert::exact_whole_units_from_mojos;
+
+/// Exact whole ladder-unit amounts from spendable coins (for bucket / protection / ownership).
+///
+/// Fractional CAT coins (e.g. `10_500` mojos = `10.5` units) are valid inventory but are
+/// omitted here — they are not an exact ladder clip.
+#[must_use]
+pub fn spendable_exact_ladder_unit_amounts(
+    spendable: &[SpendableCoin],
+    base_unit_mojo_multiplier: i64,
+) -> Vec<i64> {
+    let multiplier = base_unit_mojo_multiplier.max(1);
+    spendable
+        .iter()
+        .filter_map(|coin| exact_whole_units_from_mojos(coin.amount, multiplier))
+        .collect()
+}
 
 /// Canonical `(size_base_units, target_count + split_buffer_count)` slot for a ladder row.
 #[must_use]
@@ -235,22 +251,6 @@ pub fn primary_row_satisfied(
         return false;
     }
     counts.get(&primary_size).copied().unwrap_or(0) >= required
-}
-
-/// Remaining shape work is strictly below the primary ladder row.
-#[must_use]
-pub fn remaining_shape_below_primary_row(remaining_total: i64, primary_size: i64) -> bool {
-    remaining_total > 0 && remaining_total < primary_size
-}
-
-/// Primary row is on-chain; smaller buffer gaps are daemon coin-op scope.
-#[must_use]
-pub fn defer_sub_primary_shape_to_coin_ops(
-    remaining_total: i64,
-    primary_size: i64,
-    primary_satisfied: bool,
-) -> bool {
-    primary_satisfied && remaining_shape_below_primary_row(remaining_total, primary_size)
 }
 
 /// Index of the smallest candidate that can fund `required_output_base_units` without cannibalizing a protected row.
