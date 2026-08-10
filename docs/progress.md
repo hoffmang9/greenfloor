@@ -16,6 +16,14 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-10 — Unique maker pin session deepen
+
+ADR 0022 pin protocol lives behind `UniqueMakerPinSession` (`begin` →
+`pin_after_bootstrap` → `pending_offer_coin_ids` → `commit_on_publish`): bindings load
+inside `begin` on the caller's held store; pending pins commit only after venue success;
+CLI/`ensure_size` thread `&mut UniqueMakerPinSession` instead of a preload `Vec`. Domain
+term recorded in root `CONTEXT.md`.
+
 ### 2026-08-07 — Unique Direct maker coins (ADR 0022)
 
 Market `unique_maker_coins` (default true) pins distinct **exact-size** receive-address

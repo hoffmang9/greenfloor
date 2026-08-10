@@ -1,4 +1,4 @@
-//! Pin distinct receive-address maker coins for Direct offers (`unique_maker_coins`).
+//! Unique maker pin session: distinct receive-address makers for Direct offers.
 
 use std::collections::HashSet;
 
@@ -12,43 +12,165 @@ use crate::offer::request::compute_signer_offer_leg_amounts;
 use crate::offer::types::{effective_maker_reuse, PresplitMakerReuse};
 use crate::storage::SqliteStore;
 
-/// Whether this post should live-pin a unique exact-size maker via Coinset.
-#[must_use]
-pub(crate) fn needs_live_unique_pin(
-    dry_run: bool,
-    unique_maker_coins: bool,
-    maker_reuse: Option<&PresplitMakerReuse>,
-) -> bool {
-    !dry_run && unique_maker_coins && effective_maker_reuse(maker_reuse).is_none()
+/// Borrowed inputs for one [`UniqueMakerPinSession::pin_after_bootstrap`] call.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UniqueMakerPinRequest<'a> {
+    pub market: &'a MarketConfig,
+    pub assets: &'a ResolvedMarketOfferAssets,
+    pub size_base_units: u64,
+    pub side: &'a str,
+    pub operator_network: &'a str,
+    pub signer: &'a SignerConfig,
+    /// When set (tests only), skip Coinset and use this pin result.
+    #[cfg(test)]
+    pub test_pin_result: Option<&'a Result<String, String>>,
 }
 
-/// Seed the in-batch exclude set from preloaded binding coin ids (callers load `SQLite`).
-#[must_use]
-pub(crate) fn session_excludes_for_unique_pin(
-    dry_run: bool,
-    unique_maker_coins: bool,
-    maker_reuse: Option<&PresplitMakerReuse>,
-    binding_excludes: &[String],
-) -> HashSet<String> {
-    if !needs_live_unique_pin(dry_run, unique_maker_coins, maker_reuse) {
-        return HashSet::new();
-    }
-    let mut out = HashSet::with_capacity(binding_excludes.len());
-    for coin_id in binding_excludes {
-        record_session_pin(&mut out, coin_id);
-    }
-    out
+/// In-batch protocol that pins a distinct exact-size receive-address maker coin per Direct offer.
+///
+/// Callers that need a live session acquire a `SQLite` connection and call [`Self::begin`].
+/// When live pin is gated off, use [`Self::inactive`] (or `begin`, which returns inactive without
+/// reading the store). Inactive sessions no-op `pin` / `commit`.
+#[derive(Debug, Default)]
+pub(crate) struct UniqueMakerPinSession {
+    live: bool,
+    excludes: HashSet<String>,
+    pending: Vec<String>,
 }
 
-/// Load binding maker coin ids for a market. Empty `market_id` fails closed.
-///
-/// # Errors
-///
-/// Returns an error when `market_id` is empty or the query fails.
-pub(crate) fn load_binding_maker_coin_ids(
-    store: &SqliteStore,
-    market_id: &str,
-) -> SignerResult<Vec<String>> {
+impl UniqueMakerPinSession {
+    /// Whether this post should live-pin via Coinset (excludes dry-run / flag off / `PreferExisting`).
+    #[must_use]
+    pub(crate) fn needs_live(
+        dry_run: bool,
+        unique_maker_coins: bool,
+        maker_reuse: Option<&PresplitMakerReuse>,
+    ) -> bool {
+        !dry_run && unique_maker_coins && effective_maker_reuse(maker_reuse).is_none()
+    }
+
+    /// Inactive session: pin/commit are no-ops (dry-run, flag off, or `PreferExisting`).
+    #[must_use]
+    pub(crate) fn inactive() -> Self {
+        Self {
+            live: false,
+            excludes: HashSet::new(),
+            pending: Vec::new(),
+        }
+    }
+
+    /// Begin a batch session. When live pin is gated on, loads binding excludes from `store`.
+    /// When gated off, returns [`Self::inactive`] without reading the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when live pin is gated on and `market_id` is empty or the binding query fails.
+    pub(crate) fn begin(
+        store: &SqliteStore,
+        market_id: &str,
+        dry_run: bool,
+        unique_maker_coins: bool,
+        maker_reuse: Option<&PresplitMakerReuse>,
+    ) -> SignerResult<Self> {
+        if !Self::needs_live(dry_run, unique_maker_coins, maker_reuse) {
+            return Ok(Self::inactive());
+        }
+        let binding = load_binding_maker_coin_ids(store, market_id)?;
+        let mut excludes = HashSet::with_capacity(binding.len());
+        for coin_id in &binding {
+            record_exclude(&mut excludes, coin_id);
+        }
+        Ok(Self {
+            live: true,
+            excludes,
+            pending: Vec::new(),
+        })
+    }
+
+    /// Whether this session will live-pin via Coinset (false ⇒ pin/commit no-op).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// Whether `coin_id` is in the binding / committed-session exclude set.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn has_exclude(&self, coin_id: &str) -> bool {
+        let id = normalize_hex_id(coin_id);
+        !id.is_empty() && self.excludes.contains(&id)
+    }
+
+    /// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
+    ///
+    /// On success, pending ids are available via [`Self::pending_offer_coin_ids`]. Failures clear
+    /// pending and return [`SignerError`]; callers map to soft-fail post outcomes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when leg pricing fails, Coinset listing fails, or no free exact-size
+    /// coin remains.
+    pub(crate) async fn pin_after_bootstrap(
+        &mut self,
+        request: UniqueMakerPinRequest<'_>,
+    ) -> SignerResult<()> {
+        self.pending.clear();
+        if !self.live {
+            return Ok(());
+        }
+        #[cfg(test)]
+        if let Some(result) = request.test_pin_result {
+            return match result {
+                Ok(coin_id) => {
+                    let id = normalize_hex_id(coin_id);
+                    if id.is_empty() {
+                        return Err(SignerError::Other(
+                            "unique pin test stub returned empty coin id".to_string(),
+                        ));
+                    }
+                    self.pending = vec![id];
+                    Ok(())
+                }
+                Err(message) => Err(SignerError::Other(message.clone())),
+            };
+        }
+        let ids = resolve_unique_offer_coin_ids(
+            request.market,
+            request.assets,
+            request.size_base_units,
+            request.side,
+            request.operator_network,
+            request.signer,
+            &self.excludes,
+        )
+        .await?;
+        self.pending = ids;
+        Ok(())
+    }
+
+    /// Pending `offer_coin_ids` from the last successful [`Self::pin_after_bootstrap`].
+    #[must_use]
+    pub(crate) fn pending_offer_coin_ids(&self) -> &[String] {
+        &self.pending
+    }
+
+    /// Move pending pins into the batch exclude set after a successful venue publish.
+    ///
+    /// On failure (or inactive session), clears pending without touching excludes so a later
+    /// `repeat` iteration can reuse the coin.
+    pub(crate) fn commit_on_publish(&mut self, success: bool) {
+        if !self.live || !success {
+            self.pending.clear();
+            return;
+        }
+        for coin_id in self.pending.drain(..) {
+            record_exclude(&mut self.excludes, &coin_id);
+        }
+    }
+}
+
+fn load_binding_maker_coin_ids(store: &SqliteStore, market_id: &str) -> SignerResult<Vec<String>> {
     let market_id = market_id.trim();
     if market_id.is_empty() {
         return Err(SignerError::Other(
@@ -58,11 +180,6 @@ pub(crate) fn load_binding_maker_coin_ids(
     store.list_binding_maker_coin_ids(market_id)
 }
 
-/// Offered-leg asset id and mojo amount for a unique Direct pin (same multipliers as create).
-///
-/// # Errors
-///
-/// Returns an error when size/pricing cannot form a valid offered leg.
 fn offered_leg_for_unique_pin(
     market: &MarketConfig,
     assets: &ResolvedMarketOfferAssets,
@@ -82,15 +199,7 @@ fn offered_leg_for_unique_pin(
     Ok((leg.offer_asset_id, leg.offer_amount_mojos))
 }
 
-/// Resolve `offer_coin_ids` for a live unique Direct pin (leg target + Coinset pick).
-///
-/// Caller must only invoke when [`needs_live_unique_pin`] is true.
-///
-/// # Errors
-///
-/// Returns an error when leg pricing fails, Coinset listing fails, or no free exact-size
-/// coin remains.
-pub(crate) async fn resolve_unique_offer_coin_ids(
+async fn resolve_unique_offer_coin_ids(
     market: &MarketConfig,
     assets: &ResolvedMarketOfferAssets,
     size_base_units: u64,
@@ -113,11 +222,6 @@ pub(crate) async fn resolve_unique_offer_coin_ids(
     Ok(vec![coin_id])
 }
 
-/// Pin one free exact-size receive coin, excluding binding + in-batch session coins.
-///
-/// # Errors
-///
-/// Returns an error when Coinset listing fails, or no free exact-size coin remains.
 async fn pin_unique_exact_maker_coin_id(
     operator_network: &str,
     signer: &SignerConfig,
@@ -136,11 +240,10 @@ async fn pin_unique_exact_maker_coin_id(
     pick_from_unspent(&coins, excludes, offered_asset_id, target_amount_mojos)
 }
 
-/// Record a pinned maker in the in-batch session exclude set.
-pub(crate) fn record_session_pin(session_excludes: &mut HashSet<String>, coin_id: &str) {
+fn record_exclude(excludes: &mut HashSet<String>, coin_id: &str) {
     let id = normalize_hex_id(coin_id);
     if !id.is_empty() {
-        session_excludes.insert(id);
+        excludes.insert(id);
     }
 }
 
@@ -246,47 +349,35 @@ mod tests {
         let coins = vec![coin(0xaa, 10_000), coin(0xbb, 10_000)];
         let asset = "ab".repeat(32);
         let first = pick_from_unspent(&coins, &HashSet::new(), &asset, 10_000).expect("first");
-        let mut session = HashSet::from([first.clone()]);
-        let second = pick_from_unspent(&coins, &session, &asset, 10_000).expect("second");
+        let mut excludes = HashSet::from([first.clone()]);
+        let second = pick_from_unspent(&coins, &excludes, &asset, 10_000).expect("second");
         assert_ne!(first, second);
-        record_session_pin(&mut session, &second);
-        assert_eq!(session.len(), 2);
+        record_exclude(&mut excludes, &second);
+        assert_eq!(excludes.len(), 2);
     }
 
     #[test]
-    fn needs_live_unique_pin_gates() {
-        assert!(!needs_live_unique_pin(true, true, None));
-        assert!(!needs_live_unique_pin(false, false, None));
+    fn begin_inactive_when_gated_off() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let dry = UniqueMakerPinSession::begin(&store, "m1", true, true, None).expect("dry");
+        assert!(!dry.is_live());
+        let disabled = UniqueMakerPinSession::begin(&store, "m1", false, false, None).expect("off");
+        assert!(!disabled.is_live());
         let reuse = PresplitMakerReuse {
             coin_id: "aa".repeat(32),
             offer_nonce: "bb".repeat(32),
         };
-        assert!(!needs_live_unique_pin(false, true, Some(&reuse)));
-        assert!(needs_live_unique_pin(false, true, None));
+        let existing =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, Some(&reuse)).expect("reuse");
+        assert!(!existing.is_live());
+        assert!(!UniqueMakerPinSession::inactive().is_live());
+        assert!(!UniqueMakerPinSession::needs_live(true, true, None));
+        assert!(UniqueMakerPinSession::needs_live(false, true, None));
     }
 
     #[test]
-    fn session_excludes_for_unique_pin_honors_gate_and_normalizes() {
-        let aa = hex::encode([0xaa; 32]);
-        let binding = vec![format!("0x{aa}"), String::new()];
-        let live = session_excludes_for_unique_pin(false, true, None, &binding);
-        assert_eq!(live, HashSet::from([aa.clone()]));
-        let dry = session_excludes_for_unique_pin(true, true, None, &binding);
-        assert!(dry.is_empty());
-        let disabled = session_excludes_for_unique_pin(false, false, None, &binding);
-        assert!(disabled.is_empty());
-    }
-
-    #[test]
-    fn load_binding_maker_coin_ids_fails_closed_on_empty_market() {
-        let dir = tempdir().expect("tempdir");
-        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
-        let err = load_binding_maker_coin_ids(&store, "  ").expect_err("empty");
-        assert!(err.to_string().contains("market_id required"));
-    }
-
-    #[test]
-    fn load_binding_maker_coin_ids_returns_open_makers() {
+    fn begin_loads_bindings_when_live() {
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let coin = hex::encode([0xaa; 32]);
@@ -313,8 +404,97 @@ mod tests {
                 },
             )
             .expect("upsert");
-        let ids = load_binding_maker_coin_ids(&store, "m1").expect("load");
-        assert_eq!(ids, vec![coin]);
+        let session = UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        assert!(session.is_live());
+        assert!(session.has_exclude(&coin));
+    }
+
+    #[test]
+    fn begin_fails_closed_on_empty_market() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let err = UniqueMakerPinSession::begin(&store, "  ", false, true, None).expect_err("empty");
+        assert!(err.to_string().contains("market_id required"));
+    }
+
+    #[tokio::test]
+    async fn pin_then_commit_on_publish_only_after_success() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        let market =
+            sample_market("xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h");
+        let assets = ResolvedMarketOfferAssets {
+            base_asset_id: "ab".repeat(32),
+            quote_asset_id: "xch".to_string(),
+            quote_asset_for_offer: "xch".to_string(),
+        };
+        let signer = test_signer_config("http://127.0.0.1:9");
+        let coin = "bb".repeat(32);
+        let stub_ok = Ok(coin.clone());
+        session
+            .pin_after_bootstrap(UniqueMakerPinRequest {
+                market: &market,
+                assets: &assets,
+                size_base_units: 10,
+                side: "sell",
+                operator_network: "mainnet",
+                signer: &signer,
+                test_pin_result: Some(&stub_ok),
+            })
+            .await
+            .expect("pin");
+        session.commit_on_publish(false);
+        assert!(!session.has_exclude(&coin));
+        assert!(session.pending_offer_coin_ids().is_empty());
+
+        session
+            .pin_after_bootstrap(UniqueMakerPinRequest {
+                market: &market,
+                assets: &assets,
+                size_base_units: 10,
+                side: "sell",
+                operator_network: "mainnet",
+                signer: &signer,
+                test_pin_result: Some(&stub_ok),
+            })
+            .await
+            .expect("pin again");
+        session.commit_on_publish(true);
+        assert!(session.has_exclude(&coin));
+        assert!(session.pending_offer_coin_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pin_test_stub_sets_pending_without_commit() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        let market =
+            sample_market("xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h");
+        let assets = ResolvedMarketOfferAssets {
+            base_asset_id: "ab".repeat(32),
+            quote_asset_id: "xch".to_string(),
+            quote_asset_for_offer: "xch".to_string(),
+        };
+        let signer = test_signer_config("http://127.0.0.1:9");
+        let stub = Ok("aa".repeat(32));
+        session
+            .pin_after_bootstrap(UniqueMakerPinRequest {
+                market: &market,
+                assets: &assets,
+                size_base_units: 10,
+                side: "sell",
+                operator_network: "mainnet",
+                signer: &signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect("stub pin");
+        assert_eq!(session.pending_offer_coin_ids(), &["aa".repeat(32)]);
+        assert!(!session.has_exclude("aa".repeat(32).as_str()));
     }
 
     #[test]
@@ -343,7 +523,6 @@ mod tests {
     #[tokio::test]
     async fn pin_unique_exact_maker_coin_id_lists_and_picks_exact_xch() {
         const RECEIVE: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-        // Same fixture shape as coinset_spendable tests (amount 5000).
         let body = r#"{
             "success": true,
             "coin_records": [{

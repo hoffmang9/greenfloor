@@ -8,7 +8,6 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -19,9 +18,7 @@ use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::offer::operator::{
-    load_binding_maker_coin_ids, needs_live_unique_pin, session_excludes_for_unique_pin,
-};
+use crate::offer::operator::UniqueMakerPinSession;
 use crate::offer::request::normalize_offer_side;
 use crate::paths::resolve_cats_config_path;
 use crate::storage::{
@@ -213,7 +210,7 @@ async fn run_post_iterations(
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
     mut persist: Option<&mut OfferPostPersistSink<'_>>,
-    session_excludes: &mut HashSet<String>,
+    session: &mut UniqueMakerPinSession,
 ) -> SignerResult<PostIterationBatch> {
     let mut batch = PostIterationBatch {
         post_results: Vec::new(),
@@ -228,7 +225,7 @@ async fn run_post_iterations(
     let emitter = PostBatchEmitter::new(ctx);
     for _ in 0..request.repeat {
         let (bootstrap_action, iteration) =
-            run_post_iteration(request, ctx, dexie, splash, session_excludes).await?;
+            run_post_iteration(request, ctx, dexie, splash, session).await?;
         batch.bootstrap_actions.push(bootstrap_action);
         // Reborrow the sink each iteration (cannot move Option<&mut _> in a loop).
         apply_post_iteration_outcome(
@@ -302,12 +299,12 @@ fn lock_cli_store(
         .map_err(|err| SignerError::Other(format!("CLI persist store lock: {err}")))
 }
 
-/// `preopened_cli_store`: home DB already opened by the CLI entry for binding load.
+/// `preopened_cli_store`: home DB already opened by the CLI entry for session begin / persist.
 async fn finish_build_and_post(
     request: &BuildAndPostOfferRequest,
     ctx: ResolvedBuildAndPostContext,
     persist: Option<&mut OfferPostPersistSink<'_>>,
-    binding_excludes: Vec<String>,
+    session: &mut UniqueMakerPinSession,
     preopened_cli_store: Option<Arc<Mutex<SqliteStore>>>,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
@@ -326,7 +323,7 @@ async fn finish_build_and_post(
         None
     };
 
-    // CLI posts own a connection for binding seed + synchronous persist. Daemon
+    // CLI posts own a connection for unique-pin begin + synchronous persist. Daemon
     // callers supply their cycle write store instead, avoiding a side connection.
     let cli_store = match preopened_cli_store {
         Some(store) => Some(store),
@@ -337,12 +334,6 @@ async fn finish_build_and_post(
         }
         None => None,
     };
-    let mut session_excludes = session_excludes_for_unique_pin(
-        request.run.dry_run,
-        ctx.gated.market_row.unique_maker_coins,
-        request.maker_reuse.as_ref(),
-        &binding_excludes,
-    );
     let mut cli_persist = move |record: &OfferPostPersistRecord| {
         let store = lock_cli_store(
             cli_store
@@ -366,7 +357,7 @@ async fn finish_build_and_post(
         dexie.as_ref(),
         splash.as_ref(),
         persist,
-        &mut session_excludes,
+        session,
     )
     .await?;
 
@@ -407,27 +398,35 @@ async fn build_and_post_offer_async(
 ) -> SignerResult<BuildAndPostOfferResponse> {
     let ctx = resolve_build_and_post_context(&request).await?;
     let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
-    let live_pin = needs_live_unique_pin(
+    let market_id = ctx.gated.market_row.market_id.as_str();
+    let needs_live = UniqueMakerPinSession::needs_live(
         request.run.dry_run,
         ctx.gated.market_row.unique_maker_coins,
         request.maker_reuse.as_ref(),
     );
-    // One home-DB connection for binding seed, iteration persist, and artifact flush.
-    let cli_store = if live_pin || target == PostEmitTarget::TraceAndStore {
+    // One home-DB connection for live unique-pin begin and/or TraceAndStore persist.
+    let cli_store = if needs_live || target == PostEmitTarget::TraceAndStore {
         Some(Arc::new(Mutex::new(SqliteStore::open(
             &state_db_path_for_home(&ctx.gated.program.home_dir),
         )?)))
     } else {
         None
     };
-    let binding_excludes = if live_pin {
-        let store = lock_cli_store(cli_store.as_ref().expect("opened for live unique pin"))?;
-        load_binding_maker_coin_ids(&store, &ctx.gated.market_row.market_id)?
-    } else {
-        Vec::new()
+    let mut session = match cli_store.as_ref() {
+        Some(arc) => {
+            let store = lock_cli_store(arc)?;
+            UniqueMakerPinSession::begin(
+                &store,
+                market_id,
+                request.run.dry_run,
+                ctx.gated.market_row.unique_maker_coins,
+                request.maker_reuse.as_ref(),
+            )?
+        }
+        None => UniqueMakerPinSession::inactive(),
     };
     let (response, artifacts) =
-        finish_build_and_post(&request, ctx, None, binding_excludes, cli_store.clone()).await?;
+        finish_build_and_post(&request, ctx, None, &mut session, cli_store.clone()).await?;
     if let Some(artifacts) = artifacts {
         let store = lock_cli_store(cli_store.as_ref().expect("TraceAndStore opened CLI store"))?;
         flush_build_and_post_persist(&store, &artifacts)?;
@@ -437,9 +436,8 @@ async fn build_and_post_offer_async(
 
 /// Run build-and-post and return optional persist artifacts for caller-side flush.
 ///
-/// Callers preload `binding_excludes` (daemon/ensure: cycle write store; CLI entry loads
-/// from the same home-DB connection used for persist). Empty is correct when unique pin
-/// is gated off.
+/// Callers construct [`UniqueMakerPinSession`] via [`UniqueMakerPinSession::begin`] on their
+/// held store (daemon/ensure: cycle write store; CLI: home-DB shared with persist).
 ///
 /// # Errors
 ///
@@ -447,7 +445,7 @@ async fn build_and_post_offer_async(
 pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     request: BuildAndPostOfferRequest,
     persist: Option<&mut OfferPostPersistSink<'_>>,
-    binding_excludes: Vec<String>,
+    session: &mut UniqueMakerPinSession,
 ) -> SignerResult<(
     BuildAndPostOfferResponse,
     Option<BuildAndPostPersistArtifacts>,
@@ -461,7 +459,7 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
         return Err(SignerError::Other("repeat must be positive".to_string()));
     }
     let ctx = resolve_build_and_post_context(&request).await?;
-    finish_build_and_post(&request, ctx, persist, binding_excludes, None).await
+    finish_build_and_post(&request, ctx, persist, session, None).await
 }
 
 #[cfg(test)]
@@ -476,27 +474,26 @@ pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts
 }
 
 #[cfg(test)]
-mod binding_excludes_tests {
+mod unique_pin_session_tests {
     use super::*;
     use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
     use crate::storage::{OfferCancelWrite, OfferListingWrite};
     use crate::test_support::build_and_post::unused_post_iteration_request;
 
     #[test]
-    fn session_excludes_skip_when_unique_pin_gated_off() {
+    fn begin_inactive_when_unique_pin_gated_off() {
         let request = unused_post_iteration_request(true, None);
         let ctx = sample_resolved_build_and_post_context();
-        let seeded = session_excludes_for_unique_pin(
+        assert!(!UniqueMakerPinSession::needs_live(
             request.run.dry_run,
             ctx.gated.market_row.unique_maker_coins,
             request.maker_reuse.as_ref(),
-            &["aa".repeat(32)],
-        );
-        assert!(seeded.is_empty());
+        ));
+        assert!(!UniqueMakerPinSession::inactive().is_live());
     }
 
     #[test]
-    fn load_binding_maker_coin_ids_from_home_store() {
+    fn begin_loads_bindings_from_home_store() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(&state_db_path_for_home(dir.path())).expect("open");
         let coin = "aa".repeat(32);
@@ -523,7 +520,8 @@ mod binding_excludes_tests {
                 },
             )
             .expect("upsert");
-        let ids = load_binding_maker_coin_ids(&store, "m1").expect("load");
-        assert_eq!(ids, vec![coin]);
+        let session = UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        assert!(session.is_live());
+        assert!(session.has_exclude(&coin));
     }
 }
