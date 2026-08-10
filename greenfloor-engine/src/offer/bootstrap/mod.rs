@@ -34,6 +34,4 @@ pub use planner::plan_bootstrap_mixed_outputs;
 pub(crate) use replan::{bootstrap_replan_after_combine, BootstrapReplanAfterCombine};
 
 #[cfg(test)]
-pub(crate) use shape_policy::{
-    bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
-};
+pub(crate) use shape_policy::{bootstrap_after_combine_handoff, bootstrap_preflight_handoff};

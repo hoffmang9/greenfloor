@@ -1,9 +1,7 @@
 //! Bootstrap phase status/reason mapping after planner evaluation or post-split replan.
 
 use super::plan::{BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow};
-use super::shape_policy::{
-    bootstrap_preflight_deferred_to_coin_ops, offer_bootstrap_primary_row_complete,
-};
+use super::shape_policy::{bootstrap_after_combine_handoff, bootstrap_preflight_handoff};
 
 #[cfg(test)]
 mod tests;
@@ -98,12 +96,14 @@ fn after_combine_wait_complete_outcome(
     if outcome.combine_first_pending() {
         return None;
     }
-    if offer_bootstrap_primary_row_complete(
+    if bootstrap_after_combine_handoff(
         ctx.combine_target_amount,
         outcome,
         ctx.ladder_entries,
         ctx.spendable_coins,
-    ) {
+    )
+    .yields()
+    {
         return Some(BootstrapPlanOutcome::Ready);
     }
     match outcome {
@@ -136,7 +136,7 @@ pub fn bootstrap_early_phase(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
 ) -> Option<BootstrapPhaseSnapshot> {
-    if bootstrap_preflight_deferred_to_coin_ops(outcome, ladder_entries, spendable_coins)
+    if bootstrap_preflight_handoff(outcome, ladder_entries, spendable_coins).yields()
         || matches!(outcome, BootstrapPlanOutcome::Ready)
     {
         return Some(skipped_already_ready_snapshot());
