@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -20,9 +19,7 @@ use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
     run_signer_denomination_phase, BootstrapPhaseResult,
 };
-use crate::offer::operator::{
-    needs_live_unique_pin, record_session_pin, resolve_unique_offer_coin_ids,
-};
+use crate::offer::operator::{UniqueMakerPinRequest, UniqueMakerPinSession};
 use crate::offer::types::effective_maker_reuse;
 
 async fn run_bootstrap_phase(
@@ -55,62 +52,11 @@ fn post_phase_failure(
     })
 }
 
-/// Pin after bootstrap so denomination shaping cannot spend the chosen coin first.
-///
-/// Soft pin/leg failures return `Ok(Err(Failure))` — same nested shape as
-/// [`create_offer_for_post`] — so `ensure_size` / sequential dispatch can continue.
-async fn offer_coin_ids_after_bootstrap(
-    request: &BuildAndPostOfferRequest,
-    ctx: &ResolvedBuildAndPostContext,
-    session_excludes: &HashSet<String>,
-    started: Instant,
-) -> SignerResult<Result<Vec<String>, PostIterationOutcome>> {
-    if !needs_live_unique_pin(
-        request.run.dry_run,
-        ctx.gated.market_row.unique_maker_coins,
-        request.maker_reuse.as_ref(),
-    ) {
-        return Ok(Ok(Vec::new()));
-    }
-    #[cfg(test)]
-    if let Some(result) = ctx.test_overrides.unique_pin_result() {
-        return Ok(match result {
-            Ok(coin_id) => Ok(vec![coin_id.to_string()]),
-            Err(message) => Err(post_phase_failure(message, started, None)),
-        });
-    }
-    let side = ctx.action_side();
-    match resolve_unique_offer_coin_ids(
-        &ctx.gated.market_row,
-        &ctx.offer_assets,
-        request.size_base_units,
-        &side,
-        &ctx.gated.operator_network,
-        &ctx.gated.signer,
-        session_excludes,
+fn publish_succeeded(outcome: &PostIterationOutcome) -> bool {
+    matches!(
+        outcome,
+        PostIterationOutcome::Success(success) if success.success
     )
-    .await
-    {
-        Ok(ids) => Ok(Ok(ids)),
-        Err(err) => Ok(Err(post_phase_failure(err.to_string(), started, None))),
-    }
-}
-
-/// Commit pinned maker ids into the batch session only after the venue accepts the offer.
-fn commit_session_pins_after_publish(
-    session_excludes: &mut HashSet<String>,
-    offer_coin_ids: &[String],
-    outcome: &PostIterationOutcome,
-) {
-    let PostIterationOutcome::Success(success) = outcome else {
-        return;
-    };
-    if !success.success {
-        return;
-    }
-    for coin_id in offer_coin_ids {
-        record_session_pin(session_excludes, coin_id);
-    }
 }
 
 async fn create_offer_for_post(
@@ -244,7 +190,7 @@ pub(super) async fn run_post_iteration(
     ctx: &ResolvedBuildAndPostContext,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
-    session_excludes: &mut HashSet<String>,
+    session: &mut UniqueMakerPinSession,
 ) -> SignerResult<(Value, PostIterationOutcome)> {
     let started = Instant::now();
 
@@ -264,15 +210,33 @@ pub(super) async fn run_post_iteration(
         }
     }
 
-    let offer_coin_ids =
-        match offer_coin_ids_after_bootstrap(request, ctx, session_excludes, started).await? {
-            Ok(ids) => ids,
-            Err(outcome) => return Ok((bootstrap_action, outcome)),
-        };
+    let side = ctx.action_side();
+    if let Err(err) = session
+        .pin_after_bootstrap(UniqueMakerPinRequest {
+            market: &ctx.gated.market_row,
+            assets: &ctx.offer_assets,
+            size_base_units: request.size_base_units,
+            side: &side,
+            operator_network: &ctx.gated.operator_network,
+            signer: &ctx.gated.signer,
+            #[cfg(test)]
+            test_pin_result: ctx.test_overrides.unique_pin_result.as_ref(),
+        })
+        .await
+    {
+        return Ok((
+            bootstrap_action,
+            post_phase_failure(err.to_string(), started, None),
+        ));
+    }
     let (created, create_phase_ms) =
-        match create_offer_for_post(request, ctx, started, &offer_coin_ids).await? {
+        match create_offer_for_post(request, ctx, started, session.pending_offer_coin_ids()).await?
+        {
             Ok(values) => values,
-            Err(outcome) => return Ok((bootstrap_action, outcome)),
+            Err(outcome) => {
+                session.commit_on_publish(false);
+                return Ok((bootstrap_action, outcome));
+            }
         };
 
     let coinset = if ctx.publish_venue == "coinset" {
@@ -295,14 +259,13 @@ pub(super) async fn run_post_iteration(
         coinset,
     )
     .await?;
-    commit_session_pins_after_publish(session_excludes, &offer_coin_ids, &outcome);
+    session.commit_on_publish(publish_succeeded(&outcome));
 
     Ok((bootstrap_action, outcome))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::time::Instant;
 
     use serde_json::{json, Value};
@@ -311,6 +274,7 @@ mod tests {
     use super::PostIterationOutcome;
     use crate::offer::codec::verify_offer_for_dexie;
     use crate::offer::operator::build_and_post::context::sample_resolved_build_and_post_context;
+    use crate::offer::operator::UniqueMakerPinSession;
     use crate::test_support::build_and_post::unused_post_iteration_request;
 
     #[tokio::test]
@@ -357,7 +321,7 @@ mod tests {
     async fn run_post_iteration_blocks_when_bootstrap_not_ready() {
         let ctx = sample_resolved_build_and_post_context();
         let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let mut session = HashSet::new();
+        let mut session = UniqueMakerPinSession::inactive();
 
         let (_bootstrap_action, outcome) =
             super::run_post_iteration(&request, &ctx, None, None, &mut session)
@@ -380,7 +344,6 @@ mod tests {
     #[tokio::test]
     async fn run_post_iteration_skips_bootstrap_for_maker_reuse() {
         let mut ctx = sample_resolved_build_and_post_context();
-        // Stub reaches create; verify_offer_for_dexie fails — proves we passed bootstrap.
         let offer_text = "not-an-offer";
         ctx.test_overrides.offer_text = Some(offer_text.to_string());
         let mut request = unused_post_iteration_request(false, Some(offer_text));
@@ -389,7 +352,7 @@ mod tests {
             offer_nonce: "bb".repeat(32),
         });
         let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
-        let mut session = HashSet::new();
+        let mut session = UniqueMakerPinSession::inactive();
 
         let (bootstrap_action, outcome) =
             super::run_post_iteration(&request, &ctx, None, None, &mut session)
@@ -400,7 +363,6 @@ mod tests {
             bootstrap_action.get("reason").and_then(Value::as_str),
             Some("maker_reuse")
         );
-        // Without usable maker_reuse this fixture blocks on missing_sell_ladder.
         match outcome {
             PostIterationOutcome::Failure(failure) => {
                 assert_eq!(failure.error, expected_verify_error);
@@ -417,7 +379,7 @@ mod tests {
             coin_id: String::new(),
             offer_nonce: "bb".repeat(32),
         });
-        let mut session = HashSet::new();
+        let mut session = UniqueMakerPinSession::inactive();
 
         let (_bootstrap_action, outcome) =
             super::run_post_iteration(&request, &ctx, None, None, &mut session)
@@ -437,61 +399,75 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn offer_coin_ids_after_bootstrap_soft_fails_unique_pin_errors() {
-        let mut ctx = sample_resolved_build_and_post_context();
-        ctx.test_overrides.unique_pin_result = Some(Err("no_free_exact_maker".to_string()));
-        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let session = HashSet::new();
+    async fn pin_after_bootstrap_errors_leave_pending_clear() {
+        use tempfile::tempdir;
 
-        let outcome =
-            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
-                .await
-                .expect("outer SignerResult must stay Ok for soft pin failures");
-
-        match outcome {
-            Err(PostIterationOutcome::Failure(failure)) => {
-                assert_eq!(failure.error, "no_free_exact_maker");
-                assert!(failure.create_phase_ms.is_none());
-            }
-            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
-                panic!("expected Failure variant")
-            }
-            Ok(_) => panic!("expected soft Failure outcome for unique pin error"),
-        }
-        assert!(
-            session.is_empty(),
-            "failed pin must not reserve a session coin"
-        );
+        let dir = tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        let ctx = sample_resolved_build_and_post_context();
+        let stub = Err("no_free_exact_maker".to_string());
+        let side = ctx.action_side();
+        let err = session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect_err("stub err");
+        assert_eq!(err.to_string(), "no_free_exact_maker");
+        assert!(session.pending_offer_coin_ids().is_empty());
+        assert!(!session.has_exclude("aa".repeat(32).as_str()));
     }
 
     #[tokio::test]
-    async fn offer_coin_ids_after_bootstrap_does_not_commit_session_on_pin() {
-        let mut ctx = sample_resolved_build_and_post_context();
+    async fn pin_after_bootstrap_does_not_commit_session_on_pin() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        let ctx = sample_resolved_build_and_post_context();
         let coin = "aa".repeat(32);
-        ctx.test_overrides.unique_pin_result = Some(Ok(coin.clone()));
-        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let session = HashSet::new();
-
-        let outcome =
-            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
-                .await
-                .expect("pin");
-        let Ok(pinned) = outcome else {
-            panic!("expected pinned ids");
-        };
-
-        assert_eq!(pinned, vec![coin]);
+        let stub = Ok(coin.clone());
+        let side = ctx.action_side();
+        session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect("pin");
+        assert_eq!(
+            session.pending_offer_coin_ids(),
+            std::slice::from_ref(&coin)
+        );
         assert!(
-            session.is_empty(),
+            !session.has_exclude(&coin),
             "pin alone must not reserve; commit only after publish success"
         );
     }
 
     #[tokio::test]
-    async fn offer_coin_ids_after_bootstrap_live_pins_via_coinset() {
+    async fn pin_after_bootstrap_live_pins_via_coinset() {
         use crate::config::MarketPricing;
+        use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
         use crate::offer::ResolvedMarketOfferAssets;
+        use crate::storage::{OfferCancelWrite, OfferListingWrite};
         use crate::test_support::signer_config::test_signer_config;
+        use tempfile::tempdir;
 
         const RECEIVE: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
         let cat = "ab".repeat(32);
@@ -502,6 +478,39 @@ mod tests {
             .with_body(r#"{"success":true,"coin_records":[]}"#)
             .create_async()
             .await;
+
+        let dir = tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let prebound = "aa".repeat(32);
+        let fields = OfferCancelFields::from_presplit_build(
+            prebound.clone(),
+            "bb".repeat(32),
+            "cc".repeat(32),
+        );
+        store
+            .upsert_offer_state_with_metadata_at(
+                "o1",
+                "m1",
+                "open",
+                None,
+                "2026-01-01T00:00:00Z",
+                OfferCancelWrite {
+                    fields: Some(&fields),
+                    execution_mode: Some(OfferExecutionMode::Direct),
+                    listing: OfferListingWrite {
+                        publish_venue: Some("dexie"),
+                        listing_expires_at: None,
+                        size_base_units: Some(10),
+                        offer_nonce: None,
+                        offer_side: Some("sell"),
+                    },
+                    ..OfferCancelWrite::default()
+                },
+            )
+            .expect("seed");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        assert!(session.has_exclude(&prebound));
 
         let mut ctx = sample_resolved_build_and_post_context();
         ctx.gated.signer = test_signer_config(&server.url());
@@ -518,62 +527,76 @@ mod tests {
             quote_asset_id: "xch".to_string(),
             quote_asset_for_offer: "xch".to_string(),
         };
-        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let mut session = HashSet::new();
-        session.insert("prebound".repeat(8));
-
-        let outcome =
-            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
-                .await
-                .expect("outer SignerResult stays Ok for soft pin failures");
-
-        match outcome {
-            Err(PostIterationOutcome::Failure(failure)) => {
-                assert_eq!(failure.error, "no unspent cat coins");
-                assert!(failure.create_phase_ms.is_none());
-            }
-            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
-                panic!("expected Failure variant")
-            }
-            Ok(_) => panic!("empty Coinset list must soft-fail unique pin"),
-        }
-        assert_eq!(
-            session.len(),
-            1,
+        let side = ctx.action_side();
+        let err = session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: None,
+            })
+            .await
+            .expect_err("empty Coinset");
+        assert_eq!(err.to_string(), "no unspent cat coins");
+        assert!(
+            session.has_exclude(&prebound),
             "soft pin failure must leave session excludes unchanged"
         );
     }
 
     #[tokio::test]
-    async fn offer_coin_ids_after_bootstrap_soft_fails_invalid_offered_leg() {
+    async fn pin_after_bootstrap_errors_on_invalid_offered_leg() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
         let mut ctx = sample_resolved_build_and_post_context();
         ctx.gated.market_row.pricing.fixed_quote_per_base = Some(0.0);
-        let request = unused_post_iteration_request(false, Some("offer1dryrunpreviewstub"));
-        let session = HashSet::new();
-
-        let outcome =
-            super::offer_coin_ids_after_bootstrap(&request, &ctx, &session, Instant::now())
-                .await
-                .expect("outer ok");
-
-        match outcome {
-            Err(PostIterationOutcome::Failure(failure)) => {
-                assert!(
-                    !failure.error.is_empty(),
-                    "leg failure must surface as soft Failure"
-                );
-            }
-            Ok(_) => panic!("expected soft Failure for bad pricing"),
-            Err(PostIterationOutcome::Preview(_) | PostIterationOutcome::Success(_)) => {
-                panic!("expected Failure variant for bad pricing")
-            }
-        }
+        let side = ctx.action_side();
+        let err = session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: None,
+            })
+            .await
+            .expect_err("bad pricing");
+        assert!(!err.to_string().is_empty());
     }
 
-    #[test]
-    fn commit_session_pins_only_after_successful_publish() {
+    #[tokio::test]
+    async fn commit_on_publish_only_after_successful_publish() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut session =
+            UniqueMakerPinSession::begin(&store, "m1", false, true, None).expect("begin");
+        let ctx = sample_resolved_build_and_post_context();
         let coin = "bb".repeat(32);
-        let mut session = HashSet::new();
+        let stub = Ok(coin.clone());
+        let side = ctx.action_side();
+        session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect("pin");
         let failure = PostIterationOutcome::Failure(super::PostFailure {
             error: "create_failed".to_string(),
             started: Instant::now(),
@@ -581,37 +604,51 @@ mod tests {
             execution_mode: None,
             bootstrap: None,
         });
-        super::commit_session_pins_after_publish(
-            &mut session,
-            std::slice::from_ref(&coin),
-            &failure,
-        );
-        assert!(session.is_empty());
+        session.commit_on_publish(super::publish_succeeded(&failure));
+        assert!(!session.has_exclude(&coin));
+        assert!(session.pending_offer_coin_ids().is_empty());
 
+        session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect("pin");
         let publish_failed = PostIterationOutcome::Success(Box::new(super::PostAttemptSuccess {
             publish_venue: "dexie".to_string(),
             result: json!({}),
             success: false,
             persist_record: None,
         }));
-        super::commit_session_pins_after_publish(
-            &mut session,
-            std::slice::from_ref(&coin),
-            &publish_failed,
-        );
-        assert!(session.is_empty());
+        session.commit_on_publish(super::publish_succeeded(&publish_failed));
+        assert!(!session.has_exclude(&coin));
 
+        session
+            .pin_after_bootstrap(crate::offer::operator::UniqueMakerPinRequest {
+                market: &ctx.gated.market_row,
+                assets: &ctx.offer_assets,
+                size_base_units: 10,
+                side: &side,
+                operator_network: &ctx.gated.operator_network,
+                signer: &ctx.gated.signer,
+                test_pin_result: Some(&stub),
+            })
+            .await
+            .expect("pin");
         let published = PostIterationOutcome::Success(Box::new(super::PostAttemptSuccess {
             publish_venue: "dexie".to_string(),
             result: json!({}),
             success: true,
             persist_record: None,
         }));
-        super::commit_session_pins_after_publish(
-            &mut session,
-            std::slice::from_ref(&coin),
-            &published,
-        );
-        assert!(session.contains(&coin));
+        session.commit_on_publish(super::publish_succeeded(&published));
+        assert!(session.has_exclude(&coin));
+        assert!(session.pending_offer_coin_ids().is_empty());
     }
 }

@@ -24,7 +24,7 @@ use super::{
     build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
     BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
 };
-use crate::offer::operator::{load_binding_maker_coin_ids, needs_live_unique_pin};
+use crate::offer::operator::UniqueMakerPinSession;
 
 /// Shared plan inputs for hash compare (must match create/post asset resolution).
 struct EnsurePlan {
@@ -99,25 +99,22 @@ async fn post_offer(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .ok_or_else(|| SignerError::Other("ensure_size post requires market_id".to_string()))?;
-    let binding_excludes = if needs_live_unique_pin(
-        post_request.run.dry_run,
-        unique_maker_coins,
-        post_request.maker_reuse.as_ref(),
-    ) {
-        write_store.sync(|store| load_binding_maker_coin_ids(store, market_id))?
-    } else {
-        Vec::new()
-    };
+    let mut session = write_store.sync(|store| {
+        UniqueMakerPinSession::begin(
+            store,
+            market_id,
+            post_request.run.dry_run,
+            unique_maker_coins,
+            post_request.maker_reuse.as_ref(),
+        )
+    })?;
     let persist_store = write_store.clone();
     let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
         persist_store.sync(|store| upsert_offer_post_record(store, record))
     };
-    let (response, artifacts) = build_and_post_offer_with_persist_artifacts(
-        post_request,
-        Some(&mut persist),
-        binding_excludes,
-    )
-    .await?;
+    let (response, artifacts) =
+        build_and_post_offer_with_persist_artifacts(post_request, Some(&mut persist), &mut session)
+            .await?;
     if let Some(artifacts) = artifacts {
         let store = write_store.lock()?;
         flush_build_and_post_persist(&store, &artifacts)?;
@@ -479,7 +476,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_offer_preloads_binding_excludes_from_write_store() {
+    async fn post_offer_begins_unique_pin_session_from_write_store() {
         use crate::config::ManagerProgramConfig;
         use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
         use crate::storage::CycleWriteStore;
@@ -534,10 +531,11 @@ mod tests {
             })
             .expect("seed binding");
 
-        let loaded = write_store
-            .sync(|store| load_binding_maker_coin_ids(store, "m1"))
-            .expect("load");
-        assert_eq!(loaded, vec![coin.clone()]);
+        let live = write_store
+            .sync(|store| UniqueMakerPinSession::begin(store, "m1", false, true, None))
+            .expect("begin live");
+        assert!(live.is_live());
+        assert!(live.has_exclude(&coin));
 
         let program = ManagerProgramConfig {
             runtime_dry_run: true,
@@ -552,19 +550,15 @@ mod tests {
             &paths, &program, "mainnet", "m1", 1, "sell",
         );
 
-        // Dry-run gates live pin, so binding load is skipped; post still runs.
+        // Dry-run gates live pin, so begin is inactive; post still runs.
         let posted = post_offer(&parts, &write_store, None, true)
             .await
             .expect("post_offer after gated binding path");
         assert!(!posted);
-        assert!(
-            needs_live_unique_pin(false, true, None),
-            "live pin gate must still allow binding preload when not dry-run"
-        );
-        let binding = write_store
-            .sync(|store| load_binding_maker_coin_ids(store, "m1"))
-            .expect("load for live pin");
-        assert_eq!(binding, vec![coin]);
+        let dry = write_store
+            .sync(|store| UniqueMakerPinSession::begin(store, "m1", true, true, None))
+            .expect("begin dry");
+        assert!(!dry.is_live());
     }
 
     #[test]

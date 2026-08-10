@@ -38,14 +38,15 @@ On live `byc_two_sided_wusdbc` (ladder: 1 buy + 3 sell × 10):
 
 4. **Single pin site, after bootstrap, with a session exclude set.** Pin runs in each
    `build_and_post` iteration after denomination bootstrap succeeds and before create
-   (`resolve_unique_offer_coin_ids`), so shaping cannot spend the pinned coin. Callers
-   preload binding coin ids once when live pin is gated on (`load_binding_maker_coin_ids`:
-   daemon/ensure from the cycle write store; CLI from one home-DB connection shared with
-   persist + artifact flush) and pass them into build-and-post; session excludes are
-   derived with `session_excludes_for_unique_pin`. Pinned ids join the in-memory session
-   set only after a successful venue publish, so a failed create/publish can reuse the
-   coin on a later `repeat` iteration. Dry-run skips Coinset pin. Daemon `ensure_size`
-   reuses that path.
+   (`UniqueMakerPinSession::pin_after_bootstrap`), so shaping cannot spend the pinned coin.
+   Callers acquire the SQLite connection (daemon/ensure: cycle write store; CLI: one home-DB
+   connection shared with persist + artifact flush). When live pin is gated on they call
+   `UniqueMakerPinSession::begin`, which loads binding maker coin ids; otherwise
+   `UniqueMakerPinSession::inactive` (or `begin` while gated off). The session holds pending
+   pin ids until `commit_on_publish(success)`; pins join the in-memory exclude set only after
+   a successful venue publish, so a failed create/publish can reuse the coin on a later
+   `repeat` iteration. Dry-run / PreferExisting sessions are inactive no-ops. Daemon
+   `ensure_size` reuses that path.
 
 5. **Sequential dispatch** when unique: managed parallel dispatch is disabled for that
    market so cross-process binding rows are visible before the next ensure.
