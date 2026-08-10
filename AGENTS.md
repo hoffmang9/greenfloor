@@ -96,6 +96,15 @@ Severity tags:
 
 ## Agent skills
 
+### Issue tracker
+
+Issues and specs live in GitHub Issues (`hoffmang9/greenfloor`) via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` plus ADRs in `docs/decisions/`. See `docs/agents/domain.md`.
+
 Project skills live under `.cursor/skills/`. Invoke by name (for example `/coverage-review`) or
 when the skill description matches the task. Read the linked `SKILL.md` before running a skill.
 
