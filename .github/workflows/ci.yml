@@ -24,7 +24,9 @@ jobs:
     name: Lint, format, and tests (ubuntu-latest)
     runs-on: ubuntu-latest
     # Cold main: clippy + llvm-cov warm into target-coverage + plain nextest.
-    timeout-minutes: 15
+    # 20m: env-hash cache misses need ~6–7m instrumented + ~6–7m plain compile;
+    # 15m cancelled before main could save coverage caches for PRs.
+    timeout-minutes: 20
     permissions:
       contents: read
       # Cache save (rust-cache / actions/cache) needs a writable Actions scope.
