@@ -16,6 +16,12 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-10 — Canonical CAT outer puzzle-hash (ADR 0023)
+
+`cat(asset_id, p2)` outer hashes curry once in `coinset/cats/outer`; vault create-assert
+calls that primitive directly; scan / wallet_io / list use thin adapters (`cat_outer_coinset_hex`
+plus `normalize_hex_id` where bare hex is needed). Deleted shallow `vault_coinset_scan/cat_outer`.
+
 ### 2026-08-10 — Unique maker pin session deepen
 
 ADR 0022 pin protocol lives behind `UniqueMakerPinSession` (`begin` →

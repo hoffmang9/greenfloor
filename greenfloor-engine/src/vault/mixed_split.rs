@@ -285,11 +285,10 @@ mod tests {
 
     #[tokio::test]
     async fn build_mixed_split_rejects_double_wrap_and_keeps_receive_outputs() {
+        use crate::coinset::cat_outer_puzzle_hash;
         use crate::test_support::simulator::harness::SimulatorVaultHarness;
         use crate::test_support::simulator::SimulatorOfferCoinset;
-        use crate::vault::cat_create::{
-            assert_cat_creates, created_cats, receive_cat_outer_puzzle_hash,
-        };
+        use crate::vault::cat_create::{assert_cat_creates, created_cats};
         use chia_puzzle_types::Memos;
         use chia_sdk_driver::{Action, Id, SpendContext, Spends};
 
@@ -314,7 +313,7 @@ mod tests {
         assert!(!spend_bundle.coin_spends.is_empty());
 
         // Regression: Action::send to the CAT outer fails the create assert.
-        let expected_outer = receive_cat_outer_puzzle_hash(asset_id, receive_puzzle_hash);
+        let expected_outer = cat_outer_puzzle_hash(asset_id, receive_puzzle_hash);
         let mut bad_ctx = SpendContext::new();
         let mut bad_spends = Spends::new(receive_puzzle_hash);
         bad_spends.add(cat);
