@@ -22,7 +22,7 @@ on-chain behavior:
 | Module                                         | Responsibility                                                                                                                |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `plan.rs`                                      | Domain model: `BootstrapPlan`, `BootstrapPlanOutcome`, ladder rows, coins; `BootstrapPlanOutcome::combine_first_pending()`    |
-| `planner.rs`                                   | Orchestration only: `plan_bootstrap_mixed_outputs`                                                                            |
+| `planner.rs`                                   | Orchestration: `plan_bootstrap_mixed_outputs`, `BootstrapCombineContext` (amount-unit + asset for dust)                       |
 | `planner/tests.rs`                             | Planner unit tests                                                                                                            |
 | `test_fixtures.rs`                             | Shared planner/phase/replan test helpers (`plan_bootstrap`, `expect_needs_shape`, …)                                          |
 | `phase/mod.rs`                                 | `BootstrapPhaseStatus`, `BootstrapPhaseSnapshot`, early/executed phase mapping, shape wait poll types/resolution              |

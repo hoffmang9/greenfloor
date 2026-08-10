@@ -40,6 +40,108 @@ pub fn coin_records_response(records: &[String]) -> String {
     )
 }
 
+/// Coinset mock for combine-first then split wait progression.
+pub async fn coinset_server_for_combine_first_e2e() -> mockito::ServerGuard {
+    let fragmented = coin_records_response(&[
+        coin_record_body(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 65,
+        ),
+        coin_record_body(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 20,
+        ),
+        coin_record_body(
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 11,
+        ),
+        coin_record_body(
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 4,
+        ),
+    ]);
+    let combined_only = coin_records_response(&[coin_record_body(
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
+    )]);
+    let shaped_for_wait = coin_records_response(&[
+        coin_record_body(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
+        ),
+        coin_record_body(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            BOOTSTRAP_TEST_MOJO_PER_XCH * 100,
+        ),
+    ]);
+
+    let mut server = mockito::Server::new_async().await;
+    let _initial = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(fragmented)
+        .create_async()
+        .await;
+    let _combine_wait = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(combined_only)
+        .create_async()
+        .await;
+    let _split_wait = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(shaped_for_wait)
+        .create_async()
+        .await;
+    let _fee = server
+        .mock("POST", "/get_fee_estimate")
+        .with_status(200)
+        .with_body(r#"{"success":false}"#)
+        .create_async()
+        .await;
+    server
+}
+
+/// Coinset mock for ECO.181 combine-only (ready after combine, no split).
+pub async fn coinset_server_for_eco181_combine_only_e2e() -> mockito::ServerGuard {
+    use crate::test_support::eco181_bootstrap_inventory::{
+        eco181_after_combine_inventory_rows, eco181_bootstrap_inventory_rows,
+        eco181_fixture_coin_records,
+    };
+
+    let fragmented = eco181_fixture_coin_records(
+        &eco181_bootstrap_inventory_rows(),
+        BOOTSTRAP_TEST_MOJO_PER_XCH.cast_signed(),
+    );
+    let after_combine = eco181_fixture_coin_records(
+        &eco181_after_combine_inventory_rows(),
+        BOOTSTRAP_TEST_MOJO_PER_XCH.cast_signed(),
+    );
+
+    let mut server = mockito::Server::new_async().await;
+    let _initial = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(fragmented)
+        .create_async()
+        .await;
+    let _combine_wait = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(after_combine)
+        .expect_at_least(2)
+        .create_async()
+        .await;
+    let _fee = server
+        .mock("POST", "/get_fee_estimate")
+        .with_status(200)
+        .with_body(r#"{"success":false}"#)
+        .create_async()
+        .await;
+    server
+}
+
 /// ECO.181-style inventory (60k + four 10k plan mojos) for cap-aware combine-first
 /// bootstrap tests. Amounts are already in plan mojos.
 #[must_use]

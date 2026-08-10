@@ -1,5 +1,6 @@
 //! ECO.181-style fragmented bootstrap inventory for ladder/combine tests.
 
+use crate::coin_ops::shape::ShapeLadderRow;
 use crate::offer::bootstrap::{BootstrapCoin, PlanAmount, PlannerLadderRow};
 
 fn bootstrap_coins_from_rows(rows: &[(String, i64)]) -> Vec<BootstrapCoin> {
@@ -60,6 +61,19 @@ pub fn eco181_bootstrap_ladder() -> Vec<PlannerLadderRow> {
             split_buffer_count: 0,
         },
     ]
+}
+
+/// Same ECO.181 ladder as [`eco181_bootstrap_ladder`], in `coin_ops::shape` row form.
+#[must_use]
+pub fn eco181_shape_ladder() -> Vec<ShapeLadderRow> {
+    eco181_bootstrap_ladder()
+        .into_iter()
+        .map(|row| ShapeLadderRow {
+            size: row.size,
+            target_count: row.target_count,
+            split_buffer_count: row.split_buffer_count,
+        })
+        .collect()
 }
 
 #[must_use]

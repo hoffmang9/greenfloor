@@ -4,13 +4,15 @@
 //! the signer-side denomination phase before offer construction.
 
 mod bootstrap_execute;
-mod futures;
 mod planning;
 mod split_submit;
 #[cfg(test)]
 mod test_overrides;
 mod types;
 mod wait;
+
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::coin_ops::execution::resolve_combine_input_cap;
 use crate::coinset::WalletUnspentCoin;
@@ -32,11 +34,17 @@ pub use types::BootstrapPhaseResult;
 pub(crate) use test_overrides::SignerDenominationTestOverrides;
 
 use bootstrap_execute::execute_bootstrap_shape;
-use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
 };
 use types::{BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure};
+
+/// Boxed future for the signer denomination bootstrap phase.
+///
+/// Boxed here because the async state machine exceeds Clippy's large-futures threshold
+/// once ladder planning and vault split submission are composed.
+type SignerDenominationPhaseFuture<'a> =
+    Pin<Box<dyn Future<Output = SignerResult<BootstrapPhaseResult>> + Send + 'a>>;
 
 #[cfg(test)]
 fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
@@ -222,16 +230,37 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
 pub fn run_signer_denomination_phase(
     ctx: &ResolvedBuildAndPostContext,
 ) -> SignerDenominationPhaseFuture<'_> {
-    Box::pin(run_signer_denomination_phase_async(ctx))
+    Box::pin(run_signer_denomination_phase_inner(
+        ctx,
+        #[cfg(test)]
+        SignerDenominationTestOverrides::default(),
+    ))
+}
+
+#[cfg(test)]
+pub(crate) fn run_signer_denomination_phase_with_test_overrides(
+    ctx: &ResolvedBuildAndPostContext,
+    overrides: SignerDenominationTestOverrides,
+) -> SignerDenominationPhaseFuture<'_> {
+    Box::pin(run_signer_denomination_phase_inner(ctx, overrides))
 }
 
 // Clippy `large_futures`: the phase is already boxed at `run_signer_denomination_phase`.
 #[allow(clippy::large_futures)]
-async fn run_signer_denomination_phase_async(
+async fn run_signer_denomination_phase_inner(
     ctx: &ResolvedBuildAndPostContext,
+    #[cfg(test)] overrides: SignerDenominationTestOverrides,
 ) -> SignerResult<BootstrapPhaseResult> {
     match prepare_bootstrap_execution_plan(ctx).await? {
-        Ok(shape_ctx) => execute_bootstrap_shape(ctx, shape_ctx).await,
+        Ok(shape_ctx) => {
+            #[cfg(test)]
+            let shape_ctx = {
+                let mut shape_ctx = shape_ctx;
+                shape_ctx.test_overrides = overrides;
+                shape_ctx
+            };
+            execute_bootstrap_shape(ctx, shape_ctx).await
+        }
         Err(result) => Ok(result),
     }
 }

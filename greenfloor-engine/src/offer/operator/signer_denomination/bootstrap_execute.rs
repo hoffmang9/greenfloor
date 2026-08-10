@@ -307,6 +307,3 @@ pub(super) async fn execute_bootstrap_shape(
         remaining: wait.outcome,
     }))
 }
-
-#[cfg(test)]
-mod tests;

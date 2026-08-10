@@ -515,3 +515,90 @@ fn sell_cat_bootstrap_plan_ready_with_base_mojo_coins() {
         "expected Ready, got {outcome:?}"
     );
 }
+
+#[tokio::test]
+async fn run_signer_denomination_phase_runs_combine_then_split() {
+    use super::{
+        run_signer_denomination_phase_with_test_overrides, SignerDenominationTestOverrides,
+    };
+    use crate::config::ManagerProgramConfig;
+    use crate::test_support::bootstrap_shape::{
+        coinset_server_for_combine_first_e2e, BOOTSTRAP_TEST_RECEIVE,
+    };
+    use crate::test_support::ladder::market_with_side_ladder;
+    use crate::test_support::signer_config::test_signer_config;
+
+    let server = coinset_server_for_combine_first_e2e().await;
+    let mut market = market_with_side_ladder(BOOTSTRAP_TEST_RECEIVE, "sell", 100, 1);
+    market.ladders.get_mut("sell").expect("sell ladder")[0].split_buffer_count = 0;
+    let program = ManagerProgramConfig {
+        coin_ops_minimum_fee_mojos: 0,
+        runtime_offer_bootstrap_wait_timeout_seconds: 30,
+        ..Default::default()
+    };
+    let signer = test_signer_config(&server.url());
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+
+    let overrides = SignerDenominationTestOverrides::default();
+    overrides.enqueue_sample_vault_mixed_split_stub();
+    overrides.enqueue_sample_vault_mixed_split_stub();
+
+    let result = run_signer_denomination_phase_with_test_overrides(&phase_ctx, overrides)
+        .await
+        .expect("phase");
+
+    assert!(result.ready);
+    assert_eq!(result.reason, "bootstrap_submitted");
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_combine_submitted"))
+    }));
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_shape_wait_complete"))
+    }));
+    assert!(!result.split_result.is_null());
+}
+
+#[tokio::test]
+async fn run_signer_denomination_phase_eco181_combine_only_marks_ready_without_split() {
+    use super::{
+        run_signer_denomination_phase_with_test_overrides, SignerDenominationTestOverrides,
+    };
+    use crate::config::ManagerProgramConfig;
+    use crate::test_support::bootstrap_shape::{
+        coinset_server_for_eco181_combine_only_e2e, BOOTSTRAP_TEST_RECEIVE,
+    };
+    use crate::test_support::ladder::market_with_eco181_sell_ladder;
+    use crate::test_support::signer_config::test_signer_config;
+
+    let server = coinset_server_for_eco181_combine_only_e2e().await;
+    let market = market_with_eco181_sell_ladder(BOOTSTRAP_TEST_RECEIVE);
+    let program = ManagerProgramConfig {
+        coin_ops_minimum_fee_mojos: 0,
+        runtime_offer_bootstrap_wait_timeout_seconds: 30,
+        ..Default::default()
+    };
+    let signer = test_signer_config(&server.url());
+    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+
+    let overrides = SignerDenominationTestOverrides::default();
+    overrides.enqueue_sample_vault_mixed_split_stub();
+
+    let result = run_signer_denomination_phase_with_test_overrides(&phase_ctx, overrides)
+        .await
+        .expect("phase");
+
+    assert!(result.ready, "reason={}", result.reason);
+    assert_eq!(result.reason, "bootstrap_submitted");
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_combine_submitted"))
+    }));
+    assert!(result.wait_events.iter().any(|event| {
+        event.get("event") == Some(&serde_json::json!("bootstrap_shape_wait_complete"))
+            && event.get("wait_step") == Some(&serde_json::json!("after_combine"))
+    }));
+    assert_eq!(
+        result.split_result,
+        serde_json::json!({}),
+        "eco181 bootstrap must not submit a destructive split after combine"
+    );
+}

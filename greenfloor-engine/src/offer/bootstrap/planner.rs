@@ -8,11 +8,47 @@
 //! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
 use crate::coin_ops::shape::{
-    plan_shape_from_deficits, ShapeCoin, ShapeFundingPolicy, ShapeLadderRow, ShapePlanOutcome,
+    plan_shape_from_deficits, AmountUnit, ShapeCoin, ShapeFundingPolicy, ShapeLadderRow,
+    ShapePlanOutcome,
 };
 
-use super::combine_plan::BootstrapCombineContext;
 use super::plan::{BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow};
+
+/// Asset + amount-unit context for bootstrap combine dust validation at plan time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapCombineContext {
+    pub unit: AmountUnit,
+    pub canonical_asset_id: String,
+}
+
+impl BootstrapCombineContext {
+    /// Denomination path: ladder and coins are already mojos.
+    #[must_use]
+    pub fn mojos(canonical_asset_id: impl Into<String>) -> Self {
+        Self {
+            unit: AmountUnit::Mojos {
+                base_unit_mojo_multiplier: 1,
+            },
+            canonical_asset_id: canonical_asset_id.into(),
+        }
+    }
+
+    /// Planner fixtures that still plan in config/plan units with a dust scale to mojos.
+    #[must_use]
+    pub fn plan_units(dust_mojo_multiplier: i64, canonical_asset_id: impl Into<String>) -> Self {
+        Self {
+            unit: AmountUnit::PlanUnits {
+                dust_mojo_multiplier,
+            },
+            canonical_asset_id: canonical_asset_id.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn for_tests() -> Self {
+        Self::plan_units(1_000, "xch")
+    }
+}
 
 fn validate_inputs(
     ladder_entries: &[PlannerLadderRow],
@@ -31,9 +67,8 @@ fn validate_inputs(
     None
 }
 
-/// Bootstrap ladder rows -> unit-agnostic shape rows. Shared with [`super::combine_plan`]'s
-/// test-only combine builder and [`super::shape_policy`] (bootstrap ownership adapter) so bootstrap has one row/coin
-/// conversion, not two.
+/// Bootstrap ladder rows -> unit-agnostic shape rows. Shared with [`super::shape_policy`]
+/// (bootstrap ownership adapter) so bootstrap has one row/coin conversion.
 pub(super) fn to_shape_rows(sorted_ladder: &[PlannerLadderRow]) -> Vec<ShapeLadderRow> {
     sorted_ladder
         .iter()
