@@ -2,7 +2,6 @@
 
 pub mod asset_trace;
 pub mod cat_detect;
-pub(crate) mod cat_outer;
 pub mod checkpoint;
 pub mod cli;
 pub mod dust;

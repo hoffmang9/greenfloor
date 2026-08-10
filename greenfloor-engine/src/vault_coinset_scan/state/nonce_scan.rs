@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
+use crate::coinset::cat_outer_coinset_hex;
 use crate::coinset::{coin_id_from_record, to_coinset_hex, u64_from_value};
 use crate::error::SignerResult;
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::vault::members::nonce_member_puzzle_hash_hex;
-use crate::vault_coinset_scan::cat_outer::cat_outer_coinset_hex;
 use crate::vault_coinset_scan::types::{
     AssetTypeFilter, CoinKind, CoinRow, DiscoverySource, ScanStopReason,
 };
@@ -377,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn hint_only_discovery_skips_member_nonce_walk() {
-        use crate::vault_coinset_scan::cat_outer::cat_outer_coinset_hex;
+        use crate::coinset::cat_outer_coinset_hex;
 
         let mut server = mockito::Server::new_async().await;
         let launcher_id = "11".repeat(32);

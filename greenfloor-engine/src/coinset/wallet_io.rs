@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use crate::bech32m::{decode_address, decode_offer};
 use chia_protocol::SpendBundle;
-use chia_puzzle_types::cat::CatArgs;
 use chia_traits::Streamable;
 use serde::Serialize;
 
@@ -136,8 +135,9 @@ pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResul
 pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> SignerResult<String> {
     let puzzle_hash = decode_address(receive_address)?;
     let asset_bytes = hex_to_bytes32(asset_id)?;
-    let cat_outer: [u8; 32] = CatArgs::curry_tree_hash(asset_bytes, puzzle_hash.into()).into();
-    Ok(to_coinset_hex(&cat_outer))
+    Ok(to_coinset_hex(
+        cats::cat_outer_puzzle_hash(asset_bytes, puzzle_hash).as_ref(),
+    ))
 }
 
 /// Inventory puzzle hashes for one market receive address (inner + optional CAT outer).

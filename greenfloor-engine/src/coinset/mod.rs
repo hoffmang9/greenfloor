@@ -43,6 +43,7 @@ pub use cats::{
     fetch_parent_coin_spend, list_unspent_cats, list_unspent_cats_by_ids,
     require_cat_from_parent_spend,
 };
+pub(crate) use cats::{cat_outer_coinset_hex, cat_outer_puzzle_hash};
 pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{
     effective_coinset_base_url, explicit_coinset_url_override, normalize_coinset_network,

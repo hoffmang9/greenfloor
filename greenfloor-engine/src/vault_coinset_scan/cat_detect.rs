@@ -67,11 +67,14 @@ pub fn prelabel_known_cat_outers(
     let mut outer_to_asset: HashMap<String, String> = HashMap::new();
     for asset_id in requested_cat_ids {
         for p2_hex in &inner_p2s {
-            let Some(outer) =
-                crate::vault_coinset_scan::cat_outer::cat_outer_normalized_hex(asset_id, p2_hex)
+            let Some(coinset_outer) = crate::coinset::cat_outer_coinset_hex(asset_id, p2_hex)
             else {
                 continue;
             };
+            let outer = normalize_hex_id(&coinset_outer);
+            if outer.is_empty() {
+                continue;
+            }
             outer_to_asset.insert(outer, asset_id.clone());
         }
     }
@@ -439,11 +442,13 @@ mod tests {
     fn prelabel_known_cat_outers_labels_matching_receive_outer() {
         use std::collections::{BTreeMap, HashSet};
 
-        use crate::vault_coinset_scan::cat_outer::cat_outer_normalized_hex;
+        use crate::coinset::cat_outer_coinset_hex;
+        use crate::hex::normalize_hex_id;
 
         let asset_id = "aa".repeat(32);
         let receive_p2 = "bb".repeat(32);
-        let outer = cat_outer_normalized_hex(&asset_id, &receive_p2).expect("outer");
+        let outer =
+            normalize_hex_id(&cat_outer_coinset_hex(&asset_id, &receive_p2).expect("outer"));
         let coin_id = "cc".repeat(32);
         let mut rows = HashMap::from([(
             coin_id.clone(),

@@ -10,16 +10,10 @@
 //! construction time; do not pass the CAT outer as the send destination.
 
 use chia_protocol::Bytes32;
-use chia_puzzle_types::cat::CatArgs;
 use chia_sdk_driver::{Cat, Outputs};
 
+use crate::coinset::cat_outer_puzzle_hash;
 use crate::error::{SignerError, SignerResult};
-
-/// Outer puzzle hash for a single-wrapped CAT on `receive_p2`.
-#[must_use]
-pub(crate) fn receive_cat_outer_puzzle_hash(asset_id: Bytes32, receive_p2: Bytes32) -> Bytes32 {
-    CatArgs::curry_tree_hash(asset_id, receive_p2.into()).into()
-}
 
 /// CAT creates recorded on a [`Outputs`] map (after `Spends::prepare`).
 pub(crate) fn created_cats(outputs: &Outputs) -> impl Iterator<Item = &Cat> {
@@ -41,7 +35,7 @@ pub(crate) fn assert_cat_creates<'a>(
     receive_p2: Bytes32,
     allowed_non_receive_p2s: &[Bytes32],
 ) -> SignerResult<()> {
-    let receive_outer = receive_cat_outer_puzzle_hash(asset_id, receive_p2);
+    let receive_outer = cat_outer_puzzle_hash(asset_id, receive_p2);
     for cat in cats {
         if cat.info.asset_id != asset_id {
             continue;
@@ -93,7 +87,7 @@ mod tests {
     fn rejects_outer_as_p2() {
         let asset = Bytes32::new([0xaa; 32]);
         let receive = Bytes32::new([0x11; 32]);
-        let outer = receive_cat_outer_puzzle_hash(asset, receive);
+        let outer = cat_outer_puzzle_hash(asset, receive);
         let cat = sample_cat(asset, outer, 1_000);
         let err = assert_cat_creates([&cat], asset, receive, &[]).unwrap_err();
         assert!(matches!(
