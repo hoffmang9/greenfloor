@@ -63,7 +63,7 @@ fn split_execution_scalars(
 fn low_watermark_split_protection(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
-    spendable: &[SpendableCoin],
+    inventory_including_watched: &[SpendableCoin],
 ) -> Option<SplitSourceProtection> {
     if plan.reason != CoinOpPlanReason::LowWatermarkBufferDeficit {
         return None;
@@ -72,9 +72,11 @@ fn low_watermark_split_protection(
     if sell_ladder.is_empty() {
         return None;
     }
-    Some(SplitSourceProtection::from_sell_ladder_entries(
+    // Full-vault exact clips (including watched makers) so open sells count
+    // toward target coverage; buffer clips remain raidable for other rungs.
+    Some(SplitSourceProtection::for_low_watermark_split(
         sell_ladder,
-        spendable,
+        inventory_including_watched,
         ctx.base_unit_mojo_multiplier,
     ))
 }
@@ -229,17 +231,15 @@ async fn execute_managed_split_plan_inner(
     let amount_per_coin_mojos =
         validate_plan_target_amount(ctx, plan, "split_amount_below_coin_op_minimum")?;
     let required_amount = amount_per_coin_mojos.saturating_mul(plan.op_count);
-    let spendable = skip_if_spendable_empty(
-        plan,
-        list_spendable_coins_for_plan(ctx, plan).await?,
-        "no_spendable_split_coin_available",
-    )?;
+    let (inventory_including_watched, spendable) =
+        skip_on_signer_err_for_plan(plan, ctx.list_wallet_coins_for_split().await)?;
+    let spendable = skip_if_spendable_empty(plan, spendable, "no_spendable_split_coin_available")?;
     if daemon_low_watermark_handoff_from_spendable(plan, &spendable, ctx.base_unit_mojo_multiplier)
         .yields()
     {
         return Err(plan_skip(plan, "bootstrap_primary_shape_deferred"));
     }
-    let split_protection = low_watermark_split_protection(ctx, plan, &spendable);
+    let split_protection = low_watermark_split_protection(ctx, plan, &inventory_including_watched);
     let plan_ctx = SplitPlanContext {
         plan,
         amount_per_coin_mojos,

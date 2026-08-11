@@ -48,7 +48,7 @@ fn handle_ws_text_inventory_p2_marks_stale_without_offer_watch() {
     let p2 = "ef".repeat(32);
     let ctx = context_with_market_p2(&p2);
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     handle_ws_text(
         &store,
         &ctx,
@@ -67,7 +67,7 @@ fn handle_ws_text_inventory_p2_marks_stale_without_offer_watch() {
     .expect("hit");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn handle_ws_text_offer_with_p2s_does_not_drive_watch_or_inventory() {
     let p2 = "ef".repeat(32);
     let ctx = context_with_market_p2(&p2);
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     let watched_offer = "11".repeat(32);
     store
@@ -107,7 +107,7 @@ fn handle_ws_text_offer_with_p2s_does_not_drive_watch_or_inventory() {
     .expect("offer");
     assert!(!ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
     assert_eq!(
         store
             .list_offer_states_for_ids(std::slice::from_ref(&watched_offer))
@@ -146,7 +146,7 @@ fn handle_ws_text_offer_confirmed_marks_inventory_stale() {
         crate::daemon::InventoryFreshnessCache::new(),
     );
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     store
         .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -169,7 +169,7 @@ fn handle_ws_text_offer_confirmed_marks_inventory_stale() {
     .expect("offer");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn handle_ws_text_maker_watch_hit_marks_inventory_without_inventory_p2() {
         crate::daemon::InventoryFreshnessCache::new(),
     );
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     store
         .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -207,7 +207,7 @@ fn handle_ws_text_maker_watch_hit_marks_inventory_without_inventory_p2() {
     .expect("tx");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
     assert_eq!(
         store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
@@ -226,7 +226,7 @@ fn handle_ws_text_unknown_tx_status_marks_inventory_without_lifecycle() {
         crate::daemon::InventoryFreshnessCache::new(),
     );
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     store
         .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -252,7 +252,7 @@ fn handle_ws_text_unknown_tx_status_marks_inventory_without_lifecycle() {
     .expect("tx");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
     assert_eq!(
         store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
@@ -271,7 +271,7 @@ fn handle_ws_text_confirmed_maker_coin_watch_promotes_lifecycle() {
         crate::daemon::InventoryFreshnessCache::new(),
     );
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     store
         .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -297,7 +297,7 @@ fn handle_ws_text_confirmed_maker_coin_watch_promotes_lifecycle() {
     .expect("tx");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
     assert_eq!(
         store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
@@ -316,7 +316,7 @@ fn handle_ws_text_p2_only_watch_keeps_open_and_marks_inventory_stale() {
         crate::daemon::InventoryFreshnessCache::new(),
     );
     ctx.inventory_freshness
-        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]));
+        .mark_fresh("m1", std::collections::BTreeMap::from([(50, 1)]), "");
     let offer_id = "ab".repeat(32);
     store
         .upsert_offer_state(&offer_id, "m1", "open", None)
@@ -342,7 +342,7 @@ fn handle_ws_text_p2_only_watch_keeps_open_and_marks_inventory_stale() {
     .expect("tx");
     assert!(ctx
         .inventory_freshness
-        .needs_refresh("m1", std::time::Duration::from_secs(90)));
+        .needs_refresh("m1", std::time::Duration::from_secs(90), ""));
     assert_eq!(
         store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))

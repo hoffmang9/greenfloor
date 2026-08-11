@@ -27,12 +27,13 @@ pub(crate) fn wallet_coins_to_spendable(
 /// are shared vault inventory hashes and would lock the entire asset balance.
 /// Offer locks are coin-id watches registered at post (ADR 0019).
 pub(crate) fn exclude_watched_spendable(
-    coins: impl IntoIterator<Item = SpendableCoin>,
+    coins: &[SpendableCoin],
     watched_coin_ids: &HashSet<String>,
 ) -> Vec<SpendableCoin> {
     coins
-        .into_iter()
+        .iter()
         .filter(|coin| !watched_coin_ids.contains(&coin.id.to_ascii_lowercase()))
+        .cloned()
         .collect()
 }
 
@@ -86,7 +87,7 @@ mod tests {
             SpendableCoin::with_puzzle_hash("dd".repeat(32), 3000, "ee".repeat(32)),
             SpendableCoin::new("ff".repeat(32), 4000),
         ];
-        let kept = exclude_watched_spendable(coins, &watched_coins);
+        let kept = exclude_watched_spendable(&coins, &watched_coins);
         assert_eq!(kept.len(), 3);
         assert!(kept.iter().all(|coin| coin.id != "aa".repeat(32)));
     }

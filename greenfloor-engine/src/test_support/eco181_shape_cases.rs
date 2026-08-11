@@ -95,7 +95,7 @@ fn split_params(spendable: &[SpendableCoin]) -> DaemonAutoSplitParams<'_> {
 }
 
 fn protection_for_spendable(spendable: &[SpendableCoin]) -> SplitSourceProtection {
-    SplitSourceProtection::from_sell_ladder_entries(
+    SplitSourceProtection::for_low_watermark_split(
         &eco181_sell_ladder_entries(),
         spendable,
         ECO181_MOJO_MULTIPLIER,
