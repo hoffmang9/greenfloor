@@ -15,24 +15,21 @@ pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
     "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
 
-/// Load durable maker watches for CLI coin-ops (same sets as daemon).
+/// Load durable maker coin-id watches for CLI coin-ops (same set as daemon).
 ///
 /// Exclusion is applied inside [`CoinOpExecContext::list_spendable_coins`], which
 /// both the until-ready loop and daemon runners use for selection.
-fn load_market_watch_sets(
+fn load_market_watched_coin_ids(
     home_dir: &std::path::Path,
     state_db_override: Option<&str>,
     market_id: &str,
-) -> SignerResult<(HashSet<String>, HashSet<String>)> {
+) -> SignerResult<HashSet<String>> {
     let db_path = resolve_state_db_path(home_dir, state_db_override);
     if !db_path.exists() {
-        return Ok((HashSet::default(), HashSet::default()));
+        return Ok(HashSet::default());
     }
     let store = SqliteStore::open(&db_path)?;
-    Ok((
-        store.list_watched_coin_ids_for_market(market_id)?,
-        store.list_watched_p2s_for_market(market_id)?,
-    ))
+    store.list_watched_coin_ids_for_market(market_id)
 }
 
 pub(super) async fn build_coin_op_exec_context(
@@ -41,7 +38,7 @@ pub(super) async fn build_coin_op_exec_context(
     state_db_override: Option<&str>,
 ) -> SignerResult<CoinOpExecContext> {
     let gated = load_gated_operator_market(request)?;
-    let (watched_coin_ids, watched_p2s) = load_market_watch_sets(
+    let watched_coin_ids = load_market_watched_coin_ids(
         &gated.program.home_dir,
         state_db_override,
         &gated.market_row.market_id,
@@ -50,7 +47,6 @@ pub(super) async fn build_coin_op_exec_context(
         gated,
         asset_id_override,
         watched_coin_ids,
-        watched_p2s,
         #[cfg(test)]
         CoinOpTestOverrides::default(),
     )
@@ -107,7 +103,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn load_market_watch_sets_reads_durable_watches_when_db_exists() {
+    fn load_market_watched_coin_ids_reads_durable_watches_when_db_exists() {
         let dir = tempdir().expect("tempdir");
         let home = dir.path();
         let db_path = resolve_state_db_path(home, None);
@@ -123,16 +119,16 @@ mod tests {
                 std::slice::from_ref(&p2),
             )
             .expect("ensure");
-        let (coins, p2s) = load_market_watch_sets(home, None, "m1").expect("load");
+        let coins = load_market_watched_coin_ids(home, None, "m1").expect("load");
         assert!(coins.contains(&coin));
-        assert!(p2s.contains(&p2));
+        // Coin-ops ignores p2 watches; loader must not require them.
+        assert!(!coins.contains(&p2));
     }
 
     #[test]
-    fn load_market_watch_sets_empty_when_db_missing() {
+    fn load_market_watched_coin_ids_empty_when_db_missing() {
         let dir = tempdir().expect("tempdir");
-        let (coins, p2s) = load_market_watch_sets(dir.path(), None, "m1").expect("missing db ok");
+        let coins = load_market_watched_coin_ids(dir.path(), None, "m1").expect("missing db ok");
         assert!(coins.is_empty());
-        assert!(p2s.is_empty());
     }
 }

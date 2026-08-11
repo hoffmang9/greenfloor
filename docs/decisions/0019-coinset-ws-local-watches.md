@@ -31,13 +31,15 @@ never the operator transport.
    HTTP `get_transaction` polling supplements WS by confirming prepared
    `cancel_submitted` transaction ids during recovery and every cycle preamble.
 3. **Watches:** durable SQLite `offer_coin_watches` registered atomically at post
-   (maker coins + on-chain maker puzzle hashes — CAT outer or XCH p2 — not the
-   fixed delegated CONDITIONS hash), sourced from required `OfferCancelFields` on
-   every successful create (Direct: single exact-size maker coin; presplit: split
-   coin + fixed CONDITIONS hash). Schema migration backfills missing watches
-   from cancel metadata for pre-upgrade rows. Shared market inventory
-   receive/CAT outer p2s are **not** stored on per-offer watches; `InventoryP2Index`
-   still drives WS filters and inventory freshness. Optional coin-id fields on
+   (maker **coin ids** always; per-offer maker **p2** only when cancel metadata is
+   presplit-like via `StoredOfferCancelMetadata::is_presplit_like` — explicit
+   Presplit, or legacy NULL `execution_mode` + non-empty `fixed_delegated_puzzle_hash`).
+   Direct `maker_puzzle_hash` (CAT outer / XCH receive inner) is cancel metadata only —
+   shared inventory hashes stay on `InventoryP2Index`, not per-offer watches.
+   Sourced from required `OfferCancelFields` on every successful create (Direct:
+   single exact-size maker coin; presplit: split coin + fixed CONDITIONS hash).
+   Schema migration backfills missing watches from cancel metadata for pre-upgrade
+   rows. Optional coin-id fields on
    transaction frames are matched when present. WS offer events and watch hits
    drive lifecycle transitions directly. Cancel submit prepares `cancel_submitted`
    before broadcast (watches kept), then observes the cancel tx after successful
@@ -62,8 +64,8 @@ never the operator transport.
    `watch_venue_backfill_v2`). Missing watches are healed each reconcile via a
    single `prepare_market_reconcile_local` scan: cancel-submitted collection,
    cancel-metadata heal, and Dexie role classify (`DexieWatchRoles`), then Dexie
-   payloads for heal-only NULL-venue gaps (`fetch_and_ensure_watches` seeds both
-   maker coin ids and on-chain maker p2s from cancellable offer inputs; when a
+   payloads for heal-only NULL-venue gaps (`fetch_and_ensure_watches` seeds maker
+   coin ids always and maker p2s only when local `execution_mode` is presplit; when a
    list row lacks a decodable `offer1…`, heal calls `get_offer` so watches are
    not stuck coin-only; no Dexie lifecycle). Dexie lifecycle remains
    `publish_venue=dexie` only and applies through the same
@@ -97,9 +99,11 @@ never the operator transport.
    registered atomically at post, backfilled once on schema open via
    `schema_meta` (`watch_venue_backfill_v2`), and healed each reconcile via
    `prepare_market_reconcile_local` + heal-only Dexie fetch. Coin-ops excludes durable
-   `kind='coin'` watch ids and durable `kind='p2'` maker puzzle hashes inside
-   `list_spendable_coins` (local on-chain `puzzle_hash`; no network expand).
-   Explicit CLI coin ids are refused when they match durable maker coin watches.
+   `kind='coin'` watch ids only inside `list_spendable_coins`. Per-offer `kind='p2'`
+   watches are WS lifecycle / inventory-stale signals: seeded only when metadata is
+   `is_presplit_like` (unique CONDITIONS puzzle hash). Direct never seeds them because
+   `maker_puzzle_hash` is the shared vault inventory hash. Explicit CLI coin ids are
+   refused when they match durable maker coin watches.
 
 ## Consequences
 

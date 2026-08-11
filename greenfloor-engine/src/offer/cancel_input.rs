@@ -74,6 +74,9 @@ pub(crate) fn stored_presplit_fields(
     metadata: Option<&StoredOfferCancelMetadata>,
 ) -> Option<&OfferCancelFields> {
     let metadata = metadata?;
+    if !metadata.is_presplit_like() {
+        return None;
+    }
     let hash = metadata
         .fields
         .fixed_delegated_puzzle_hash
@@ -82,13 +85,7 @@ pub(crate) fn stored_presplit_fields(
     if hash.is_empty() {
         return None;
     }
-    match metadata.execution_mode {
-        Some(OfferExecutionMode::Direct) => None,
-        Some(OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting) => {
-            Some(&metadata.fields)
-        }
-        None => Some(&metadata.fields),
-    }
+    Some(&metadata.fields)
 }
 
 /// Whether stored cancel metadata can drive Coinset-primary cancel without an offer file.

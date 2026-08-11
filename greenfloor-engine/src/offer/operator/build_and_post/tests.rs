@@ -210,7 +210,12 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     );
     assert!(direct.cancel_fields.fixed_delegated_puzzle_hash.is_none());
     assert_eq!(direct.watched_coin_ids, vec![direct_coin]);
-    assert_eq!(direct.watched_p2s, vec![direct_p2]);
+    // Direct maker_puzzle_hash is shared inventory — not a per-offer p2 watch.
+    assert!(direct.watched_p2s.is_empty());
+    assert_eq!(
+        direct.cancel_fields.maker_puzzle_hash.as_deref(),
+        Some(direct_p2.as_str())
+    );
     assert!(crate::offer::metadata_sufficient_for_coinset_cancel(Some(
         &crate::offer::types::StoredOfferCancelMetadata {
             fields: direct.cancel_fields.clone(),

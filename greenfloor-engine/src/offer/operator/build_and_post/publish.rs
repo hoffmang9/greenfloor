@@ -119,17 +119,20 @@ pub(super) fn offer_post_persist_record(
     }
     watched_coin_ids.sort();
     watched_coin_ids.dedup();
-    let mut watched_p2s = Vec::new();
-    // On-chain maker puzzle hash only (not fixed_delegated CONDITIONS hash).
-    if let Some(p2) = cancel_fields.maker_puzzle_hash.clone() {
-        watched_p2s.push(p2);
-    }
-    // Do not seed shared market inventory receive/CAT outer p2s into per-offer
-    // watches: those hashes are common to every open offer on the market and would
-    // promote all of them on any deposit/spend. Inventory freshness uses
-    // InventoryP2Index separately; lifecycle watch hits need maker-specific keys.
-    watched_p2s.sort();
-    watched_p2s.dedup();
+    // Per-offer p2 watches: presplit-like CONDITIONS only. Direct maker_puzzle_hash
+    // is shared vault inventory (ADR 0019) — InventoryP2Index owns those.
+    let watched_p2s = if crate::offer::types::StoredOfferCancelMetadata::is_presplit_like_parts(
+        execution_mode,
+        cancel_fields.fixed_delegated_puzzle_hash.as_deref(),
+    ) {
+        cancel_fields
+            .maker_puzzle_hash
+            .clone()
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.gated.market_row.market_id.clone(),

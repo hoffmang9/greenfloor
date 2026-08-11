@@ -24,14 +24,16 @@ pub struct CoinOpExecContext {
     pub base_unit_mojo_multiplier: i64,
     pub combine_input_cap: i64,
     pub watched_coin_ids: HashSet<String>,
-    /// Durable maker puzzle hashes (`kind='p2'` watches) for local spend exclusion.
-    pub watched_p2s: HashSet<String>,
     #[cfg(test)]
     pub test_overrides: CoinOpTestOverrides,
 }
 
 impl CoinOpExecContext {
     /// Build execution context from an owned gated operator market.
+    ///
+    /// Coin-ops spendable exclusion uses durable **coin-id** watches only.
+    /// Per-offer `kind='p2'` watches are for WS lifecycle; Direct inventory
+    /// hashes must never lock coin-ops selection (ADR 0019).
     ///
     /// # Errors
     ///
@@ -40,7 +42,6 @@ impl CoinOpExecContext {
         gated: GatedOperatorMarket,
         canonical_base_asset: Option<&str>,
         watched_coin_ids: HashSet<String>,
-        watched_p2s: HashSet<String>,
         #[cfg(test)] test_overrides: CoinOpTestOverrides,
     ) -> SignerResult<Self> {
         let resolver = gated.asset_resolver();
@@ -54,7 +55,6 @@ impl CoinOpExecContext {
             gated,
             resolved_base_asset_id,
             watched_coin_ids,
-            watched_p2s,
             #[cfg(test)]
             test_overrides,
         })
@@ -87,7 +87,7 @@ impl CoinOpExecContext {
             .await
     }
 
-    /// List spendable coins, excluding durable maker coin-id and p2 watches.
+    /// List spendable coins, excluding durable maker **coin-id** watches.
     ///
     /// # Errors
     ///
@@ -98,7 +98,6 @@ impl CoinOpExecContext {
             return Ok(exclude_watched_spendable(
                 coins.iter().cloned(),
                 &self.watched_coin_ids,
-                &self.watched_p2s,
             ));
         }
         let coins = list_wallet_unspent_coins_for_signer(
@@ -111,7 +110,6 @@ impl CoinOpExecContext {
         Ok(exclude_watched_spendable(
             wallet_coins_to_spendable(&coins, self.gated.market_row.base_asset.trim()),
             &self.watched_coin_ids,
-            &self.watched_p2s,
         ))
     }
 
