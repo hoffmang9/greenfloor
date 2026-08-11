@@ -256,16 +256,6 @@ impl OfferExecutionMode {
             _ => None,
         }
     }
-
-    /// Whether per-offer `kind='p2'` watches should be seeded from `maker_puzzle_hash`.
-    ///
-    /// Direct receive coins share the vault inventory puzzle hash (CAT outer or XCH
-    /// inner). Those belong in `InventoryP2Index`, not per-offer watches (ADR 0019).
-    /// Presplit offer inputs use a unique CONDITIONS puzzle hash and may be watched.
-    #[must_use]
-    pub const fn seeds_per_offer_maker_p2_watch(self) -> bool {
-        matches!(self, Self::PresplitNew | Self::PresplitExisting)
-    }
 }
 
 /// Cancel hints persisted at offer post time (Direct and presplit execution modes).
@@ -280,7 +270,7 @@ pub struct OfferCancelFields {
     pub fixed_delegated_puzzle_hash: Option<String>,
     /// On-chain maker coin puzzle hash (CAT outer, XCH p2, or presplit CONDITIONS).
     /// Persisted for cancel metadata; per-offer `kind='p2'` watches are seeded only
-    /// for presplit modes ([`OfferExecutionMode::seeds_per_offer_maker_p2_watch`]).
+    /// when [`StoredOfferCancelMetadata::is_presplit_like`] is true.
     pub maker_puzzle_hash: Option<String>,
 }
 
@@ -314,6 +304,37 @@ impl OfferCancelFields {
 pub struct StoredOfferCancelMetadata {
     pub fields: OfferCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
+}
+
+impl StoredOfferCancelMetadata {
+    /// Whether this row is treated as a presplit offer for cancel / watch policy.
+    ///
+    /// Explicit Direct → false. Explicit Presplit → true. NULL `execution_mode` with
+    /// a non-empty `fixed_delegated_puzzle_hash` → true (legacy cancel rule). Direct
+    /// receive coins share vault inventory puzzle hashes, so only presplit-like rows
+    /// may seed per-offer `kind='p2'` watches (ADR 0019).
+    #[must_use]
+    pub fn is_presplit_like(&self) -> bool {
+        Self::is_presplit_like_parts(
+            self.execution_mode,
+            self.fields.fixed_delegated_puzzle_hash.as_deref(),
+        )
+    }
+
+    /// Same gate as [`Self::is_presplit_like`] without building a metadata struct.
+    #[must_use]
+    pub fn is_presplit_like_parts(
+        execution_mode: Option<OfferExecutionMode>,
+        fixed_delegated_puzzle_hash: Option<&str>,
+    ) -> bool {
+        match execution_mode {
+            Some(OfferExecutionMode::Direct) => false,
+            Some(OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting) => true,
+            None => fixed_delegated_puzzle_hash
+                .map(str::trim)
+                .is_some_and(|hash| !hash.is_empty()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -429,6 +450,40 @@ mod tests {
         );
         assert_eq!(OfferExecutionMode::PresplitNew.to_string(), "presplit_new");
         assert!(OfferExecutionMode::parse_db("unknown").is_none());
+    }
+
+    #[test]
+    fn is_presplit_like_matches_cancel_legacy_null_mode() {
+        assert!(StoredOfferCancelMetadata::is_presplit_like_parts(
+            Some(OfferExecutionMode::PresplitExisting),
+            None
+        ));
+        assert!(!StoredOfferCancelMetadata::is_presplit_like_parts(
+            Some(OfferExecutionMode::Direct),
+            Some(&"aa".repeat(32))
+        ));
+        assert!(StoredOfferCancelMetadata::is_presplit_like_parts(
+            None,
+            Some(&"aa".repeat(32))
+        ));
+        assert!(!StoredOfferCancelMetadata::is_presplit_like_parts(
+            None, None
+        ));
+
+        let legacy = StoredOfferCancelMetadata {
+            fields: OfferCancelFields::from_presplit_build(
+                "coin".into(),
+                "aa".repeat(32),
+                "bb".repeat(32),
+            ),
+            execution_mode: None,
+        };
+        assert!(legacy.is_presplit_like());
+        let direct = StoredOfferCancelMetadata {
+            fields: OfferCancelFields::from_direct_build("coin".into(), "bb".repeat(32)),
+            execution_mode: Some(OfferExecutionMode::Direct),
+        };
+        assert!(!direct.is_presplit_like());
     }
 
     #[test]

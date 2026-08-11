@@ -31,9 +31,10 @@ never the operator transport.
    HTTP `get_transaction` polling supplements WS by confirming prepared
    `cancel_submitted` transaction ids during recovery and every cycle preamble.
 3. **Watches:** durable SQLite `offer_coin_watches` registered atomically at post
-   (maker **coin ids** always; per-offer maker **p2** only for presplit CONDITIONS
-   puzzle hashes via `OfferExecutionMode::seeds_per_offer_maker_p2_watch`). Direct
-   `maker_puzzle_hash` (CAT outer / XCH receive inner) is cancel metadata only —
+   (maker **coin ids** always; per-offer maker **p2** only when cancel metadata is
+   presplit-like via `StoredOfferCancelMetadata::is_presplit_like` — explicit
+   Presplit, or legacy NULL `execution_mode` + non-empty `fixed_delegated_puzzle_hash`).
+   Direct `maker_puzzle_hash` (CAT outer / XCH receive inner) is cancel metadata only —
    shared inventory hashes stay on `InventoryP2Index`, not per-offer watches.
    Sourced from required `OfferCancelFields` on every successful create (Direct:
    single exact-size maker coin; presplit: split coin + fixed CONDITIONS hash).
@@ -99,11 +100,10 @@ never the operator transport.
    `schema_meta` (`watch_venue_backfill_v2`), and healed each reconcile via
    `prepare_market_reconcile_local` + heal-only Dexie fetch. Coin-ops excludes durable
    `kind='coin'` watch ids only inside `list_spendable_coins`. Per-offer `kind='p2'`
-   watches are WS lifecycle / inventory-stale signals: Direct offers never seed them
-   (`OfferExecutionMode::seeds_per_offer_maker_p2_watch` is false) because
-   `maker_puzzle_hash` is the shared vault inventory hash; presplit may seed the
-   unique CONDITIONS puzzle hash. Explicit CLI coin ids are refused when they match
-   durable maker coin watches.
+   watches are WS lifecycle / inventory-stale signals: seeded only when metadata is
+   `is_presplit_like` (unique CONDITIONS puzzle hash). Direct never seeds them because
+   `maker_puzzle_hash` is the shared vault inventory hash. Explicit CLI coin ids are
+   refused when they match durable maker coin watches.
 
 ## Consequences
 

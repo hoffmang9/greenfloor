@@ -119,15 +119,19 @@ pub(super) fn offer_post_persist_record(
     }
     watched_coin_ids.sort();
     watched_coin_ids.dedup();
-    // Per-offer p2 watches: presplit CONDITIONS only. Direct maker_puzzle_hash is
-    // the shared vault inventory hash (ADR 0019) — InventoryP2Index owns those.
-    let watched_p2s = match execution_mode {
-        Some(mode) if mode.seeds_per_offer_maker_p2_watch() => cancel_fields
+    // Per-offer p2 watches: presplit-like CONDITIONS only. Direct maker_puzzle_hash
+    // is shared vault inventory (ADR 0019) — InventoryP2Index owns those.
+    let watched_p2s = if crate::offer::types::StoredOfferCancelMetadata::is_presplit_like_parts(
+        execution_mode,
+        cancel_fields.fixed_delegated_puzzle_hash.as_deref(),
+    ) {
+        cancel_fields
             .maker_puzzle_hash
             .clone()
             .into_iter()
-            .collect(),
-        _ => Vec::new(),
+            .collect()
+    } else {
+        Vec::new()
     };
     Some(OfferPostPersistRecord {
         offer_id,

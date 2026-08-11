@@ -13,7 +13,6 @@ use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
 use crate::hex::normalize_hex_id;
 use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOfferPayload};
-use crate::offer::types::OfferExecutionMode;
 use crate::storage::OfferStateListRow;
 use crate::storage::SqliteStore;
 
@@ -77,10 +76,8 @@ fn heal_watches_from_local_metadata(
         coins.push(coin);
     }
     // Direct maker_puzzle_hash is shared vault inventory — never per-offer p2.
-    if meta
-        .execution_mode
-        .is_some_and(OfferExecutionMode::seeds_per_offer_maker_p2_watch)
-    {
+    // Presplit-like rows (incl. legacy NULL mode + fixed_delegated) may seed CONDITIONS p2.
+    if meta.is_presplit_like() {
         if let Some(p2) = meta
             .fields
             .maker_puzzle_hash
@@ -182,13 +179,10 @@ pub fn ensure_watches_from_dexie_payload(
     raw: &Value,
 ) -> SignerResult<()> {
     let (coin_ids, payload_p2s) = maker_watch_keys_from_dexie_payload(raw);
-    // Seed p2 watches only for presplit offers. Direct cancellable inputs share
-    // vault inventory puzzle hashes (ADR 0019); coin-id watches are enough.
-    let p2s = match store
-        .offer_cancel_metadata_for_id(offer_id)?
-        .and_then(|meta| meta.execution_mode)
-    {
-        Some(mode) if mode.seeds_per_offer_maker_p2_watch() => payload_p2s,
+    // Seed p2 watches only for presplit-like rows (incl. legacy NULL + fixed_delegated).
+    // Direct cancellable inputs share vault inventory puzzle hashes (ADR 0019).
+    let p2s = match store.offer_cancel_metadata_for_id(offer_id)? {
+        Some(meta) if meta.is_presplit_like() => payload_p2s,
         _ => Vec::new(),
     };
     if !coin_ids.is_empty() || !p2s.is_empty() {
@@ -348,6 +342,46 @@ mod tests {
             .list_watched_p2s_for_market("m1")
             .expect("p2s")
             .contains(&inventory_p2));
+    }
+
+    #[test]
+    fn classify_heals_null_mode_presplit_seeds_maker_p2() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let offer_id = "ab".repeat(32);
+        let coin = "cd".repeat(32);
+        let conditions_p2 = "ef".repeat(32);
+        let fields = OfferCancelFields {
+            input_coin_id: Some(coin.clone()),
+            fixed_delegated_puzzle_hash: Some("aa".repeat(32)),
+            maker_puzzle_hash: Some(conditions_p2.clone()),
+        };
+        store
+            .upsert_offer_state_with_metadata_at(
+                &offer_id,
+                "m1",
+                "open",
+                None,
+                &chrono::Utc::now().to_rfc3339(),
+                OfferCancelWrite {
+                    fields: Some(&fields),
+                    execution_mode: None,
+                    listing: OfferListingWrite::venue(None),
+                    ..OfferCancelWrite::default()
+                },
+            )
+            .expect("upsert");
+        let local = prepare_market_reconcile_local(&store, "m1").expect("plan");
+        assert!(local.dexie.heal_only.is_empty());
+        assert!(store.offer_has_coin_watches(&offer_id).expect("healed"));
+        assert!(store
+            .list_watched_coin_ids_for_market("m1")
+            .expect("coins")
+            .contains(&coin));
+        assert!(store
+            .list_watched_p2s_for_market("m1")
+            .expect("p2s")
+            .contains(&conditions_p2));
     }
 
     #[test]
