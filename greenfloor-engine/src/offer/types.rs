@@ -256,6 +256,16 @@ impl OfferExecutionMode {
             _ => None,
         }
     }
+
+    /// Whether per-offer `kind='p2'` watches should be seeded from `maker_puzzle_hash`.
+    ///
+    /// Direct receive coins share the vault inventory puzzle hash (CAT outer or XCH
+    /// inner). Those belong in `InventoryP2Index`, not per-offer watches (ADR 0019).
+    /// Presplit offer inputs use a unique CONDITIONS puzzle hash and may be watched.
+    #[must_use]
+    pub const fn seeds_per_offer_maker_p2_watch(self) -> bool {
+        matches!(self, Self::PresplitNew | Self::PresplitExisting)
+    }
 }
 
 /// Cancel hints persisted at offer post time (Direct and presplit execution modes).
@@ -268,7 +278,9 @@ pub struct OfferCancelFields {
     pub input_coin_id: Option<String>,
     /// Fixed CONDITIONS tree hash (cancel/reclaim verification). Not an on-chain coin p2.
     pub fixed_delegated_puzzle_hash: Option<String>,
-    /// On-chain maker coin puzzle hash (CAT outer or XCH p2) for WS / coin-ops watches.
+    /// On-chain maker coin puzzle hash (CAT outer, XCH p2, or presplit CONDITIONS).
+    /// Persisted for cancel metadata; per-offer `kind='p2'` watches are seeded only
+    /// for presplit modes ([`OfferExecutionMode::seeds_per_offer_maker_p2_watch`]).
     pub maker_puzzle_hash: Option<String>,
 }
 

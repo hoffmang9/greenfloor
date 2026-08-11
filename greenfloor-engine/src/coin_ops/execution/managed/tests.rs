@@ -68,7 +68,6 @@ fn test_exec_context(
         base_unit_mojo_multiplier: 1_000,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::new(),
-        watched_p2s: HashSet::new(),
         test_overrides: CoinOpTestOverrides::new(
             Some(spendable),
             mixed_split_operation_id.map(str::to_string),
@@ -112,7 +111,6 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
-        &HashSet::<String>::default(),
     )
     .await;
 
@@ -142,7 +140,6 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
-        &HashSet::<String>::default(),
     )
     .await;
 
@@ -169,7 +166,6 @@ async fn execute_managed_coin_op_plans_skips_invalid_plans() {
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
-        &HashSet::<String>::default(),
     )
     .await;
 
@@ -193,7 +189,6 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
     let result = execute_managed_coin_op_plans_with_test_overrides(
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
-        &HashSet::<String>::default(),
         &HashSet::<String>::default(),
         CoinOpTestOverrides::new(
             Some(vec![
@@ -223,7 +218,7 @@ async fn execute_managed_coin_op_plans_executes_split_and_combine_via_runner_ove
 }
 
 #[tokio::test]
-async fn execute_managed_coin_op_plans_skips_when_spendable_matches_watched_p2() {
+async fn execute_managed_coin_op_plans_ignores_p2_watches_for_spendable_exclusion() {
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = minimal_program_bundle(&dir);
     let mut market = sample_market("xch1test");
@@ -232,71 +227,70 @@ async fn execute_managed_coin_op_plans_skips_when_spendable_matches_watched_p2()
         sample_plan(CoinOpKind::Split),
         sample_plan(CoinOpKind::Combine),
     ];
-    let maker_p2 = "ef".repeat(32);
-    let watched_p2s = HashSet::from([maker_p2.clone()]);
+    // Shared inventory-style p2 must not lock every coin; coin-id watches do.
+    let shared_p2 = "ef".repeat(32);
 
     let empty_index = empty_cat_ticker_index();
     let result = execute_managed_coin_op_plans_with_test_overrides(
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &HashSet::<String>::default(),
-        &watched_p2s,
         CoinOpTestOverrides::new(
             Some(vec![
-                SpendableCoin::with_puzzle_hash(test_coin_id('a'), 100_000, maker_p2.clone()),
-                SpendableCoin::with_puzzle_hash(test_coin_id('b'), 10_000, maker_p2.clone()),
-                SpendableCoin::with_puzzle_hash(test_coin_id('c'), 10_000, maker_p2),
+                SpendableCoin::with_puzzle_hash(test_coin_id('a'), 100_000, shared_p2.clone()),
+                SpendableCoin::with_puzzle_hash(test_coin_id('b'), 10_000, shared_p2.clone()),
+                SpendableCoin::with_puzzle_hash(test_coin_id('c'), 10_000, shared_p2),
             ]),
             Some("managed-op-test".to_string()),
         ),
     )
     .await;
 
-    assert_eq!(result.executed_count, 0);
-    assert!(result.items.iter().any(|item| {
-        item.op_type == "split" && item.reason == "no_spendable_split_coin_available"
-    }));
-    assert!(result.items.iter().any(|item| {
-        item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
-    }));
+    assert_eq!(result.executed_count, 2);
+    assert!(result
+        .items
+        .iter()
+        .any(|item| item.reason == "signer_split_submitted"));
+    assert!(result
+        .items
+        .iter()
+        .any(|item| item.reason == "signer_combine_submitted"));
 }
 
 #[tokio::test]
-async fn execute_managed_coin_op_plans_excludes_empty_puzzle_hash_when_p2_watches_exist() {
+async fn execute_managed_combine_locks_only_watched_coin_ids() {
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = minimal_program_bundle(&dir);
     let mut market = sample_market("xch1test");
     market.base_asset = test_coin_id('f');
-    let plans = vec![
-        sample_plan(CoinOpKind::Split),
-        sample_plan(CoinOpKind::Combine),
-    ];
-    let watched_p2s = HashSet::from(["ef".repeat(32)]);
+    let locked = test_coin_id('a');
+    let free_b = test_coin_id('b');
+    let free_c = test_coin_id('c');
+    let watched_coins = HashSet::from([locked.clone()]);
+    let shared_p2 = "ef".repeat(32);
+    let plans = vec![sample_plan(CoinOpKind::Combine)];
 
     let empty_index = empty_cat_ticker_index();
     let result = execute_managed_coin_op_plans_with_test_overrides(
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
-        &HashSet::<String>::default(),
-        &watched_p2s,
+        &watched_coins,
         CoinOpTestOverrides::new(
             Some(vec![
-                // Empty puzzle_hash must fail closed when maker p2 watches exist.
-                SpendableCoin::new(test_coin_id('a'), 100_000),
-                SpendableCoin::new(test_coin_id('b'), 10_000),
-                SpendableCoin::new(test_coin_id('c'), 10_000),
+                SpendableCoin::with_puzzle_hash(locked, 10_000, shared_p2.clone()),
+                SpendableCoin::with_puzzle_hash(free_b, 10_000, shared_p2.clone()),
+                SpendableCoin::with_puzzle_hash(free_c, 10_000, shared_p2),
             ]),
             Some("managed-op-test".to_string()),
         ),
     )
     .await;
 
-    assert_eq!(result.executed_count, 0);
+    assert_eq!(result.executed_count, 1);
     assert!(result.items.iter().any(|item| {
-        item.op_type == "split" && item.reason == "no_spendable_split_coin_available"
-    }));
-    assert!(result.items.iter().any(|item| {
-        item.op_type == "combine" && item.reason == "no_spendable_combine_coin_available"
+        item.op_type == "combine"
+            && item.status == "executed"
+            && item.reason == "signer_combine_submitted"
     }));
 }
 
@@ -317,7 +311,6 @@ async fn execute_managed_coin_op_plans_skips_when_all_spendable_coins_are_watche
         sample_gated_market(bundle.program, bundle.signer, &market, empty_index),
         &plans,
         &watched,
-        &HashSet::<String>::default(),
         CoinOpTestOverrides::new(
             Some(vec![
                 SpendableCoin::new(test_coin_id('a'), 100_000),

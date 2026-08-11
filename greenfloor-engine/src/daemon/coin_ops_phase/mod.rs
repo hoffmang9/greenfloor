@@ -149,18 +149,17 @@ async fn execute_coin_ops_plans(
         });
     }
 
-    // Durable watches: coin ids + on-chain maker puzzle hashes (local exclude).
+    // Durable maker coin-id watches (local spend exclude). Per-offer p2 watches
+    // are WS-only; Direct inventory hashes must not lock coin-ops selection.
     let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
-    let watched_p2s = store.list_watched_p2s_for_market(&market.market_id)?;
 
     match ctx.gated_market(market) {
-        Ok(gated) => Ok(execute_managed_coin_op_plans(
-            gated,
-            &planning.executable_plans,
-            &watched_coin_ids,
-            &watched_p2s,
-        )
-        .await),
+        Ok(gated) => {
+            Ok(
+                execute_managed_coin_op_plans(gated, &planning.executable_plans, &watched_coin_ids)
+                    .await,
+            )
+        }
         Err(err) => Ok(skipped_coin_ops_result(
             program,
             market,
