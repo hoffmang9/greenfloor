@@ -7,6 +7,7 @@ accepted decision** when onboarding.
 
 | ADR                                                              | Topic                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [0025](decisions/0025-two-sided-target-spread.md)                | **Two-sided spread** — bid/ask around mid; sell-only omits the field    |
 | [0023](decisions/0023-canonical-cat-outer-puzzle-hash.md)        | **CAT outer hash** — one `coinset/cats/outer` primitive + Coinset hex   |
 | [0021](decisions/0021-three-ownership-simplifications.md)        | **Ownership spines** — expired maker, reconcile prep, `coin_ops::shape` |
 | [0020](decisions/0020-soft-expiry-stable-makers.md)              | **Soft listing expiry** — stable makers, `ensure_size_n_offer`          |

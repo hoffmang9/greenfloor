@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use crate::config::MarketConfig;
 use crate::cycle::ParallelReservationContext;
 use crate::error::SignerResult;
-use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::OfferAssetResolver;
 
 pub fn reservation_wallet_id(signer: &crate::config::SignerConfig) -> String {
@@ -23,7 +22,8 @@ pub async fn parallel_reservation_context(
     let fee_asset_id = resolver.resolve_fee_asset(&assets).await?;
     let base_unit_mojo_multiplier = market.pricing.base_mojo_multiplier(&assets.base_asset_id);
     let quote_unit_mojo_multiplier = market.pricing.quote_mojo_multiplier(&assets.quote_asset_id);
-    let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
+    let sell_quote_price = market.quote_price_for_side("sell")?;
+    let buy_quote_price = market.quote_price_for_side("buy")?;
     Ok(ParallelReservationContext {
         base_asset_id: assets.base_asset_id.trim().to_string(),
         quote_asset_id: assets.quote_asset_id.trim().to_string(),
@@ -31,7 +31,8 @@ pub async fn parallel_reservation_context(
         fee_amount_mojos,
         base_unit_mojo_multiplier,
         quote_unit_mojo_multiplier,
-        quote_price,
+        sell_quote_price,
+        buy_quote_price,
     })
 }
 

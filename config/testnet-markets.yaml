@@ -14,7 +14,6 @@ markets:
       fixed_quote_per_base: 0.004714285714285714
       quote_unit_mojo_multiplier: 1000000000000
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10
@@ -56,7 +55,6 @@ markets:
       fixed_quote_per_base: 0.002420604183
       quote_unit_mojo_multiplier: 1000000000000
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10

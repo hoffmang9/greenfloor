@@ -12,9 +12,7 @@ use crate::config::{
 use crate::error::{SignerError, SignerResult};
 use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
-use crate::offer::build_context::{
-    resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
-};
+use crate::offer::build_context::resolve_offer_expiry_for_pricing;
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
 use crate::offer::types::{
     effective_maker_reuse, CreateOfferRequest, CreateOfferResult, OfferTerms, PresplitMakerReuse,
@@ -87,7 +85,7 @@ pub(crate) fn offer_terms_from_resolved_assets(
     size_base_units: u64,
     side: &str,
 ) -> SignerResult<OfferTerms> {
-    let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
+    let quote_price = market.quote_price_for_side(side)?;
     let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
     let leg = compute_signer_offer_leg_amounts(
         size_i64,
@@ -132,12 +130,10 @@ pub(crate) async fn plan_offer_terms_for_market(
 }
 
 fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64> {
-    if let Some(price) = request.quote_price {
-        if price > 0.0 {
-            return Ok(price);
-        }
+    if let Some(price) = request.quote_price.filter(|price| *price > 0.0) {
+        return Ok(price);
     }
-    resolve_quote_price_for_pricing(&request.pricing)
+    request.pricing.quote_price()
 }
 
 /// Build signer offer for action.
@@ -323,5 +319,35 @@ mod tests {
         assert_eq!(terms.offer_asset_id, "aa".repeat(32));
         assert_eq!(terms.request_asset_id, "xch");
         assert!(!terms.bake_expiry_into_conditions);
+    }
+
+    #[test]
+    fn two_sided_spread_puts_par_inside_bid_and_ask() {
+        use crate::offer::assets::ResolvedMarketOfferAssets;
+        use crate::test_support::market_config::sample_market;
+
+        let quote = "bb".repeat(32);
+        let mut market =
+            sample_market("xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w");
+        market.mode = "two_sided".into();
+        market.quote_asset_type = "stable".into();
+        market.pricing = MarketPricing {
+            fixed_quote_per_base: Some(1.0),
+            strategy_target_spread_bps: Some(20),
+            base_unit_mojo_multiplier: Some(1_000),
+            quote_unit_mojo_multiplier: Some(1_000),
+            ..MarketPricing::default()
+        };
+        let assets = ResolvedMarketOfferAssets {
+            base_asset_id: "aa".repeat(32),
+            quote_asset_id: quote.clone(),
+            quote_asset_for_offer: quote.clone(),
+        };
+        let sell = offer_terms_from_resolved_assets(&market, &assets, 10, "sell").expect("sell");
+        let buy = offer_terms_from_resolved_assets(&market, &assets, 10, "buy").expect("buy");
+        assert_eq!(sell.offer_amount, 10_000);
+        assert_eq!(sell.request_amount, 10_010);
+        assert_eq!(buy.offer_amount, 9_990);
+        assert_eq!(buy.request_amount, 10_000);
     }
 }

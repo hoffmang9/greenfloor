@@ -25,7 +25,18 @@ pub struct ParallelReservationContext {
     pub fee_amount_mojos: i64,
     pub base_unit_mojo_multiplier: i64,
     pub quote_unit_mojo_multiplier: i64,
-    pub quote_price: f64,
+    pub sell_quote_price: f64,
+    pub buy_quote_price: f64,
+}
+
+impl ParallelReservationContext {
+    fn quote_price_for_side(&self, side: &str) -> f64 {
+        if side.trim().eq_ignore_ascii_case("buy") {
+            self.buy_quote_price
+        } else {
+            self.sell_quote_price
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,7 +66,7 @@ fn build_parallel_reservation_prep(
                 quote_asset_id: &ctx.quote_asset_id,
                 base_unit_mojo_multiplier: ctx.base_unit_mojo_multiplier,
                 quote_unit_mojo_multiplier: ctx.quote_unit_mojo_multiplier,
-                quote_price: ctx.quote_price,
+                quote_price: ctx.quote_price_for_side(&action.side),
                 fee_asset_id: &ctx.fee_asset_id,
                 fee_amount_mojos: ctx.fee_amount_mojos,
             })?;
@@ -173,7 +184,6 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
             expiry_value: Some(action.expiry_value),
             cancel_after_create: Some(action.cancel_after_create),
             reason: Some(action.reason.clone()),
-            target_spread_bps: action.target_spread_bps,
         })
         .collect();
     expand_inputs_by_repeat(&inputs)
@@ -187,7 +197,6 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
             expiry_value: input.expiry_value.unwrap_or(0),
             cancel_after_create: input.cancel_after_create.unwrap_or(false),
             reason: input.reason.unwrap_or_default(),
-            target_spread_bps: input.target_spread_bps,
         })
         .collect()
 }
@@ -205,7 +214,8 @@ mod tests {
             fee_amount_mojos: 0,
             base_unit_mojo_multiplier: 1000,
             quote_unit_mojo_multiplier: 1000,
-            quote_price: 1.5,
+            sell_quote_price: 1.5,
+            buy_quote_price: 1.5,
         }
     }
 
@@ -220,7 +230,6 @@ mod tests {
             expiry_value: 0,
             cancel_after_create: false,
             reason: String::new(),
-            target_spread_bps: None,
             side: "sell".to_string(),
         }];
         let plan =
@@ -241,7 +250,6 @@ mod tests {
             expiry_value: 0,
             cancel_after_create: false,
             reason: String::new(),
-            target_spread_bps: None,
             side: "sell".to_string(),
         }];
         let profiles = BTreeMap::from([(
@@ -272,7 +280,6 @@ mod tests {
                 expiry_value: 0,
                 cancel_after_create: false,
                 reason: String::new(),
-                target_spread_bps: None,
                 side: "sell".to_string(),
             },
             PlannedAction {
@@ -283,7 +290,6 @@ mod tests {
                 expiry_value: 0,
                 cancel_after_create: false,
                 reason: String::new(),
-                target_spread_bps: None,
                 side: "sell".to_string(),
             },
         ];
@@ -304,6 +310,38 @@ mod tests {
     }
 
     #[test]
+    fn plan_parallel_managed_dispatch_buy_reserves_spread_adjusted_quote() {
+        let mut ctx = sample_reservation_context();
+        ctx.sell_quote_price = 1.001;
+        ctx.buy_quote_price = 0.999;
+        let actions = vec![PlannedAction {
+            size: 10,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            side: "buy".to_string(),
+        }];
+        let spendable_profiles = BTreeMap::from([(
+            "quote_asset".to_string(),
+            SpendableAssetProfile {
+                total: 50_000,
+                max_single: 50_000,
+                max_single_known: true,
+            },
+        )]);
+        let plan =
+            plan_parallel_managed_dispatch(&actions, &ctx, &spendable_profiles).expect("plan");
+        assert_eq!(plan.queue.len(), 1);
+        assert_eq!(
+            plan.queue[0].requested_amounts.get("quote_asset"),
+            Some(&9_990)
+        );
+    }
+
+    #[test]
     fn expand_planned_actions_sets_repeat_one_per_unit() {
         let actions = vec![PlannedAction {
             size: 10,
@@ -313,7 +351,6 @@ mod tests {
             expiry_value: 10,
             cancel_after_create: true,
             reason: "below_target".to_string(),
-            target_spread_bps: None,
             side: "sell".to_string(),
         }];
         let expanded = expand_planned_actions(&actions);

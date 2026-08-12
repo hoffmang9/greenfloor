@@ -16,6 +16,12 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-12 — Two-sided target spread (ADR 0025)
+
+`strategy_target_spread_bps` now offsets two-sided bid/ask around mid (buy below, sell
+above). Sell-only configs omit the field and keep mid. `byc_two_sided_wusdbc` is mid
+1.0 + 20 bps so par sits inside the book (bid 0.999 / ask 1.001).
+
 ### 2026-08-10 — Canonical CAT outer puzzle-hash (ADR 0023)
 
 `cat(asset_id, p2)` outer hashes curry once in `coinset/cats/outer`; vault create-assert

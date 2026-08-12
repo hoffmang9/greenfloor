@@ -125,7 +125,6 @@ pub fn plan_reseed_actions_from_gap(
             expiry_value: template.expiry_value,
             cancel_after_create: template.cancel_after_create,
             reason: "offer_size_gap_reseed".to_string(),
-            target_spread_bps: template.target_spread_bps,
             side: template.side.clone(),
         });
     }
@@ -165,7 +164,6 @@ mod tests {
             ones_target: 5,
             tens_target: 2,
             hundreds_target: 1,
-            target_spread_bps: None,
             min_xch_price_usd: None,
             max_xch_price_usd: None,
             offer_expiry_minutes: None,
@@ -192,7 +190,6 @@ mod tests {
             expiry_value: 10,
             cancel_after_create: true,
             reason: "below_target".to_string(),
-            target_spread_bps: None,
             side: "sell".to_string(),
         }];
         let plan = plan_reseed_actions_from_gap(

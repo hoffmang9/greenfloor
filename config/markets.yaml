@@ -16,7 +16,6 @@ markets:
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10
@@ -95,7 +94,6 @@ markets:
       min_price_quote_per_base: 0.0027
       max_price_quote_per_base: 0.0033
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10
@@ -174,7 +172,6 @@ markets:
       min_price_quote_per_base: 0.0030
       max_price_quote_per_base: 0.0037
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_offer_expiry_minutes: 10
       cancel_move_threshold_bps: 300
       cancel_policy_stable_vs_unstable: true
@@ -252,7 +249,6 @@ markets:
       min_price_quote_per_base: 0.0027
       max_price_quote_per_base: 0.0033
       slippage_bps: 100
-      strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10
@@ -364,7 +360,9 @@ markets:
     signer_key_id: "key-main-2"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
-      fixed_quote_per_base: 0.999
+      # Mid at par; 20 bps full spread → bid 0.999 / ask 1.001 so 1.0 is inside.
+      fixed_quote_per_base: 1.0
+      strategy_target_spread_bps: 20
       strategy_offer_expiry_minutes: 30
     inventory:
       low_watermark_base_units: 200

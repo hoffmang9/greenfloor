@@ -14,7 +14,6 @@ mod tests {
             ones_target: 5,
             tens_target: 2,
             hundreds_target: 1,
-            target_spread_bps: None,
             min_xch_price_usd: None,
             max_xch_price_usd: None,
             offer_expiry_minutes: Some(120),

@@ -23,8 +23,6 @@ pub struct StrategyConfig {
     #[serde(default = "default_hundreds_target")]
     pub hundreds_target: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_spread_bps: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_xch_price_usd: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_xch_price_usd: Option<f64>,
@@ -55,8 +53,6 @@ pub struct PlannedAction {
     pub expiry_value: i64,
     pub cancel_after_create: bool,
     pub reason: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_spread_bps: Option<i64>,
     #[serde(default = "default_side")]
     pub side: String,
 }
@@ -141,7 +137,6 @@ pub fn evaluate_market(state: &MarketState, config: &StrategyConfig) -> Vec<Plan
                 expiry_value: expiry_minutes,
                 cancel_after_create: true,
                 reason: "below_target".to_string(),
-                target_spread_bps: config.target_spread_bps,
             });
         }
     }
@@ -189,7 +184,6 @@ mod tests {
             ones_target: 5,
             tens_target: 2,
             hundreds_target: 1,
-            target_spread_bps: None,
             min_xch_price_usd: None,
             max_xch_price_usd: None,
             offer_expiry_minutes: None,
@@ -227,7 +221,6 @@ mod tests {
                     expiry_value: 10,
                     cancel_after_create: true,
                     reason: "below_target".to_string(),
-                    target_spread_bps: None,
                     side: "sell".to_string(),
                 },
                 PlannedAction {
@@ -238,7 +231,6 @@ mod tests {
                     expiry_value: 10,
                     cancel_after_create: true,
                     reason: "below_target".to_string(),
-                    target_spread_bps: None,
                     side: "sell".to_string(),
                 },
                 PlannedAction {
@@ -249,7 +241,6 @@ mod tests {
                     expiry_value: 10,
                     cancel_after_create: true,
                     reason: "below_target".to_string(),
-                    target_spread_bps: None,
                     side: "sell".to_string(),
                 },
             ]

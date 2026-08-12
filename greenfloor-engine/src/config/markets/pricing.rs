@@ -48,7 +48,7 @@ impl MarketPricing {
             .unwrap_or(DEFAULT_OFFER_EXPIRY_MINUTES)
     }
 
-    /// Quote-per-base for manual / managed offer build.
+    /// Mid quote-per-base for manual / managed offer build (no bid-ask offset).
     ///
     /// # Errors
     ///
@@ -116,6 +116,12 @@ pub(super) fn parse_market_pricing(
         optional_positive_i64(obj, market_id, "cancel_move_threshold_bps")?;
     let strategy_target_spread_bps =
         optional_positive_i64(obj, market_id, "strategy_target_spread_bps")?;
+    if strategy_target_spread_bps.is_some_and(|bps| bps >= 20_000) {
+        return Err(market_err(
+            market_id,
+            "strategy_target_spread_bps must be < 20000",
+        ));
+    }
     let strategy_min_xch_price_usd =
         optional_positive_f64(obj, market_id, "strategy_min_xch_price_usd")?;
     let strategy_max_xch_price_usd =
@@ -169,6 +175,21 @@ pub(super) fn parse_market_pricing(
         },
         cancel_move_threshold_bps,
     })
+}
+
+/// Full spread in bps, split equally around mid. Buy below mid; sell above.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub(super) fn spread_adjusted_quote_price(mid: f64, spread_bps: Option<i64>, side: &str) -> f64 {
+    let Some(bps) = spread_bps.filter(|value| *value > 0) else {
+        return mid;
+    };
+    let half = (bps as f64) / 20_000.0;
+    if side.trim().eq_ignore_ascii_case("buy") {
+        mid * (1.0 - half)
+    } else {
+        mid * (1.0 + half)
+    }
 }
 
 fn reject_legacy_fields(obj: &Map<String, Value>, market_id: &str) -> SignerResult<()> {
@@ -346,5 +367,34 @@ mod tests {
         )
         .expect("valid");
         assert_eq!(parsed.cancel_move_threshold_bps, Some(250));
+    }
+
+    #[test]
+    fn spread_adjusted_quote_price_offsets_half_spread_around_mid() {
+        let buy = spread_adjusted_quote_price(1.0, Some(20), "buy");
+        let sell = spread_adjusted_quote_price(1.0, Some(20), "sell");
+        assert!((buy - 0.999).abs() < 1e-12);
+        assert!((sell - 1.001).abs() < 1e-12);
+        assert!(buy < 1.0 && 1.0 < sell);
+    }
+
+    #[test]
+    fn spread_adjusted_quote_price_without_spread_is_mid() {
+        assert!((spread_adjusted_quote_price(0.999, None, "buy") - 0.999).abs() < 1e-12);
+        assert!((spread_adjusted_quote_price(0.999, None, "sell") - 0.999).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parse_rejects_spread_that_would_zero_the_buy_side() {
+        let err = parse_market_pricing(
+            Some(&json!({"strategy_target_spread_bps": 20_000})),
+            "BYC",
+            "wUSDC.b",
+            "stable",
+            "m1",
+        )
+        .err()
+        .expect("spread too wide");
+        assert!(err.to_string().contains("strategy_target_spread_bps"));
     }
 }
