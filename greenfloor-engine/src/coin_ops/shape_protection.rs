@@ -40,7 +40,7 @@ pub fn required_ladder_row_slot(
     (size_base_units, target_count + split_buffer_count)
 }
 
-/// Required slot rows from daemon/market [`LadderEntry`] values.
+/// Required slot rows from daemon/market [`LadderEntry`] values (target + buffer).
 #[must_use]
 pub fn required_rows_from_ladder_entries(entries: &[LadderEntry]) -> Vec<(i64, i64)> {
     required_ladder_row_slots(entries.iter().map(|row| {
@@ -119,15 +119,32 @@ pub struct SplitSourceProtection {
 }
 
 impl SplitSourceProtection {
+    /// Low-watermark split-source protection: **`target_count` only** (buffer raidable).
+    ///
+    /// Distinct from [`LadderShapeContext::from_sell_ladder_entries`], which uses
+    /// target+buffer for bootstrap / primary-row readiness.
+    ///
+    /// `inventory_including_watched` must be full-vault exact-clip inventory so
+    /// open-offer makers count toward target coverage.
     #[must_use]
-    pub fn from_sell_ladder_entries(
+    pub fn for_low_watermark_split(
         entries: &[LadderEntry],
-        spendable: &[SpendableCoin],
+        inventory_including_watched: &[SpendableCoin],
         base_unit_mojo_multiplier: i64,
     ) -> Self {
+        let target_only_rows = required_ladder_row_slots(entries.iter().filter_map(|row| {
+            (row.size_base_units > 0).then_some((
+                row.size_base_units,
+                row.target_count.max(0),
+                0, // buffer raidable for other-rung deficits
+            ))
+        }));
         Self::from_required_rows(
-            &required_rows_from_ladder_entries(entries),
-            &spendable_exact_ladder_unit_amounts(spendable, base_unit_mojo_multiplier),
+            &target_only_rows,
+            &spendable_exact_ladder_unit_amounts(
+                inventory_including_watched,
+                base_unit_mojo_multiplier,
+            ),
             base_unit_mojo_multiplier,
         )
     }
@@ -212,11 +229,12 @@ pub fn exact_ladder_coin_counts(
     counts
 }
 
-/// True when splitting `coin_amount` would consume a protected exact ladder-row coin for a smaller deficit.
+/// True when splitting `coin_amount` would drop a protected exact ladder row below its slot count.
+///
+/// Excess exact clips (`current > required`) may fund smaller-rung deficits.
 #[must_use]
 pub fn split_would_cannibalize_protected_row(
     coin_amount: i64,
-    total_output_amount: i64,
     ladder_sizes: &HashSet<i64>,
     protected_slots: &HashMap<i64, i64>,
     counts: &HashMap<i64, i64>,
@@ -229,10 +247,11 @@ pub fn split_would_cannibalize_protected_row(
         return false;
     }
     let current = counts.get(&coin_amount).copied().unwrap_or(0);
-    if current > 0 && current < required {
-        return true;
+    if current <= 0 {
+        return false;
     }
-    total_output_amount < coin_amount && current >= required
+    // i64::saturating_sub does not clamp at zero.
+    current.saturating_sub(1).max(0) < required
 }
 
 #[must_use]
@@ -268,7 +287,6 @@ pub fn select_smallest_non_cannibalizing_index(
             candidate.exact_ladder_units.is_none_or(|clip_units| {
                 !split_would_cannibalize_protected_row(
                     clip_units,
-                    required_output_base_units,
                     &ctx.ladder_sizes,
                     &ctx.protected_slots,
                     &ctx.exact_ladder_counts,
@@ -345,10 +363,9 @@ mod tests {
     }
 
     #[test]
-    fn cannibalization_skips_when_no_required_slots() {
+    fn cannibalization_skips_when_count_is_zero() {
         let ctx = LadderShapeContext::from_required_rows(&[(10, 3)], &[]);
         assert!(!split_would_cannibalize_protected_row(
-            10,
             10,
             &ctx.ladder_sizes,
             &ctx.protected_slots,
@@ -400,11 +417,35 @@ mod tests {
         ctx.exact_ladder_counts = counts.clone();
         assert!(split_would_cannibalize_protected_row(
             100,
-            10,
             &ctx.ladder_sizes,
             &ctx.protected_slots,
             &counts,
         ));
+    }
+
+    #[test]
+    fn allows_splitting_excess_exact_clip_above_target() {
+        let ctx = LadderShapeContext::from_required_rows(&[(10, 3), (25, 1)], &[25, 25, 10, 10]);
+        assert!(!split_would_cannibalize_protected_row(
+            25,
+            &ctx.ladder_sizes,
+            &ctx.protected_slots,
+            &ctx.exact_ladder_counts,
+        ));
+        let spendable = vec![
+            SpendableCoin::new("locked_25".to_string(), 25_000),
+            SpendableCoin::new("free_25".to_string(), 25_000),
+            SpendableCoin::new("frac".to_string(), 10_300),
+        ];
+        let selected = select_smallest_non_cannibalizing_spendable(
+            &spendable,
+            20,
+            1_000,
+            &HashSet::from(["locked_25".to_string()]),
+            &ctx,
+        )
+        .expect("excess size-25 should fund size-10 deficit");
+        assert_eq!(selected.id, "free_25");
     }
 
     #[test]

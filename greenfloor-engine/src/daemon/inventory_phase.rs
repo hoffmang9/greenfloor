@@ -12,6 +12,7 @@ use crate::operator_log::{LogContext, INVENTORY_BUCKET_SCAN, INVENTORY_BUCKET_SC
 use crate::storage::SqliteStore;
 
 use super::coinset_spendable::list_spendable_base_unit_amounts_for_signer;
+use super::inventory_freshness::watch_coin_fingerprint;
 use super::market_context::DaemonCycleResources;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
@@ -67,9 +68,13 @@ pub async fn run_inventory_phase(
         return Ok(BTreeMap::default());
     }
 
+    let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
+    let watch_fingerprint = watch_coin_fingerprint(&watched_coin_ids);
+
     if !resources.coinset.inventory_freshness.needs_refresh(
         &market.market_id,
         super::inventory_freshness::INVENTORY_MAX_STALENESS,
+        &watch_fingerprint,
     ) {
         if let Some(cached) = resources
             .coinset
@@ -98,12 +103,14 @@ pub async fn run_inventory_phase(
         let resolved_base_asset_id = resolver.resolve_base(market.base_asset.trim()).await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let signer_config = resources.signer_for_execution()?;
+        // Free exact clips only — durable maker watches are reserved for open offers.
         let amounts = list_spendable_base_unit_amounts_for_signer(
             &resources.network,
             signer_config,
             &market.receive_address,
             &resolved_base_asset_id,
             base_unit_multiplier,
+            &watched_coin_ids,
         )
         .await?;
         let bucket_counts = compute_bucket_counts_from_coins(&amounts, &ladder_sizes);
@@ -113,10 +120,11 @@ pub async fn run_inventory_phase(
 
     match scan_result {
         Ok((resolved_base_asset_id, coin_count, bucket_counts)) => {
-            resources
-                .coinset
-                .inventory_freshness
-                .mark_fresh(&market.market_id, bucket_counts.clone());
+            resources.coinset.inventory_freshness.mark_fresh(
+                &market.market_id,
+                bucket_counts.clone(),
+                watch_fingerprint,
+            );
             LogContext::MARKET_CYCLE.dual_audit(
                 store,
                 Level::DEBUG,
@@ -218,10 +226,11 @@ mod tests {
     fn freshness_cache_preserves_last_buckets() {
         let freshness = super::super::inventory_freshness::InventoryFreshnessCache::new();
         let buckets = BTreeMap::from([(1, 3), (10, 1)]);
-        freshness.mark_fresh("m1", buckets.clone());
+        freshness.mark_fresh("m1", buckets.clone(), "");
         assert!(!freshness.needs_refresh(
             "m1",
-            super::super::inventory_freshness::INVENTORY_MAX_STALENESS
+            super::super::inventory_freshness::INVENTORY_MAX_STALENESS,
+            ""
         ));
         assert_eq!(freshness.cached_buckets("m1"), Some(buckets));
     }
@@ -246,7 +255,7 @@ mod tests {
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
         let buckets = BTreeMap::from([(10, 2)]);
         let freshness = crate::daemon::InventoryFreshnessCache::new();
-        freshness.mark_fresh("m1", buckets.clone());
+        freshness.mark_fresh("m1", buckets.clone(), "");
         let coinset = CoinsetWsShared::new(
             Arc::new(InventoryP2Index::default()),
             Arc::clone(&freshness),
@@ -291,7 +300,8 @@ mod tests {
         freshness.mark_stale("m1");
         assert!(freshness.needs_refresh(
             "m1",
-            super::super::inventory_freshness::INVENTORY_MAX_STALENESS
+            super::super::inventory_freshness::INVENTORY_MAX_STALENESS,
+            ""
         ));
         // After stale, phase attempts HTTP scan; without a live signer this soft-skips
         // to empty buckets rather than returning the cached fresh map.

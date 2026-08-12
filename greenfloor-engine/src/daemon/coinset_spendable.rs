@@ -1,26 +1,33 @@
 //! Coinset spendable coin scans shared by inventory and offer-dispatch paths.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::SignerConfig;
 use crate::cycle::SpendableAssetProfile;
 use crate::error::SignerResult;
 
+/// Exact whole ladder-unit amounts for **free** inventory (optional maker coin-id excludes).
 pub async fn list_spendable_base_unit_amounts_for_signer(
     network: &str,
     signer: &SignerConfig,
     receive_address: &str,
     resolved_asset_id: &str,
     base_unit_multiplier: i64,
+    exclude_coin_ids: &HashSet<String>,
 ) -> SignerResult<Vec<i64>> {
     let coins =
         list_wallet_unspent_coins_for_signer(network, signer, receive_address, resolved_asset_id)
             .await?;
     let multiplier = base_unit_multiplier.max(1);
+    let exclude: HashSet<String> = exclude_coin_ids
+        .iter()
+        .map(|id| id.to_ascii_lowercase())
+        .collect();
     // Exact whole ladder units only — fractional CAT coins (10.5) are valid but not a clip size.
     Ok(coins
         .into_iter()
+        .filter(|coin| !exclude.contains(&coin.id.to_ascii_lowercase()))
         .filter_map(|coin| {
             let amount_mojos = i64::try_from(coin.amount).ok()?;
             crate::coin_ops::exact_whole_units_from_mojos(amount_mojos, multiplier)
@@ -115,6 +122,7 @@ mod tests {
             RECEIVE_ADDRESS,
             "xch",
             1_000,
+            &std::collections::HashSet::new(),
         )
         .await
         .expect("amounts");

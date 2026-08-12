@@ -277,7 +277,7 @@ mod tests {
         )
         .expect("markets");
         let freshness = InventoryFreshnessCache::new();
-        freshness.mark_fresh("m1", BTreeMap::from([(10, 1)]));
+        freshness.mark_fresh("m1", BTreeMap::from([(10, 1)]), "");
         let request = DaemonRunOnceRequest {
             program_path,
             markets_path,
@@ -311,9 +311,10 @@ mod tests {
             resources.coinset.p2_index().p2s().is_empty(),
             "empty request index must stay empty"
         );
-        assert!(!resources
-            .coinset
-            .inventory_freshness
-            .needs_refresh("m1", crate::daemon::INVENTORY_MAX_STALENESS));
+        assert!(!resources.coinset.inventory_freshness.needs_refresh(
+            "m1",
+            crate::daemon::INVENTORY_MAX_STALENESS,
+            ""
+        ));
     }
 }

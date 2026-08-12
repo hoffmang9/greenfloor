@@ -87,18 +87,18 @@ impl CoinOpExecContext {
             .await
     }
 
-    /// List spendable coins, excluding durable maker **coin-id** watches.
+    /// List wallet coins without excluding durable maker watches.
+    ///
+    /// Prefer [`Self::list_wallet_coins_for_split`] when both full inventory and
+    /// spendable subset are needed (one Coinset fetch).
     ///
     /// # Errors
     ///
     /// Returns an error if the operation fails.
-    pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+    pub async fn list_wallet_coins_including_watched(&self) -> SignerResult<Vec<SpendableCoin>> {
         #[cfg(test)]
         if let Some(coins) = self.test_overrides.wallet_coins_override() {
-            return Ok(exclude_watched_spendable(
-                coins.iter().cloned(),
-                &self.watched_coin_ids,
-            ));
+            return Ok(coins.to_vec());
         }
         let coins = list_wallet_unspent_coins_for_signer(
             &self.gated.operator_network,
@@ -107,10 +107,35 @@ impl CoinOpExecContext {
             &self.resolved_base_asset_id,
         )
         .await?;
-        Ok(exclude_watched_spendable(
-            wallet_coins_to_spendable(&coins, self.gated.market_row.base_asset.trim()),
-            &self.watched_coin_ids,
+        Ok(wallet_coins_to_spendable(
+            &coins,
+            self.gated.market_row.base_asset.trim(),
         ))
+    }
+
+    /// One Coinset fetch: `(including_watched, spendable)`.
+    ///
+    /// `including_watched` feeds low-watermark protection counts; `spendable`
+    /// excludes durable maker coin-id watches for selection/submit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub async fn list_wallet_coins_for_split(
+        &self,
+    ) -> SignerResult<(Vec<SpendableCoin>, Vec<SpendableCoin>)> {
+        let including_watched = self.list_wallet_coins_including_watched().await?;
+        let spendable = exclude_watched_spendable(&including_watched, &self.watched_coin_ids);
+        Ok((including_watched, spendable))
+    }
+
+    /// List spendable coins, excluding durable maker **coin-id** watches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
+    pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+        Ok(self.list_wallet_coins_for_split().await?.1)
     }
 
     /// Refuse explicit coin-op inputs that are durable maker coin watches.
