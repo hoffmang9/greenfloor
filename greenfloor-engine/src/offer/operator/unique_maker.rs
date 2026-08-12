@@ -7,7 +7,6 @@ use crate::config::{MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::assets::ResolvedMarketOfferAssets;
-use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::request::compute_signer_offer_leg_amounts;
 use crate::offer::types::{effective_maker_reuse, PresplitMakerReuse};
 use crate::storage::SqliteStore;
@@ -186,7 +185,7 @@ fn offered_leg_for_unique_pin(
     size_base_units: u64,
     side: &str,
 ) -> SignerResult<(String, u64)> {
-    let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
+    let quote_price = market.quote_price_for_side(side)?;
     let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
     let leg = compute_signer_offer_leg_amounts(
         size_i64,
@@ -518,6 +517,32 @@ mod tests {
             offered_leg_for_unique_pin(&market, &assets, 10, "sell").expect("leg");
         assert_eq!(asset, cat);
         assert_eq!(amount, 10_000);
+    }
+
+    #[test]
+    fn offered_leg_for_unique_pin_buy_uses_bid_price() {
+        let base = "ab".repeat(32);
+        let quote = "cd".repeat(32);
+        let mut market =
+            sample_market("xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h");
+        market.mode = "two_sided".to_string();
+        market.base_asset = base.clone();
+        market.quote_asset = quote.clone();
+        market.pricing = MarketPricing {
+            fixed_quote_per_base: Some(1.0),
+            strategy_target_spread_bps: Some(20),
+            base_unit_mojo_multiplier: Some(1_000),
+            quote_unit_mojo_multiplier: Some(1_000),
+            ..MarketPricing::default()
+        };
+        let assets = ResolvedMarketOfferAssets {
+            base_asset_id: base,
+            quote_asset_id: quote.clone(),
+            quote_asset_for_offer: quote.clone(),
+        };
+        let (asset, amount) = offered_leg_for_unique_pin(&market, &assets, 10, "buy").expect("leg");
+        assert_eq!(asset, quote);
+        assert_eq!(amount, 9_990);
     }
 
     #[tokio::test]

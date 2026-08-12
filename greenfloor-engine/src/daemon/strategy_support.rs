@@ -156,9 +156,6 @@ fn strategy_config_for_ladder(
         ones_target: *normalized.get(&1).unwrap_or(&0),
         tens_target: *normalized.get(&10).unwrap_or(&0),
         hundreds_target: *normalized.get(&100).unwrap_or(&0),
-        target_spread_bps: include_pricing_bounds
-            .then_some(pricing.strategy_target_spread_bps)
-            .flatten(),
         min_xch_price_usd: include_pricing_bounds
             .then_some(pricing.strategy_min_xch_price_usd)
             .flatten(),
@@ -261,10 +258,9 @@ mod tests {
     }
 
     #[test]
-    fn buy_side_config_omits_spread_and_price_bounds() {
+    fn buy_side_config_omits_price_bounds() {
         let market = sample_market();
         let buy = strategy_config_for_ladder(&market, "mainnet", "buy", false);
-        assert!(buy.target_spread_bps.is_none());
         assert!(buy.min_xch_price_usd.is_none());
         assert!(buy.max_xch_price_usd.is_none());
     }

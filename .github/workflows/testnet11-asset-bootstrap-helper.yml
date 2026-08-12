@@ -282,7 +282,6 @@ jobs:
               snippet_lines.append(f"    fixed_quote_per_base: {fixed_quote_per_base}")
               snippet_lines.append("    quote_unit_mojo_multiplier: 1000000000000")
               snippet_lines.append("    slippage_bps: 100")
-              snippet_lines.append("    strategy_target_spread_bps: 140")
               snippet_lines.append("    strategy_min_xch_price_usd: 20.0")
               snippet_lines.append("    strategy_max_xch_price_usd: 60.0")
               snippet_lines.append("    strategy_offer_expiry_minutes: 10")

@@ -21,8 +21,6 @@ pub struct PlannedActionInput {
     pub cancel_after_create: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_spread_bps: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -177,7 +175,6 @@ mod tests {
                 expiry_value: None,
                 cancel_after_create: None,
                 reason: None,
-                target_spread_bps: None,
             },
             PlannedActionInput {
                 size: 10,
@@ -188,7 +185,6 @@ mod tests {
                 expiry_value: None,
                 cancel_after_create: None,
                 reason: None,
-                target_spread_bps: None,
             },
         ];
         let expanded = expand_inputs_by_repeat(&actions);

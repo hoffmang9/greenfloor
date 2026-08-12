@@ -83,7 +83,6 @@ pub(super) fn sample_action() -> PlannedAction {
         expiry_value: 10,
         cancel_after_create: false,
         reason: "test".to_string(),
-        target_spread_bps: None,
         side: "sell".to_string(),
     }
 }

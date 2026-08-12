@@ -45,6 +45,32 @@ pub struct MarketConfig {
     pub ladders: HashMap<String, Vec<LadderEntry>>,
 }
 
+impl MarketConfig {
+    #[must_use]
+    pub fn is_two_sided(&self) -> bool {
+        self.mode.trim().eq_ignore_ascii_case("two_sided")
+    }
+
+    /// Quote-per-base for `side`. Two-sided markets apply `strategy_target_spread_bps`
+    /// around mid (buy below, sell above). One-sided markets keep the mid price so
+    /// unused spread fields on sell-only books do not move posted prices.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when pricing lacks a usable quote price.
+    pub fn quote_price_for_side(&self, side: &str) -> SignerResult<f64> {
+        let mid = self.pricing.quote_price()?;
+        if !self.is_two_sided() {
+            return Ok(mid);
+        }
+        Ok(pricing::spread_adjusted_quote_price(
+            mid,
+            self.pricing.strategy_target_spread_bps,
+            side,
+        ))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MarketsConfig {
     pub markets: Vec<MarketConfig>,
@@ -205,5 +231,40 @@ mod soft_expiry_tests {
         let mut disabled = market.clone();
         disabled.enabled = false;
         assert!(!market_wants_ladder_size(&disabled, "sell", 10));
+    }
+
+    #[test]
+    fn two_sided_quote_price_applies_spread_sell_only_does_not() {
+        let pricing = MarketPricing {
+            fixed_quote_per_base: Some(1.0),
+            strategy_target_spread_bps: Some(20),
+            ..MarketPricing::default()
+        };
+        let two_sided = MarketConfig {
+            market_id: "byc".to_string(),
+            enabled: true,
+            unique_maker_coins: true,
+            base_asset: "BYC".to_string(),
+            base_symbol: "BYC".to_string(),
+            quote_asset: "wUSDC.b".to_string(),
+            quote_asset_type: "stable".to_string(),
+            receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w"
+                .to_string(),
+            signer_key_id: "k".to_string(),
+            mode: "two_sided".to_string(),
+            pricing: pricing.clone(),
+            cancel_move_threshold_bps: None,
+            ladders: HashMap::new(),
+        };
+        let buy = two_sided.quote_price_for_side("buy").expect("buy");
+        let sell = two_sided.quote_price_for_side("sell").expect("sell");
+        assert!(buy < 1.0 && 1.0 < sell);
+
+        let mut sell_only = two_sided.clone();
+        sell_only.mode = "sell_only".to_string();
+        let sell_mid = sell_only.quote_price_for_side("sell").expect("mid");
+        let buy_mid = sell_only.quote_price_for_side("buy").expect("mid");
+        assert!((sell_mid - 1.0).abs() < 1e-12);
+        assert!((buy_mid - 1.0).abs() < 1e-12);
     }
 }

@@ -162,7 +162,6 @@ mod tests {
             expiry_value: 10,
             cancel_after_create: false,
             reason: "test".to_string(),
-            target_spread_bps: None,
         }
     }
 

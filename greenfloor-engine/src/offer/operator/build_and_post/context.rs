@@ -4,6 +4,7 @@ use crate::config::{
     GatedOperatorMarketLoadRequest, MarketPricing, OperatorMarketCommand,
 };
 use crate::error::SignerResult;
+#[cfg(test)]
 use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::{normalize_offer_side, ResolvedMarketOfferAssets};
 
@@ -35,13 +36,15 @@ impl ResolvedBuildAndPostContext {
         )
     }
 
-    /// Quote-per-base from market pricing.
+    /// Quote-per-base for this action side (two-sided markets apply the configured spread).
     ///
     /// # Errors
     ///
     /// Returns an error when pricing lacks a usable quote price.
     pub(crate) fn quote_price(&self) -> SignerResult<f64> {
-        resolve_quote_price_for_pricing(&self.gated.market_row.pricing)
+        self.gated
+            .market_row
+            .quote_price_for_side(&self.action_side())
     }
 }
 
@@ -222,8 +225,22 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_maker_offer_fee;
+    use super::{resolve_maker_offer_fee, sample_resolved_build_and_post_context};
     use crate::test_support::signer_config::test_signer_config;
+
+    #[test]
+    fn quote_price_applies_two_sided_spread_per_side() {
+        let mut ctx = sample_resolved_build_and_post_context();
+        ctx.gated.market_row.mode = "two_sided".to_string();
+        ctx.gated.market_row.pricing.strategy_target_spread_bps = Some(20);
+        ctx.action_side_override = Some("buy".to_string());
+        let buy = ctx.quote_price().expect("buy");
+        ctx.action_side_override = Some("sell".to_string());
+        let sell = ctx.quote_price().expect("sell");
+        assert!((buy - 0.999).abs() < 1e-12);
+        assert!((sell - 1.001).abs() < 1e-12);
+        assert!(buy < 1.0 && 1.0 < sell);
+    }
 
     #[tokio::test]
     async fn resolve_maker_offer_fee_uses_signer_coinset_endpoint() {
