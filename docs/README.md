@@ -7,6 +7,7 @@ accepted decision** when onboarding.
 
 | ADR                                                              | Topic                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [0026](decisions/0026-combine-dust-remainder-coin.md)            | **Combine dust remainder** — extra input absorbs CAT change; keep 1 CAT |
 | [0025](decisions/0025-two-sided-target-spread.md)                | **Two-sided spread** — bid/ask around mid; sell-only omits the field    |
 | [0023](decisions/0023-canonical-cat-outer-puzzle-hash.md)        | **CAT outer hash** — one `coinset/cats/outer` primitive + Coinset hex   |
 | [0021](decisions/0021-three-ownership-simplifications.md)        | **Ownership spines** — expired maker, reconcile prep, `coin_ops::shape` |

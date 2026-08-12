@@ -16,6 +16,12 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-12 — Combine dusty overshoot takes a remainder coin (ADR 0026)
+
+When a covering combine would leave CAT dust change, the shaper retries while skipping
+dusty overshoots so leftover change lands on an extra remainder coin (or a different
+pair with legal change). The 1 CAT dust floor is unchanged.
+
 ### 2026-08-12 — Two-sided target spread (ADR 0025)
 
 `strategy_target_spread_bps` now offsets two-sided bid/ask around mid (buy below, sell
