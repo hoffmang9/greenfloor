@@ -76,7 +76,7 @@ pub async fn detect_stale_open_offers_for_requeue(
                     reason: reason.to_string(),
                 })
             }
-            Ok(DexieOfferFetch::Missing(_)) => Some(StaleSweepHit {
+            Ok(DexieOfferFetch::Missing) => Some(StaleSweepHit {
                 market_id: market_id.clone(),
                 offer_id: offer_id.clone(),
                 reason: "offer_missing_404".to_string(),

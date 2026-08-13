@@ -91,13 +91,9 @@ async fn fetch_missing_watched_offers(
             Ok(DexieOfferFetch::Found(body)) => {
                 augmented_by_local_id.insert(watched_offer_id.clone(), body);
             }
-            Ok(DexieOfferFetch::Missing(error_text)) => {
-                let transition = reconciler.apply_missing(
-                    market_id,
-                    watched_offer_id,
-                    current_state,
-                    Some(&error_text),
-                )?;
+            Ok(DexieOfferFetch::Missing) => {
+                let transition =
+                    reconciler.apply_missing(market_id, watched_offer_id, current_state, None)?;
                 note_reconcile_transition_side_effects(
                     &transition,
                     watched_offer_id,

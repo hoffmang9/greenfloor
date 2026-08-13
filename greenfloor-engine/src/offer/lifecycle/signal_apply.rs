@@ -212,9 +212,8 @@ impl<'a> WatchedOfferReconciler<'a> {
             Ok(DexieOfferFetch::Found(offer_body)) => {
                 self.apply_dexie_payload(market_id, offer_id, current_state, &offer_body, env)
             }
-            Ok(DexieOfferFetch::Missing(error_text)) => {
-                let transition =
-                    self.apply_missing(market_id, offer_id, current_state, Some(&error_text))?;
+            Ok(DexieOfferFetch::Missing) => {
+                let transition = self.apply_missing(market_id, offer_id, current_state, None)?;
                 Ok((transition, None))
             }
             Ok(DexieOfferFetch::Mismatch) => self.persist_lookup_unchanged(

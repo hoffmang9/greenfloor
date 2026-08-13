@@ -94,6 +94,14 @@ impl PublishResult {
         }
     }
 
+    pub fn from_error(err: &crate::error::SignerError) -> Self {
+        Self {
+            success: false,
+            offer_id: None,
+            body: json!({"success": false, "error": err.to_string()}),
+        }
+    }
+
     /// Map Coinset `push_offer` JSON into a publish result.
     ///
     /// Canonical `offer_id` must be a 64-hex trade id (Dexie `trade_id`), matching

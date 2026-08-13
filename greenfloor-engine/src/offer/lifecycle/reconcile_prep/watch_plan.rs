@@ -176,7 +176,7 @@ async fn fetch_dexie_offer_body_for_heal(
 ) -> SignerResult<Option<Value>> {
     match fetch_dexie_offer(dexie, offer_id).await {
         Ok(DexieOfferFetch::Found(body)) => Ok(Some(body)),
-        Ok(DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch) => Ok(None),
+        Ok(DexieOfferFetch::Missing | DexieOfferFetch::Mismatch) => Ok(None),
         Err(err) => {
             on_lookup_error(market_id, offer_id, &err.to_string())?;
             Ok(None)

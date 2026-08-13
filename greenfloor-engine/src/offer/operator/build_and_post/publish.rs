@@ -41,23 +41,26 @@ pub(super) async fn publish_offer(
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
-            Ok(PublishResult::from_dexie_response(
-                post_offer_phase_dexie(PostOfferPhaseDexieParams {
-                    dexie,
-                    offer_text,
-                    drop_only,
-                    claim_rewards,
-                    expected,
-                })
-                .await?,
+            Ok(post_offer_phase_dexie(PostOfferPhaseDexieParams {
+                dexie,
+                offer_text,
+                drop_only,
+                claim_rewards,
+                expected,
+            })
+            .await
+            .map_or_else(
+                |err| PublishResult::from_error(&err),
+                PublishResult::from_dexie_response,
             ))
         }
         crate::config::Venue::Splash => {
             let splash = splash.ok_or_else(|| {
                 SignerError::Other("splash adapter missing for splash publish".to_string())
             })?;
-            Ok(PublishResult::from_splash_response(
-                splash.post_offer(offer_text).await?,
+            Ok(splash.post_offer(offer_text).await.map_or_else(
+                |err| PublishResult::from_error(&err),
+                PublishResult::from_splash_response,
             ))
         }
     }

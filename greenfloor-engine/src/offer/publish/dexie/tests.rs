@@ -3,6 +3,7 @@ use serde_json::json;
 
 use super::{post_offer_phase_dexie, PostOfferPhaseDexieParams};
 use crate::adapters::DexieClient;
+use crate::error::{OfferError, SignerError};
 use crate::offer::publish::{ExpectedPublishAssetFields, PublishAssetSide};
 
 fn expected_fields() -> ExpectedPublishAssetFields {
@@ -136,7 +137,7 @@ async fn post_offer_phase_fails_on_asset_mismatch() {
 
     let dexie = DexieClient::new(server.url());
     let expected = expected_fields();
-    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
+    let err = post_offer_phase_dexie(PostOfferPhaseDexieParams {
         dexie: &dexie,
         offer_text: "offer1test",
         drop_only: true,
@@ -144,12 +145,12 @@ async fn post_offer_phase_fails_on_asset_mismatch() {
         expected: &expected,
     })
     .await
-    .expect("post");
-    assert!(!result.success());
-    assert!(result
-        .error_text()
-        .starts_with("dexie_offer_offered_asset_missing:"));
-    assert_eq!(result.offer_id(), Some(offer_id));
+    .expect_err("asset mismatch");
+    assert!(matches!(
+        err,
+        SignerError::Offer(OfferError::DexieOfferAssetMismatch(ref detail))
+            if detail.starts_with("dexie_offer_offered_asset_missing:")
+    ));
 }
 
 #[tokio::test]
@@ -231,7 +232,7 @@ async fn post_offer_phase_mismatch_does_not_repost() {
 
     let dexie = DexieClient::new(server.url());
     let expected = expected_fields();
-    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
+    let err = post_offer_phase_dexie(PostOfferPhaseDexieParams {
         dexie: &dexie,
         offer_text: "offer1test",
         drop_only: true,
@@ -239,26 +240,9 @@ async fn post_offer_phase_mismatch_does_not_repost() {
         expected: &expected,
     })
     .await
-    .expect("post");
-    assert!(!result.success());
-    assert_eq!(
-        result.error_text(),
-        "dexie_offer_visibility_payload_mismatch"
-    );
-}
-
-#[test]
-fn dexie_publish_failure_overwrites_success_and_error() {
-    use crate::adapters::DexieResponse;
-
-    let failed = super::dexie_publish_failure(
-        DexieResponse::from_value(json!({"success": true, "id": "offer-1"})),
-        "dexie_offer_offered_asset_missing:expected_asset=cat:expected_symbol=cat",
-    );
-    assert!(!failed.success());
-    assert_eq!(
-        failed.error_text(),
-        "dexie_offer_offered_asset_missing:expected_asset=cat:expected_symbol=cat"
-    );
-    assert_eq!(failed.offer_id(), Some("offer-1"));
+    .expect_err("mismatch");
+    assert!(matches!(
+        err,
+        SignerError::Offer(OfferError::DexieOfferVisibilityMismatch)
+    ));
 }

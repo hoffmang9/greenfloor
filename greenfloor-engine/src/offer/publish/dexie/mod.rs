@@ -1,8 +1,6 @@
-use serde_json::json;
-
 use crate::adapters::{DexieClient, DexieResponse};
 use crate::cycle::{dexie_invalid_offer_retry_sleep, dexie_invalid_offer_should_retry};
-use crate::error::{SignerError, SignerResult, TransportError};
+use crate::error::{OfferError, SignerResult};
 use crate::offer::lifecycle::reconcile_prep::{fetch_dexie_offer, DexieOfferFetch};
 
 use super::{dexie_offer_asset_expectation_error, ExpectedPublishAssetFields};
@@ -23,12 +21,9 @@ pub struct PostOfferPhaseDexieParams<'a> {
     pub expected: &'a ExpectedPublishAssetFields,
 }
 
-#[derive(Debug)]
-enum OfferVisibilityWait {
+enum DexiePostVisibility {
     Visible,
-    Failed(String),
-    Missing(String),
-    Unresolved(String),
+    Missing,
 }
 
 async fn sleep_for_publish(seconds: f64) {
@@ -40,40 +35,6 @@ async fn sleep_for_publish(seconds: f64) {
     {
         let _ = seconds;
         tokio::task::yield_now().await;
-    }
-}
-
-fn dexie_publish_failure(response: DexieResponse, error: impl Into<String>) -> DexieResponse {
-    let error = error.into();
-    let offer_id = response.offer_id().map(str::to_string);
-    let mut body = response.into_value();
-    match &mut body {
-        serde_json::Value::Object(obj) => {
-            obj.insert("success".to_string(), serde_json::Value::Bool(false));
-            obj.insert("error".to_string(), serde_json::Value::String(error));
-        }
-        _ => {
-            body = json!({
-                "success": false,
-                "error": error,
-                "id": offer_id,
-            });
-        }
-    }
-    DexieResponse::from_value(body)
-}
-
-fn failed_dexie_from_http_status(err: SignerError) -> SignerResult<DexieResponse> {
-    if matches!(
-        &err,
-        SignerError::Transport(TransportError::HttpStatus { .. })
-    ) {
-        Ok(DexieResponse::from_value(json!({
-            "success": false,
-            "error": err.to_string(),
-        })))
-    } else {
-        Err(err)
     }
 }
 
@@ -101,7 +62,7 @@ async fn post_dexie_offer_with_invalid_offer_retry(
                 sleep_for_publish(sleep_seconds).await;
                 attempt += 1;
             }
-            Err(err) => return failed_dexie_from_http_status(err),
+            Err(err) => return Err(err),
         }
     }
 }
@@ -110,13 +71,13 @@ async fn wait_for_dexie_offer_visible(
     dexie: &DexieClient,
     offer_id: &str,
     expected: &ExpectedPublishAssetFields,
-) -> OfferVisibilityWait {
+) -> SignerResult<DexiePostVisibility> {
     let clean_offer_id = offer_id.trim();
     if clean_offer_id.is_empty() {
-        return OfferVisibilityWait::Unresolved("dexie_offer_missing_id_after_publish".to_string());
+        return Err(OfferError::DexieOfferMissingIdAfterPublish.into());
     }
-    let mut last: Result<DexieOfferFetch, String> =
-        Err("dexie_offer_not_visible_after_publish".to_string());
+    let mut last = DexieOfferFetch::Mismatch;
+    let mut last_err = None;
     for attempt in 1..=DEXIE_VISIBILITY_POLL_ATTEMPTS {
         match fetch_dexie_offer(dexie, clean_offer_id).await {
             Ok(DexieOfferFetch::Found(offer_obj)) => {
@@ -127,23 +88,28 @@ async fn wait_for_dexie_offer_visible(
                         .unwrap_or(&serde_json::Value::Null),
                     expected,
                 ) {
-                    return OfferVisibilityWait::Failed(asset_error);
+                    return Err(OfferError::DexieOfferAssetMismatch(asset_error).into());
                 }
-                return OfferVisibilityWait::Visible;
+                return Ok(DexiePostVisibility::Visible);
             }
-            Ok(fetch) => last = Ok(fetch),
-            Err(err) => last = Err(format!("dexie_get_offer_error:{err}")),
+            Ok(fetch) => {
+                last = fetch;
+                last_err = None;
+            }
+            Err(err) => last_err = Some(err),
         }
         if attempt < DEXIE_VISIBILITY_POLL_ATTEMPTS {
             sleep_for_publish(DEXIE_VISIBILITY_POLL_DELAY_SECONDS).await;
         }
     }
+    if let Some(err) = last_err {
+        return Err(err);
+    }
     match last {
-        Ok(DexieOfferFetch::Missing(error)) => OfferVisibilityWait::Missing(error),
-        Ok(_) => {
-            OfferVisibilityWait::Unresolved("dexie_offer_visibility_payload_mismatch".to_string())
+        DexieOfferFetch::Missing => Ok(DexiePostVisibility::Missing),
+        DexieOfferFetch::Found(_) | DexieOfferFetch::Mismatch => {
+            Err(OfferError::DexieOfferVisibilityMismatch.into())
         }
-        Err(error) => OfferVisibilityWait::Unresolved(error),
     }
 }
 
@@ -151,7 +117,7 @@ async fn wait_for_dexie_offer_visible(
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
+/// Returns an error if the post, visibility poll, or asset check fails.
 pub async fn post_offer_phase_dexie(
     params: PostOfferPhaseDexieParams<'_>,
 ) -> SignerResult<DexieResponse> {
@@ -162,41 +128,24 @@ pub async fn post_offer_phase_dexie(
         claim_rewards,
         expected,
     } = params;
-    let mut last_result = DexieResponse::from_value(json!({
-        "success": false,
-        "error": "dexie_offer_not_visible_after_publish",
-    }));
-    let mut last_missing_error = String::new();
     for attempt in 1..=DEXIE_VISIBILITY_REPOST_MAX_ATTEMPTS {
         let result =
             post_dexie_offer_with_invalid_offer_retry(dexie, offer_text, drop_only, claim_rewards)
                 .await?;
-        last_result = result.clone();
         if !result.success() {
             return Ok(result);
         }
         let posted_offer_id = result.offer_id().unwrap_or("").to_string();
-        match wait_for_dexie_offer_visible(dexie, &posted_offer_id, expected).await {
-            OfferVisibilityWait::Visible => return Ok(result),
-            OfferVisibilityWait::Failed(error) | OfferVisibilityWait::Unresolved(error) => {
-                return Ok(dexie_publish_failure(result, error));
-            }
-            OfferVisibilityWait::Missing(error) => {
-                last_missing_error = error;
+        match wait_for_dexie_offer_visible(dexie, &posted_offer_id, expected).await? {
+            DexiePostVisibility::Visible => return Ok(result),
+            DexiePostVisibility::Missing => {
                 if attempt < DEXIE_VISIBILITY_REPOST_MAX_ATTEMPTS {
                     sleep_for_publish(DEXIE_VISIBILITY_REPOST_DELAY_SECONDS).await;
                 }
             }
         }
     }
-    Ok(dexie_publish_failure(
-        last_result,
-        if last_missing_error.is_empty() {
-            "dexie_offer_not_visible_after_publish".to_string()
-        } else {
-            last_missing_error
-        },
-    ))
+    Err(OfferError::DexieOfferNotVisible.into())
 }
 
 #[cfg(test)]

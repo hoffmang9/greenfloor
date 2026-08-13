@@ -30,28 +30,3 @@ pub fn plan_exact_amount_combine_inputs(
         Some(capped_count(number_of_coins, max_count)),
     )
 }
-
-/// Select the largest spendable combine inputs.
-#[must_use]
-pub fn plan_largest_combine_inputs(
-    spendable_coins: &[SpendableCoin],
-    number_of_coins: usize,
-    exclude_coin_ids: Option<&HashSet<String>>,
-    max_count: Option<usize>,
-) -> Vec<String> {
-    let excluded = normalized_exclude_ids(exclude_coin_ids);
-    let cap = capped_count(number_of_coins, max_count);
-    let mut eligible: Vec<&SpendableCoin> = spendable_coins
-        .iter()
-        .filter(|coin| {
-            !coin.id.is_empty()
-                && !crate::coin_ops::selection::coin_id_is_excluded(&coin.id, &excluded)
-        })
-        .collect();
-    eligible.sort_by_key(|coin| std::cmp::Reverse(coin.amount));
-    eligible
-        .iter()
-        .take(cap)
-        .map(|coin| coin.id.clone())
-        .collect()
-}

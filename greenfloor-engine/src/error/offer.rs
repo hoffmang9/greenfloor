@@ -47,6 +47,18 @@ pub enum OfferError {
     #[error("offer_cancel_offer_file_missing")]
     OfferCancelOfferFileMissing,
 
+    #[error("dexie_offer_not_visible_after_publish")]
+    DexieOfferNotVisible,
+
+    #[error("dexie_offer_visibility_payload_mismatch")]
+    DexieOfferVisibilityMismatch,
+
+    #[error("dexie_offer_missing_id_after_publish")]
+    DexieOfferMissingIdAfterPublish,
+
+    #[error("{0}")]
+    DexieOfferAssetMismatch(String),
+
     #[error("offer_cancel_no_spendable_input")]
     OfferCancelNoSpendableInput,
 

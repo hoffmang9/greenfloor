@@ -139,8 +139,6 @@ pub fn select_exact_amount_coin_ids(
 pub enum FundingSelectionMode {
     /// Accumulate smallest coins until the running total covers `target_amount`.
     SmallestFirst,
-    /// Subset-sum cover of `target_amount` (shape / bootstrap combine-first).
-    TargetCover,
     /// Pick coins whose amount equals `target_amount` (exact-denomination combine).
     ExactDenom,
     /// Use every listed coin in input order (explicit coin-id sets).
@@ -161,18 +159,6 @@ pub fn select_funding_coin_ids(
     match mode {
         FundingSelectionMode::ExactDenom => {
             select_exact_amount_coin_ids(coins, target_amount, &excluded, cap)
-        }
-        FundingSelectionMode::TargetCover => {
-            let options = TargetAmountSelectionOptions {
-                max_input_count: cap,
-                ..TargetAmountSelectionOptions::default()
-            };
-            let (ids, _, _) = select_spendable_coins_for_target_amount_with_options(
-                coins,
-                target_amount,
-                options,
-            );
-            ids
         }
         FundingSelectionMode::SmallestFirst => {
             select_smallest_first_spendable_ids(coins, target_amount, &excluded, cap)
@@ -603,14 +589,6 @@ mod tests {
         let smallest =
             select_funding_coin_ids(FundingSelectionMode::SmallestFirst, &list, 1000, None, None);
         assert_eq!(smallest, vec!["exact"]);
-        let cover = select_funding_coin_ids(
-            FundingSelectionMode::TargetCover,
-            &list,
-            2600,
-            None,
-            Some(3),
-        );
-        assert!(!cover.is_empty());
         let listed =
             select_funding_coin_ids(FundingSelectionMode::AllListed, &list, 2600, None, None);
         assert_eq!(listed, vec!["tiny", "exact", "big"]);

@@ -525,3 +525,22 @@ async fn execute_managed_combine_plan_skips_when_insufficient_inputs() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].reason, "no_spendable_combine_coin_available");
 }
+
+#[tokio::test]
+async fn execute_managed_combine_plan_skips_mixed_denomination_cover() {
+    let ctx = test_exec_context(
+        sample_market("xch1test"),
+        vec![
+            SpendableCoin::new(test_coin_id('a'), 8_000),
+            SpendableCoin::new(test_coin_id('b'), 15_000),
+        ],
+        Some("must-not-combine"),
+    );
+    let plan = sample_plan(CoinOpKind::Combine);
+
+    let (items, executed) = Box::pin(execute_managed_combine_plan(&ctx, &plan)).await;
+
+    assert_eq!(executed, 0);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].reason, "no_spendable_combine_coin_available");
+}

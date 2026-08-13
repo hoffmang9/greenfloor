@@ -12,9 +12,20 @@ pub enum DexieOfferFetch {
     /// Nested `offer` object whose lookup keys match the requested local id.
     Found(serde_json::Value),
     /// Dexie reported the offer missing (HTTP 404 or explicit `success: false`).
-    Missing(String),
+    Missing,
     /// Response succeeded but did not match the requested local offer id.
     Mismatch,
+}
+
+async fn get_dexie_offer(
+    dexie: &DexieClient,
+    offer_id: &str,
+) -> SignerResult<Option<DexieResponse>> {
+    match dexie.get_offer(offer_id).await {
+        Ok(response) => Ok(Some(response)),
+        Err(err) if err.is_http_not_found() => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 fn parse_dexie_get_offer_response(offer_id: &str, response: &DexieResponse) -> DexieOfferFetch {
@@ -24,7 +35,7 @@ fn parse_dexie_get_offer_response(offer_id: &str, response: &DexieResponse) -> D
         }
     }
     if response.is_explicit_failure() {
-        return DexieOfferFetch::Missing(response.error_text().to_string());
+        return DexieOfferFetch::Missing;
     }
     DexieOfferFetch::Mismatch
 }
@@ -36,11 +47,10 @@ pub async fn fetch_dexie_offer(
     dexie: &DexieClient,
     offer_id: &str,
 ) -> SignerResult<DexieOfferFetch> {
-    match dexie.get_offer(offer_id).await {
-        Ok(response) => Ok(parse_dexie_get_offer_response(offer_id, &response)),
-        Err(err) if err.is_http_not_found() => Ok(DexieOfferFetch::Missing(err.to_string())),
-        Err(err) => Err(err),
-    }
+    Ok(match get_dexie_offer(dexie, offer_id).await? {
+        Some(response) => parse_dexie_get_offer_response(offer_id, &response),
+        None => DexieOfferFetch::Missing,
+    })
 }
 
 /// Fetch Dexie offer-file text for cancel fallback.
@@ -50,17 +60,16 @@ pub async fn fetch_dexie_offer_file_text(
     dexie: &DexieClient,
     offer_id: &str,
 ) -> SignerResult<String> {
-    let response = match dexie.get_offer(offer_id).await {
-        Ok(response) => response,
-        Err(err) if err.is_http_not_found() => {
-            return Err(SignerError::Offer(OfferError::OfferCancelOfferFileNotFound));
-        }
-        Err(err) => return Err(err),
+    let Some(response) = get_dexie_offer(dexie, offer_id).await? else {
+        return Err(SignerError::Offer(OfferError::OfferCancelOfferFileNotFound));
     };
-    if response.is_explicit_failure() {
+    if matches!(
+        parse_dexie_get_offer_response(offer_id, &response),
+        DexieOfferFetch::Missing
+    ) {
         return Err(SignerError::Offer(OfferError::OfferCancelOfferFileNotFound));
     }
-    if let Some(text) = DexieOfferPayload::new(response.body().clone()).offer_file_text() {
+    if let Some(text) = DexieOfferPayload::new(response.into_value()).offer_file_text() {
         return Ok(text.to_string());
     }
     Err(SignerError::Offer(OfferError::OfferCancelOfferFileMissing))
@@ -80,7 +89,7 @@ mod tests {
         }));
         assert_eq!(
             parse_dexie_get_offer_response("ab", &response),
-            DexieOfferFetch::Missing("HTTP Error 404: Not Found".into())
+            DexieOfferFetch::Missing
         );
     }
 
@@ -125,7 +134,7 @@ mod tests {
             .create();
         let dexie = DexieClient::new(server.url());
         let fetch = fetch_dexie_offer(&dexie, "missing").await.expect("fetch");
-        assert!(matches!(fetch, DexieOfferFetch::Missing(_)));
+        assert_eq!(fetch, DexieOfferFetch::Missing);
     }
 
     #[tokio::test]
