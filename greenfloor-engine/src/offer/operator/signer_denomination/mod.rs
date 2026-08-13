@@ -35,7 +35,8 @@ pub(crate) use test_overrides::SignerDenominationTestOverrides;
 
 use bootstrap_execute::execute_bootstrap_shape;
 use planning::{
-    bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee,
+    action_clip_mojos_for_side, bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side,
+    resolve_bootstrap_split_fee,
 };
 use types::{BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure};
 
@@ -148,6 +149,15 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
             "empty_{side}_ladder_after_mojo_conversion"
         ))));
     }
+    let action_clip_mojos = action_clip_mojos_for_side(
+        side,
+        &side_ladder,
+        ctx.action_size_base_units,
+        &ctx.gated.market_row.pricing,
+        quote_price,
+        &ctx.offer_assets.base_asset_id,
+        &ctx.offer_assets.quote_asset_id,
+    )?;
 
     let split_asset_id = signer_split_asset_id(
         side,
@@ -188,7 +198,12 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         resolve_combine_input_cap(),
         &combine_context,
     );
-    if let Some(early) = bootstrap_early_phase(&outcome, &ladder_entries, &spendable_coins) {
+    if let Some(early) = bootstrap_early_phase(
+        &outcome,
+        &ladder_entries,
+        &spendable_coins,
+        action_clip_mojos,
+    ) {
         return Ok(Err(BootstrapPhaseResult::from_snapshot(early)));
     }
 

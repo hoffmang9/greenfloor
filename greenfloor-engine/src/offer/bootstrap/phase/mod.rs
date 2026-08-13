@@ -130,13 +130,18 @@ fn skipped_already_ready_snapshot() -> BootstrapPhaseSnapshot {
 }
 
 /// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
+///
+/// `action_clip_mojos` is the converted clip being posted. `None` means no posting-row
+/// check (full-ladder handoff only).
 #[must_use]
 pub fn bootstrap_early_phase(
     outcome: &BootstrapPlanOutcome,
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
+    action_clip_mojos: Option<i64>,
 ) -> Option<BootstrapPhaseSnapshot> {
-    if bootstrap_preflight_handoff(outcome, ladder_entries, spendable_coins).yields()
+    if bootstrap_preflight_handoff(outcome, ladder_entries, spendable_coins, action_clip_mojos)
+        .yields()
         || matches!(outcome, BootstrapPlanOutcome::Ready)
     {
         return Some(skipped_already_ready_snapshot());

@@ -578,7 +578,10 @@ async fn run_signer_denomination_phase_eco181_combine_only_marks_ready_without_s
         ..Default::default()
     };
     let signer = test_signer_config(&server.url());
-    let phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    let mut phase_ctx = signer_denomination_test_context(program, signer, &market, "sell");
+    // Posting the 100-unit row: inventory has exact 10s but no 100, so bootstrap
+    // must still combine. An exact 10 clip must not skip shaping for a 100 post.
+    phase_ctx.action_size_base_units = 100;
 
     let overrides = SignerDenominationTestOverrides::default();
     overrides.enqueue_sample_vault_mixed_split_stub();

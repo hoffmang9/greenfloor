@@ -25,14 +25,14 @@ fn early_phase_skips_when_needs_split() {
     let ladder = vec![row(10, 2, 0)];
     let spendable = vec![coin("coin-big", 100)];
     let outcome = plan_bootstrap(&ladder, &spendable);
-    assert!(bootstrap_early_phase(&outcome, &ladder, &spendable).is_none());
+    assert!(bootstrap_early_phase(&outcome, &ladder, &spendable, Some(10)).is_none());
 }
 
 #[test]
 fn early_phase_reports_already_ready() {
     let ladder = vec![row(10, 2, 0)];
     let spendable = vec![coin("coin-a", 10), coin("coin-b", 10)];
-    let phase = bootstrap_early_phase(&BootstrapPlanOutcome::Ready, &ladder, &spendable)
+    let phase = bootstrap_early_phase(&BootstrapPlanOutcome::Ready, &ladder, &spendable, None)
         .expect("ready snapshot");
     assert_eq!(phase.status, BootstrapPhaseStatus::Skipped);
     assert_eq!(phase.reason, "already_ready");
@@ -203,5 +203,38 @@ fn after_split_wait_ignores_combine_first_inventory_updates() {
     assert_eq!(
         resolve_bootstrap_wait_poll(BootstrapWaitPoll::AfterSplit, &combine_first, true),
         BootstrapWaitResolution::Continue
+    );
+}
+
+#[test]
+fn early_phase_maps_action_clip_yield_to_already_ready() {
+    let ladder = vec![row(10, 4, 1), row(25, 1, 1)];
+    let spendable = vec![
+        coin("ten-a", 10),
+        coin("ten-b", 10),
+        coin("ten-c", 10),
+        coin("ten-d", 10),
+        coin("ten-e", 10),
+        coin("twenty-five", 25),
+        coin("fifteen", 15),
+    ];
+    let outcome = plan_bootstrap(&ladder, &spendable);
+    let phase =
+        bootstrap_early_phase(&outcome, &ladder, &spendable, Some(10)).expect("ten clip ready");
+    assert_eq!(phase.status, BootstrapPhaseStatus::Skipped);
+    assert_eq!(phase.reason, "already_ready");
+}
+
+#[test]
+fn early_phase_still_underfunded_when_action_clip_is_missing() {
+    let ladder = vec![row(10, 4, 1), row(25, 1, 1)];
+    let spendable = vec![coin("three", 3)];
+    let outcome = plan_bootstrap(&ladder, &spendable);
+    let phase = bootstrap_early_phase(&outcome, &ladder, &spendable, Some(25)).expect("no 25 clip");
+    assert_eq!(phase.status, BootstrapPhaseStatus::Skipped);
+    assert!(
+        phase.reason.starts_with("bootstrap_underfunded:"),
+        "unexpected reason: {}",
+        phase.reason
     );
 }
