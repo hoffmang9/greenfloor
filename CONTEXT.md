@@ -11,3 +11,7 @@ _Avoid_: Unique pin helpers, binding exclusion set, Direct coin picker
 **Remaining-shape ownership**:
 Who finishes ladder shape after the primary row is on-chain — offer-post bootstrap versus daemon coin ops — including the inverse handoff when a low-watermark split still belongs to bootstrap combine-first.
 _Avoid_: Shape deferral, sub-primary policy, bootstrap vs coin-ops bounce
+
+**Exact-denomination combine**:
+Managed and CLI combine that spends only coins of the same clip size. Shape combine-first may cover a target with mixed sizes.
+_Avoid_: mixed-denomination cover (for the managed/CLI path)

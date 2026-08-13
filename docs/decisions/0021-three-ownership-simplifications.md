@@ -47,6 +47,8 @@ Behavior-preserving ownership moves only (no policy changes).
   ladder protect flag) rather than silently merging selectors.
 - Daemon remains phase orchestrator (not a thin shell); path-specific gates, fee budgets,
   and dust Preselected submit stay path-local.
+- CLI apply later lives on `WatchedOfferReconciler::fetch_and_apply` (the 0021 helper
+  was renamed).
 
 ## Non-goals
 

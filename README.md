@@ -90,8 +90,8 @@ greenfloor-manager vault-asset-trace --asset wUSDC.b
 # Split one coin into target denominations (waits through signature + mempool + confirmation + reorg watch)
 greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10
 
-# Combine small coins into one larger coin (waits through signature + mempool + confirmation + reorg watch)
-greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch
+# Combine same-denomination coins (waits through signature + mempool + confirmation + reorg watch)
+greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 5 --asset-id xch
 ```
 
 Coin-op wait diagnostics include:
@@ -117,6 +117,8 @@ Run the daemon:
 ```bash
 greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
 ```
+
+`--once` exit codes: [runbook](docs/runbook.md) §6.
 
 ## Local dev tooling
 

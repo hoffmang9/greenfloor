@@ -16,6 +16,11 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-08-13 — Typed operator outcomes (ADR 0027)
+
+[#202](https://github.com/hoffmang9/greenfloor/pull/202). Typed Coinset/Dexie/`SignerError`
+outcomes: ADR 0027. Exact-denomination managed combine: ADR 0026.
+
 ### 2026-08-12 — Combine dusty overshoot takes a remainder coin (ADR 0026)
 
 When a covering combine would leave CAT dust change, the shaper retries while skipping
