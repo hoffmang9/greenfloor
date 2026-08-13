@@ -110,7 +110,9 @@ async fn offers_reconcile_updates_states_from_dexie() {
     let _ok = server
         .mock("GET", "/v1/offers/offer-ok")
         .with_status(200)
-        .with_body(json!({"id":"offer-ok","status":4,"tx_id": confirmed_tx_id}).to_string())
+        .with_body(
+            json!({"offer":{"id":"offer-ok","status":4,"tx_id": confirmed_tx_id}}).to_string(),
+        )
         .create_async()
         .await;
     let _missing = server
