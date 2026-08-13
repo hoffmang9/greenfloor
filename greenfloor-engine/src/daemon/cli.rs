@@ -4,7 +4,7 @@ use clap::Args;
 use serde_json::Value;
 
 use crate::cli_util::optional_trimmed;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 use crate::paths::{expand_home, resolve_testnet_markets_path, TestnetMarketsPathPolicy};
 
 use super::cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
@@ -52,7 +52,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
     let mode = if args.once { "once" } else { "loop" };
     let lock = match DaemonInstanceLock::acquire(&state_dir, mode) {
         Ok(lock) => lock,
-        Err(SignerError::DaemonAlreadyRunning { .. }) => return Ok(3),
+        Err(SignerError::Config(ConfigError::DaemonAlreadyRunning { .. })) => return Ok(3),
         Err(err) => return Err(err),
     };
     let _guard = lock;

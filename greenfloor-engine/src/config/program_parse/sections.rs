@@ -98,6 +98,7 @@ pub(super) struct CoinOpsFields {
     pub coin_ops_max_daily_fee_budget_mojos: i64,
     pub coin_ops_split_fee_mojos: i64,
     pub coin_ops_combine_fee_mojos: i64,
+    pub coin_ops_combine_input_coin_cap: i64,
 }
 
 pub(super) fn parse_coin_ops_config(
@@ -109,7 +110,7 @@ pub(super) fn parse_coin_ops_config(
     }
     let coin_ops_minimum_fee_mojos = u64::try_from(raw_fee)
         .map_err(|_| config_err("coin_ops.minimum_fee_mojos must fit in u64"))?;
-    Ok(CoinOpsFields {
+    let fields = CoinOpsFields {
         coin_ops_minimum_fee_mojos,
         coin_ops_max_operations_per_run: coin_ops_i64_field(
             coin_ops,
@@ -123,7 +124,16 @@ pub(super) fn parse_coin_ops_config(
         )?,
         coin_ops_split_fee_mojos: coin_ops_i64_field(coin_ops, "split_fee_mojos", 0)?,
         coin_ops_combine_fee_mojos: coin_ops_i64_field(coin_ops, "combine_fee_mojos", 0)?,
-    })
+        coin_ops_combine_input_coin_cap: coin_ops_i64_field(coin_ops, "combine_input_coin_cap", 5)?
+            .max(2),
+    };
+    if fields.coin_ops_split_fee_mojos != 0 || fields.coin_ops_combine_fee_mojos != 0 {
+        return Err(config_err(
+            "coin_ops.split_fee_mojos and coin_ops.combine_fee_mojos must be 0; \
+             vault mixed-split does not support fees",
+        ));
+    }
+    Ok(fields)
 }
 
 #[allow(clippy::struct_field_names)]

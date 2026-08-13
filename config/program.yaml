@@ -53,6 +53,7 @@ coin_ops:
   minimum_fee_mojos: 10000000
   split_fee_mojos: 0
   combine_fee_mojos: 0
+  combine_input_coin_cap: 5
 
 venues:
   dexie:

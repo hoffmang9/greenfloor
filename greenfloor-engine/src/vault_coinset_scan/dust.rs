@@ -46,11 +46,13 @@ impl ProvenDustCoin {
     ///
     /// # Errors
     ///
-    /// Returns [`SignerError::ProvenDustCoinMismatch`] when `dust` and `cat` disagree.
+    /// Returns [`crate::error::CoinOpsError::ProvenDustCoinMismatch`] when `dust` and `cat` disagree.
     pub fn from_lineage(dust: &DustCoin, cat: Cat) -> SignerResult<Self> {
         let projected = DustCoin::from_cat(&cat);
         if dust.coin_id != projected.coin_id || dust.amount != projected.amount {
-            return Err(crate::error::SignerError::ProvenDustCoinMismatch);
+            return Err(crate::error::SignerError::CoinOps(
+                crate::error::CoinOpsError::ProvenDustCoinMismatch,
+            ));
         }
         Ok(Self { cat })
     }
@@ -306,7 +308,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            crate::error::SignerError::ProvenDustCoinMismatch
+            crate::error::SignerError::CoinOps(crate::error::CoinOpsError::ProvenDustCoinMismatch)
         ));
 
         let mut cat = cat_with_amount(50);
@@ -325,7 +327,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            crate::error::SignerError::ProvenDustCoinMismatch
+            crate::error::SignerError::CoinOps(crate::error::CoinOpsError::ProvenDustCoinMismatch)
         ));
     }
 

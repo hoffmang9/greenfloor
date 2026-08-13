@@ -239,7 +239,7 @@ pub async fn run_daemon_cycle_once(
         LogContext::DAEMON_CYCLE.audit(store, DAEMON_CYCLE_SUMMARY, &summary_payload, None)
     })?;
 
-    let exit_code = compute_cycle_exit_code(&plan, &metrics);
+    let exit_code = compute_cycle_exit_code(&plan, &metrics, preamble.cycle_error_count);
     trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());
 
     Ok(DaemonCycleOnceResponse {

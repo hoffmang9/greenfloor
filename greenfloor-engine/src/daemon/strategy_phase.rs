@@ -66,6 +66,7 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
+                state.strategy_failed = true;
                 write_store.sync(|store| {
                     LogContext::MARKET_CYCLE.dual_audit(
                         store,

@@ -1,17 +1,26 @@
 use chia_protocol::{Bytes32, CoinSpend};
 use chia_sdk_coinset::CoinsetClient;
+use chia_sdk_driver::Cat;
 use chia_sdk_test::Simulator;
 
 use super::{
-    finalize_preselected_cats_for_spend, finalize_selected_cats, select_cats_for_spend,
-    select_from_list, CoinSelectionMode,
+    finalize_preselected_cats_for_spend, select_cats_for_spend, select_items, select_resolved_cats,
 };
+use crate::coin_ops::FundingSelectionMode;
 use crate::coinset::test_support::{
     cat_with_amount, mock_get_coin_record_by_name_body, mock_get_coin_records_by_puzzle_hash_body,
     mock_get_puzzle_and_solution_body,
 };
-use crate::error::SignerError;
+use crate::error::{CoinOpsError, SignerError};
 use crate::test_support::simulator::harness::SimulatorVaultHarness;
+
+fn select_cats_for_mode(
+    cats: Vec<Cat>,
+    target_amount: u64,
+    mode: FundingSelectionMode,
+) -> Result<Vec<Cat>, SignerError> {
+    select_items(cats, target_amount, mode, |cat| &cat.coin)
+}
 
 fn parent_spent_block_index(sim: &Simulator, parent_coin_id: Bytes32) -> u32 {
     sim.coin_state(parent_coin_id)
@@ -31,15 +40,8 @@ fn smallest_first_prefers_exact_single_coin() {
         cat_with_amount(10_000),
         cat_with_amount(100_000),
     ];
-    let selected = select_from_list(
-        cats,
-        10_000,
-        CoinSelectionMode::SmallestFirst,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
-    )
-    .expect("selection");
+    let selected =
+        select_cats_for_mode(cats, 10_000, FundingSelectionMode::SmallestFirst).expect("selection");
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].coin.amount, 10_000);
 }
@@ -51,15 +53,8 @@ fn smallest_first_prefers_smallest_single_cover_coin() {
         cat_with_amount(20_000),
         cat_with_amount(100_000),
     ];
-    let selected = select_from_list(
-        cats,
-        10_000,
-        CoinSelectionMode::SmallestFirst,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
-    )
-    .expect("selection");
+    let selected =
+        select_cats_for_mode(cats, 10_000, FundingSelectionMode::SmallestFirst).expect("selection");
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].coin.amount, 20_000);
 }
@@ -71,15 +66,8 @@ fn smallest_first_accumulates_when_no_single_coin_covers_target() {
         cat_with_amount(1000),
         cat_with_amount(1500),
     ];
-    let selected = select_from_list(
-        cats,
-        2500,
-        CoinSelectionMode::SmallestFirst,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
-    )
-    .expect("selection");
+    let selected =
+        select_cats_for_mode(cats, 2500, FundingSelectionMode::SmallestFirst).expect("selection");
     assert_eq!(selected.len(), 2);
     assert_eq!(selected[0].coin.amount, 1000);
     assert_eq!(selected[1].coin.amount, 1500);
@@ -87,43 +75,34 @@ fn smallest_first_accumulates_when_no_single_coin_covers_target() {
 
 #[test]
 fn smallest_first_empty_list_uses_empty_error() {
-    use chia_sdk_driver::Cat;
-
-    let err = select_from_list(
-        Vec::<Cat>::new(),
-        1000,
-        CoinSelectionMode::SmallestFirst,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
-    )
-    .expect_err("empty");
-    assert!(matches!(err, SignerError::NoUnspentCatCoins));
+    let err = select_cats_for_mode(Vec::<Cat>::new(), 1000, FundingSelectionMode::SmallestFirst)
+        .expect_err("empty");
+    assert!(matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::NoUnspentCatCoins)
+    ));
 }
 
 #[test]
 fn smallest_first_insufficient_uses_insufficient_error() {
-    let err = select_from_list(
+    let err = select_cats_for_mode(
         vec![cat_with_amount(500)],
         1000,
-        CoinSelectionMode::SmallestFirst,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
+        FundingSelectionMode::SmallestFirst,
     )
     .expect_err("insufficient");
-    assert!(matches!(err, SignerError::InsufficientCatCoins));
+    assert!(matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
+    ));
 }
 
 #[test]
 fn explicit_sum_requires_full_set_total() {
-    let selected = select_from_list(
+    let selected = select_cats_for_mode(
         vec![cat_with_amount(700), cat_with_amount(400)],
         1000,
-        CoinSelectionMode::ExplicitSum,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
+        FundingSelectionMode::AllListed,
     )
     .expect("sum covers target");
     assert_eq!(selected.len(), 2);
@@ -135,16 +114,16 @@ fn explicit_sum_requires_full_set_total() {
 
 #[test]
 fn explicit_sum_fails_when_total_below_target() {
-    let err = select_from_list(
+    let err = select_cats_for_mode(
         vec![cat_with_amount(400)],
         1000,
-        CoinSelectionMode::ExplicitSum,
-        |cat| cat.coin.amount,
-        SignerError::NoUnspentCatCoins,
-        SignerError::InsufficientCatCoins,
+        FundingSelectionMode::AllListed,
     )
     .expect_err("below target");
-    assert!(matches!(err, SignerError::InsufficientCatCoins));
+    assert!(matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
+    ));
 }
 
 #[test]
@@ -153,7 +132,10 @@ fn finalize_preselected_cats_rejects_mismatched_coin_ids() {
     let wrong_id = Bytes32::new([0xab; 32]);
     let err =
         finalize_preselected_cats_for_spend(vec![cat], &[wrong_id], 600).expect_err("mismatch");
-    assert!(matches!(err, SignerError::PreselectedCatCoinIdsMismatch));
+    assert!(matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::PreselectedCatCoinIdsMismatch)
+    ));
 }
 
 #[test]
@@ -168,10 +150,10 @@ fn finalize_preselected_cats_accepts_matching_coin_ids() {
 }
 
 #[test]
-fn finalize_selected_cats_uses_explicit_sum_for_fixed_ids() {
+fn select_resolved_cats_all_listed_sums_all_cats() {
     let cats = vec![cat_with_amount(600), cat_with_amount(500)];
-    let selected = finalize_selected_cats(cats, &[Bytes32::new([0xab; 32])], 1000)
-        .expect("vault-style explicit selection");
+    let selected =
+        select_resolved_cats(cats, 1000, FundingSelectionMode::AllListed).expect("all listed");
     assert_eq!(selected.selected.len(), 2);
     assert_eq!(selected.offered_total, 1100);
     assert_eq!(selected.change_amount, 100);

@@ -12,7 +12,7 @@ use crate::coin_ops::SpendableCoin;
 pub struct CoinOpTestOverrides {
     pub wallet_coins: Option<Vec<SpendableCoin>>,
     pub mixed_split_operation_id: Option<String>,
-    /// First `execute_mixed_split` returns [`SignerError::MixedSplitSelectedCoinsNotSpendable`].
+    /// First `execute_mixed_split` returns [`crate::error::VaultError::MixedSplitSelectedCoinsNotSpendable`].
     pub mixed_split_stale_first: bool,
     mixed_split_calls: Arc<AtomicUsize>,
 }

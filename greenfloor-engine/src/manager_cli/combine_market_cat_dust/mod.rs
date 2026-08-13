@@ -6,14 +6,13 @@ mod combine_test_support;
 mod execute;
 #[cfg(test)]
 mod execute_test;
-mod jobs;
 #[cfg(test)]
 mod lineage_e2e_test;
 mod report;
 #[cfg(test)]
 mod report_test;
 
-use jobs::{build_enabled_cat_jobs, CatDustJob};
+use crate::coin_ops::{build_enabled_cat_jobs, CatDustJob};
 use report::{
     finalize_job_report, list_failed_job_report, signer_blocked_job_report, CombineRunMode,
 };
@@ -24,7 +23,7 @@ use crate::coinset::ResolvedCoinsetEndpoint;
 use crate::config::{
     load_combine_command_resources, CombineCommandLoadRequest, ManagerProgramConfig,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::vault_scan::{
     manager_vault_scan_params, resolve_manager_vault_launcher, run_manager_vault_scan,
@@ -77,7 +76,10 @@ fn emit_command_error(
 }
 
 fn signer_load_error_reason(err: &SignerError) -> &'static str {
-    if matches!(err, SignerError::SignerPathNotConfigured) {
+    if matches!(
+        err,
+        SignerError::Config(ConfigError::SignerPathNotConfigured)
+    ) {
         "signer_not_configured"
     } else {
         "signer_load_failed"

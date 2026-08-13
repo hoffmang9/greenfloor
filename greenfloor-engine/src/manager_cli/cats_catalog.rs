@@ -2,15 +2,9 @@
 
 use serde_json::{json, Value as JsonValue};
 
-use crate::config::{build_cat_ticker_index_from_cats_rows, lookup_asset_id_from_ticker};
 use crate::hex::normalize_hex_id;
 
-pub use crate::config::{load_cats_catalog, write_cats_catalog};
-
-pub fn resolve_asset_id_from_catalog(catalog: &[JsonValue], ticker: &str) -> Option<String> {
-    let index = build_cat_ticker_index_from_cats_rows(catalog);
-    lookup_asset_id_from_ticker(&index, ticker).ok().flatten()
-}
+pub use crate::config::{load_cats_catalog, resolve_asset_id_from_catalog, write_cats_catalog};
 
 pub fn derive_cat_metadata_from_dexie_row(row: Option<&JsonValue>) -> JsonValue {
     let Some(row) = row else {

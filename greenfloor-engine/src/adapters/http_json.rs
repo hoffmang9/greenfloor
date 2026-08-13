@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
 
@@ -17,7 +17,7 @@ pub(crate) async fn get_json(
     http: &Client,
     url: &str,
     timeout_secs: u64,
-    network_err_tag: &str,
+    network_err_tag: &'static str,
     tags: AdapterResponseTags,
 ) -> SignerResult<Value> {
     let response = http
@@ -25,7 +25,7 @@ pub(crate) async fn get_json(
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
-        .map_err(|err| SignerError::Other(format!("{network_err_tag}:{err}")))?;
+        .map_err(|err| SignerError::from_reqwest(network_err_tag, &err))?;
     parse_response(response, tags).await
 }
 
@@ -34,7 +34,7 @@ pub(crate) async fn post_json(
     url: &str,
     body: Value,
     timeout_secs: u64,
-    network_err_tag: &str,
+    network_err_tag: &'static str,
     tags: AdapterResponseTags,
 ) -> SignerResult<Value> {
     let response = http
@@ -43,7 +43,7 @@ pub(crate) async fn post_json(
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
-        .map_err(|err| SignerError::Other(format!("{network_err_tag}:{err}")))?;
+        .map_err(|err| SignerError::from_reqwest(network_err_tag, &err))?;
     parse_response(response, tags).await
 }
 
@@ -55,7 +55,7 @@ async fn parse_response(
     let body = response
         .text()
         .await
-        .map_err(|err| SignerError::Other(format!("{}:{err}", tags.read_error_prefix)))?;
+        .map_err(|err| SignerError::from_reqwest(tags.read_error_prefix, &err))?;
     parse_response_body(status, &body, tags)
 }
 
@@ -66,20 +66,20 @@ pub(crate) fn parse_response_body(
 ) -> SignerResult<Value> {
     if !status.is_success() {
         let snippet: String = body.chars().take(500).collect();
-        let error = if snippet.is_empty() {
-            format!("{}:{}", tags.http_error_prefix, status.as_u16())
-        } else {
-            format!("{}:{}:{snippet}", tags.http_error_prefix, status.as_u16())
-        };
-        return Ok(json!({"success": false, "error": error}));
+        return Err(SignerError::http_status(
+            tags.http_error_prefix,
+            status.as_u16(),
+            snippet,
+        ));
     }
     serde_json::from_str(body)
-        .map_err(|err| SignerError::Other(format!("{}:{err}", tags.json_error_prefix)))
+        .map_err(|err| SignerError::http(tags.json_error_prefix, err.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{parse_response_body, AdapterResponseTags};
+    use crate::error::{SignerError, TransportError};
     use reqwest::StatusCode;
 
     const TAGS: AdapterResponseTags = AdapterResponseTags {
@@ -100,11 +100,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_body_http_error_returns_success_false() {
-        let payload = parse_response_body(StatusCode::NOT_FOUND, "missing", TAGS).expect("parse");
-        assert_eq!(
-            payload.get("error").and_then(|v| v.as_str()),
-            Some("test_http_error:404:missing")
-        );
+    fn parse_response_body_http_error_is_typed_status() {
+        let err = parse_response_body(StatusCode::NOT_FOUND, "missing", TAGS).expect_err("404");
+        assert!(matches!(
+            err,
+            SignerError::Transport(TransportError::HttpStatus {
+                layer: "test_http_error",
+                status: 404,
+                ..
+            })
+        ));
+        assert!(err.is_http_not_found());
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 
@@ -99,6 +100,43 @@ impl MemberDiscovery {
             | Self::HintsThenNonces {
                 empty_batch_stop, ..
             } => *empty_batch_stop,
+        }
+    }
+
+    /// Discovery plan for `vault-asset-trace`: XCH walks member nonces; CAT uses receive hints
+    /// and optionally a nonce walk when `--max-nonce` is set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when CAT tracing has neither receive hints nor `--max-nonce`.
+    pub fn for_vault_asset_trace(
+        asset_type: AssetTypeFilter,
+        max_nonce: Option<u32>,
+        cat_hint_puzzle_hashes: Vec<String>,
+    ) -> SignerResult<Self> {
+        match asset_type {
+            AssetTypeFilter::Xch | AssetTypeFilter::All => {
+                Ok(Self::nonces(max_nonce.unwrap_or(100)))
+            }
+            AssetTypeFilter::Cat => match max_nonce {
+                None => {
+                    if cat_hint_puzzle_hashes.is_empty() {
+                        return Err(SignerError::Other(
+                            "vault-asset-trace CAT path needs a market receive_address for the asset, \
+                             or pass --max-nonce N to scan vault member nonces"
+                                .to_string(),
+                        ));
+                    }
+                    Ok(Self::Hints {
+                        puzzle_hashes: cat_hint_puzzle_hashes,
+                    })
+                }
+                Some(max_nonce) => Ok(Self::HintsThenNonces {
+                    puzzle_hashes: cat_hint_puzzle_hashes,
+                    max_nonce,
+                    empty_batch_stop: EmptyBatchStop::Always,
+                }),
+            },
         }
     }
 }
@@ -260,5 +298,57 @@ mod tests {
         assert_eq!(plan.max_nonce(), Some(3));
         assert_eq!(plan.empty_batch_stop(), EmptyBatchStop::Always);
         assert_eq!(plan.hint_puzzle_hashes().len(), 1);
+    }
+
+    #[test]
+    fn xch_discovery_is_nonce_walk_without_hints() {
+        let plan = MemberDiscovery::for_vault_asset_trace(
+            AssetTypeFilter::Xch,
+            None,
+            vec!["should-be-ignored".to_string()],
+        )
+        .expect("xch plan");
+        assert!(matches!(
+            plan,
+            MemberDiscovery::Nonces { max_nonce: 100, .. }
+        ));
+        assert!(plan.hint_puzzle_hashes().is_empty());
+    }
+
+    #[test]
+    fn cat_discovery_defaults_to_hints_only() {
+        let hashes = vec!["aa".repeat(32)];
+        let plan =
+            MemberDiscovery::for_vault_asset_trace(AssetTypeFilter::Cat, None, hashes.clone())
+                .expect("cat hints");
+        assert_eq!(
+            plan,
+            MemberDiscovery::Hints {
+                puzzle_hashes: hashes
+            }
+        );
+    }
+
+    #[test]
+    fn cat_discovery_without_hints_or_nonce_errors() {
+        let err = MemberDiscovery::for_vault_asset_trace(AssetTypeFilter::Cat, None, Vec::new())
+            .expect_err("needs hints or max-nonce");
+        assert!(err.to_string().contains("receive_address"));
+    }
+
+    #[test]
+    fn cat_discovery_with_max_nonce_uses_hints_then_nonces() {
+        let hashes = vec!["aa".repeat(32)];
+        let plan =
+            MemberDiscovery::for_vault_asset_trace(AssetTypeFilter::Cat, Some(7), hashes.clone())
+                .expect("cat plan");
+        assert_eq!(
+            plan,
+            MemberDiscovery::HintsThenNonces {
+                puzzle_hashes: hashes,
+                max_nonce: 7,
+                empty_batch_stop: EmptyBatchStop::Always,
+            }
+        );
     }
 }

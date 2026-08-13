@@ -41,23 +41,26 @@ pub(super) async fn publish_offer(
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
-            Ok(PublishResult::from_dexie_response(
-                post_offer_phase_dexie(PostOfferPhaseDexieParams {
-                    dexie,
-                    offer_text,
-                    drop_only,
-                    claim_rewards,
-                    expected,
-                })
-                .await?,
+            Ok(post_offer_phase_dexie(PostOfferPhaseDexieParams {
+                dexie,
+                offer_text,
+                drop_only,
+                claim_rewards,
+                expected,
+            })
+            .await
+            .map_or_else(
+                |err| PublishResult::from_error(&err),
+                PublishResult::from_dexie_response,
             ))
         }
         crate::config::Venue::Splash => {
             let splash = splash.ok_or_else(|| {
                 SignerError::Other("splash adapter missing for splash publish".to_string())
             })?;
-            Ok(PublishResult::from_splash_response(
-                splash.post_offer(offer_text).await?,
+            Ok(splash.post_offer(offer_text).await.map_or_else(
+                |err| PublishResult::from_error(&err),
+                PublishResult::from_splash_response,
             ))
         }
     }
@@ -65,7 +68,7 @@ pub(super) async fn publish_offer(
 
 pub(super) fn finalize_publish_payload(
     publish: PublishResult,
-    execution_mode: &str,
+    execution_mode: OfferExecutionMode,
     timing_ms: Value,
     dexie_base_url: Option<&str>,
 ) -> Value {
@@ -89,7 +92,7 @@ pub(super) fn finalize_publish_payload(
 pub(super) fn offer_post_persist_record(
     publish: &PublishResult,
     side: &str,
-    execution_mode: &str,
+    execution_mode: Option<OfferExecutionMode>,
     ctx: &ResolvedBuildAndPostContext,
     size_base_units: u64,
     listing_expires_at: Option<u64>,
@@ -104,35 +107,24 @@ pub(super) fn offer_post_persist_record(
         .unwrap_or_default();
     let execution_mode = create_result
         .map(|result| result.execution_mode)
-        .or_else(|| OfferExecutionMode::parse_db(execution_mode));
+        .or(execution_mode);
     let offer_nonce = create_result
         .map(|result| result.offer_nonce.clone())
         .filter(|value| !value.trim().is_empty());
-    let mut watched_coin_ids = create_result
-        .map(|result| result.selected_coin_ids.clone())
-        .unwrap_or_default();
-    if let Some(presplit) = create_result.and_then(|result| result.presplit_coin_id.clone()) {
-        watched_coin_ids.push(presplit);
-    }
-    if let Some(input) = cancel_fields.input_coin_id.clone() {
-        watched_coin_ids.push(input);
-    }
-    watched_coin_ids.sort();
-    watched_coin_ids.dedup();
-    // Per-offer p2 watches: presplit-like CONDITIONS only. Direct maker_puzzle_hash
-    // is shared vault inventory (ADR 0019) — InventoryP2Index owns those.
-    let watched_p2s = if crate::offer::types::StoredOfferCancelMetadata::is_presplit_like_parts(
-        execution_mode,
-        cancel_fields.fixed_delegated_puzzle_hash.as_deref(),
-    ) {
-        cancel_fields
-            .maker_puzzle_hash
-            .clone()
-            .into_iter()
-            .collect()
-    } else {
-        Vec::new()
+    let extra_coin_ids = {
+        let mut ids = create_result
+            .map(|result| result.selected_coin_ids.clone())
+            .unwrap_or_default();
+        if let Some(presplit) = create_result.and_then(|result| result.presplit_coin_id.clone()) {
+            ids.push(presplit);
+        }
+        ids
     };
+    let seed = crate::offer::MakerWatchSeed::from_post_fields(
+        execution_mode,
+        &cancel_fields,
+        extra_coin_ids,
+    );
     Some(OfferPostPersistRecord {
         offer_id,
         market_id: ctx.gated.market_row.market_id.clone(),
@@ -144,8 +136,8 @@ pub(super) fn offer_post_persist_record(
         created_extra: json!({}),
         cancel_fields,
         execution_mode,
-        watched_coin_ids,
-        watched_p2s,
+        watched_coin_ids: seed.coin_ids,
+        watched_p2s: seed.p2s,
         listing_expires_at,
         offer_nonce,
     })
@@ -180,7 +172,7 @@ mod tests {
         };
         let payload = finalize_publish_payload(
             publish,
-            "direct",
+            OfferExecutionMode::Direct,
             json!({"total_ms": 12}),
             Some("https://api.dexie.space"),
         );

@@ -193,6 +193,7 @@ pub fn combine_first_shape_context(
         fee_mojos: 0,
         fee_source: String::new(),
         fee_lookup_error: None,
+        combine_input_cap,
         #[cfg(test)]
         test_overrides: SignerDenominationTestOverrides::default(),
     }

@@ -9,8 +9,8 @@ use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use super::super::{
-    apply_watched_offer_from_dexie_payload, preload_cancel_submitted_contexts,
-    ReconcilePersistOptions, WatchedOfferTransitionEnv,
+    preload_cancel_submitted_contexts, ReconcilePersistOptions, WatchedOfferReconciler,
+    WatchedOfferTransitionEnv,
 };
 
 /// Outcomes from market reconcile apply (errors + requeue hints for the daemon cycle).
@@ -64,20 +64,14 @@ pub(crate) fn apply_dexie_lifecycle_transitions(
         dexie_error: None,
     };
     let env = WatchedOfferTransitionEnv::at_now(Some(&cancel_submitted_by_offer));
+    let reconciler = WatchedOfferReconciler::new(store, &options);
 
     for (local_offer_id, raw) in by_local_id {
         let current_state = state_by_offer_id
             .get(local_offer_id)
             .map_or("open", String::as_str);
-        let (transition, _) = apply_watched_offer_from_dexie_payload(
-            store,
-            market_id,
-            local_offer_id,
-            current_state,
-            raw,
-            env,
-            &options,
-        )?;
+        let (transition, _) =
+            reconciler.apply_dexie_payload(market_id, local_offer_id, current_state, raw, env)?;
         note_reconcile_transition_side_effects(
             &transition,
             local_offer_id,

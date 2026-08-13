@@ -5,7 +5,7 @@ use chia_sdk_driver::{Vault, VaultInfo};
 use clvm_utils::TreeHash;
 
 use super::pagination::{coin_records_by_parent_ids, coin_records_by_puzzle_hash};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 
 /// Fetch latest vault.
 ///
@@ -20,13 +20,13 @@ pub async fn fetch_latest_vault(
     let launcher_children =
         coin_records_by_parent_ids(client, vec![launcher_id], None, None, Some(true)).await?;
     let Some(first_child) = launcher_children.first() else {
-        return Err(SignerError::VaultSingletonNotFound);
+        return Err(SignerError::Vault(VaultError::SingletonNotFound));
     };
     let singleton_puzzle_hash = first_child.coin.puzzle_hash;
     let mut leaf_candidates =
         coin_records_by_puzzle_hash(client, singleton_puzzle_hash, None, None, Some(false)).await?;
     if leaf_candidates.is_empty() {
-        return Err(SignerError::VaultSingletonNotFound);
+        return Err(SignerError::Vault(VaultError::SingletonNotFound));
     }
     leaf_candidates.sort_by_key(|record| std::cmp::Reverse(record.confirmed_block_index));
     let current = &leaf_candidates[0];
@@ -36,7 +36,7 @@ pub async fn fetch_latest_vault(
         .await
         .map_err(SignerError::from)?;
     let Some(parent_record) = parent_response.coin_record else {
-        return Err(SignerError::VaultSingletonNotFound);
+        return Err(SignerError::Vault(VaultError::SingletonNotFound));
     };
     let parent_parent = parent_record.coin.parent_coin_info;
     let proof = if parent_id == launcher_id {
@@ -66,7 +66,7 @@ mod tests {
 
     use super::fetch_latest_vault;
     use crate::coinset::json_util::to_coinset_hex;
-    use crate::error::SignerError;
+    use crate::error::{SignerError, VaultError};
 
     fn hex32(byte: u8) -> String {
         to_coinset_hex(&[byte; 32])
@@ -98,7 +98,10 @@ mod tests {
         let err = fetch_latest_vault(&client, launcher_id, TreeHash::new([0x22; 32]))
             .await
             .expect_err("missing launcher child");
-        assert!(matches!(err, SignerError::VaultSingletonNotFound));
+        assert!(matches!(
+            err,
+            SignerError::Vault(VaultError::SingletonNotFound)
+        ));
     }
 
     #[tokio::test]

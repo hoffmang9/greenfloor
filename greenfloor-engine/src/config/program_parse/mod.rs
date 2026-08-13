@@ -64,6 +64,7 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         coin_ops_max_daily_fee_budget_mojos: coin_ops.coin_ops_max_daily_fee_budget_mojos,
         coin_ops_split_fee_mojos: coin_ops.coin_ops_split_fee_mojos,
         coin_ops_combine_fee_mojos: coin_ops.coin_ops_combine_fee_mojos,
+        coin_ops_combine_input_coin_cap: coin_ops.coin_ops_combine_input_coin_cap,
         runtime_offer_bootstrap_wait_timeout_seconds: runtime
             .runtime_offer_bootstrap_wait_timeout_seconds,
         runtime_market_slot_count: runtime.runtime_market_slot_count,

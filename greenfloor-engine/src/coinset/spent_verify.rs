@@ -2,7 +2,7 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 
 use super::poll::{run_poll_loop, PollConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 
 const DEFAULT_VERIFY_TIMEOUT_SECS: u64 = 15 * 60;
 const DEFAULT_VERIFY_POLL_SECS: u64 = 8;
@@ -79,7 +79,7 @@ pub(crate) async fn wait_until_coins_spent_poll(
             }
         },
         poll,
-        SignerError::CombineInputVerifyTimeout,
+        SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout),
     )
     .await
 }
@@ -106,7 +106,9 @@ mod test_helpers {
                 return Ok(());
             }
             if started.elapsed() >= poll.timeout {
-                return Err(SignerError::CombineInputVerifyTimeout);
+                return Err(SignerError::CoinOps(
+                    CoinOpsError::CombineInputVerifyTimeout,
+                ));
             }
             tokio::time::sleep(poll.interval).await;
         }
@@ -176,7 +178,10 @@ mod tests {
         )
         .await
         .expect_err("timeout");
-        assert!(matches!(err, SignerError::CombineInputVerifyTimeout));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout)
+        ));
     }
 
     #[test]

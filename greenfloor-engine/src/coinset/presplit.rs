@@ -4,7 +4,7 @@ use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 use super::poll::{run_poll_loop, PollConfig};
 use super::spent_verify::coin_record_is_spent;
 use super::{cats, CoinsetClient};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use chia_sdk_driver::Cat;
 
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
@@ -41,7 +41,7 @@ pub async fn offer_input_coin_is_spent(
 ///
 /// # Errors
 ///
-/// Returns [`SignerError::PresplitCoinNotFound`] when missing or spent.
+/// Returns [`crate::error::OfferError::PresplitCoinNotFound`] when missing or spent.
 pub async fn fetch_unspent_offer_input_coin(
     client: &CoinsetClient,
     coin_id: Bytes32,
@@ -51,10 +51,10 @@ pub async fn fetch_unspent_offer_input_coin(
         .await
         .map_err(SignerError::from)?;
     let Some(record) = response.coin_record else {
-        return Err(SignerError::PresplitCoinNotFound);
+        return Err(SignerError::Offer(OfferError::PresplitCoinNotFound));
     };
     if coin_record_is_spent(record.spent_block_index) {
-        return Err(SignerError::PresplitCoinNotFound);
+        return Err(SignerError::Offer(OfferError::PresplitCoinNotFound));
     }
     Ok(record.coin)
 }
@@ -70,14 +70,14 @@ pub async fn fetch_offer_input_cat(client: &CoinsetClient, coin_id: Bytes32) -> 
         .await
         .map_err(SignerError::from)?;
     let Some(record) = response.coin_record else {
-        return Err(SignerError::PresplitCoinNotFound);
+        return Err(SignerError::Offer(OfferError::PresplitCoinNotFound));
     };
     if record.spent_block_index != 0 {
-        return Err(SignerError::PresplitCoinNotFound);
+        return Err(SignerError::Offer(OfferError::PresplitCoinNotFound));
     }
     cats::cat_from_record(client, &record)
         .await?
-        .ok_or(SignerError::PresplitCoinNotFound)
+        .ok_or(SignerError::Offer(OfferError::PresplitCoinNotFound))
 }
 
 /// Wait for unspent cat.
@@ -118,7 +118,7 @@ where
     run_poll_loop(
         move || fetch(coin_id),
         poll,
-        SignerError::PresplitCoinConfirmationTimeout,
+        SignerError::Offer(OfferError::PresplitCoinConfirmationTimeout),
     )
     .await
 }
@@ -183,6 +183,9 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(err, SignerError::PresplitCoinConfirmationTimeout));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitCoinConfirmationTimeout)
+        ));
     }
 }

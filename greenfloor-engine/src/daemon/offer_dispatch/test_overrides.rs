@@ -8,7 +8,7 @@
 use crate::daemon::dispatch_test_controls::{
     DaemonDispatchTestInjections, ManagedPostTestMode, ParallelDispatchTestMode,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::{PersistenceError, SignerError, SignerResult};
 
 use super::managed_post::ManagedPostContext;
 use super::OfferDispatchOutput;
@@ -17,8 +17,8 @@ pub(crate) fn parallel_dispatch_result(
     injections: &DaemonDispatchTestInjections,
 ) -> Option<SignerResult<OfferDispatchOutput>> {
     match injections.parallel? {
-        ParallelDispatchTestMode::Transient => Some(Err(SignerError::ReservationContention(
-            "test override".to_string(),
+        ParallelDispatchTestMode::Transient => Some(Err(SignerError::Persistence(
+            PersistenceError::ReservationContention("test override".to_string()),
         ))),
         ParallelDispatchTestMode::Fatal => Some(Err(SignerError::Other(
             "permanent_offer_build_failure: test override".to_string(),
@@ -53,7 +53,9 @@ mod tests {
             DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Transient);
         assert!(matches!(
             parallel_dispatch_result(&transient).expect("configured"),
-            Err(SignerError::ReservationContention(_))
+            Err(SignerError::Persistence(
+                PersistenceError::ReservationContention(_)
+            ))
         ));
 
         let fatal =

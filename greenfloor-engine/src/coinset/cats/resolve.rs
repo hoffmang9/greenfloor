@@ -13,18 +13,18 @@ use clvmr::serde::{node_from_bytes, node_to_bytes};
 use clvmr::{Allocator, NodePtr};
 
 use crate::coinset::retry::with_coinset_client_retries;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, OfferError, SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 
 fn unparseable_cat_lineage(detail: impl Into<String>) -> SignerError {
-    SignerError::UnparseableCatLineage(detail.into())
+    SignerError::CoinOps(CoinOpsError::UnparseableCatLineage(detail.into()))
 }
 
 /// Fetch the parent coin's spend (record must be spent and have a puzzle/solution).
 ///
 /// # Errors
 ///
-/// Returns [`SignerError::Coinset`] on transport/API failure.
+/// Returns a transport error on HTTP/RPC failure.
 pub async fn fetch_parent_coin_spend(
     client: &CoinsetClient,
     parent_coin_info: Bytes32,
@@ -76,7 +76,8 @@ pub fn cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResu
 ///
 /// Returns an error if the operation fails.
 pub fn require_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Cat> {
-    cat_from_parent_spend(coin, parent_spend)?.ok_or(SignerError::PresplitCoinNotFound)
+    cat_from_parent_spend(coin, parent_spend)?
+        .ok_or(SignerError::Offer(OfferError::PresplitCoinNotFound))
 }
 
 /// One CAT child from a parent spend plus serialized inner-p2 `CREATE_COIN` memos (if any).
@@ -257,6 +258,9 @@ mod tests {
             1,
         );
         let err = parse_cat_from_parent_spend(child, &empty_parent_spend()).expect_err("parse");
-        assert!(matches!(err, SignerError::UnparseableCatLineage(_)));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::UnparseableCatLineage(_))
+        ));
     }
 }

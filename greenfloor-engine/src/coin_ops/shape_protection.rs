@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::config::LadderEntry;
 
-use super::selection::SpendableCoin;
+use super::selection::{coin_id_is_excluded, SpendableCoin};
 use super::unit_convert::exact_whole_units_from_mojos;
 
 /// Exact whole ladder-unit amounts from spendable coins (for bucket / protection / ownership).
@@ -324,7 +324,7 @@ pub fn select_smallest_non_cannibalizing_spendable<'a>(
         .iter()
         .filter(|coin| {
             !coin.id.is_empty()
-                && !exclude_coin_ids.contains(&coin.id)
+                && !coin_id_is_excluded(&coin.id, exclude_coin_ids)
                 && coin.amount >= required_mojos
         })
         .map(|coin| SplittableCandidate::from_mojos(coin.id.as_str(), coin.amount, multiplier))

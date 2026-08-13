@@ -66,7 +66,7 @@ fn test_exec_context(
         ),
         resolved_base_asset_id: "xch".to_string(),
         base_unit_mojo_multiplier: 1_000,
-        combine_input_cap: resolve_combine_input_cap(),
+        combine_input_cap: resolve_combine_input_cap(5),
         watched_coin_ids: HashSet::new(),
         test_overrides: CoinOpTestOverrides::new(
             Some(spendable),
@@ -516,6 +516,25 @@ async fn execute_managed_combine_plan_skips_when_insufficient_inputs() {
         sample_market("xch1test"),
         vec![SpendableCoin::new(test_coin_id('d'), 10_000)],
         None,
+    );
+    let plan = sample_plan(CoinOpKind::Combine);
+
+    let (items, executed) = Box::pin(execute_managed_combine_plan(&ctx, &plan)).await;
+
+    assert_eq!(executed, 0);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].reason, "no_spendable_combine_coin_available");
+}
+
+#[tokio::test]
+async fn execute_managed_combine_plan_skips_mixed_denomination_cover() {
+    let ctx = test_exec_context(
+        sample_market("xch1test"),
+        vec![
+            SpendableCoin::new(test_coin_id('a'), 8_000),
+            SpendableCoin::new(test_coin_id('b'), 15_000),
+        ],
+        Some("must-not-combine"),
     );
     let plan = sample_plan(CoinOpKind::Combine);
 

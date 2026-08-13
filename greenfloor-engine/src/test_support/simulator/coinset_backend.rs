@@ -7,9 +7,12 @@ use clvm_utils::TreeHash;
 use super::harness::{
     fetch_cat_from_sim, fetch_cat_from_sim_by_id, fetch_vault_from_sim, SimChain,
 };
-use crate::coinset::coin_select::{finalize_selected_cats, SelectedCats};
+use crate::coin_ops::FundingSelectionMode;
+use crate::coinset::coin_select::{
+    finalize_preselected_cats_for_spend, select_resolved_cats, SelectedCats,
+};
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 
 pub(crate) struct SimulatorOfferCoinset<'a> {
@@ -49,7 +52,7 @@ impl<'a> SimulatorOfferCoinset<'a> {
             let sim = self.chain.sim.lock().expect("sim lock");
             if let Some(state) = sim.coin_state(coin_id) {
                 if state.spent_height.is_some() {
-                    return Err(SignerError::PresplitCoinNotFound);
+                    return Err(SignerError::Offer(OfferError::PresplitCoinNotFound));
                 }
             }
         }
@@ -83,7 +86,11 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
             }
             cats
         };
-        finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+        if explicit_coin_ids.is_empty() {
+            select_resolved_cats(cats, target_amount, FundingSelectionMode::SmallestFirst)
+        } else {
+            finalize_preselected_cats_for_spend(cats, explicit_coin_ids, target_amount)
+        }
     }
 
     async fn fetch_latest_vault(
@@ -102,8 +109,8 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
     async fn fetch_offer_input_cat(&self, coin_id: Bytes32) -> SignerResult<Cat> {
         match self.fetch_by_id(coin_id) {
             Ok(cat) => Ok(cat),
-            Err(SignerError::PresplitCoinNotFound | SignerError::Other(_)) => {
-                Err(SignerError::PresplitCoinNotFound)
+            Err(SignerError::Offer(OfferError::PresplitCoinNotFound) | SignerError::Other(_)) => {
+                Err(SignerError::Offer(OfferError::PresplitCoinNotFound))
             }
             Err(err) => Err(err),
         }
@@ -113,7 +120,7 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
         let sim = self.chain.sim.lock().expect("sim lock");
         match sim.coin_state(coin_id) {
             Some(state) if state.spent_height.is_none() => Ok(state.coin),
-            _ => Err(SignerError::PresplitCoinNotFound),
+            _ => Err(SignerError::Offer(OfferError::PresplitCoinNotFound)),
         }
     }
 

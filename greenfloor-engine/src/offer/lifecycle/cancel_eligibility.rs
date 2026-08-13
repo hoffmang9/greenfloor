@@ -2,7 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::DEXIE_STATUS_OPEN;
 use crate::storage::{OfferStateListRow, SqliteStore};
@@ -16,7 +15,8 @@ pub fn dexie_status_open_for_cancel(status: i64) -> bool {
 /// Whether a persisted offer row is eligible for cancel selection.
 #[must_use]
 pub fn row_cancel_eligible(row: &OfferStateListRow) -> bool {
-    ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_eligible())
+    row.reconcile_state()
+        .is_ok_and(|state| state.is_cancel_eligible())
 }
 
 /// Filter cancel-eligible rows into target offer ids.

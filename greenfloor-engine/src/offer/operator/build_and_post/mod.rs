@@ -94,27 +94,6 @@ pub struct BuildAndPostOfferRequest {
     pub test_overrides: crate::offer::operator::BuildOfferTestOverrides,
 }
 
-/// Shared fields for constructing a [`BuildAndPostOfferRequest`] from CLI or daemon callers.
-#[derive(Debug, Clone)]
-pub struct BuildAndPostOfferRequestParts {
-    pub program_path: PathBuf,
-    pub markets_path: PathBuf,
-    pub testnet_markets_path: Option<PathBuf>,
-    pub cats_path: Option<PathBuf>,
-    pub network: String,
-    pub market_id: Option<String>,
-    pub pair: Option<String>,
-    pub size_base_units: u64,
-    pub repeat: u32,
-    pub publish_venue: Option<String>,
-    pub dexie_base_url: Option<String>,
-    pub splash_base_url: Option<String>,
-    pub venue: BuildAndPostVenueOptions,
-    pub run: BuildAndPostRunOptions,
-    pub action_side: Option<String>,
-    pub maker_reuse: Option<crate::offer::types::PresplitMakerReuse>,
-}
-
 /// Program/markets config paths for managed ensure / build-and-post callers.
 #[derive(Debug, Clone)]
 pub struct OperatorConfigPaths {
@@ -123,8 +102,8 @@ pub struct OperatorConfigPaths {
     pub testnet_markets_path: Option<PathBuf>,
 }
 
-impl BuildAndPostOfferRequestParts {
-    /// Shared parts for daemon/ensure size-N posts (`drop_only`, single repeat).
+impl BuildAndPostOfferRequest {
+    /// Daemon / ensure-size post request (drop-only, single repeat).
     #[must_use]
     pub fn for_ensure_size(
         paths: &OperatorConfigPaths,
@@ -157,30 +136,6 @@ impl BuildAndPostOfferRequestParts {
             },
             action_side: Some(normalize_offer_side(&side.into()).to_string()),
             maker_reuse: None,
-        }
-    }
-}
-
-impl BuildAndPostOfferRequest {
-    #[must_use]
-    pub fn from_parts(parts: BuildAndPostOfferRequestParts) -> Self {
-        Self {
-            program_path: parts.program_path,
-            markets_path: parts.markets_path,
-            testnet_markets_path: parts.testnet_markets_path,
-            cats_path: parts.cats_path,
-            network: parts.network,
-            market_id: parts.market_id,
-            pair: parts.pair,
-            size_base_units: parts.size_base_units,
-            repeat: parts.repeat,
-            publish_venue: parts.publish_venue,
-            dexie_base_url: parts.dexie_base_url,
-            splash_base_url: parts.splash_base_url,
-            venue: parts.venue,
-            run: parts.run,
-            action_side: parts.action_side,
-            maker_reuse: parts.maker_reuse,
             #[cfg(test)]
             test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
         }
@@ -460,6 +415,41 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     }
     let ctx = resolve_build_and_post_context(&request).await?;
     finish_build_and_post(&request, ctx, persist, session, None).await
+}
+
+/// Pin, persist, and flush on a cycle write store (daemon / `ensure_size`).
+pub(crate) async fn build_and_post_offer_on_cycle_store(
+    request: BuildAndPostOfferRequest,
+    write_store: &crate::storage::CycleWriteStore,
+    unique_maker_coins: bool,
+) -> SignerResult<BuildAndPostOfferResponse> {
+    let market_id = request
+        .market_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| SignerError::Other("post requires market_id".to_string()))?;
+    let mut session = write_store.sync(|store| {
+        UniqueMakerPinSession::begin(
+            store,
+            market_id,
+            request.run.dry_run,
+            unique_maker_coins,
+            request.maker_reuse.as_ref(),
+        )
+    })?;
+    let persist_store = write_store.clone();
+    let mut persist = move |record: &OfferPostPersistRecord| {
+        persist_store.sync(|store| upsert_offer_post_record(store, record))
+    };
+    let (response, artifacts) =
+        build_and_post_offer_with_persist_artifacts(request, Some(&mut persist), &mut session)
+            .await?;
+    if let Some(artifacts) = artifacts {
+        let store = write_store.lock()?;
+        flush_build_and_post_persist(&store, &artifacts)?;
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

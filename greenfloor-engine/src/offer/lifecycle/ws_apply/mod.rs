@@ -10,7 +10,7 @@ use crate::storage::{SqliteStore, TxSignalIngress};
 
 use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::ReconcilePersistOptions;
-use super::signal_apply::{apply_cancel_submitted_rows, apply_signals_to_row};
+use super::signal_apply::WatchedOfferReconciler;
 
 #[cfg(test)]
 mod tests;
@@ -84,13 +84,12 @@ pub fn apply_ws_offer_event(
     let Some(row) = rows.first() else {
         return Ok(WsOfferApply::NotTracked);
     };
-    apply_signals_to_row(
-        store,
+    let options = ws_persist_options();
+    WatchedOfferReconciler::new(store, &options).apply_row(
         row,
         status,
         signals,
         None,
-        &ws_persist_options(),
         Utc::now(),
     )?;
     Ok(WsOfferApply::Applied {
@@ -117,7 +116,8 @@ pub fn promote_cancel_submitted_for_confirmed_txs(
     let rows = store.list_offer_states_for_cancel_submitted_tx_ids(confirmed_tx_ids)?;
     // Do not wrap in a parent transaction: terminal persist uses
     // immediate_transaction (clear watches + upsert) and cannot nest.
-    apply_cancel_submitted_rows(store, &rows, &ws_persist_options(), Utc::now())?;
+    let options = ws_persist_options();
+    WatchedOfferReconciler::new(store, &options).apply_cancel_submitted(&rows, Utc::now())?;
     let mut market_ids: Vec<String> = rows.into_iter().map(|row| row.market_id).collect();
     market_ids.sort();
     market_ids.dedup();
@@ -156,18 +156,11 @@ pub fn apply_watch_hits_batch(
     let rows: Vec<_> = coin_hits.iter().map(|hit| hit.row.clone()).collect();
     let cancel_by_offer = preload_cancel_submitted_contexts(store, &rows)?;
     let options = ws_persist_options();
+    let reconciler = WatchedOfferReconciler::new(store, &options);
     let now = Utc::now();
     for hit in coin_hits {
         let signals = signals_for_watch_hit(frame_confirmed, confirmed_tx_ids);
-        apply_signals_to_row(
-            store,
-            &hit.row,
-            None,
-            signals,
-            Some(&cancel_by_offer),
-            &options,
-            now,
-        )?;
+        reconciler.apply_row(&hit.row, None, signals, Some(&cancel_by_offer), now)?;
     }
     Ok(market_ids)
 }

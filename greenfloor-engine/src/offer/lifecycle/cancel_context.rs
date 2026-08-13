@@ -149,7 +149,8 @@ pub fn preload_cancel_submitted_contexts(
     let cancel_rows: Vec<&OfferStateListRow> = rows
         .iter()
         .filter(|row| {
-            ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_submitted())
+            row.reconcile_state()
+                .is_ok_and(|state| state.is_cancel_submitted())
         })
         .collect();
     if cancel_rows.is_empty() {
@@ -190,7 +191,10 @@ pub fn cancel_submitted_context_for_offer(
     let Some(row) = rows.into_iter().next() else {
         return Ok(None);
     };
-    if !ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_submitted()) {
+    if !row
+        .reconcile_state()
+        .is_ok_and(|state| state.is_cancel_submitted())
+    {
         return Ok(None);
     }
     let tx_signals = match row

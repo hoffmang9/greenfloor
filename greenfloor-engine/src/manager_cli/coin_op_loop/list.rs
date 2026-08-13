@@ -7,7 +7,7 @@ use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::{
     load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 
 use crate::manager_cli::context::ManagerContext;
 
@@ -168,11 +168,11 @@ async fn run_coin_list_command(cmd: CoinListCommand<'_>) -> SignerResult<i32> {
     })
     .await
     {
-        Err(SignerError::SignerPathNotConfigured) => {
+        Err(SignerError::Config(ConfigError::SignerPathNotConfigured)) => {
             mgr.emit_json(&json!({
                 "ok": false,
                 "error": "coin_list_requires_signer_backend",
-                "detail": SignerError::SignerPathNotConfigured.to_string(),
+                "detail": SignerError::Config(ConfigError::SignerPathNotConfigured).to_string(),
             }))?;
             return Ok(2);
         }

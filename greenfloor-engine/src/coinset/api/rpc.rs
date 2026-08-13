@@ -52,7 +52,7 @@ async fn post_coinset_rpc_with(
     client
         .make_post_request(endpoint, body)
         .await
-        .map_err(SignerError::from)
+        .map_err(|err| SignerError::from_reqwest("coinset", &err))
 }
 
 /// Script/scan Coinset RPC via the direct API host (`api.coinset.org` defaults).

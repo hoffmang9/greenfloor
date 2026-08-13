@@ -344,7 +344,7 @@ impl SqliteStore {
         market_id: &str,
         prior_state: &str,
     ) -> SignerResult<()> {
-        self.upsert_offer_state(offer_id, market_id, prior_state, None)
+        self.upsert_offer_state_at(offer_id, market_id, prior_state, None, &super::utcnow_iso())
     }
 
     /// Persist committed `cancel_submitted` (prepare + observe cancel tx) for tests.

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::program::read_program_yaml;
 use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult, VaultError};
 use crate::hex::hex_to_bytes32;
 use crate::kms::KmsRuntime;
 use crate::vault::context::VaultCustodySnapshot;
@@ -103,7 +103,7 @@ fn parse_vault_section(
     vault: &serde_json::Map<String, Value>,
 ) -> SignerResult<VaultCustodySnapshot> {
     let launcher_id = hex_to_bytes32(&require_nonempty_str(vault, "launcher_id")?)
-        .map_err(|_| SignerError::VaultLauncherIdInvalid)?;
+        .map_err(|_| SignerError::Vault(VaultError::LauncherIdInvalid))?;
     let custody_threshold = parse_u32_field(
         req_value(vault, "custody_threshold")?,
         "vault.custody_threshold",
@@ -122,12 +122,12 @@ fn parse_vault_section(
         parse_wallet_keys(req_value(vault, "recovery_keys")?, "vault.recovery_keys")?;
 
     if custody_keys.is_empty() || recovery_keys.is_empty() {
-        return Err(SignerError::UnsupportedVaultSignerCardinality);
+        return Err(SignerError::Vault(VaultError::UnsupportedSignerCardinality));
     }
     validate_vault_threshold(custody_threshold, custody_keys.len())?;
     validate_vault_threshold(recovery_threshold, recovery_keys.len())?;
     if recovery_clawback_timelock == 0 {
-        return Err(SignerError::InvalidVaultRecoveryTimelock);
+        return Err(SignerError::Vault(VaultError::InvalidRecoveryTimelock));
     }
 
     Ok(VaultCustodySnapshot {
@@ -164,7 +164,7 @@ fn require_nonempty_str(
 ) -> SignerResult<String> {
     let trimmed = req_str(map, key)?.trim().to_string();
     if trimmed.is_empty() {
-        return Err(SignerError::MissingConfigField(key));
+        return Err(SignerError::Config(ConfigError::MissingField(key)));
     }
     Ok(trimmed)
 }

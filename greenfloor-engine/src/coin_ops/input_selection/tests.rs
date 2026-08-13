@@ -126,19 +126,6 @@ fn combine_exact_amount_normalizes_exclude_ids() {
 }
 
 #[test]
-fn combine_largest_by_amount_picks_top_coins_respecting_exclude() {
-    let spendable = coins(&[
-        ("small", 100),
-        ("medium", 500),
-        ("big", 1500),
-        ("excluded", 2000),
-    ]);
-    let excluded = HashSet::from(["EXCLUDED".to_string()]);
-    let ids = plan_largest_combine_inputs(&spendable, 2, Some(&excluded), None);
-    assert_eq!(ids, vec!["big", "medium"]);
-}
-
-#[test]
 fn daemon_auto_skips_when_only_funding_coin_would_create_sub_cat_change() {
     // Dust filter runs inside resolve_shape_funding, so a sole 10_500→10_000 CAT funder
     // never becomes a Coin plan (and never needs the post-select SubCatChange skip).

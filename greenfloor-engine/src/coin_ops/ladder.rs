@@ -1,8 +1,13 @@
-//! Sell-ladder resolution for manager coin-op commands.
+//! Sell-ladder resolution shared by CLI coin-ops and daemon planning.
 
 use crate::config::{LadderEntry, MarketConfig};
 use crate::error::{SignerError, SignerResult};
 
+/// Look up the sell-ladder row for `size_base_units`.
+///
+/// # Errors
+///
+/// Returns an error when the market has no sell ladder or no row for `size_base_units`.
 pub fn sell_ladder_entry_for_size(
     market: &MarketConfig,
     size_base_units: i64,
@@ -28,6 +33,11 @@ pub fn sell_ladder_entry_for_size(
         })
 }
 
+/// Resolve split amount and count from explicit args or the sell-ladder row.
+///
+/// # Errors
+///
+/// Returns an error when `size_base_units` is set but no matching sell-ladder row exists.
 pub fn resolve_split_targets(
     market: &MarketConfig,
     amount_per_coin: i64,
@@ -52,6 +62,11 @@ pub fn resolve_split_targets(
     Ok((amount_per_coin, number_of_coins))
 }
 
+/// Resolve combine input count from explicit args or the sell-ladder excess threshold.
+///
+/// # Errors
+///
+/// Returns an error when `size_base_units` is set but ladder math is invalid or missing.
 pub fn resolve_combine_count(
     market: &MarketConfig,
     number_of_coins: i64,
@@ -73,6 +88,7 @@ pub fn resolve_combine_count(
     Ok(number_of_coins)
 }
 
+#[must_use]
 pub fn split_required_count(entry: &LadderEntry) -> i64 {
     entry.target_count + entry.split_buffer_count
 }

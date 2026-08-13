@@ -3,7 +3,7 @@ use crate::coinset::{client_for_signer_on_network, spend_bundle_operation_id, Li
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::cancel_input::metadata_sufficient_for_coinset_cancel;
-use crate::offer::dexie_payload::DexieOfferPayload;
+use crate::offer::lifecycle::reconcile_prep::fetch_dexie_offer_file_text;
 use crate::offer::reclaim::{
     build_offer_cancel_spend_bundle, build_offer_cancel_spend_bundle_from_metadata,
 };
@@ -31,18 +31,6 @@ fn missing_cancel_input_error() -> SignerError {
         "offer cancel requires local offer file, stored cancel metadata, or Dexie offer-file fallback"
             .to_string(),
     )
-}
-
-async fn fetch_dexie_offer_file_text(dexie: &DexieClient, offer_id: &str) -> SignerResult<String> {
-    let response = dexie.get_offer(offer_id).await?;
-    if response.is_explicit_failure() {
-        return Err(SignerError::OfferCancelOfferFileNotFound);
-    }
-    let payload = DexieOfferPayload::new(response.into_value());
-    payload
-        .offer_file_text()
-        .map(str::to_string)
-        .ok_or(SignerError::OfferCancelOfferFileMissing)
 }
 
 /// Local text → metadata-sufficient (no blob) → optional Dexie offer-file fallback.

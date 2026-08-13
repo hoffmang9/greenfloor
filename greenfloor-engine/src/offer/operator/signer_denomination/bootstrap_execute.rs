@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_executed_phase, bootstrap_replan_after_combine, BootstrapCoin,
     BootstrapPhaseSnapshot, BootstrapPhaseStatus, BootstrapPlanOutcome,
@@ -24,6 +24,13 @@ fn bootstrap_wait_timeout(timeout_seconds: u64) -> Duration {
     Duration::from_secs(timeout_seconds.max(BOOTSTRAP_WAIT_MIN_TIMEOUT_SECONDS))
 }
 
+fn is_bootstrap_shape_wait_timeout(err: &SignerError) -> bool {
+    matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::BootstrapShapeWaitTimeout)
+    )
+}
+
 pub(crate) struct BootstrapShapeContext {
     pub(crate) split_asset_id: String,
     pub(crate) receive_address: String,
@@ -33,6 +40,7 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) fee_mojos: u64,
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
+    pub(crate) combine_input_cap: i64,
     #[cfg(test)]
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
 }
@@ -149,7 +157,7 @@ async fn execute_bootstrap_combine_step(
     })
     .await
     .map_err(|err| {
-        if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
+        if is_bootstrap_shape_wait_timeout(&err) {
             return shape.executed_on_shape_wait_timeout(
                 "bootstrap_submitted:after_combine_wait_timeout",
                 BootstrapExecutedExtras {
@@ -201,13 +209,12 @@ pub(crate) fn replan_after_combine(
     }
 }
 
-#[allow(clippy::large_futures)]
+#[allow(clippy::large_futures, clippy::too_many_lines)]
 pub(super) async fn execute_bootstrap_shape(
     build_ctx: &ResolvedBuildAndPostContext,
     mut shape: BootstrapShapeContext,
 ) -> SignerResult<BootstrapPhaseResult> {
     let mut prepend_wait_events = Vec::new();
-
     if shape.bootstrap_plan.requires_combine_first() {
         let combine_target_amount = shape.bootstrap_plan.total_output_amount;
         let (events, replanned, spendable) =
@@ -226,7 +233,6 @@ pub(super) async fn execute_bootstrap_shape(
             return Ok(result);
         }
     }
-
     let bootstrap_plan = shape.bootstrap_plan.clone();
     let split_result = match submit_bootstrap_mixed_split(
         build_ctx,
@@ -269,7 +275,7 @@ pub(super) async fn execute_bootstrap_shape(
     {
         Ok(wait) => wait,
         Err(err) => {
-            if matches!(err, SignerError::BootstrapShapeWaitTimeout) {
+            if is_bootstrap_shape_wait_timeout(&err) {
                 return Ok(shape.executed_on_shape_wait_timeout(
                     "bootstrap_submitted:after_split_wait_timeout",
                     BootstrapExecutedExtras {

@@ -7,6 +7,7 @@ pub mod cli;
 pub mod dust;
 #[cfg(test)]
 mod dust_lineage_test;
+pub mod hints;
 pub mod launcher;
 pub mod metadata;
 pub mod request;
@@ -21,6 +22,7 @@ pub use dust::{
     dust_coins_from_scan, plan_dust_batches, plan_dust_from_scan_with_lineage,
     prove_dust_coins_lineage, DustBatchPlan, DustCoin, DustCombineBatch, DustPlan, ProvenDustCoin,
 };
+pub use hints::cat_receive_hint_puzzle_hashes;
 pub use launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, LauncherIdSource, ResolveLauncherIdParams,
     ResolvedLauncherId,

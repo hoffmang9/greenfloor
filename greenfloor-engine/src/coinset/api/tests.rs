@@ -6,6 +6,7 @@ use super::{
     conservative_fee_from_payload, get_all_mempool_tx_ids, get_fee_estimate,
     post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_tx_hex,
 };
+use crate::error::{SignerError, TransportError};
 
 #[test]
 fn conservative_fee_uses_max_estimate() {
@@ -197,7 +198,7 @@ async fn post_coinset_coin_records_fails_on_success_false() {
 }
 
 #[tokio::test]
-async fn post_coinset_rpc_surfaces_http_503_as_coinset_error() {
+async fn post_coinset_rpc_surfaces_http_503_as_decode_error() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_blockchain_state")
@@ -215,11 +216,21 @@ async fn post_coinset_rpc_surfaces_http_503_as_coinset_error() {
     .await
     .expect_err("503 should fail");
     let message = err.to_string();
-    assert!(message.starts_with("coinset error:"), "{message}");
+    assert!(
+        matches!(
+            err,
+            SignerError::Transport(TransportError::Decode {
+                layer: "coinset",
+                ..
+            })
+        ),
+        "{message}"
+    );
     assert_eq!(
-        message, "coinset error: error decoding response body",
+        message, "http decode (coinset): error decoding response body",
         "unexpected coinset 503 error text"
     );
+    assert!(err.is_retryable_upstream());
 }
 
 #[tokio::test]

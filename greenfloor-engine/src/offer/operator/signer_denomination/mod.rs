@@ -195,7 +195,7 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     let outcome = plan_bootstrap_mixed_outputs(
         &ladder_entries,
         &spendable_coins,
-        resolve_combine_input_cap(),
+        resolve_combine_input_cap(ctx.gated.program.coin_ops_combine_input_coin_cap),
         &combine_context,
     );
     if let Some(early) = bootstrap_early_phase(
@@ -236,6 +236,9 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         fee_mojos,
         fee_source,
         fee_lookup_error,
+        combine_input_cap: resolve_combine_input_cap(
+            ctx.gated.program.coin_ops_combine_input_coin_cap,
+        ),
         #[cfg(test)]
         test_overrides: test_overrides::SignerDenominationTestOverrides::default(),
     }))

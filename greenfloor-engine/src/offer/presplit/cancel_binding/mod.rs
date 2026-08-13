@@ -8,7 +8,7 @@ use chia_sdk_driver::Cat;
 use clvm_utils::TreeHash;
 use clvmr::Allocator;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::vault::members::{
     p2_conditions_or_singleton_from_member_fixed, p2_conditions_or_singleton_puzzle_hash,
 };
@@ -90,7 +90,9 @@ pub(crate) fn verify_fixed_delegated_puzzle_hash_for_binding(
     let expected =
         p2_conditions_or_singleton_puzzle_hash(fixed_delegated_puzzle_hash, launcher_id)?;
     if binding_p2_puzzle_hash != expected.puzzle_hash.into() {
-        return Err(SignerError::PresplitCoinPuzzleHashMismatch);
+        return Err(SignerError::Offer(
+            OfferError::PresplitCoinPuzzleHashMismatch,
+        ));
     }
     Ok(())
 }
@@ -100,7 +102,7 @@ pub(crate) fn verify_fixed_delegated_puzzle_hash_for_binding(
 /// Accepts operator `fixed_delegated_puzzle_hash` (raw delegated CONDITIONS tree hash) or
 /// Cloud Wallet `fixedConditionsHash` (already member-wrapped). Construction errors propagate;
 /// only a successful hash build with a non-matching binding p2 falls through to the other
-/// encoding before returning [`SignerError::PresplitCoinPuzzleHashMismatch`].
+/// encoding before returning [`crate::error::OfferError::PresplitCoinPuzzleHashMismatch`].
 ///
 /// # Errors
 ///
@@ -118,7 +120,9 @@ pub(crate) fn resolve_member_fixed_conditions_hash_for_binding(
     if binding_p2_puzzle_hash == member_hashes.puzzle_hash.into() {
         return Ok(member_hashes.fixed_conditions_hash);
     }
-    Err(SignerError::PresplitCoinPuzzleHashMismatch)
+    Err(SignerError::Offer(
+        OfferError::PresplitCoinPuzzleHashMismatch,
+    ))
 }
 
 /// Read presplit maker binding from a cancellable input (XCH or CAT).
@@ -196,6 +200,9 @@ mod tests {
             TreeHash::new([0x33; 32]),
         )
         .expect_err("unrelated hash");
-        assert!(matches!(err, SignerError::PresplitCoinPuzzleHashMismatch));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitCoinPuzzleHashMismatch)
+        ));
     }
 }

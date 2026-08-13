@@ -31,7 +31,7 @@ pub(super) struct PostFailure {
     pub error: String,
     pub started: Instant,
     pub create_phase_ms: Option<u64>,
-    pub execution_mode: Option<String>,
+    pub execution_mode: Option<crate::offer::OfferExecutionMode>,
     pub bootstrap: Option<Value>,
 }
 
@@ -91,6 +91,14 @@ impl PublishResult {
             success: result.success(),
             offer_id: result.offer_id().map(str::to_string),
             body: result.into_value(),
+        }
+    }
+
+    pub fn from_error(err: &crate::error::SignerError) -> Self {
+        Self {
+            success: false,
+            offer_id: None,
+            body: json!({"success": false, "error": err.to_string()}),
         }
     }
 

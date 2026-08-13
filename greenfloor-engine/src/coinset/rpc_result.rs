@@ -10,7 +10,7 @@ pub(crate) fn ensure_coinset_success(
     if success {
         return Ok(());
     }
-    Err(SignerError::Coinset(error.map_or_else(
+    Err(SignerError::coinset(error.map_or_else(
         || failure_default.to_string(),
         str::to_string,
     )))

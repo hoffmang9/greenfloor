@@ -53,6 +53,8 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use crate::error::CoinOpsError;
+
     #[tokio::test]
     async fn run_poll_loop_returns_when_attempt_succeeds() {
         let attempts = Rc::new(Cell::new(0u8));
@@ -75,7 +77,7 @@ mod tests {
                 timeout: Duration::from_millis(50),
                 interval: Duration::from_millis(1),
             },
-            SignerError::CombineInputVerifyTimeout,
+            SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout),
         )
         .await
         .expect("poll");
@@ -91,10 +93,13 @@ mod tests {
                 timeout: Duration::from_millis(5),
                 interval: Duration::from_millis(1),
             },
-            SignerError::CombineInputVerifyTimeout,
+            SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout),
         )
         .await
         .expect_err("timeout");
-        assert!(matches!(err, SignerError::CombineInputVerifyTimeout));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout)
+        ));
     }
 }

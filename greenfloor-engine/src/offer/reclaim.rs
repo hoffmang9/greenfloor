@@ -10,7 +10,7 @@ use crate::coinset::{
     OfferCoinsetBackend,
 };
 use crate::config::SignerConfig;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::cancel_input::{
     classify_cancellable_maker_input, classify_maker_input_from_stored_metadata,
@@ -86,7 +86,7 @@ fn append_cancellable_input_reclaim(
         CancellableMakerInput::VaultCatDirect { cat } => {
             let nonce = vault_ctx
                 .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-                .ok_or(SignerError::Driver(
+                .ok_or(SignerError::driver(
                     "failed to infer vault nonce for reclaim cat".to_string(),
                 ))?;
             let inner_spend = build_vault_change_inner_spend(
@@ -172,7 +172,7 @@ pub async fn build_offer_cancel_spend_bundle<C: OfferCoinsetBackend>(
     let offer = Offer::from_spend_bundle(&mut allocator, &spend_bundle)?;
     let cancellable = offer.cancellable_coin_spends().map_err(SignerError::from)?;
     if cancellable.is_empty() {
-        return Err(SignerError::OfferCancelNoSpendableInput);
+        return Err(SignerError::Offer(OfferError::OfferCancelNoSpendableInput));
     }
 
     let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id)?;

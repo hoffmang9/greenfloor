@@ -5,50 +5,12 @@ use serde_json::{json, Value};
 
 use crate::error::{SignerError, SignerResult};
 
-const RETRYABLE_COINSET_TRANSPORT_MARKERS: &[&str] = &[
-    "operation timed out",
-    "connection refused",
-    "connection reset",
-    "remote end closed connection",
-    "error sending request",
-    "temporary failure",
-    "temporarily unavailable",
-    "broken pipe",
-    "http status server error (502",
-    "http status server error (503",
-    "http status server error (504",
-    "http status client error (429",
-    "too many requests",
-    "bad gateway",
-    "service unavailable",
-    "error decoding response body",
-    "ssl",
-    "handshake",
-    "cloudflare",
-];
-
-#[must_use]
-pub fn script_coinset_transport_retryable(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    RETRYABLE_COINSET_TRANSPORT_MARKERS
-        .iter()
-        .any(|marker| lower.contains(marker))
-}
-
-#[must_use]
-pub fn script_engine_error_retryable(err: &SignerError) -> bool {
-    match err {
-        SignerError::Coinset(message) => script_coinset_transport_retryable(message),
-        _ => false,
-    }
-}
-
 pub fn emit_engine_cli_error(err: &SignerError, json_mode: bool) {
     if json_mode {
         let payload = json!({
             "success": false,
             "error": err.to_string(),
-            "retryable": script_engine_error_retryable(err),
+            "retryable": err.is_retryable_upstream(),
         });
         eprintln!(
             "{}",
@@ -144,33 +106,8 @@ pub fn print_json_pretty(value: &impl Serialize) -> SignerResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        format_json, format_json_value, optional_str, optional_trimmed,
-        script_coinset_transport_retryable, script_engine_error_retryable,
-    };
-    use crate::error::SignerError;
+    use super::{format_json, format_json_value, optional_str, optional_trimmed};
     use serde_json::json;
-
-    #[test]
-    fn script_coinset_transport_retryable_matches_decode_and_refused() {
-        assert!(script_coinset_transport_retryable(
-            "error decoding response body"
-        ));
-        assert!(script_coinset_transport_retryable(
-            "error sending request for url (http://127.0.0.1:1/): connection refused"
-        ));
-        assert!(!script_coinset_transport_retryable("invalid puzzle hash"));
-    }
-
-    #[test]
-    fn script_engine_error_retryable_classifies_coinset_and_parse_errors() {
-        assert!(script_engine_error_retryable(&SignerError::Coinset(
-            "error decoding response body".to_string()
-        )));
-        assert!(!script_engine_error_retryable(&SignerError::Other(
-            "parse body json: expected value at line 1 column 1".to_string()
-        )));
-    }
 
     #[test]
     fn optional_str_trims_and_rejects_blank() {

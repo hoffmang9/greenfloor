@@ -2,7 +2,7 @@ use greenfloor_engine::config::{
     is_signer_execution_soft_skip, parse_program_config, signer_execution_skip_reason,
     CycleProgramConfig, SIGNER_SKIP_NO_SIGNER_PATH,
 };
-use greenfloor_engine::error::SignerError;
+use greenfloor_engine::error::{ConfigError, SignerError};
 use serde_json::{json, Value};
 
 use super::shared::base_program_raw;
@@ -362,7 +362,10 @@ fn signer_execution_skip_reason_maps_missing_signer_path() {
     let err = cfg
         .require_signer_offer_path()
         .expect_err("missing signer path");
-    assert!(matches!(err, SignerError::SignerPathNotConfigured));
+    assert!(matches!(
+        err,
+        SignerError::Config(ConfigError::SignerPathNotConfigured)
+    ));
     assert_eq!(
         signer_execution_skip_reason(&err),
         SIGNER_SKIP_NO_SIGNER_PATH
@@ -372,7 +375,7 @@ fn signer_execution_skip_reason_maps_missing_signer_path() {
 
 #[test]
 fn signer_execution_skip_reason_maps_missing_signer_section() {
-    let err = SignerError::MissingConfigField("signer");
+    let err = SignerError::Config(ConfigError::MissingField("signer"));
     assert_eq!(
         signer_execution_skip_reason(&err),
         "skipped_missing_signer_config"

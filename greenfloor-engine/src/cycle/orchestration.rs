@@ -240,17 +240,6 @@ pub fn classify_dexie_stale_offer_status(status: i64) -> Option<&'static str> {
 }
 
 #[must_use]
-pub fn is_dexie_offer_missing_error_text(error_text: &str) -> bool {
-    let normalized = error_text.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return false;
-    }
-    (normalized.contains("dexie_get_offer_error") && normalized.contains("404"))
-        || normalized.contains("dexie_http_error:404")
-        || (normalized.contains("http error 404") && normalized.contains("not found"))
-}
-
-#[must_use]
 pub fn record_stale_sweep_check(
     progress: &StaleSweepProgress,
     hit: Option<StaleSweepHit>,
@@ -323,13 +312,5 @@ mod tests {
         assert_eq!(classify_dexie_stale_offer_status(6), Some("offer_expired"));
         assert_eq!(classify_dexie_stale_offer_status(4), Some("tx_confirmed"));
         assert_eq!(classify_dexie_stale_offer_status(0), None);
-    }
-
-    #[test]
-    fn is_dexie_offer_missing_error_text_detects_404() {
-        assert!(is_dexie_offer_missing_error_text(
-            "HTTP Error 404: Not Found"
-        ));
-        assert!(!is_dexie_offer_missing_error_text("timeout"));
     }
 }

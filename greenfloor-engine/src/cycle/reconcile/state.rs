@@ -170,6 +170,27 @@ impl ReconcileState {
     pub fn binds_unique_maker_coin(&self) -> bool {
         self.is_watched_for_reconcile() || matches!(self, Self::MakerClaimed)
     }
+
+    /// Sort key for coins-balance unreturned makers: active listings, then expired, then the rest.
+    #[must_use]
+    pub fn unreturned_maker_priority(&self) -> u8 {
+        match self {
+            Self::Lifecycle(
+                OfferLifecycleState::Open
+                | OfferLifecycleState::RefreshDue
+                | OfferLifecycleState::MempoolObserved,
+            )
+            | Self::PendingVisibility => 0,
+            Self::Lifecycle(OfferLifecycleState::Expired) => 1,
+            _ => 2,
+        }
+    }
+}
+
+/// Prefer open/active rows when multiple `offer_state` rows share a maker coin id.
+#[must_use]
+pub fn unreturned_row_priority(state: Option<&ReconcileState>) -> u8 {
+    state.map_or(2, ReconcileState::unreturned_maker_priority)
 }
 
 /// Persistable states loaded for ladder capacity (includes mempool for timed filter).

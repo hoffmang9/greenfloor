@@ -2,7 +2,7 @@
 
 use aws_sdk_kms::Client;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 
 #[derive(Debug, Clone, Default)]
 pub struct KmsOverrides {
@@ -44,9 +44,9 @@ impl KmsRuntime {
     /// Returns an error when `fast_fail` is set on the active overrides.
     pub fn ensure_client_allowed(&self) -> SignerResult<()> {
         if self.overrides.fast_fail {
-            return Err(SignerError::Kms(
+            return Err(SignerError::Vault(VaultError::Kms(
                 "credentials not configured (test fast fail)".to_string(),
-            ));
+            )));
         }
         Ok(())
     }

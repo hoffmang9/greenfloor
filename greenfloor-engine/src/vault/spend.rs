@@ -7,7 +7,7 @@ use chia_secp::{R1PublicKey, R1Signature};
 use clvm_utils::TreeHash;
 
 use crate::config::SignerConfig;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::hex::hex_to_bytes;
 use crate::kms::{self, KmsRuntime};
 use crate::vault::context::{VaultComputedHashes, VaultContext, VaultCustodySnapshot};
@@ -174,8 +174,11 @@ pub fn build_vault_spend_context_from_hashes(
     let key_bytes = hex_to_bytes(&display.secp256r1_custody_keys[0])?;
     let mut key_array = [0u8; 33];
     key_array.copy_from_slice(&key_bytes);
-    let secp256r1_public_key = R1PublicKey::from_bytes(&key_array)
-        .map_err(|err| SignerError::UnsupportedVaultCurve(format!("SECP256R1 decode: {err}")))?;
+    let secp256r1_public_key = R1PublicKey::from_bytes(&key_array).map_err(|err| {
+        SignerError::Vault(VaultError::UnsupportedCurve(format!(
+            "SECP256R1 decode: {err}"
+        )))
+    })?;
     Ok(VaultSpendContext {
         launcher_id: snapshot.launcher_id,
         inner_puzzle_hash: hashes.inner_puzzle_hash,
@@ -206,13 +209,17 @@ pub(crate) async fn sign_vault_fast_forward_digest(
         &hex::encode(signature_message),
     )
     .await?;
-    let signature_bytes = hex::decode(crate::hex::normalize_hex(&signature_hex))
-        .map_err(|err| SignerError::Kms(format!("invalid signature hex: {err}")))?;
-    let signature_array: [u8; 64] = signature_bytes
-        .try_into()
-        .map_err(|_| SignerError::Kms("invalid compact signature length".to_string()))?;
+    let signature_bytes =
+        hex::decode(crate::hex::normalize_hex(&signature_hex)).map_err(|err| {
+            SignerError::Vault(VaultError::Kms(format!("invalid signature hex: {err}")))
+        })?;
+    let signature_array: [u8; 64] = signature_bytes.try_into().map_err(|_| {
+        SignerError::Vault(VaultError::Kms(
+            "invalid compact signature length".to_string(),
+        ))
+    })?;
     R1Signature::from_bytes(&signature_array)
-        .map_err(|err| SignerError::Kms(format!("invalid r1 signature: {err}")))
+        .map_err(|err| SignerError::Vault(VaultError::Kms(format!("invalid r1 signature: {err}"))))
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use clvm_utils::{tree_hash_pair, TreeHash};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::hex::{bytes32_to_hex, hex_to_bytes32, tree_hash_nil, tree_hash_to_hex};
 use crate::vault::members::{
     force_1_of_2_restriction, m_of_n_hash, member_hash_for_key, nonce_member_puzzle_hash,
@@ -34,26 +34,26 @@ impl VaultCustodySnapshot {
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         )
-        .map_err(|_| SignerError::VaultLauncherIdInvalid)?;
+        .map_err(|_| SignerError::Vault(VaultError::LauncherIdInvalid))?;
 
         let custody_threshold = parse_u32_field(value, "custodyThreshold")
-            .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
+            .ok_or(SignerError::Vault(VaultError::ThresholdOrTimelockInvalid))?;
         let recovery_threshold = parse_u32_field(value, "recoveryThreshold")
-            .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
+            .ok_or(SignerError::Vault(VaultError::ThresholdOrTimelockInvalid))?;
         let recovery_clawback_timelock = value
             .get("recoveryClawbackTimelock")
             .and_then(parse_json_u64)
-            .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
+            .ok_or(SignerError::Vault(VaultError::ThresholdOrTimelockInvalid))?;
 
         let custody_keys = extract_wallet_keys(value.get("custodyKeys"));
         let recovery_keys = extract_wallet_keys(value.get("recoveryKeys"));
         if custody_keys.is_empty() || recovery_keys.is_empty() {
-            return Err(SignerError::UnsupportedVaultSignerCardinality);
+            return Err(SignerError::Vault(VaultError::UnsupportedSignerCardinality));
         }
         validate_vault_threshold(custody_threshold, custody_keys.len())?;
         validate_vault_threshold(recovery_threshold, recovery_keys.len())?;
         if recovery_clawback_timelock == 0 {
-            return Err(SignerError::InvalidVaultRecoveryTimelock);
+            return Err(SignerError::Vault(VaultError::InvalidRecoveryTimelock));
         }
 
         Ok(Self {
@@ -185,15 +185,15 @@ pub fn compute_vault_context_from_hashes(
         secp256r1_custody_keys.len() == 1 && normalized_kms == secp256r1_custody_keys[0];
 
     if secp256r1_custody_keys.len() != 1 {
-        return Err(SignerError::VaultSecp256r1KeyCount(
+        return Err(SignerError::Vault(VaultError::Secp256r1KeyCount(
             secp256r1_custody_keys.len(),
-        ));
+        )));
     }
     if !kms_custody_key_match {
-        return Err(SignerError::KmsPublicKeyMismatch {
+        return Err(SignerError::Vault(VaultError::KmsPublicKeyMismatch {
             kms: normalized_kms,
             custody: secp256r1_custody_keys[0].clone(),
-        });
+        }));
     }
 
     Ok(VaultContext {

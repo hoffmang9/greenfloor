@@ -12,45 +12,14 @@ use crate::storage::SqliteStore;
 
 use super::super::dexie_index::index_list_offers_by_local_ids;
 use super::super::reconcile_prep::{
-    ensure_watches_from_dexie_payload, fetch_dexie_offer, DexieFetchMode, DexieOfferFetch,
+    ensure_watches_from_dexie_payload, fetch_dexie_offer, DexieOfferFetch,
 };
-use super::super::{persist_missing_watched_offer, ReconcilePersistOptions};
+use super::super::{ReconcilePersistOptions, WatchedOfferReconciler};
 use super::transition::{note_reconcile_transition_side_effects, ReconcileMarketCycleMetrics};
 
 pub struct AugmentedDexieOffers {
     /// Dexie payloads keyed by local `offer_state.offer_id` (already matched).
     pub by_local_id: HashMap<String, Value>,
-}
-
-fn apply_missing_watched_offer(
-    store: &SqliteStore,
-    market_id: &str,
-    watched_offer_id: &str,
-    error_text: &str,
-    state_by_offer_id: &mut HashMap<String, String>,
-    metrics: &mut ReconcileMarketCycleMetrics,
-) -> SignerResult<()> {
-    let current_state = state_by_offer_id
-        .get(watched_offer_id)
-        .map_or("open", String::as_str);
-    let transition = persist_missing_watched_offer(
-        store,
-        market_id,
-        watched_offer_id,
-        current_state,
-        &ReconcilePersistOptions {
-            action: "reconcile_coins_and_offers",
-            venue: Some(crate::config::Venue::Dexie),
-            dexie_error: Some(error_text),
-        },
-    )?;
-    note_reconcile_transition_side_effects(
-        &transition,
-        watched_offer_id,
-        metrics,
-        state_by_offer_id,
-    );
-    Ok(())
 }
 
 /// Shared Dexie watch-error audit for the daemon cycle heal callback and watchlist augment —
@@ -105,25 +74,34 @@ async fn fetch_missing_watched_offers(
     state_by_offer_id: &mut HashMap<String, String>,
     metrics: &mut ReconcileMarketCycleMetrics,
 ) -> SignerResult<()> {
+    let options = ReconcilePersistOptions {
+        action: "reconcile_coins_and_offers",
+        venue: Some(crate::config::Venue::Dexie),
+        dexie_error: None,
+    };
+    let reconciler = WatchedOfferReconciler::new(store, &options);
     for watched_offer_id in dexie_offer_ids {
         if augmented_by_local_id.contains_key(watched_offer_id) {
             continue;
         }
-        match fetch_dexie_offer(dexie, watched_offer_id, DexieFetchMode::HealStrict).await {
-            DexieOfferFetch::Found(body) => {
+        let current_state = state_by_offer_id
+            .get(watched_offer_id)
+            .map_or("open", String::as_str);
+        match fetch_dexie_offer(dexie, watched_offer_id).await {
+            Ok(DexieOfferFetch::Found(body)) => {
                 augmented_by_local_id.insert(watched_offer_id.clone(), body);
             }
-            DexieOfferFetch::Missing(error_text) => {
-                apply_missing_watched_offer(
-                    store,
-                    market_id,
+            Ok(DexieOfferFetch::Missing) => {
+                let transition =
+                    reconciler.apply_missing(market_id, watched_offer_id, current_state, None)?;
+                note_reconcile_transition_side_effects(
+                    &transition,
                     watched_offer_id,
-                    &error_text,
-                    state_by_offer_id,
                     metrics,
-                )?;
+                    state_by_offer_id,
+                );
             }
-            DexieOfferFetch::Mismatch => {
+            Ok(DexieOfferFetch::Mismatch) => {
                 record_watchlist_augment_error(
                     store,
                     market_id,
@@ -132,8 +110,14 @@ async fn fetch_missing_watched_offers(
                     metrics,
                 )?;
             }
-            DexieOfferFetch::LookupError(err) => {
-                record_watchlist_augment_error(store, market_id, watched_offer_id, &err, metrics)?;
+            Err(err) => {
+                record_watchlist_augment_error(
+                    store,
+                    market_id,
+                    watched_offer_id,
+                    &err.to_string(),
+                    metrics,
+                )?;
             }
         }
     }

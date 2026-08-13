@@ -45,6 +45,15 @@ pub fn assert_inventory_asset_resolution_matches_config(
     Ok(())
 }
 
+/// Outcome of the inventory bucket scan for coin-ops planning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InventoryScanOutcome {
+    /// Successful scan or freshness cache hit.
+    Fresh(BTreeMap<i64, i64>),
+    /// Signer soft-skip: inventory is unknown, not empty. Coin-ops must not treat this as zero.
+    Unknown,
+}
+
 /// Scan spendable inventory into ladder bucket counts, skipping HTTP when WS freshness allows.
 ///
 /// # Errors
@@ -56,7 +65,7 @@ pub async fn run_inventory_phase(
     resources: &DaemonCycleResources,
     market: &MarketConfig,
     state: &mut MarketCycleResultState,
-) -> SignerResult<BTreeMap<i64, i64>> {
+) -> SignerResult<InventoryScanOutcome> {
     let ladder_sizes: Vec<i64> = market
         .ladders
         .get("sell")
@@ -65,7 +74,7 @@ pub async fn run_inventory_phase(
         .filter(|size| *size > 0)
         .collect();
     if ladder_sizes.is_empty() {
-        return Ok(BTreeMap::default());
+        return Ok(InventoryScanOutcome::Fresh(BTreeMap::default()));
     }
 
     let watched_coin_ids = store.list_watched_coin_ids_for_market(&market.market_id)?;
@@ -93,7 +102,7 @@ pub async fn run_inventory_phase(
                 }),
                 Some(&market.market_id),
             )?;
-            return Ok(cached);
+            return Ok(InventoryScanOutcome::Fresh(cached));
         }
     }
 
@@ -139,7 +148,7 @@ pub async fn run_inventory_phase(
                 }),
                 Some(&market.market_id),
             )?;
-            Ok(bucket_counts)
+            Ok(InventoryScanOutcome::Fresh(bucket_counts))
         }
         Err(err) if is_signer_execution_soft_skip(&err) => {
             LogContext::MARKET_CYCLE.dual_audit(
@@ -150,11 +159,11 @@ pub async fn run_inventory_phase(
                 &json!({
                     "market_id": market.market_id,
                     "source": signer_execution_skip_reason(&err),
-                    "bucket_counts": {},
+                    "inventory": "unknown",
                 }),
                 Some(&market.market_id),
             )?;
-            Ok(BTreeMap::default())
+            Ok(InventoryScanOutcome::Unknown)
         }
         Err(err) => {
             state.record_phase_error();
@@ -289,7 +298,7 @@ mod tests {
         let returned = run_inventory_phase(&store, &resources, &market, &mut state)
             .await
             .expect("fresh skip");
-        assert_eq!(returned, buckets);
+        assert_eq!(returned, InventoryScanOutcome::Fresh(buckets.clone()));
         let audits = store
             .list_recent_audit_events(Some(&[INVENTORY_BUCKET_SCAN]), Some("m1"), 5)
             .expect("audits");
@@ -310,7 +319,8 @@ mod tests {
             .await
             .expect("stale path");
         assert_ne!(
-            after_stale, buckets,
+            after_stale,
+            InventoryScanOutcome::Fresh(buckets),
             "stale path must not return the prior fresh-skip cache"
         );
     }

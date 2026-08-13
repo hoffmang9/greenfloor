@@ -70,7 +70,6 @@ pub(crate) async fn build_vault_cat_offer_with_spend<C: OfferCoinsetBackend>(
             )
             .await
         }
-        OfferPlan::RequiresSplitFlag => Err(crate::error::SignerError::OfferInputRequiresPresplit),
         OfferPlan::SplitAndOffer {
             selection,
             offer_nonce,

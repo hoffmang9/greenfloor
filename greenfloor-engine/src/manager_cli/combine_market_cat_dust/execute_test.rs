@@ -8,7 +8,7 @@ use crate::coinset::test_support::{
     mock_unspent_coin_record_by_name_body,
 };
 use crate::coinset::{CoinSpentVerifyConfig, PollConfig};
-use crate::error::SignerError;
+use crate::error::{CoinOpsError, SignerError};
 use crate::vault_coinset_scan::{DustCombineBatch, ProvenDustCoin};
 
 #[tokio::test]
@@ -84,5 +84,8 @@ async fn combine_batch_executor_verify_times_out_when_inputs_stay_unspent() {
         .wait_for_batch_spent(&batch)
         .await
         .expect_err("verify timeout");
-    assert!(matches!(err, SignerError::CombineInputVerifyTimeout));
+    assert!(matches!(
+        err,
+        SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout)
+    ));
 }

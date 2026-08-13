@@ -15,7 +15,7 @@ use chia_secp::R1Signature;
 use clvm_utils::TreeHash;
 
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::vault::members::u32_to_usize;
 use crate::vault::messages::extract_mode23_receive_messages;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
@@ -60,7 +60,7 @@ where
             continue;
         };
         let chia_sdk_driver::SpendKind::Conditions(spend) = kind else {
-            return Err(SignerError::Driver(
+            return Err(SignerError::driver(
                 "unexpected settlement spend in vault cat spend".to_string(),
             ));
         };
@@ -69,7 +69,7 @@ where
             .map_err(SignerError::from)?;
         let nonce = vault_ctx
             .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-            .ok_or(SignerError::Driver(
+            .ok_or(SignerError::driver(
                 "failed to infer vault nonce for cat p2 puzzle hash".to_string(),
             ))?;
         let inner_spend = build_vault_cat_inner_spend(
@@ -82,7 +82,7 @@ where
         cat_spends.push(CatSpend::new(cat, inner_spend));
     }
     if cat_spends.is_empty() {
-        return Err(SignerError::Driver(
+        return Err(SignerError::driver(
             "no cat spends produced for vault transaction".to_string(),
         ));
     }
@@ -196,7 +196,7 @@ where
 {
     let receive_messages = extract_mode23_receive_messages(ctx)?;
     if receive_messages.is_empty() {
-        return Err(SignerError::VaultReceiveMessageNotFound);
+        return Err(SignerError::Vault(VaultError::ReceiveMessageNotFound));
     }
     let mut conditions = Conditions::new().create_coin(
         vault_ctx.inner_puzzle_hash.into(),

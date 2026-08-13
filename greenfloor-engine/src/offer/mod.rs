@@ -13,6 +13,7 @@ pub mod codec;
 pub mod dexie_payload;
 pub mod invariants;
 pub mod lifecycle;
+pub mod maker_shape;
 pub mod operator;
 pub mod plan;
 pub mod presplit;
@@ -46,6 +47,7 @@ pub use codec::{
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
     verify_offer_for_dexie,
 };
+pub use maker_shape::MakerWatchSeed;
 pub use pricing::quote_mojos_for_base_size;
 pub use publish::{
     expected_publish_asset_fields, post_offer_phase_dexie, ExpectedPublishAssetFields,
@@ -61,5 +63,5 @@ pub use request::{
 };
 pub use types::{
     effective_maker_reuse, CreateOfferRequest, CreateOfferResult, OfferCancelFields,
-    OfferExecutionMode, PresplitMakerReuse, StoredOfferCancelMetadata,
+    OfferExecutionMode, PostedOfferShape, PresplitMakerReuse, StoredOfferCancelMetadata,
 };

@@ -2,7 +2,7 @@ use chia_protocol::{Coin, CoinSpend, SpendBundle};
 use chia_sdk_driver::{Cat, Puzzle};
 use clvmr::{serde::node_from_bytes, Allocator, NodePtr};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 
 pub(super) struct ParsedOfferMakerSpend {
     pub cat: Option<Cat>,
@@ -11,9 +11,9 @@ pub(super) struct ParsedOfferMakerSpend {
 }
 
 pub(super) fn binding_parse_err(detail: impl Into<String>) -> SignerError {
-    SignerError::OfferCancelPresplitBindingParseFailed {
+    SignerError::Offer(OfferError::OfferCancelPresplitBindingParseFailed {
         detail: detail.into(),
-    }
+    })
 }
 
 pub(super) fn coin_spend_for_presplit_input(
@@ -25,7 +25,7 @@ pub(super) fn coin_spend_for_presplit_input(
             return Ok(coin_spend);
         }
     }
-    Err(SignerError::OfferCancelNoSpendableInput)
+    Err(SignerError::Offer(OfferError::OfferCancelNoSpendableInput))
 }
 
 pub(super) fn parse_offer_maker_coin_spend(
@@ -42,7 +42,7 @@ pub(super) fn parse_offer_maker_coin_spend(
         Cat::parse(allocator, coin_spend.coin, puzzle, solution_ptr).map_err(SignerError::from)?
     {
         if parsed_cat.coin.coin_id() != coin.coin_id() {
-            return Err(SignerError::OfferCancelNoSpendableInput);
+            return Err(SignerError::Offer(OfferError::OfferCancelNoSpendableInput));
         }
         Ok(ParsedOfferMakerSpend {
             cat: Some(parsed_cat),

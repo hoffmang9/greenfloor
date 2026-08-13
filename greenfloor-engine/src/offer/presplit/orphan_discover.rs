@@ -10,7 +10,7 @@ use clvmr::serde::node_from_bytes;
 use clvmr::{Allocator, NodePtr};
 
 use crate::coinset::{cat_child_p2_create_coin_memos, fetch_parent_coin_spend};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, TransportError};
 use crate::hex::{hex_to_bytes32, normalize_hex_id, tree_hash_to_hex};
 use crate::offer::presplit::resolve_member_fixed_conditions_hash_for_binding;
 use crate::vault_coinset_scan::types::CoinRow;
@@ -108,10 +108,10 @@ fn candidate_fixed_hashes_in_allocator(
     let direct = tree_hash(allocator, conditions_ptr);
     let q = allocator
         .new_atom(&[1])
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+        .map_err(|err| SignerError::driver(err.to_string()))?;
     let quoted = allocator
         .new_pair(q, conditions_ptr)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+        .map_err(|err| SignerError::driver(err.to_string()))?;
     Ok([direct, tree_hash(allocator, quoted)])
 }
 
@@ -142,7 +142,7 @@ pub(crate) fn recover_from_parent_spend(
     };
     let mut allocator = Allocator::new();
     let memos_ptr = node_from_bytes(&mut allocator, &memos_bytes)
-        .map_err(|err| SignerError::Driver(err.to_string()))?;
+        .map_err(|err| SignerError::driver(err.to_string()))?;
     let Some(conditions_ptr) = second_memo_item(&allocator, memos_ptr) else {
         return Ok((
             None,
@@ -184,8 +184,11 @@ async fn recover_fixed_hash_for_row(
 
 fn soft_fail_detail(err: SignerError) -> SignerResult<String> {
     match err {
-        // Transport / API failures should fail the whole discover, not hide as per-row noise.
-        SignerError::Coinset(_) => Err(err),
+        // Driver parse/spend misses stay per-row; HTTP/RPC failures abort discovery.
+        SignerError::Transport(TransportError::Driver(message)) => {
+            Ok(format!("driver error: {message}"))
+        }
+        err @ SignerError::Transport(_) => Err(err),
         other => Ok(other.to_string()),
     }
 }
@@ -198,7 +201,7 @@ fn soft_fail_detail(err: SignerError) -> SignerResult<String> {
 ///
 /// # Errors
 ///
-/// Returns [`SignerError::Coinset`] when Coinset access fails for a candidate.
+/// Returns a transport error when Coinset access fails for a candidate.
 pub async fn discover_orphan_presplit_candidates(
     client: &CoinsetClient,
     launcher_id: Bytes32,
@@ -317,9 +320,21 @@ mod tests {
 
     #[test]
     fn soft_fail_detail_propagates_coinset_transport() {
-        let err = soft_fail_detail(SignerError::Coinset("down".to_string())).expect_err("coinset");
-        assert!(matches!(err, SignerError::Coinset(_)));
-        let detail = soft_fail_detail(SignerError::Driver("bad puzzle".to_string())).expect("soft");
+        let err = soft_fail_detail(SignerError::coinset("down".to_string())).expect_err("coinset");
+        assert!(matches!(
+            err,
+            SignerError::Transport(TransportError::Coinset(_))
+        ));
+        let connect = soft_fail_detail(SignerError::http_connect("coinset", "connection refused"))
+            .expect_err("connect");
+        assert!(matches!(
+            connect,
+            SignerError::Transport(TransportError::Connect {
+                layer: "coinset",
+                ..
+            })
+        ));
+        let detail = soft_fail_detail(SignerError::driver("bad puzzle".to_string())).expect("soft");
         assert!(detail.contains("bad puzzle"));
     }
 

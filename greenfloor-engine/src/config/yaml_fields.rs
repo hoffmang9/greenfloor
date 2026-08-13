@@ -2,10 +2,10 @@
 
 use serde_json::Value;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 
 pub fn config_err(message: impl Into<String>) -> SignerError {
-    SignerError::Other(message.into())
+    ConfigError::Parse(message.into()).into()
 }
 
 pub fn req_mapping<'a>(
@@ -152,4 +152,17 @@ pub fn optional_trimmed_string(raw: Option<&Value>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_err;
+    use crate::error::{ConfigError, SignerError};
+
+    #[test]
+    fn config_err_is_typed_parse() {
+        let err = config_err("markets config root must be a mapping");
+        assert!(matches!(err, SignerError::Config(ConfigError::Parse(_))));
+        assert_eq!(err.to_string(), "markets config root must be a mapping");
+    }
 }

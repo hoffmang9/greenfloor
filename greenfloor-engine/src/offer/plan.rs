@@ -7,7 +7,7 @@ use chia_sdk_driver::{AssetInfo, RequestedPayments, SpendContext};
 use chia_sdk_types::{conditions::AssertBeforeSecondsAbsolute, Conditions};
 
 use crate::coinset::{OfferCoinsetBackend, SelectedCats};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult, VaultError};
 use crate::hex::hex_to_bytes32;
 use crate::offer::presplit::{offer_nonce_from_cats, offer_nonce_from_coin_ids};
 use crate::offer::types::{OfferInput, OfferTerms};
@@ -18,7 +18,6 @@ pub(crate) enum OfferPlan {
     ExistingPresplit {
         offer_nonce: Bytes32,
     },
-    RequiresSplitFlag,
     Direct {
         selection: SelectedCats,
         offer_nonce: Bytes32,
@@ -32,7 +31,7 @@ pub(crate) enum OfferPlan {
 pub(crate) fn validate_offer_input(input: &OfferInput) -> SignerResult<()> {
     let terms = input.terms();
     if terms.offer_amount == 0 || terms.request_amount == 0 {
-        return Err(SignerError::InvalidOutputAmount);
+        return Err(SignerError::Vault(VaultError::InvalidOutputAmount));
     }
     if is_xch_like_asset(&terms.offer_asset_id) {
         return Err(SignerError::Other(
@@ -50,7 +49,9 @@ fn offer_nonce_for_existing_presplit(
         return Ok(nonce);
     }
     if source_coin_ids.is_empty() {
-        return Err(SignerError::PresplitOfferRequiresSourceCoinIds);
+        return Err(SignerError::Offer(
+            OfferError::PresplitOfferRequiresSourceCoinIds,
+        ));
     }
     Ok(offer_nonce_from_coin_ids(source_coin_ids))
 }
@@ -90,7 +91,9 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
             // Exact-size inputs need no vault split; Direct cancel metadata assumes one maker coin.
             if selection.offered_total <= terms.offer_amount {
                 if selection.selected.len() != 1 {
-                    return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+                    return Err(SignerError::Offer(
+                        OfferError::DirectOfferRequiresSingleInputCoin,
+                    ));
                 }
                 return Ok(OfferPlan::Direct {
                     selection,
@@ -103,7 +106,9 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
                     selection,
                     offer_nonce,
                 },
-                OfferInput::Direct { .. } => OfferPlan::RequiresSplitFlag,
+                OfferInput::Direct { .. } => {
+                    return Err(SignerError::Offer(OfferError::OfferInputRequiresPresplit));
+                }
                 OfferInput::PresplitExisting { .. } => unreachable!(),
             })
         }
@@ -206,7 +211,7 @@ mod tests {
     fn direct_input_requires_split_flag_when_change_without_presplit() {
         assert!(matches!(
             direct_plan_kind_for_amounts(5000, 1000, 1),
-            Ok(DirectPlanKind::RequiresSplitFlag)
+            Err(SignerError::Offer(OfferError::OfferInputRequiresPresplit))
         ));
         assert!(matches!(
             direct_plan_kind_for_amounts(1000, 1000, 1),
@@ -214,7 +219,9 @@ mod tests {
         ));
         assert!(matches!(
             direct_plan_kind_for_amounts(1000, 1000, 2),
-            Err(SignerError::DirectOfferRequiresSingleInputCoin)
+            Err(SignerError::Offer(
+                OfferError::DirectOfferRequiresSingleInputCoin
+            ))
         ));
     }
 
@@ -223,7 +230,7 @@ mod tests {
         let err = offer_nonce_for_existing_presplit(&[], None).unwrap_err();
         assert!(matches!(
             err,
-            SignerError::PresplitOfferRequiresSourceCoinIds
+            SignerError::Offer(OfferError::PresplitOfferRequiresSourceCoinIds)
         ));
     }
 
@@ -245,12 +252,14 @@ mod tests {
             offer_nonce: None,
         };
         let err = OfferInput::try_from(request).unwrap_err();
-        assert!(matches!(err, SignerError::PresplitOfferRequiresSingleCoin));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitOfferRequiresSingleCoin)
+        ));
     }
 
     enum DirectPlanKind {
         Direct,
-        RequiresSplitFlag,
     }
 
     fn direct_plan_kind_for_amounts(
@@ -260,11 +269,13 @@ mod tests {
     ) -> Result<DirectPlanKind, SignerError> {
         if offered_total <= offer_amount {
             if input_count != 1 {
-                return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+                return Err(SignerError::Offer(
+                    OfferError::DirectOfferRequiresSingleInputCoin,
+                ));
             }
             Ok(DirectPlanKind::Direct)
         } else {
-            Ok(DirectPlanKind::RequiresSplitFlag)
+            Err(SignerError::Offer(OfferError::OfferInputRequiresPresplit))
         }
     }
 }

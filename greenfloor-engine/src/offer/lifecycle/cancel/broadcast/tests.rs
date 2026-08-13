@@ -126,7 +126,7 @@ fn tracked_broadcast_failure_defaults_prior_state_to_open() {
     let offer_id = target.offer_id().to_string();
     let cancel_tx = "ef".repeat(32);
     store
-        .upsert_offer_state(&offer_id, "m1", "pending", None)
+        .upsert_offer_state(&offer_id, "m1", "open", None)
         .expect("seed");
     store
         .prepare_offer_cancel_submitted(&offer_id, "m1", &cancel_tx, None)

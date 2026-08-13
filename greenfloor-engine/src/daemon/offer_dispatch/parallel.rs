@@ -12,7 +12,7 @@ use crate::cycle::{
 
 use super::{parallel_max_workers, reservation_release_status};
 use crate::daemon::market_context::MarketCycleContext;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{PersistenceError, SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
 
@@ -178,7 +178,7 @@ async fn run_parallel_post_jobs(
                     post_result
                 }
                 Ok(ReservationAcquireResult::Rejected { reason }) => {
-                    return Err(SignerError::ReservationContention(reason.to_string()));
+                    return Err(PersistenceError::ReservationContention(reason.to_string()).into());
                 }
                 Err(err) => return Err(err),
             };
@@ -190,14 +190,7 @@ async fn run_parallel_post_jobs(
     for handle in handles {
         let (action, counts_as_executed) = handle
             .await
-            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?
-            .map_err(|err| {
-                if err.is_sqlite_fatal() {
-                    err
-                } else {
-                    SignerError::Other(format!("parallel worker failed: {err}"))
-                }
-            })?;
+            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))??;
         if counts_as_executed {
             executed += 1;
         }
@@ -224,8 +217,20 @@ pub async fn execute_actions_parallel(
         return result;
     }
 
+    let fee_amount_mojos = crate::coinset::get_conservative_fee_estimate_for_signer(
+        signer_config,
+        &ctx.resources.network,
+        1_000_000,
+        Some(1),
+    )
+    .await
+    .ok()
+    .flatten()
+    .and_then(|fee| i64::try_from(fee).ok())
+    .unwrap_or(0);
     let reservation_ctx =
-        parallel_reservation_context(&ctx.resources.asset_resolver()?, market, 0).await?;
+        parallel_reservation_context(&ctx.resources.asset_resolver()?, market, fee_amount_mojos)
+            .await?;
 
     let spendable_profiles =
         resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;

@@ -46,7 +46,7 @@ pub(crate) fn pagination_from_payload(payload: &Value) -> CoinsetRecordsPaginati
 /// Returns an error when `truncated` is true and `next_cursor` is missing.
 pub(crate) fn ensure_complete_page(pagination: &CoinsetRecordsPagination) -> SignerResult<()> {
     if pagination.truncated && pagination.next_cursor.is_none() {
-        return Err(SignerError::Coinset(
+        return Err(SignerError::coinset(
             "coinset response truncated without next_cursor".to_string(),
         ));
     }

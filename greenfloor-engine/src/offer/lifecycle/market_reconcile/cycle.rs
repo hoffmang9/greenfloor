@@ -14,7 +14,7 @@ use crate::storage::SqliteStore;
 
 use super::super::dexie_index::{build_dexie_size_by_offer_id, dexie_status_index};
 use super::super::reconcile_prep::{fetch_and_ensure_watches, prepare_market_reconcile_local};
-use super::super::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+use super::super::{ReconcilePersistOptions, WatchedOfferReconciler};
 use super::augment::{augment_dexie_offers_for_watchlist, dexie_watch_error_dual_audit};
 use super::transition::{apply_dexie_lifecycle_transitions, ReconcileMarketCycleMetrics};
 
@@ -62,16 +62,13 @@ pub async fn run_reconcile_market_cycle(
 
     // One scan: cancel-submitted rows, local metadata heal, Dexie roles, state map.
     let local = prepare_market_reconcile_local(store, market_id)?;
-    apply_cancel_submitted_rows(
-        store,
-        &local.cancel_submitted_rows,
-        &ReconcilePersistOptions {
-            action: "cancel_submitted_orphan_reconcile",
-            venue: None,
-            dexie_error: None,
-        },
-        Utc::now(),
-    )?;
+    let cancel_options = ReconcilePersistOptions {
+        action: "cancel_submitted_orphan_reconcile",
+        venue: None,
+        dexie_error: None,
+    };
+    WatchedOfferReconciler::new(store, &cancel_options)
+        .apply_cancel_submitted(&local.cancel_submitted_rows, Utc::now())?;
     if !local.dexie.needs_dexie_http() {
         return Ok(ReconcileMarketCycleResult::idle(metrics));
     }

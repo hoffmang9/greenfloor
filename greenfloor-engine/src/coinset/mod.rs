@@ -1,5 +1,4 @@
 mod api;
-mod asset;
 mod backend;
 mod batch;
 mod broadcast;
@@ -25,14 +24,13 @@ mod wallet_io;
 mod ws_event;
 mod xch;
 
+pub use crate::hex::{is_canonical_xch_asset, is_xch_like_asset};
 pub use api::{
     conservative_fee_from_payload, direct_coinset_client, filter_confirmed_tx_ids,
     get_all_mempool_tx_ids, get_conservative_fee_estimate,
     get_conservative_fee_estimate_for_signer, get_fee_estimate, is_transaction_confirmed,
     post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_offer_text, push_tx_hex,
 };
-pub use asset::is_canonical_xch_asset;
-pub use asset::is_xch_like_asset;
 pub use backend::{coin_id_is_unspent, LiveCoinset, OfferCoinsetBackend};
 pub use batch::chunk_values;
 pub use broadcast::{
@@ -44,7 +42,7 @@ pub use cats::{
     require_cat_from_parent_spend,
 };
 pub(crate) use cats::{cat_outer_coinset_hex, cat_outer_puzzle_hash};
-pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
+pub use coin_select::{SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{
     effective_coinset_base_url, explicit_coinset_url_override, normalize_coinset_network,
     normalize_direct_base_url_input, resolve_coinset_endpoint, resolve_direct_client,

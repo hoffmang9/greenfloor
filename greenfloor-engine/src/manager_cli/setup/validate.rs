@@ -1,4 +1,6 @@
-use crate::config::{load_markets_config_with_overlay, load_program_config};
+use crate::config::{
+    build_cat_ticker_index, load_markets_config_with_overlay, load_program_config,
+};
 use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 
@@ -9,6 +11,13 @@ pub fn validate_config(ctx: &ManagerContext, program_only: bool) -> SignerResult
     }
     let _markets =
         load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
+    if ctx.cats_config.exists() {
+        let _ = build_cat_ticker_index(
+            &ctx.cats_config,
+            &ctx.markets_config,
+            ctx.testnet_markets_path(),
+        )?;
+    }
     Ok(())
 }
 
@@ -26,6 +35,7 @@ pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerRe
         "ok": true,
         "program_config": program_path,
         "markets_config": ctx.markets_config.display().to_string(),
+        "cats_config": ctx.cats_config.display().to_string(),
     }))?;
     Ok(0)
 }

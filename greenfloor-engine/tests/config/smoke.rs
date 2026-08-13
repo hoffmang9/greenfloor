@@ -30,6 +30,7 @@ fn parse_markets_config_parses_cancel_move_threshold_bps() {
             "base_asset": "a1",
             "quote_asset": "xch",
             "receive_address": "xch1test",
+            "signer_key_id": "key-main-1",
             "pricing": {"cancel_move_threshold_bps": 250}
         }]
     }))

@@ -53,18 +53,11 @@ pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };
-pub use signal_apply::{
-    apply_cancel_submitted_rows, apply_signals_to_row, apply_watched_offer_from_dexie_payload,
-    apply_watched_offer_signals, persist_missing_watched_offer,
-    persist_resolved_watched_transition,
-};
+pub use signal_apply::WatchedOfferReconciler;
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };
-pub use transition::{
-    coinset_signals_from_dexie_offer_payload, missing_offer_error_from_payload,
-    resolve_watched_offer_transition_from_dexie_fetch, WatchedOfferTransitionEnv,
-};
+pub use transition::{coinset_signals_from_dexie_offer_payload, WatchedOfferTransitionEnv};
 pub use ws_apply::{
     apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
     signals_for_watch_hit, WsOfferApply,

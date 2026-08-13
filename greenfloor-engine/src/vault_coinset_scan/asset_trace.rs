@@ -282,8 +282,15 @@ fn build_chains(coins: &[AssetTraceCoin]) -> Vec<AssetTraceChain> {
 
     let mut chains = Vec::new();
     let mut path = Vec::new();
+    let mut visited = HashSet::new();
     for reception_id in &reception_ids {
-        walk_chain(reception_id, &mut path, &coins_by_id, &mut chains);
+        walk_chain(
+            reception_id,
+            &mut path,
+            &coins_by_id,
+            &mut chains,
+            &mut visited,
+        );
     }
     chains.sort_by(|left, right| {
         left.path
@@ -300,8 +307,18 @@ fn walk_chain(
     path: &mut Vec<String>,
     coins_by_id: &HashMap<&str, &AssetTraceCoin>,
     chains: &mut Vec<AssetTraceChain>,
+    visited: &mut HashSet<String>,
 ) {
+    if !visited.insert(node.to_string()) {
+        chains.push(AssetTraceChain {
+            path: path.clone(),
+            terminal_role: AssetTraceRole::Internal,
+            terminal_amount_mojos: coins_by_id.get(node).map_or(0, |coin| coin.amount),
+        });
+        return;
+    }
     let Some(coin) = coins_by_id.get(node) else {
+        visited.remove(node);
         return;
     };
     path.push(node.to_string());
@@ -313,10 +330,11 @@ fn walk_chain(
         });
     } else {
         for child in &coin.child_coin_ids {
-            walk_chain(child, path, coins_by_id, chains);
+            walk_chain(child, path, coins_by_id, chains, visited);
         }
     }
     path.pop();
+    visited.remove(node);
 }
 
 #[cfg(test)]

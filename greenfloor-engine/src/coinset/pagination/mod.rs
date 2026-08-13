@@ -55,7 +55,7 @@ where
         }
         return Ok(all);
     }
-    Err(SignerError::Coinset(format!(
+    Err(SignerError::coinset(format!(
         "coinset pagination exceeded {MAX_COINSET_RECORD_PAGES} pages for {endpoint}"
     )))
 }

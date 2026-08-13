@@ -1,10 +1,10 @@
 use crate::adapters::DexieClient;
 use crate::cycle::{
-    classify_dexie_stale_offer_status, collect_stale_sweep_candidates,
-    is_dexie_offer_missing_error_text, record_stale_sweep_check, OfferStateRow, StaleSweepHit,
-    StaleSweepProgress,
+    classify_dexie_stale_offer_status, collect_stale_sweep_candidates, record_stale_sweep_check,
+    OfferStateRow, StaleSweepHit, StaleSweepProgress,
 };
 use crate::error::SignerResult;
+use crate::offer::lifecycle::reconcile_prep::{fetch_dexie_offer, DexieOfferFetch};
 use crate::storage::SqliteStore;
 
 const GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET: usize = 3;
@@ -64,40 +64,24 @@ pub async fn detect_stale_open_offers_for_requeue(
         if !store.is_dexie_authoritative_offer(&offer_id)? {
             continue;
         }
-        let hit = match dexie.get_offer(&offer_id).await {
-            Ok(response) => {
-                if response.is_explicit_failure() {
-                    if is_dexie_offer_missing_error_text(response.error_text()) {
-                        Some(StaleSweepHit {
-                            market_id: market_id.clone(),
-                            offer_id: offer_id.clone(),
-                            reason: "offer_missing_404".to_string(),
-                        })
-                    } else {
-                        None
-                    }
-                } else if let Some(offer_obj) = response.offer_payload() {
-                    let status = offer_obj
-                        .get("status")
-                        .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(-1);
-                    classify_dexie_stale_offer_status(status).map(|reason| StaleSweepHit {
-                        market_id: market_id.clone(),
-                        offer_id: offer_id.clone(),
-                        reason: reason.to_string(),
-                    })
-                } else {
-                    None
-                }
-            }
-            Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
-                Some(StaleSweepHit {
+        let hit = match fetch_dexie_offer(dexie, &offer_id).await {
+            Ok(DexieOfferFetch::Found(offer_obj)) => {
+                let status = offer_obj
+                    .get("status")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(-1);
+                classify_dexie_stale_offer_status(status).map(|reason| StaleSweepHit {
                     market_id: market_id.clone(),
                     offer_id: offer_id.clone(),
-                    reason: "offer_missing_404".to_string(),
+                    reason: reason.to_string(),
                 })
             }
-            Err(_) => None,
+            Ok(DexieOfferFetch::Missing) => Some(StaleSweepHit {
+                market_id: market_id.clone(),
+                offer_id: offer_id.clone(),
+                reason: "offer_missing_404".to_string(),
+            }),
+            Ok(DexieOfferFetch::Mismatch) | Err(_) => None,
         };
         progress = record_stale_sweep_check(&progress, hit);
     }
@@ -181,5 +165,41 @@ mod tests {
         assert_eq!(progress.checked_offer_count, 1);
         assert_eq!(progress.requeue_market_ids, vec!["m2".to_string()]);
         assert_eq!(progress.hits[0].reason, "offer_missing_404");
+    }
+
+    #[tokio::test]
+    async fn detect_stale_open_offers_ignores_mismatch_and_transport() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state_with_metadata_at(
+                "offer-mismatch",
+                "m3",
+                "open",
+                Some(0),
+                &chrono::Utc::now().to_rfc3339(),
+                crate::storage::OfferCancelWrite {
+                    listing: crate::storage::OfferListingWrite::venue(Some("dexie")),
+                    ..Default::default()
+                },
+            )
+            .expect("seed");
+
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/offer-mismatch")
+            .with_status(200)
+            .with_body(r#"{"success":true,"offer":{"id":"other-id","status":6}}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+
+        let progress = detect_stale_open_offers_for_requeue(&store, &dexie, &["m3".to_string()])
+            .await
+            .expect("sweep");
+
+        assert_eq!(progress.checked_offer_count, 1);
+        assert!(progress.hits.is_empty());
+        assert!(progress.requeue_market_ids.is_empty());
     }
 }

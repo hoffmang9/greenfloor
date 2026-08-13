@@ -8,15 +8,14 @@ mod signer_denomination;
 mod test_overrides;
 mod unique_maker;
 
+pub(crate) use build_and_post::build_and_post_offer_on_cycle_store;
 #[cfg(test)]
 pub(crate) use build_and_post::empty_persist_artifacts_for_test;
+#[cfg(test)]
+pub(crate) use build_and_post::flush_build_and_post_persist;
 pub use build_and_post::{
-    build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
-    BuildAndPostOfferResponse, BuildAndPostRunOptions, BuildAndPostVenueOptions,
-    OperatorConfigPaths,
-};
-pub(crate) use build_and_post::{
-    build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
+    build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostOfferResponse,
+    BuildAndPostRunOptions, BuildAndPostVenueOptions, OperatorConfigPaths,
 };
 pub use ensure_size::ensure_size_n_offer;
 pub use logging::{

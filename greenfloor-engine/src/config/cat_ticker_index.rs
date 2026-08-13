@@ -73,6 +73,13 @@ pub fn lookup_asset_id_from_ticker(
     )))
 }
 
+/// Resolve a ticker or catalog symbol to an asset id, treating ambiguous tickers as a miss.
+#[must_use]
+pub fn resolve_asset_id_from_catalog(catalog: &[JsonValue], ticker: &str) -> Option<String> {
+    let index = build_cat_ticker_index_from_cats_rows(catalog);
+    lookup_asset_id_from_ticker(&index, ticker).ok().flatten()
+}
+
 impl CatTickerIndex {
     /// True when `label` is `asset_id` (hex) or a ticker that maps to it.
     ///

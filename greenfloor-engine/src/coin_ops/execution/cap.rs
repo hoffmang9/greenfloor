@@ -1,8 +1,5 @@
-/// Resolve combine input cap once at `CoinOpExecContext` construction.
+/// Resolve combine input cap from program config (minimum 2, default 5).
 #[must_use]
-pub fn resolve_combine_input_cap() -> i64 {
-    std::env::var("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<i64>().ok())
-        .map_or(5, |value| value.max(2))
+pub fn resolve_combine_input_cap(configured: i64) -> i64 {
+    configured.max(2)
 }
