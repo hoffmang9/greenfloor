@@ -67,6 +67,11 @@ fn parallel_transient_signer_error_classifies_reservation_and_upstream() {
     assert!(contention.is_parallel_dispatch_transient());
     let upstream = SignerError::http_timeout("dexie", "timed out");
     assert!(upstream.is_parallel_dispatch_transient());
+    let coinset = SignerError::http_connect(
+        "coinset",
+        "error sending request for url (https://api.coinset.org/): connection refused",
+    );
+    assert!(coinset.is_parallel_dispatch_transient());
     let locked: SignerError = PersistenceError::DatabaseLocked.into();
     assert!(locked.is_parallel_dispatch_transient());
     let fatal = SignerError::Other("permanent_offer_build_failure: bad puzzle".to_string());
@@ -93,6 +98,31 @@ fn classify_parallel_dispatch_transient_error_falls_back() {
             assert!(message.to_string().contains("busy"));
         }
         _ => panic!("expected transient fallback"),
+    }
+}
+
+#[test]
+fn classify_parallel_dispatch_retryable_coinset_falls_back() {
+    let err = SignerError::http_connect(
+        "coinset",
+        "error sending request for url (https://api.coinset.org/): connection refused",
+    );
+    match classify_parallel_dispatch(Err(err)) {
+        ParallelDispatchDecision::FallbackTransient(message) => {
+            assert!(message.to_string().contains("connection refused"));
+        }
+        _ => panic!("expected Coinset transport fallback"),
+    }
+}
+
+#[test]
+fn classify_parallel_dispatch_non_retryable_coinset_is_fatal() {
+    let err = SignerError::coinset("invalid puzzle hash");
+    match classify_parallel_dispatch(Err(err)) {
+        ParallelDispatchDecision::Fatal(message) => {
+            assert!(message.to_string().contains("invalid puzzle hash"));
+        }
+        _ => panic!("expected fatal Coinset error"),
     }
 }
 

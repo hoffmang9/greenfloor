@@ -184,8 +184,11 @@ async fn recover_fixed_hash_for_row(
 
 fn soft_fail_detail(err: SignerError) -> SignerResult<String> {
     match err {
-        // Transport / API failures should fail the whole discover, not hide as per-row noise.
-        SignerError::Transport(TransportError::Coinset(_)) => Err(err),
+        // Driver parse/spend misses stay per-row; HTTP/RPC failures abort discovery.
+        SignerError::Transport(TransportError::Driver(message)) => {
+            Ok(format!("driver error: {message}"))
+        }
+        err @ SignerError::Transport(_) => Err(err),
         other => Ok(other.to_string()),
     }
 }
@@ -198,7 +201,7 @@ fn soft_fail_detail(err: SignerError) -> SignerResult<String> {
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::TransportError::Coinset`] when Coinset access fails for a candidate.
+/// Returns a transport error when Coinset access fails for a candidate.
 pub async fn discover_orphan_presplit_candidates(
     client: &CoinsetClient,
     launcher_id: Bytes32,
@@ -321,6 +324,15 @@ mod tests {
         assert!(matches!(
             err,
             SignerError::Transport(TransportError::Coinset(_))
+        ));
+        let connect = soft_fail_detail(SignerError::http_connect("coinset", "connection refused"))
+            .expect_err("connect");
+        assert!(matches!(
+            connect,
+            SignerError::Transport(TransportError::Connect {
+                layer: "coinset",
+                ..
+            })
         ));
         let detail = soft_fail_detail(SignerError::driver("bad puzzle".to_string())).expect("soft");
         assert!(detail.contains("bad puzzle"));

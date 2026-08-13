@@ -195,8 +195,7 @@ impl CoinOpExecContext {
             request,
             true,
         )
-        .await
-        .map_err(SignerError::normalize_mixed_split_error)?;
+        .await?;
         spend_bundle_hash_from_hex(&result.spend_bundle_hex)
     }
 }

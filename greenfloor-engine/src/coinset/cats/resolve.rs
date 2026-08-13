@@ -24,7 +24,7 @@ fn unparseable_cat_lineage(detail: impl Into<String>) -> SignerError {
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::TransportError::Coinset`] on transport/API failure.
+/// Returns a transport error on HTTP/RPC failure.
 pub async fn fetch_parent_coin_spend(
     client: &CoinsetClient,
     parent_coin_info: Bytes32,

@@ -15,6 +15,16 @@ pub enum TransportError {
         layer: &'static str,
         message: String,
     },
+    #[error("http decode ({layer}): {message}")]
+    Decode {
+        layer: &'static str,
+        message: String,
+    },
+    #[error("http request ({layer}): {message}")]
+    Request {
+        layer: &'static str,
+        message: String,
+    },
     #[error("http error ({layer}): {message}")]
     Http {
         layer: &'static str,
@@ -38,6 +48,16 @@ impl TransportError {
             Self::Timeout { layer, message }
         } else if err.is_connect() {
             Self::Connect { layer, message }
+        } else if let Some(status) = err.status() {
+            Self::HttpStatus {
+                layer,
+                status: status.as_u16(),
+                message,
+            }
+        } else if err.is_decode() {
+            Self::Decode { layer, message }
+        } else if err.is_request() || err.is_body() {
+            Self::Request { layer, message }
         } else {
             Self::Http { layer, message }
         }
@@ -48,8 +68,19 @@ impl TransportError {
         matches!(self, Self::HttpStatus { status: 404, .. })
     }
 
+    /// True when Coinset/HTTP can be retried or parallel dispatch can fall back.
     #[must_use]
-    pub fn is_parallel_dispatch_transient(&self) -> bool {
-        matches!(self, Self::Timeout { .. } | Self::Connect { .. })
+    pub fn is_retryable_upstream(&self) -> bool {
+        matches!(
+            self,
+            Self::Timeout { .. }
+                | Self::Connect { .. }
+                | Self::Decode { .. }
+                | Self::Request { .. }
+                | Self::HttpStatus {
+                    status: 429 | 502 | 503 | 504,
+                    ..
+                }
+        )
     }
 }

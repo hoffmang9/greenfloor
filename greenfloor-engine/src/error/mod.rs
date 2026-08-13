@@ -37,12 +37,8 @@ pub enum SignerError {
 
 const MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE: &str = "Some selected coins are not spendable";
 
-fn mixed_split_selected_coins_not_spendable_message(message: &str) -> bool {
-    message.contains(MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE)
-}
-
 impl SignerError {
-    /// Coinset HTTP/RPC transport failure.
+    /// Coinset RPC application failure (`success: false`). HTTP/transport uses [`Self::from_reqwest`].
     #[must_use]
     pub fn coinset(message: impl Into<String>) -> Self {
         Self::Transport(TransportError::Coinset(message.into()))
@@ -70,6 +66,24 @@ impl SignerError {
     #[must_use]
     pub fn http_connect(layer: &'static str, message: impl Into<String>) -> Self {
         Self::Transport(TransportError::Connect {
+            layer,
+            message: message.into(),
+        })
+    }
+
+    /// HTTP decode failure (`reqwest::Error::is_decode`).
+    #[must_use]
+    pub fn http_decode(layer: &'static str, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Decode {
+            layer,
+            message: message.into(),
+        })
+    }
+
+    /// HTTP request/body failure (`reqwest::Error::is_request` / `is_body`).
+    #[must_use]
+    pub fn http_request(layer: &'static str, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Request {
             layer,
             message: message.into(),
         })
@@ -110,26 +124,16 @@ impl SignerError {
     }
 
     #[must_use]
-    pub fn normalize_mixed_split_error(err: Self) -> Self {
-        if matches!(
-            err,
-            Self::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
-        ) {
-            return err;
-        }
-        if mixed_split_selected_coins_not_spendable_message(&err.to_string()) {
-            VaultError::MixedSplitSelectedCoinsNotSpendable.into()
-        } else {
-            err
-        }
-    }
-
-    #[must_use]
     pub fn is_sqlite_fatal(&self) -> bool {
         match self {
             Self::Persistence(err) => err.is_sqlite_fatal(),
             _ => false,
         }
+    }
+
+    #[must_use]
+    pub fn is_retryable_upstream(&self) -> bool {
+        matches!(self, Self::Transport(err) if err.is_retryable_upstream())
     }
 
     #[must_use]
@@ -139,7 +143,7 @@ impl SignerError {
         }
         match self {
             Self::Persistence(err) => err.is_parallel_dispatch_transient(),
-            Self::Transport(err) => err.is_parallel_dispatch_transient(),
+            Self::Transport(err) => err.is_retryable_upstream(),
             _ => false,
         }
     }
@@ -149,6 +153,11 @@ pub type SignerResult<T> = Result<T, SignerError>;
 
 #[must_use]
 pub fn driver_error(err: &chia_sdk_driver::DriverError) -> SignerError {
+    if let chia_sdk_driver::DriverError::Custom(message) = err {
+        if message.contains(MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE) {
+            return VaultError::MixedSplitSelectedCoinsNotSpendable.into();
+        }
+    }
     SignerError::driver(err.to_string())
 }
 
@@ -228,6 +237,14 @@ mod tests {
                 "http connect (dexie): connection refused",
             ),
             (
+                SignerError::http_decode("coinset", "error decoding response body"),
+                "http decode (coinset): error decoding response body",
+            ),
+            (
+                SignerError::http_request("coinset", "error sending request"),
+                "http request (coinset): error sending request",
+            ),
+            (
                 SignerError::http_status("dexie_http_error", 404, "missing"),
                 "http status 404 (dexie_http_error): missing",
             ),
@@ -298,11 +315,33 @@ mod tests {
     }
 
     #[test]
-    fn parallel_dispatch_transient_rejects_non_transient_variants() {
+    fn parallel_dispatch_transient_classifies_coinset_and_http_status() {
         assert!(!SignerError::driver("invalid mod hash").is_parallel_dispatch_transient());
         assert!(!SignerError::http("dexie", "bad json").is_parallel_dispatch_transient());
         assert!(!SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
             .is_parallel_dispatch_transient());
+        assert!(!SignerError::coinset("connection refused").is_retryable_upstream());
+        assert!(!SignerError::coinset("invalid puzzle hash").is_retryable_upstream());
+        assert!(SignerError::http_connect("coinset", "connection refused").is_retryable_upstream());
+        assert!(
+            SignerError::http_decode("coinset", "error decoding response body")
+                .is_retryable_upstream()
+        );
+        assert!(
+            SignerError::http_request("coinset", "error sending request").is_retryable_upstream()
+        );
+        assert!(
+            SignerError::http_status("dexie_http_error", 503, "unavailable")
+                .is_retryable_upstream()
+        );
+        assert!(
+            !SignerError::http_status("dexie_http_error", 400, "Invalid Offer")
+                .is_retryable_upstream()
+        );
+        assert!(!SignerError::Other(
+            "parse body json: expected value at line 1 column 1".to_string()
+        )
+        .is_retryable_upstream());
     }
 
     #[test]
@@ -315,12 +354,6 @@ mod tests {
             !SignerError::Other("upstream: Some selected coins are not spendable".to_string())
                 .is_mixed_split_selected_coins_not_spendable()
         );
-        assert!(matches!(
-            SignerError::normalize_mixed_split_error(SignerError::Other(
-                "Some selected coins are not spendable".to_string()
-            )),
-            SignerError::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
-        ));
     }
 
     #[test]
@@ -337,5 +370,13 @@ mod tests {
 
         let from_impl: SignerError = DriverError::InvalidModHash.into();
         assert_eq!(from_impl.to_string(), mapped.to_string());
+
+        let unspendable = driver_error(&DriverError::Custom(
+            "Some selected coins are not spendable".to_string(),
+        ));
+        assert!(matches!(
+            unspendable,
+            SignerError::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
+        ));
     }
 }

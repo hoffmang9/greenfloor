@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use rand::Rng;
 
-use crate::cli_util::script_engine_error_retryable;
 use crate::error::{SignerError, SignerResult};
 
 /// Backoff policy for [`with_script_retries`].
@@ -86,7 +85,7 @@ where
     for attempt in 1..=policy.max_attempts {
         match operation().await {
             Ok(value) => return Ok(value),
-            Err(err) if attempt < policy.max_attempts && script_engine_error_retryable(&err) => {
+            Err(err) if attempt < policy.max_attempts && err.is_retryable_upstream() => {
                 tokio::time::sleep(retry_sleep_duration(policy, delay)).await;
                 delay = (delay * 2.0).min(8.0);
             }
@@ -129,7 +128,7 @@ where
         async move {
             future
                 .await
-                .map_err(|err| SignerError::coinset(err.to_string()))
+                .map_err(|err| SignerError::from_reqwest("coinset", &err))
         }
     })
     .await
@@ -155,9 +154,9 @@ mod tests {
             attempts += 1;
             async move {
                 if attempts == 1 {
-                    Err(SignerError::coinset(
-                        "error sending request for url (http://127.0.0.1:1/): connection refused"
-                            .to_string(),
+                    Err(SignerError::http_connect(
+                        "coinset",
+                        "error sending request for url (http://127.0.0.1:1/): connection refused",
                     ))
                 } else {
                     Ok("ok")

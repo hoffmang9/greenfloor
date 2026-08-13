@@ -52,8 +52,7 @@ async fn submit_bootstrap_vault_mixed_split(
         request,
         true,
     )
-    .await
-    .map_err(crate::error::SignerError::normalize_mixed_split_error)?;
+    .await?;
     Ok(mixed_split_result_json(&result))
 }
 

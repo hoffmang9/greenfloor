@@ -1,4 +1,3 @@
-use crate::cli_util::script_engine_error_retryable;
 use crate::coinset::{
     coin_id_from_record, ensure_coinset_rpc_success, post_coinset_coin_records,
     post_coinset_record, post_coinset_rpc, push_tx_hex, resolve_direct_client,
@@ -100,7 +99,7 @@ async fn coin_records_fails_on_success_false() {
     .await
     .expect_err("success=false");
     assert_eq!(err.to_string(), "coinset error: invalid puzzle hash");
-    assert!(!script_engine_error_retryable(&err));
+    assert!(!err.is_retryable_upstream());
 }
 
 #[tokio::test]
@@ -124,9 +123,12 @@ async fn coin_records_surfaces_retryable_error_on_http_503() {
     .expect_err("503");
     assert!(matches!(
         err,
-        SignerError::Transport(TransportError::Coinset(_))
+        SignerError::Transport(TransportError::Decode {
+            layer: "coinset",
+            ..
+        })
     ));
-    assert!(script_engine_error_retryable(&err));
+    assert!(err.is_retryable_upstream());
 }
 
 #[tokio::test]
