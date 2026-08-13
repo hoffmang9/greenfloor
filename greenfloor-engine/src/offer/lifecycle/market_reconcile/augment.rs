@@ -14,7 +14,7 @@ use super::super::dexie_index::index_list_offers_by_local_ids;
 use super::super::reconcile_prep::{
     ensure_watches_from_dexie_payload, fetch_dexie_offer, DexieFetchMode, DexieOfferFetch,
 };
-use super::super::{persist_missing_watched_offer, ReconcilePersistOptions};
+use super::super::{ReconcilePersistOptions, WatchedOfferReconciler};
 use super::transition::{note_reconcile_transition_side_effects, ReconcileMarketCycleMetrics};
 
 pub struct AugmentedDexieOffers {
@@ -33,16 +33,15 @@ fn apply_missing_watched_offer(
     let current_state = state_by_offer_id
         .get(watched_offer_id)
         .map_or("open", String::as_str);
-    let transition = persist_missing_watched_offer(
-        store,
+    let options = ReconcilePersistOptions {
+        action: "reconcile_coins_and_offers",
+        venue: Some(crate::config::Venue::Dexie),
+        dexie_error: Some(error_text),
+    };
+    let transition = WatchedOfferReconciler::new(store, &options).apply_missing(
         market_id,
         watched_offer_id,
         current_state,
-        &ReconcilePersistOptions {
-            action: "reconcile_coins_and_offers",
-            venue: Some(crate::config::Venue::Dexie),
-            dexie_error: Some(error_text),
-        },
     )?;
     note_reconcile_transition_side_effects(
         &transition,

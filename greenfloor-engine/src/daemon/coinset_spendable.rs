@@ -59,7 +59,11 @@ pub async fn coinset_spendable_profiles_for_signer(
         return Ok(profiles);
     }
     for asset_id in asset_ids {
-        let profile = profiles.get_mut(asset_id).expect("profile");
+        let profile = profiles.get_mut(asset_id).ok_or_else(|| {
+            crate::error::SignerError::Other(format!(
+                "spendable profile missing for asset {asset_id}"
+            ))
+        })?;
         let coins =
             list_wallet_unspent_coins_for_signer(network, signer, receive_address, asset_id)
                 .await?;

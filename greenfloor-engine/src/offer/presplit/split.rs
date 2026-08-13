@@ -108,7 +108,7 @@ where
     let delegated = ctx.delegated_spend(conditions).map_err(SignerError::from)?;
     let nonce = vault_ctx
         .infer_nonce_for_p2_hash(source_cat.info.p2_puzzle_hash)
-        .ok_or(SignerError::Driver(
+        .ok_or(SignerError::driver(
             "failed to infer vault nonce for cat p2 puzzle hash".to_string(),
         ))?;
     let inner_spend = build_vault_cat_inner_spend(

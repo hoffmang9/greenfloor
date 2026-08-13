@@ -29,20 +29,20 @@ pub fn persist_offer_lifecycle_transition(
 ) -> SignerResult<()> {
     if transition.new_state.is_terminal() {
         store.immediate_transaction("offer_lifecycle_terminal", |store| {
-            store.upsert_offer_state(
+            store.upsert_offer_reconcile_state(
                 offer_id,
                 market_id,
-                &transition.new_state.as_str(),
+                &transition.new_state,
                 last_seen_status,
             )?;
             store.clear_offer_coin_watches(offer_id)?;
             Ok(())
         })?;
     } else {
-        store.upsert_offer_state(
+        store.upsert_offer_reconcile_state(
             offer_id,
             market_id,
-            &transition.new_state.as_str(),
+            &transition.new_state,
             last_seen_status,
         )?;
     }

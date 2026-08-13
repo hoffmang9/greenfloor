@@ -53,11 +53,7 @@ pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };
-pub use signal_apply::{
-    apply_cancel_submitted_rows, apply_signals_to_row, apply_watched_offer_from_dexie_payload,
-    apply_watched_offer_signals, persist_missing_watched_offer,
-    persist_resolved_watched_transition,
-};
+pub use signal_apply::WatchedOfferReconciler;
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };

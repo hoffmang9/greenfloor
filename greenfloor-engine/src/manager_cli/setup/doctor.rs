@@ -22,7 +22,23 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     let state_db = ctx.state_db_override();
     let testnet_markets_path = ctx.testnet_markets_path();
     let program = load_program_config(program_path)?;
-    let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
+    let markets = match load_markets_config_with_overlay(markets_path, testnet_markets_path) {
+        Ok(markets) => markets,
+        Err(err) => {
+            let db_path = resolve_state_db_path(&program.home_dir, state_db);
+            ctx.emit_json(&json!({
+                "ok": false,
+                "program_config": program_path.display().to_string(),
+                "markets_config": markets_path.display().to_string(),
+                "state_db": db_path.display().to_string(),
+                "enabled_markets": 0,
+                "resolved_key_ids": Vec::<String>::new(),
+                "warnings": Vec::<String>::new(),
+                "problems": [format!("markets_config_error:{err}")],
+            }))?;
+            return Ok(2);
+        }
+    };
     let mut problems = Vec::new();
     let mut warnings = Vec::new();
     let enabled_markets: Vec<_> = markets.markets.iter().filter(|m| m.enabled).collect();
@@ -132,7 +148,7 @@ mod tests {
         assert!(problems.iter().any(|problem| {
             problem
                 .as_str()
-                .is_some_and(|text| text.contains("missing signer_key_id"))
+                .is_some_and(|text| text.contains("signer_key_id"))
         }));
     }
 

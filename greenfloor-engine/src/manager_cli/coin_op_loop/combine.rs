@@ -2,9 +2,9 @@ use crate::async_boundary::ManagerCommandFuture;
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_combine_gate;
+use crate::coin_ops::resolve_combine_count;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::ladder::resolve_combine_count;
 use crate::offer::pricing::combine_threshold_count;
 
 use super::combine_iteration::{run_combine_iteration, CombineIterationParams};

@@ -18,9 +18,14 @@ pub struct DexieClient {
 
 impl DexieClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        Self::with_http(base_url, crate::adapters::shared_http_client())
+    }
+
+    #[must_use]
+    pub fn with_http(base_url: impl Into<String>, http: reqwest::Client) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 

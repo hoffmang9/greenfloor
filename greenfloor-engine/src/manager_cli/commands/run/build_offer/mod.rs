@@ -2,7 +2,7 @@ use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::util::require_market_selector;
 use crate::offer::operator::{
-    build_and_post_offer, BuildAndPostOfferRequestParts, BuildAndPostRunOptions,
+    build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
     BuildAndPostVenueOptions,
 };
 
@@ -33,34 +33,32 @@ pub(crate) fn build_and_post_request(
     };
 
     require_market_selector(market_id.as_deref(), pair.as_deref())?;
-    Ok(
-        crate::offer::operator::BuildAndPostOfferRequest::from_parts(
-            BuildAndPostOfferRequestParts {
-                program_path: ctx.program_config.clone(),
-                markets_path: ctx.markets_config.clone(),
-                testnet_markets_path: ctx.testnet_markets_path().map(std::path::Path::to_path_buf),
-                cats_path: Some(ctx.cats_config.clone()),
-                network: network.clone(),
-                market_id: market_id.clone(),
-                pair: pair.clone(),
-                size_base_units: *size_base_units,
-                repeat: *repeat,
-                publish_venue: venue.clone(),
-                dexie_base_url: dexie_base_url.clone().or(ctx.dexie_base_url.clone()),
-                splash_base_url: splash_base_url.clone(),
-                venue: BuildAndPostVenueOptions {
-                    drop_only: !allow_take,
-                    claim_rewards: *claim_rewards,
-                },
-                run: BuildAndPostRunOptions {
-                    dry_run: *dry_run,
-                    persist_results: true,
-                },
-                action_side: None,
-                maker_reuse: None,
-            },
-        ),
-    )
+    Ok(BuildAndPostOfferRequest {
+        program_path: ctx.program_config.clone(),
+        markets_path: ctx.markets_config.clone(),
+        testnet_markets_path: ctx.testnet_markets_path().map(std::path::Path::to_path_buf),
+        cats_path: Some(ctx.cats_config.clone()),
+        network: network.clone(),
+        market_id: market_id.clone(),
+        pair: pair.clone(),
+        size_base_units: *size_base_units,
+        repeat: *repeat,
+        publish_venue: venue.clone(),
+        dexie_base_url: dexie_base_url.clone().or(ctx.dexie_base_url.clone()),
+        splash_base_url: splash_base_url.clone(),
+        venue: BuildAndPostVenueOptions {
+            drop_only: !allow_take,
+            claim_rewards: *claim_rewards,
+        },
+        run: BuildAndPostRunOptions {
+            dry_run: *dry_run,
+            persist_results: true,
+        },
+        action_side: None,
+        maker_reuse: None,
+        #[cfg(test)]
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
+    })
 }
 
 pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> SignerResult<i32> {

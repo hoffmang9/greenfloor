@@ -84,6 +84,11 @@ impl SpendableCoin {
     }
 }
 
+pub(crate) fn coin_id_is_excluded(coin_id: &str, exclude_coin_ids: &HashSet<String>) -> bool {
+    let lower = coin_id.to_ascii_lowercase();
+    exclude_coin_ids.contains(coin_id) || exclude_coin_ids.contains(&lower)
+}
+
 #[must_use]
 pub fn select_largest_spendable_coin<'a>(
     coins: &'a [SpendableCoin],
@@ -94,7 +99,7 @@ pub fn select_largest_spendable_coin<'a>(
         .iter()
         .filter(|coin| {
             !coin.id.is_empty()
-                && !exclude_coin_ids.contains(&coin.id)
+                && !coin_id_is_excluded(&coin.id, exclude_coin_ids)
                 && coin.amount >= min_amount_mojos
         })
         .max_by_key(|coin| coin.amount)
@@ -112,7 +117,7 @@ pub fn select_exact_amount_coin_ids(
         if coin.id.is_empty() {
             continue;
         }
-        if exclude_coin_ids.contains(&coin.id.to_ascii_lowercase()) {
+        if coin_id_is_excluded(&coin.id, exclude_coin_ids) {
             continue;
         }
         if coin.amount != amount_mojos {
@@ -126,6 +131,116 @@ pub fn select_exact_amount_coin_ids(
         }
     }
     selected
+}
+
+/// Operator coin-selection mode (amount-scaled). Coinset CAT listing maps coins
+/// to [`SpendableCoin`] and delegates here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FundingSelectionMode {
+    /// Accumulate smallest coins until the running total covers `target_amount`.
+    SmallestFirst,
+    /// Subset-sum cover of `target_amount` (shape / bootstrap combine-first).
+    TargetCover,
+    /// Pick coins whose amount equals `target_amount` (exact-denomination combine).
+    ExactDenom,
+    /// Use every listed coin in input order (explicit coin-id sets).
+    AllListed,
+}
+
+/// Select coin ids for `mode`. `target_amount` is on-chain mojos.
+/// `cap` limits how many ids are returned (`None` = unbounded).
+#[must_use]
+pub fn select_funding_coin_ids(
+    mode: FundingSelectionMode,
+    coins: &[SpendableCoin],
+    target_amount: i64,
+    exclude_coin_ids: Option<&HashSet<String>>,
+    cap: Option<usize>,
+) -> Vec<String> {
+    let excluded = exclude_coin_ids.cloned().unwrap_or_default();
+    match mode {
+        FundingSelectionMode::ExactDenom => {
+            select_exact_amount_coin_ids(coins, target_amount, &excluded, cap)
+        }
+        FundingSelectionMode::TargetCover => {
+            let options = TargetAmountSelectionOptions {
+                max_input_count: cap,
+                ..TargetAmountSelectionOptions::default()
+            };
+            let (ids, _, _) = select_spendable_coins_for_target_amount_with_options(
+                coins,
+                target_amount,
+                options,
+            );
+            ids
+        }
+        FundingSelectionMode::SmallestFirst => {
+            select_smallest_first_spendable_ids(coins, target_amount, &excluded, cap)
+        }
+        FundingSelectionMode::AllListed => select_all_listed_spendable_ids(coins, &excluded, cap),
+    }
+}
+
+fn select_all_listed_spendable_ids(
+    coins: &[SpendableCoin],
+    exclude_coin_ids: &HashSet<String>,
+    cap: Option<usize>,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    for coin in coins {
+        if coin.id.is_empty() || coin_id_is_excluded(&coin.id, exclude_coin_ids) {
+            continue;
+        }
+        ids.push(coin.id.clone());
+        if cap.is_some_and(|limit| ids.len() >= limit) {
+            break;
+        }
+    }
+    ids
+}
+
+fn select_smallest_first_spendable_ids(
+    coins: &[SpendableCoin],
+    target_amount: i64,
+    exclude_coin_ids: &HashSet<String>,
+    cap: Option<usize>,
+) -> Vec<String> {
+    if target_amount <= 0 {
+        return Vec::new();
+    }
+    let mut eligible: Vec<&SpendableCoin> = coins
+        .iter()
+        .filter(|coin| {
+            !coin.id.is_empty()
+                && !coin_id_is_excluded(&coin.id, exclude_coin_ids)
+                && coin.amount > 0
+        })
+        .collect();
+    if let Some(coin) = eligible.iter().find(|coin| coin.amount == target_amount) {
+        return vec![coin.id.clone()];
+    }
+    if let Some(coin) = eligible
+        .iter()
+        .filter(|coin| coin.amount >= target_amount)
+        .min_by_key(|coin| coin.amount)
+    {
+        return vec![coin.id.clone()];
+    }
+    eligible.sort_by_key(|coin| coin.amount);
+    let mut selected = Vec::new();
+    let mut running = 0i64;
+    for coin in eligible {
+        running = running.saturating_add(coin.amount);
+        selected.push(coin.id.clone());
+        if cap.is_some_and(|max| selected.len() >= max) || running >= target_amount {
+            break;
+        }
+    }
+    if running >= target_amount {
+        selected
+    } else {
+        Vec::new()
+    }
 }
 
 /// Whether splitting `selected_amount_mojos` down to `required_amount_mojos` leaves CAT dust.
@@ -477,5 +592,27 @@ mod tests {
             set,
             HashSet::from(["old25_a", "old25_b", "remainder"].map(str::to_string))
         );
+    }
+
+    #[test]
+    fn funding_selection_mode_dispatches_exact_and_smallest() {
+        let list = coins(&[("tiny", 100), ("exact", 1000), ("big", 2500)]);
+        let exact =
+            select_funding_coin_ids(FundingSelectionMode::ExactDenom, &list, 1000, None, Some(2));
+        assert_eq!(exact, vec!["exact"]);
+        let smallest =
+            select_funding_coin_ids(FundingSelectionMode::SmallestFirst, &list, 1000, None, None);
+        assert_eq!(smallest, vec!["exact"]);
+        let cover = select_funding_coin_ids(
+            FundingSelectionMode::TargetCover,
+            &list,
+            2600,
+            None,
+            Some(3),
+        );
+        assert!(!cover.is_empty());
+        let listed =
+            select_funding_coin_ids(FundingSelectionMode::AllListed, &list, 2600, None, None);
+        assert_eq!(listed, vec!["tiny", "exact", "big"]);
     }
 }

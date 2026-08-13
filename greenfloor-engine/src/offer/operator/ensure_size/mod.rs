@@ -16,14 +16,12 @@ use crate::offer::presplit::PresplitOfferBinding;
 use crate::offer::reclaim::reclaim_presplit_maker_coin;
 use crate::offer::request::effective_offer_side;
 use crate::offer::types::{effective_maker_reuse, OfferTerms, PresplitMakerReuse};
-use crate::storage::{upsert_offer_post_record, CycleWriteStore, ReusablePresplitMakerRow};
+use crate::storage::{CycleWriteStore, ReusablePresplitMakerRow};
 use crate::vault::session::resolve_vault_spend_context;
 
 use self::selection::{decide_ensure_reuse, EnsureReuseKind};
-use super::{
-    build_and_post_offer_with_persist_artifacts, flush_build_and_post_persist,
-    BuildAndPostOfferRequest, BuildAndPostOfferRequestParts,
-};
+use super::{build_and_post_offer_on_cycle_store, BuildAndPostOfferRequest};
+#[cfg(test)]
 use crate::offer::operator::UniqueMakerPinSession;
 
 /// Shared plan inputs for hash compare (must match create/post asset resolution).
@@ -71,9 +69,9 @@ fn planned_fixed_hash(
 }
 
 fn with_maker_reuse(
-    parts: &BuildAndPostOfferRequestParts,
+    parts: &BuildAndPostOfferRequest,
     reuse: Option<&ReusablePresplitMakerRow>,
-) -> BuildAndPostOfferRequestParts {
+) -> BuildAndPostOfferRequest {
     let mut next = parts.clone();
     next.maker_reuse = reuse.and_then(|row| {
         let candidate = PresplitMakerReuse {
@@ -86,39 +84,14 @@ fn with_maker_reuse(
 }
 
 async fn post_offer(
-    parts: &BuildAndPostOfferRequestParts,
+    parts: &BuildAndPostOfferRequest,
     write_store: &CycleWriteStore,
     reuse: Option<&ReusablePresplitMakerRow>,
     unique_maker_coins: bool,
 ) -> SignerResult<bool> {
-    // Unique Direct pin lives in build_and_post (after market context resolve).
-    let post_request = BuildAndPostOfferRequest::from_parts(with_maker_reuse(parts, reuse));
-    let market_id = post_request
-        .market_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| SignerError::Other("ensure_size post requires market_id".to_string()))?;
-    let mut session = write_store.sync(|store| {
-        UniqueMakerPinSession::begin(
-            store,
-            market_id,
-            post_request.run.dry_run,
-            unique_maker_coins,
-            post_request.maker_reuse.as_ref(),
-        )
-    })?;
-    let persist_store = write_store.clone();
-    let mut persist = move |record: &crate::storage::OfferPostPersistRecord| {
-        persist_store.sync(|store| upsert_offer_post_record(store, record))
-    };
-    let (response, artifacts) =
-        build_and_post_offer_with_persist_artifacts(post_request, Some(&mut persist), &mut session)
-            .await?;
-    if let Some(artifacts) = artifacts {
-        let store = write_store.lock()?;
-        flush_build_and_post_persist(&store, &artifacts)?;
-    }
+    let post_request = with_maker_reuse(parts, reuse);
+    let response =
+        build_and_post_offer_on_cycle_store(post_request, write_store, unique_maker_coins).await?;
     Ok(response.exit_code == 0)
 }
 
@@ -175,7 +148,7 @@ pub async fn ensure_size_n_offer(
     signer: SignerConfig,
     ticker_index: &crate::config::CatTickerIndex,
     market: &MarketConfig,
-    parts: BuildAndPostOfferRequestParts,
+    parts: BuildAndPostOfferRequest,
 ) -> SignerResult<bool> {
     let side = effective_offer_side(parts.action_side.as_deref()).to_string();
     let size_i64 =
@@ -255,7 +228,7 @@ pub async fn ensure_size_n_offer(
 
 async fn apply_reoffer(
     write_store: &CycleWriteStore,
-    parts: &BuildAndPostOfferRequestParts,
+    parts: &BuildAndPostOfferRequest,
     candidate: &ReusablePresplitMakerRow,
     lease: ExpiredMakerLease<'_>,
     unique_maker_coins: bool,
@@ -283,7 +256,7 @@ async fn apply_reoffer(
 async fn apply_reclaim_and_post(
     write_store: &CycleWriteStore,
     signer: SignerConfig,
-    parts: &BuildAndPostOfferRequestParts,
+    parts: &BuildAndPostOfferRequest,
     candidate: &ReusablePresplitMakerRow,
     lease: ExpiredMakerLease<'_>,
     unique_maker_coins: bool,
@@ -431,7 +404,7 @@ mod tests {
             markets_path: dir.path().join("markets.yaml"),
             testnet_markets_path: None,
         };
-        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
+        let parts = BuildAndPostOfferRequest::for_ensure_size(
             &paths,
             &program,
             "mainnet",
@@ -465,9 +438,8 @@ mod tests {
             markets_path: dir.path().join("markets.yaml"),
             testnet_markets_path: None,
         };
-        let mut parts = BuildAndPostOfferRequestParts::for_ensure_size(
-            &paths, &program, "mainnet", "m1", 1, "sell",
-        );
+        let mut parts =
+            BuildAndPostOfferRequest::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
         parts.market_id = None;
         let err = post_offer(&parts, &write_store, None, true)
             .await
@@ -546,9 +518,8 @@ mod tests {
             markets_path,
             testnet_markets_path: None,
         };
-        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
-            &paths, &program, "mainnet", "m1", 1, "sell",
-        );
+        let parts =
+            BuildAndPostOfferRequest::for_ensure_size(&paths, &program, "mainnet", "m1", 1, "sell");
 
         // Dry-run gates live pin, so begin is inactive; post still runs.
         let posted = post_offer(&parts, &write_store, None, true)
@@ -651,7 +622,7 @@ mod tests {
             markets_path: dir.path().join("markets.yaml"),
             testnet_markets_path: None,
         };
-        let parts = BuildAndPostOfferRequestParts::for_ensure_size(
+        let parts = BuildAndPostOfferRequest::for_ensure_size(
             &paths, &program, "mainnet", "m1", 10, "sell",
         );
         let row = ReusablePresplitMakerRow {

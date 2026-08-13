@@ -1,49 +1,18 @@
 //! `coins-balance`: vault-controlled CAT total (receive + known unreturned makers).
 
-use std::collections::HashSet;
-
 use serde_json::json;
 
+use crate::coin_ops::vault_controlled_balance;
 use crate::coinset::{
     client_for_signer_on_network, list_wallet_unspent_coins_for_signer, LiveCoinset,
-    OfferCoinsetBackend,
 };
 use crate::config::{
     load_gated_operator_market, GatedOperatorMarketLoadRequest, OperatorMarketCommand,
 };
-use crate::cycle::{OfferLifecycleState, ReconcileState};
 use crate::error::{SignerError, SignerResult};
-use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::manager_cli::asset_resolve::resolve_market_inventory_asset_id;
 use crate::manager_cli::context::ManagerContext;
 use crate::storage::{resolve_state_db_path, SqliteStore};
-
-#[must_use]
-fn vault_controlled_total(receive_amount: u64, unreturned_amount: u64) -> u64 {
-    receive_amount.saturating_add(unreturned_amount)
-}
-
-/// Prefer open/active rows when multiple `offer_state` rows share a maker coin id.
-#[must_use]
-fn unreturned_row_priority(state: Option<&ReconcileState>) -> u8 {
-    match state {
-        Some(
-            ReconcileState::Lifecycle(
-                OfferLifecycleState::Open
-                | OfferLifecycleState::RefreshDue
-                | OfferLifecycleState::MempoolObserved,
-            )
-            | ReconcileState::PendingVisibility,
-        ) => 0,
-        Some(ReconcileState::Lifecycle(OfferLifecycleState::Expired)) => 1,
-        _ => 2,
-    }
-}
-
-#[must_use]
-fn cat_matches_asset_filter(cat_asset_id: &str, filter_asset_id: &str) -> bool {
-    normalize_hex_id(cat_asset_id) == normalize_hex_id(filter_asset_id)
-}
 
 /// Vault-controlled balance for one asset: receive inventory + known unreturned makers.
 ///
@@ -89,70 +58,45 @@ pub async fn run_coins_balance(
 
     let db_path = resolve_state_db_path(&loaded.program.home_dir, mgr.state_db_override());
     let store = SqliteStore::open(&db_path)?;
-    let mut makers: Vec<_> = store
-        .list_unreturned_presplit_makers(Some(&market.market_id))?
-        .into_iter()
-        .map(|row| {
-            let state = ReconcileState::parse(&row.state).ok();
-            (row, state)
-        })
-        .collect();
-    makers.sort_by(|(a, a_state), (b, b_state)| {
-        unreturned_row_priority(a_state.as_ref())
-            .cmp(&unreturned_row_priority(b_state.as_ref()))
-            .then_with(|| a.offer_id.cmp(&b.offer_id))
-    });
-
     let coinset = client_for_signer_on_network(&loaded.signer, &loaded.operator_network)?;
     let backend = LiveCoinset(&coinset);
+    let balance = vault_controlled_balance(
+        &store,
+        &backend,
+        &market.market_id,
+        &list_asset_id,
+        receive_amount,
+    )
+    .await?;
 
-    let mut seen_coins = HashSet::new();
-    let mut unreturned_amount = 0u64;
-    let mut unreturned_coins = Vec::new();
-    for (row, state) in makers {
-        let coin_id = normalize_hex_id(&row.cancel_input_coin_id);
-        if !seen_coins.insert(coin_id.clone()) {
-            continue;
-        }
-        let Ok(bytes) = hex_to_bytes32(&coin_id) else {
-            continue;
-        };
-        let amount = match backend.fetch_offer_input_cat(bytes).await {
-            Ok(cat) => {
-                let maker_asset = hex::encode(cat.info.asset_id);
-                if !cat_matches_asset_filter(&maker_asset, &list_asset_id) {
-                    continue;
-                }
-                cat.coin.amount
-            }
-            Err(SignerError::PresplitCoinNotFound) => continue,
-            Err(err) => return Err(err),
-        };
-        unreturned_amount = unreturned_amount.saturating_add(amount);
-        unreturned_coins.push(json!({
-            "coin_id": coin_id,
-            "amount": amount,
-            "fixed_delegated_puzzle_hash": normalize_hex_id(&row.fixed_delegated_puzzle_hash),
-            "offer_id": row.offer_id,
-            "state": row.state,
-            "size_base_units": row.size_base_units,
-            "reclaimable": state.as_ref().is_some_and(ReconcileState::is_ops_reclaimable),
-        }));
-    }
+    let unreturned_coins: Vec<_> = balance
+        .unreturned_coins
+        .iter()
+        .map(|coin| {
+            json!({
+                "coin_id": coin.coin_id,
+                "amount": coin.amount,
+                "fixed_delegated_puzzle_hash": coin.fixed_delegated_puzzle_hash,
+                "offer_id": coin.offer_id,
+                "state": coin.state,
+                "size_base_units": coin.size_base_units,
+                "reclaimable": coin.reclaimable,
+            })
+        })
+        .collect();
 
-    let vault_controlled_amount = vault_controlled_total(receive_amount, unreturned_amount);
     let payload = json!({
         "op": "coins-balance",
         "network": loaded.operator_network,
         "market_id": market.market_id,
         "asset": list_asset_id,
         "receive_address": receive_address,
-        "receive_amount": receive_amount,
-        "receive_units": crate::coin_ops::cat_units_display_from_mojos(receive_amount),
-        "unreturned_amount": unreturned_amount,
-        "unreturned_units": crate::coin_ops::cat_units_display_from_mojos(unreturned_amount),
-        "vault_controlled_amount": vault_controlled_amount,
-        "vault_controlled_units": crate::coin_ops::cat_units_display_from_mojos(vault_controlled_amount),
+        "receive_amount": balance.receive_amount,
+        "receive_units": crate::coin_ops::cat_units_display_from_mojos(balance.receive_amount),
+        "unreturned_amount": balance.unreturned_amount,
+        "unreturned_units": crate::coin_ops::cat_units_display_from_mojos(balance.unreturned_amount),
+        "vault_controlled_amount": balance.vault_controlled_amount,
+        "vault_controlled_units": crate::coin_ops::cat_units_display_from_mojos(balance.vault_controlled_amount),
         "unreturned_coins": unreturned_coins,
         "note": "Open makers are listed with reclaimable=false; reclaim idle/expired via offers-reclaim-presplit.",
     });
@@ -162,8 +106,7 @@ pub async fn run_coins_balance(
 
 #[cfg(test)]
 mod tests {
-    use super::{cat_matches_asset_filter, unreturned_row_priority, vault_controlled_total};
-    use crate::cycle::{OfferLifecycleState, ReconcileState};
+    use crate::cycle::{unreturned_row_priority, OfferLifecycleState, ReconcileState};
 
     fn priority_for(raw: &str) -> u8 {
         unreturned_row_priority(ReconcileState::parse(raw).ok().as_ref())
@@ -214,21 +157,6 @@ mod tests {
             0
         );
         assert_eq!(unreturned_row_priority(None), 2);
-    }
-
-    #[test]
-    fn vault_controlled_sums_receive_and_unreturned() {
-        assert_eq!(vault_controlled_total(1_000, 2_000), 3_000);
-        assert_eq!(vault_controlled_total(u64::MAX, 1), u64::MAX);
-    }
-
-    #[test]
-    fn unreturned_makers_filter_by_asset_id() {
-        let asset_a = "aa".repeat(32);
-        let asset_b = "bb".repeat(32);
-        assert!(cat_matches_asset_filter(&asset_a, &asset_a));
-        assert!(cat_matches_asset_filter(&format!("0x{asset_a}"), &asset_a));
-        assert!(!cat_matches_asset_filter(&asset_a, &asset_b));
     }
 
     #[tokio::test]

@@ -18,7 +18,6 @@ pub(crate) enum OfferPlan {
     ExistingPresplit {
         offer_nonce: Bytes32,
     },
-    RequiresSplitFlag,
     Direct {
         selection: SelectedCats,
         offer_nonce: Bytes32,
@@ -103,7 +102,9 @@ pub(crate) async fn plan_vault_cat_offer<C: OfferCoinsetBackend>(
                     selection,
                     offer_nonce,
                 },
-                OfferInput::Direct { .. } => OfferPlan::RequiresSplitFlag,
+                OfferInput::Direct { .. } => {
+                    return Err(SignerError::OfferInputRequiresPresplit);
+                }
                 OfferInput::PresplitExisting { .. } => unreachable!(),
             })
         }
@@ -206,7 +207,7 @@ mod tests {
     fn direct_input_requires_split_flag_when_change_without_presplit() {
         assert!(matches!(
             direct_plan_kind_for_amounts(5000, 1000, 1),
-            Ok(DirectPlanKind::RequiresSplitFlag)
+            Err(SignerError::OfferInputRequiresPresplit)
         ));
         assert!(matches!(
             direct_plan_kind_for_amounts(1000, 1000, 1),
@@ -250,7 +251,6 @@ mod tests {
 
     enum DirectPlanKind {
         Direct,
-        RequiresSplitFlag,
     }
 
     fn direct_plan_kind_for_amounts(
@@ -264,7 +264,7 @@ mod tests {
             }
             Ok(DirectPlanKind::Direct)
         } else {
-            Ok(DirectPlanKind::RequiresSplitFlag)
+            Err(SignerError::OfferInputRequiresPresplit)
         }
     }
 }

@@ -32,7 +32,10 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
                 .ok_or_else(|| config_err("markets entries must be mappings"))?;
             parse_market_row(row)
         })
-        .collect::<SignerResult<_>>()?;
+        .collect::<SignerResult<Vec<_>>>()?;
+    for market in &markets {
+        validate_enabled_market(market)?;
+    }
     Ok(MarketsConfig { markets })
 }
 
@@ -66,6 +69,31 @@ fn parse_market_row(row: &Map<String, Value>) -> SignerResult<MarketConfig> {
         cancel_move_threshold_bps: parsed.cancel_move_threshold_bps,
         ladders,
     })
+}
+
+fn validate_enabled_market(market: &MarketConfig) -> SignerResult<()> {
+    if !market.enabled {
+        return Ok(());
+    }
+    if market.receive_address.trim().is_empty() {
+        return Err(config_err(format!(
+            "market {} enabled but receive_address is empty",
+            market.market_id
+        )));
+    }
+    if market.signer_key_id.trim().is_empty() {
+        return Err(config_err(format!(
+            "market {} enabled but signer_key_id is empty",
+            market.market_id
+        )));
+    }
+    if market.base_asset.trim().is_empty() {
+        return Err(config_err(format!(
+            "market {} enabled but base_asset is empty",
+            market.market_id
+        )));
+    }
+    Ok(())
 }
 
 fn parse_ladders(

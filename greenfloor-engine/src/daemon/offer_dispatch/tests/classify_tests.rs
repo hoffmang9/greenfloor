@@ -86,10 +86,10 @@ fn classify_parallel_dispatch_success_returns_output() {
 
 #[test]
 fn classify_parallel_dispatch_transient_error_falls_back() {
-    let err = SignerError::Other("ReservationContentionError: busy".to_string());
+    let err = SignerError::ReservationContention("busy".to_string());
     match classify_parallel_dispatch(Err(err)) {
         ParallelDispatchDecision::FallbackTransient(message) => {
-            assert!(message.to_string().contains("ReservationContentionError"));
+            assert!(message.to_string().contains("busy"));
         }
         _ => panic!("expected transient fallback"),
     }
@@ -113,7 +113,7 @@ async fn record_parallel_fallback_audit_persists_event() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = CycleWriteStore::open(&db_path).expect("open");
-    let err = SignerError::Other("ReservationContentionError: simulated".to_string());
+    let err = SignerError::ReservationContention("simulated".to_string());
     record_parallel_fallback_audit(&store, "m1", &err).expect("audit");
     let events = lock_shared_store_for_test(&store)
         .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)

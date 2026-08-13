@@ -45,7 +45,7 @@ pub(super) async fn create_offer(
             expires_at_unix: 4_000_000_000,
             offer_amount: size_base_units,
             request_amount: 1,
-            execution_mode: "signer_test_stub".to_string(),
+            execution_mode: crate::offer::OfferExecutionMode::Direct,
             create_result: None,
         });
     }

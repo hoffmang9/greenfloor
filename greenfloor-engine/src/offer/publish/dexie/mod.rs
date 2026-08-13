@@ -3,6 +3,7 @@ use serde_json::json;
 use crate::adapters::{DexieClient, DexieResponse};
 use crate::cycle::{dexie_invalid_offer_retry_sleep, dexie_invalid_offer_should_retry};
 use crate::error::SignerResult;
+use crate::offer::lifecycle::reconcile_prep::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
 
 use super::{dexie_offer_asset_expectation_error, ExpectedPublishAssetFields};
 
@@ -97,40 +98,30 @@ pub(super) async fn poll_dexie_offer_visibility_once(
     offer_id: &str,
     expected: &ExpectedPublishAssetFields,
 ) -> OfferVisibilityPoll {
-    let payload = match dexie.get_offer(offer_id).await {
-        Ok(payload) => payload,
-        Err(err) => {
-            return OfferVisibilityPoll::Retry(format!("dexie_get_offer_error:{err}"));
-        }
-    };
-    if payload.is_explicit_failure() {
-        let error = if payload.error_text().is_empty() {
-            "dexie_offer_not_visible_after_publish".to_string()
-        } else {
-            payload.error_text().to_string()
+    let fetched = fetch_dexie_offer(dexie, offer_id, DexieFetchMode::HealStrict).await;
+    if !fetched.visibility_ready() {
+        return match fetched {
+            DexieOfferFetch::Missing(err) => OfferVisibilityPoll::Retry(err),
+            DexieOfferFetch::Mismatch => {
+                OfferVisibilityPoll::Retry("dexie_offer_visibility_payload_mismatch".to_string())
+            }
+            DexieOfferFetch::LookupError(err) => {
+                OfferVisibilityPoll::Retry(format!("dexie_get_offer_error:{err}"))
+            }
+            DexieOfferFetch::Found(_) => unreachable!("visibility_ready is true for Found"),
         };
-        return OfferVisibilityPoll::Retry(error);
     }
-    let offer_payload = payload.offer_payload();
-    let visible_id = offer_payload
-        .and_then(serde_json::Value::as_object)
-        .and_then(|obj| obj.get("id"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .trim();
-    if visible_id != offer_id {
-        return OfferVisibilityPoll::Retry("dexie_offer_visibility_payload_mismatch".to_string());
-    }
-    if let Some(offer_obj) = offer_payload.and_then(serde_json::Value::as_object) {
-        if let Some(asset_error) = dexie_offer_asset_expectation_error(
-            offer_obj.get("offered").unwrap_or(&serde_json::Value::Null),
-            offer_obj
-                .get("requested")
-                .unwrap_or(&serde_json::Value::Null),
-            expected,
-        ) {
-            return OfferVisibilityPoll::Failed(asset_error);
-        }
+    let DexieOfferFetch::Found(offer_obj) = fetched else {
+        unreachable!("visibility_ready is true for Found");
+    };
+    if let Some(asset_error) = dexie_offer_asset_expectation_error(
+        offer_obj.get("offered").unwrap_or(&serde_json::Value::Null),
+        offer_obj
+            .get("requested")
+            .unwrap_or(&serde_json::Value::Null),
+        expected,
+    ) {
+        return OfferVisibilityPoll::Failed(asset_error);
     }
     OfferVisibilityPoll::Ready
 }

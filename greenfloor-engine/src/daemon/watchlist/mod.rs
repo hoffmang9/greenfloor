@@ -38,7 +38,10 @@ pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let mut offer_ids = HashSet::default();
     for row in store.list_offer_states(Some(market_id), 500)? {
-        if ReconcileState::parse(&row.state).is_ok_and(|state| state.is_watched_for_reconcile()) {
+        if row
+            .reconcile_state()
+            .is_ok_and(|state| state.is_watched_for_reconcile())
+        {
             offer_ids.insert(row.offer_id);
         }
     }

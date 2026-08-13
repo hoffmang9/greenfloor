@@ -41,7 +41,7 @@ async fn fetch_all_coinset_pages_follows_cursor_for_typed_responses() {
                     next_cursor: None,
                 })
             }
-            Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
+            Some(other) => Err(SignerError::coinset(format!("unexpected cursor {other}"))),
         }
     })
     .await
@@ -116,7 +116,7 @@ async fn coin_records_from_json_endpoint_follows_cursor() {
                         next_cursor: None,
                     },
                 )),
-                Some(other) => Err(SignerError::Coinset(format!("unexpected cursor {other}"))),
+                Some(other) => Err(SignerError::coinset(format!("unexpected cursor {other}"))),
             }
         })
         .await

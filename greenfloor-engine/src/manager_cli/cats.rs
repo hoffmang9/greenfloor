@@ -50,10 +50,11 @@ async fn lookup_dexie_cat_row(
     if !use_dexie_lookup {
         return Ok(None);
     }
+    let program = crate::config::load_program_config(&ctx.program_config)?;
     let dexie_base = resolve_dexie_base_url(
         network,
         ctx.dexie_base_url.as_deref(),
-        "https://api.dexie.space",
+        &program.dexie_api_base,
     )?;
     let dexie = DexieClient::new(dexie_base);
     let mut dexie_row = None;

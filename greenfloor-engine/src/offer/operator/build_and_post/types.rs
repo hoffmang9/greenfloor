@@ -31,7 +31,7 @@ pub(super) struct PostFailure {
     pub error: String,
     pub started: Instant,
     pub create_phase_ms: Option<u64>,
-    pub execution_mode: Option<String>,
+    pub execution_mode: Option<crate::offer::OfferExecutionMode>,
     pub bootstrap: Option<Value>,
 }
 

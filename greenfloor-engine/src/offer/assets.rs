@@ -6,6 +6,7 @@ use crate::coinset::{is_xch_like_asset, lookup_asset_by_symbol};
 use crate::config::{lookup_asset_id_from_ticker, resolve_quote_asset_for_offer, CatTickerIndex};
 use crate::config::{MarketConfig, SignerConfig};
 use crate::error::{SignerError, SignerResult};
+use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 /// Resolved on-chain asset ids for a configured market row (offer build / reservations).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,35 @@ pub struct ResolvedMarketOfferAssets {
 pub enum VaultTraceAssetKind {
     Xch,
     Cat,
+}
+
+impl VaultTraceAssetKind {
+    /// JSON `asset_kind` label for vault-asset-trace payloads.
+    #[must_use]
+    pub fn json_label(self) -> &'static str {
+        match self {
+            Self::Xch => "xch",
+            Self::Cat => "cat",
+        }
+    }
+
+    /// Coinset scan asset-type filter for this kind.
+    #[must_use]
+    pub fn scan_asset_type(self) -> AssetTypeFilter {
+        match self {
+            Self::Xch => AssetTypeFilter::Xch,
+            Self::Cat => AssetTypeFilter::Cat,
+        }
+    }
+
+    /// CAT asset id to pass into a vault scan, or `None` for XCH.
+    #[must_use]
+    pub fn scan_cat_asset_id(self, asset_id: &str) -> Option<&str> {
+        match self {
+            Self::Cat => Some(asset_id),
+            Self::Xch => None,
+        }
+    }
 }
 
 /// Resolved asset for `vault-asset-trace`.

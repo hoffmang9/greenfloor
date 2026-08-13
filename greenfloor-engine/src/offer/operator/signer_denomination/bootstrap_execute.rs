@@ -33,6 +33,7 @@ pub(crate) struct BootstrapShapeContext {
     pub(crate) fee_mojos: u64,
     pub(crate) fee_source: String,
     pub(crate) fee_lookup_error: Option<String>,
+    pub(crate) combine_input_cap: i64,
     #[cfg(test)]
     pub(crate) test_overrides: super::test_overrides::SignerDenominationTestOverrides,
 }

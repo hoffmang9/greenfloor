@@ -1,5 +1,9 @@
 use thiserror::Error;
 
+mod transport;
+
+pub use transport::TransportError;
+
 #[derive(Debug, Error)]
 pub enum SignerError {
     #[error("vault custody snapshot unavailable")]
@@ -35,11 +39,11 @@ pub enum SignerError {
     #[error("kms error: {0}")]
     Kms(String),
 
-    #[error("coinset error: {0}")]
-    Coinset(String),
+    #[error(transparent)]
+    Transport(#[from] TransportError),
 
-    #[error("driver error: {0}")]
-    Driver(String),
+    #[error(transparent)]
+    Reconcile(#[from] crate::cycle::ReconcileStateError),
 
     #[error("unparseable cat lineage: {0}")]
     UnparseableCatLineage(String),
@@ -239,13 +243,6 @@ pub enum SignerError {
     Other(String),
 }
 
-fn is_parallel_dispatch_transient_class(exception_class: &str) -> bool {
-    matches!(
-        exception_class.trim(),
-        "ReservationContentionError" | "ManagedUpstreamTransientError" | "TimeoutError"
-    )
-}
-
 fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
     const MARKERS: &[&str] = &[
         "timed out",
@@ -276,6 +273,27 @@ fn mixed_split_selected_coins_not_spendable_message(message: &str) -> bool {
 }
 
 impl SignerError {
+    /// Coinset HTTP/RPC transport failure.
+    #[must_use]
+    pub fn coinset(message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Coinset(message.into()))
+    }
+
+    /// Generic HTTP transport failure (`layer` names the client, e.g. `http` or `dexie`).
+    #[must_use]
+    pub fn http(layer: &'static str, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Http {
+            layer,
+            message: message.into(),
+        })
+    }
+
+    /// chia-wallet-sdk driver failure.
+    #[must_use]
+    pub fn driver(message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Driver(message.into()))
+    }
+
     #[must_use]
     pub fn is_mixed_split_selected_coins_not_spendable(&self) -> bool {
         matches!(self, Self::MixedSplitSelectedCoinsNotSpendable)
@@ -307,12 +325,12 @@ impl SignerError {
             Self::ReservationContention(_)
             | Self::ManagedUpstreamTransient(_)
             | Self::DatabaseLocked => true,
+            Self::Transport(TransportError::Http { message, .. }) => {
+                is_transient_managed_upstream_error_text(message)
+            }
             Self::Other(message) => {
                 let message = message.as_str();
                 message.contains("database is locked")
-                    || is_parallel_dispatch_transient_class(
-                        message.split(':').next().unwrap_or(message).trim(),
-                    )
                     || is_transient_managed_upstream_error_text(message)
             }
             _ => false,
@@ -324,7 +342,7 @@ pub type SignerResult<T> = Result<T, SignerError>;
 
 #[must_use]
 pub fn driver_error(err: &chia_sdk_driver::DriverError) -> SignerError {
-    SignerError::Driver(err.to_string())
+    SignerError::driver(err.to_string())
 }
 
 impl From<chia_sdk_driver::DriverError> for SignerError {
@@ -335,13 +353,13 @@ impl From<chia_sdk_driver::DriverError> for SignerError {
 
 impl From<reqwest::Error> for SignerError {
     fn from(err: reqwest::Error) -> Self {
-        SignerError::Coinset(err.to_string())
+        SignerError::http("http", err.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SignerError;
+    use super::{SignerError, TransportError};
 
     #[test]
     fn signer_error_display_messages_are_stable() {
@@ -378,6 +396,15 @@ mod tests {
                 SignerError::ResolvedAssetsCollideForNonXchPair,
                 "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair",
             ),
+            (SignerError::coinset("down"), "coinset error: down"),
+            (
+                SignerError::http("dexie", "timeout"),
+                "http error (dexie): timeout",
+            ),
+            (
+                SignerError::driver("invalid mod hash"),
+                "driver error: invalid mod hash",
+            ),
         ];
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
@@ -394,16 +421,11 @@ mod tests {
     }
 
     #[test]
-    fn parallel_dispatch_transient_matches_upstream_and_contention_classes() {
-        assert!(SignerError::Other("TimeoutError: timed out".to_string())
+    fn parallel_dispatch_transient_matches_typed_contention_and_upstream() {
+        assert!(SignerError::ManagedUpstreamTransient("timeout".to_string())
             .is_parallel_dispatch_transient());
         assert!(
-            SignerError::Other("ManagedUpstreamTransientError: timeout".to_string())
-                .is_parallel_dispatch_transient()
-        );
-        assert!(
-            SignerError::Other("ReservationContentionError: busy".to_string())
-                .is_parallel_dispatch_transient()
+            SignerError::ReservationContention("busy".to_string()).is_parallel_dispatch_transient()
         );
         assert!(
             !SignerError::Other("PermanentOfferBuildFailure: bad puzzle".to_string())
@@ -429,9 +451,7 @@ mod tests {
 
     #[test]
     fn parallel_dispatch_transient_rejects_non_transient_variants() {
-        assert!(
-            !SignerError::Driver("invalid mod hash".to_string()).is_parallel_dispatch_transient()
-        );
+        assert!(!SignerError::driver("invalid mod hash").is_parallel_dispatch_transient());
         assert!(!SignerError::InsufficientCatCoins.is_parallel_dispatch_transient());
     }
 
@@ -457,7 +477,10 @@ mod tests {
         use chia_sdk_driver::DriverError;
 
         let mapped = driver_error(&DriverError::InvalidModHash);
-        assert!(matches!(mapped, SignerError::Driver(_)));
+        assert!(matches!(
+            mapped,
+            SignerError::Transport(TransportError::Driver(_))
+        ));
         assert!(mapped.to_string().contains("invalid mod hash"));
 
         let from_impl: SignerError = DriverError::InvalidModHash.into();

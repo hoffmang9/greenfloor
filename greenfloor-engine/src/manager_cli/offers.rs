@@ -145,7 +145,7 @@ pub async fn run_offers_cancel_command(
 ) -> SignerResult<i32> {
     let bundle = load_program_bundle_gated(&ctx.program_config)?;
     let program = bundle.program;
-    let db_path = resolve_state_db_path(&program.home_dir, None);
+    let db_path = resolve_state_db_path(&program.home_dir, ctx.state_db_override());
     let venue = args
         .venue
         .as_deref()

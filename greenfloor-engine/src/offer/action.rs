@@ -53,7 +53,7 @@ pub struct BuildOfferForActionResult {
     pub expires_at_unix: u64,
     pub offer_amount: u64,
     pub request_amount: u64,
-    pub execution_mode: String,
+    pub execution_mode: crate::offer::OfferExecutionMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub create_result: Option<CreateOfferResult>,
 }
@@ -165,7 +165,7 @@ pub async fn build_signer_offer_for_action(
         expires_at_unix,
         offer_amount: leg.offer_amount_mojos,
         request_amount: leg.request_amount_mojos,
-        execution_mode: create_result.execution_mode.to_string(),
+        execution_mode: create_result.execution_mode,
         create_result: Some(create_result),
     })
 }

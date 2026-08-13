@@ -13,7 +13,8 @@ pub(crate) mod yaml_file;
 
 pub use cat_ticker_index::{
     build_cat_ticker_index, build_cat_ticker_index_from_cats_rows, build_cat_ticker_index_lenient,
-    empty_cat_ticker_index, lookup_asset_id_from_ticker, normalize_label, CatTickerIndex,
+    empty_cat_ticker_index, lookup_asset_id_from_ticker, normalize_label,
+    resolve_asset_id_from_catalog, CatTickerIndex,
 };
 pub use cats_catalog::{load_cats_catalog, write_cats_catalog};
 pub use keys_registry::SignerKeyEntry;

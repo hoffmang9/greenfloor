@@ -44,6 +44,12 @@ pub fn total_for_coin_ids(spendable: &[SpendableCoin], coin_ids: &[String]) -> i
         .sum()
 }
 
+/// Receive inventory plus known unreturned maker amount (saturating).
+#[must_use]
+pub fn vault_controlled_total(receive_amount: u64, unreturned_amount: u64) -> u64 {
+    receive_amount.saturating_add(unreturned_amount)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +87,11 @@ mod tests {
             total_for_coin_ids(&spendable, &["AB".to_string(), "CD".to_string()]),
             12
         );
+    }
+
+    #[test]
+    fn vault_controlled_sums_receive_and_unreturned() {
+        assert_eq!(vault_controlled_total(1_000, 2_000), 3_000);
+        assert_eq!(vault_controlled_total(u64::MAX, 1), u64::MAX);
     }
 }

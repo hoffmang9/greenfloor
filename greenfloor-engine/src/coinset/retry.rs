@@ -126,7 +126,11 @@ where
 {
     with_script_retries_with_policy(policy, || {
         let future = operation();
-        async move { future.await.map_err(SignerError::from) }
+        async move {
+            future
+                .await
+                .map_err(|err| SignerError::coinset(err.to_string()))
+        }
     })
     .await
 }
@@ -151,7 +155,7 @@ mod tests {
             attempts += 1;
             async move {
                 if attempts == 1 {
-                    Err(SignerError::Coinset(
+                    Err(SignerError::coinset(
                         "error sending request for url (http://127.0.0.1:1/): connection refused"
                             .to_string(),
                     ))

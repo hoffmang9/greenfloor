@@ -51,7 +51,9 @@ impl CoinOpExecContext {
             base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(
                 gated.market_row.base_asset.trim(),
             ),
-            combine_input_cap: resolve_combine_input_cap(),
+            combine_input_cap: resolve_combine_input_cap(
+                gated.program.coin_ops_combine_input_coin_cap,
+            ),
             gated,
             resolved_base_asset_id,
             watched_coin_ids,

@@ -8,7 +8,7 @@ pub(super) use execute::{
 pub(super) use executor::{test_combine_batch_executor, test_combine_batch_executor_with_asset};
 pub(super) use sim::{dust_plan_from_scan_without_lineage, register_lineage_mocks_for_scan_coins};
 
-use super::jobs::CatDustJob;
+use crate::coin_ops::CatDustJob;
 use crate::coinset::{resolve_coinset_endpoint, ResolvedCoinsetEndpoint};
 
 pub(super) const RECEIVE_ADDRESS: &str =

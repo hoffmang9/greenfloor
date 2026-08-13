@@ -224,8 +224,20 @@ pub async fn execute_actions_parallel(
         return result;
     }
 
+    let fee_amount_mojos = crate::coinset::get_conservative_fee_estimate_for_signer(
+        signer_config,
+        &ctx.resources.network,
+        1_000_000,
+        Some(1),
+    )
+    .await
+    .ok()
+    .flatten()
+    .and_then(|fee| i64::try_from(fee).ok())
+    .unwrap_or(0);
     let reservation_ctx =
-        parallel_reservation_context(&ctx.resources.asset_resolver()?, market, 0).await?;
+        parallel_reservation_context(&ctx.resources.asset_resolver()?, market, fee_amount_mojos)
+            .await?;
 
     let spendable_profiles =
         resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;

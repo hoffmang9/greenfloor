@@ -112,8 +112,7 @@ pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
 }
 
 fn missing_watched_offer_transition(current_state: &str) -> SignerResult<CycleOfferTransition> {
-    resolve_missing_watched_offer_transition(current_state)
-        .map_err(|err| crate::error::SignerError::Other(err.to_string()))
+    resolve_missing_watched_offer_transition(current_state).map_err(Into::into)
 }
 
 /// Resolve lifecycle + Dexie status from an offer body (list row or `get_offer.offer`).
@@ -147,8 +146,7 @@ pub(crate) fn transition_from_offer_body(
         &chain_confirmed_tx_ids,
         cancel_submitted.as_ref(),
         env.now,
-    )
-    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+    )?;
     Ok((transition, status))
 }
 
@@ -179,8 +177,7 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
         }
         DexieOfferFetch::LookupError(err) => {
             let transition =
-                unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))
-                    .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
+                unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))?;
             Ok((transition, None, None))
         }
     }

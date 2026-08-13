@@ -11,7 +11,7 @@ use crate::storage::CycleWriteStore;
 use super::cancel_phase::run_market_cancel_phase;
 use super::coin_ops_phase::run_coin_ops_phase;
 use super::cycle_store::run_logged_market_phase;
-use super::inventory_phase::run_inventory_phase;
+use super::inventory_phase::{run_inventory_phase, InventoryScanOutcome};
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::soft_expire_phase::run_soft_expire_phase;
@@ -36,7 +36,8 @@ async fn execute_post_reconcile_phases(
     market: &MarketConfig,
     cycle_state: &mut MarketCycleResultState,
 ) -> SignerResult<()> {
-    // Soft-expire marks + reclaims surplus; strategy ensure_size fills ladder gaps.
+    // Soft-expire marks + reclaims surplus; cancel (when triggered) before strategy
+    // so new posts cannot race a strong-move pull. Coin-ops uses strategy counts.
     // Uses CycleWriteStore sync slices (no lock held across Coinset/Dexie awaits).
     run_logged_market_phase(
         market.market_id.as_str(),
@@ -45,12 +46,17 @@ async fn execute_post_reconcile_phases(
     )
     .await?;
 
-    let bucket_counts = locked_logged_phase!(
+    let inventory = locked_logged_phase!(
         market.market_id.as_str(),
         "inventory",
         write_store,
         |store| { run_inventory_phase(&store, ctx.resources, market, cycle_state) }
     )
+    .await?;
+
+    locked_logged_phase!(market.market_id.as_str(), "cancel", write_store, |store| {
+        run_market_cancel_phase(&store, ctx, market, cycle_state)
+    })
     .await?;
 
     let strategy = run_logged_market_phase(
@@ -60,10 +66,12 @@ async fn execute_post_reconcile_phases(
     )
     .await?;
 
-    locked_logged_phase!(market.market_id.as_str(), "cancel", write_store, |store| {
-        run_market_cancel_phase(&store, ctx, market, cycle_state)
-    })
-    .await?;
+    let InventoryScanOutcome::Fresh(bucket_counts) = inventory else {
+        return Ok(());
+    };
+    if cycle_state.strategy_failed {
+        return Ok(());
+    }
 
     locked_logged_phase!(
         market.market_id.as_str(),
@@ -155,8 +163,8 @@ mod tests {
             &[
                 MarketCyclePhase::SoftExpire,
                 MarketCyclePhase::Inventory,
-                MarketCyclePhase::Strategy,
                 MarketCyclePhase::Cancel,
+                MarketCyclePhase::Strategy,
                 MarketCyclePhase::CoinOps,
             ]
         );

@@ -25,7 +25,31 @@ fn compute_cycle_exit_code_non_zero_when_all_markets_fail() {
         cycle_error_count: 1,
         ..MarketDispatchMetrics::default()
     };
-    assert_eq!(compute_cycle_exit_code(&plan, &metrics), 1);
+    assert_eq!(compute_cycle_exit_code(&plan, &metrics, 0), 1);
+}
+
+#[test]
+fn compute_cycle_exit_code_non_zero_on_partial_cycle_errors() {
+    let plan = CyclePlan {
+        enabled_market_ids: vec!["m1".to_string()],
+        selected_market_ids: vec!["m1".to_string()],
+        consumed_immediate_requeues: Vec::new(),
+        dispatch_state: DaemonDispatchState::default(),
+        stale_open_sweep: StaleSweepProgress::default(),
+        configured_market_slot_count: 1,
+        runtime_dry_run: false,
+        db_path: PathBuf::from("/tmp/db.sqlite"),
+        previous_xch_price_usd: None,
+        dexie_base_url: String::new(),
+        splash_base_url: String::new(),
+        test_controls: DaemonCycleTestControls::default(),
+    };
+    let metrics = MarketDispatchMetrics {
+        markets_processed: 1,
+        cycle_error_count: 1,
+        ..MarketDispatchMetrics::default()
+    };
+    assert_eq!(compute_cycle_exit_code(&plan, &metrics, 0), 1);
 }
 
 #[test]

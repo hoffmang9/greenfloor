@@ -148,6 +148,19 @@ pub struct OfferStateListRow {
     pub publish_venue: Option<String>,
 }
 
+impl OfferStateListRow {
+    /// Parse persisted `state` once at the `SQLite` read boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `state` is not a known reconcile/lifecycle value.
+    pub fn reconcile_state(
+        &self,
+    ) -> Result<crate::cycle::ReconcileState, crate::cycle::ReconcileStateError> {
+        crate::cycle::ReconcileState::parse(&self.state)
+    }
+}
+
 pub use tx_signals::TxSignalIngress;
 
 #[derive(Debug, Clone, Default)]

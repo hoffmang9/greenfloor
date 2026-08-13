@@ -16,6 +16,7 @@ pub mod retry;
 pub mod strategy;
 pub mod strategy_action;
 
+pub use crate::adapters::is_dexie_offer_missing_error_text;
 pub use cancel::{
     abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision, CancelPolicyDecision,
 };
@@ -42,15 +43,15 @@ pub use notifications::{
 };
 pub use orchestration::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates, dedupe_sorted_market_ids,
-    enqueue_immediate_requeue, is_dexie_offer_missing_error_text, record_stale_sweep_check,
-    select_market_batch, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
-    MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
+    enqueue_immediate_requeue, record_stale_sweep_check, select_market_batch,
+    should_try_cat_inventory_fallback, should_use_market_slot_dispatch, MarketBatchSelection,
+    OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
     DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };
 pub use reconcile::{
     resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
-    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
-    ReconcileState,
+    unchanged_offer_transition, unreturned_row_priority, unsupported_venue_offer_transition,
+    CycleOfferTransition, ReconcileState, ReconcileStateError,
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,

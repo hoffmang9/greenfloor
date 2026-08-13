@@ -33,20 +33,21 @@ pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
         MarketCyclePhase::Reconcile,
         MarketCyclePhase::SoftExpire,
         MarketCyclePhase::Inventory,
-        MarketCyclePhase::Strategy,
         MarketCyclePhase::Cancel,
+        MarketCyclePhase::Strategy,
         MarketCyclePhase::CoinOps,
     ]
 }
 
 /// Phases run in-process after reconcile completes (reconcile is handled separately).
+/// Cancel runs before strategy so a triggered cancel policy cannot race new posts.
 #[must_use]
 pub fn post_reconcile_market_cycle_phases() -> &'static [MarketCyclePhase] {
     &[
         MarketCyclePhase::SoftExpire,
         MarketCyclePhase::Inventory,
-        MarketCyclePhase::Strategy,
         MarketCyclePhase::Cancel,
+        MarketCyclePhase::Strategy,
         MarketCyclePhase::CoinOps,
     ]
 }
@@ -61,6 +62,8 @@ pub struct MarketCycleResultState {
     pub cancel_executed: i64,
     pub immediate_requeue_requested: bool,
     pub immediate_requeue_signals: Vec<String>,
+    /// Strategy execution failed; coin-ops must not run on stale assumptions.
+    pub strategy_failed: bool,
 }
 
 impl MarketCycleResultState {

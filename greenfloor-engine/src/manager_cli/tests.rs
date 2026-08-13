@@ -74,6 +74,7 @@ markets:
     base_symbol: A1
     quote_asset: xch
     receive_address: xch1test
+    signer_key_id: key-1
     pricing:
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
@@ -121,6 +122,7 @@ markets:
     base_symbol: A1
     quote_asset: xch
     receive_address: xch1test
+    signer_key_id: key-1
     pricing:
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
@@ -147,6 +149,7 @@ markets:
     base_symbol: A1
     quote_asset: xch
     receive_address: xch1a
+    signer_key_id: key-1
     pricing: { "side": "sell" }
   - id: m2
     enabled: true
@@ -154,6 +157,7 @@ markets:
     base_symbol: A1
     quote_asset: xch
     receive_address: xch1b
+    signer_key_id: key-1
     pricing: { "side": "sell" }
 "#,
     )

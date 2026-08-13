@@ -239,16 +239,7 @@ pub fn classify_dexie_stale_offer_status(status: i64) -> Option<&'static str> {
     }
 }
 
-#[must_use]
-pub fn is_dexie_offer_missing_error_text(error_text: &str) -> bool {
-    let normalized = error_text.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return false;
-    }
-    (normalized.contains("dexie_get_offer_error") && normalized.contains("404"))
-        || normalized.contains("dexie_http_error:404")
-        || (normalized.contains("http error 404") && normalized.contains("not found"))
-}
+pub use crate::adapters::is_dexie_offer_missing_error_text;
 
 #[must_use]
 pub fn record_stale_sweep_check(

@@ -86,7 +86,7 @@ fn append_cancellable_input_reclaim(
         CancellableMakerInput::VaultCatDirect { cat } => {
             let nonce = vault_ctx
                 .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-                .ok_or(SignerError::Driver(
+                .ok_or(SignerError::driver(
                     "failed to infer vault nonce for reclaim cat".to_string(),
                 ))?;
             let inner_spend = build_vault_change_inner_spend(

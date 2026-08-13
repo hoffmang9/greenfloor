@@ -77,7 +77,10 @@ pub(crate) fn allowed_cancel_target_offer_ids(
     let defer_targets: std::collections::HashSet<&str> = db_rows
         .iter()
         .filter_map(|row| {
-            if !ReconcileState::parse(&row.state).is_ok_and(|state| state.is_cancel_submitted()) {
+            if !row
+                .reconcile_state()
+                .is_ok_and(|state| state.is_cancel_submitted())
+            {
                 return None;
             }
             if row

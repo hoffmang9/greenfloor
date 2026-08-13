@@ -122,7 +122,7 @@ pub(super) async fn wait_for_bootstrap_shape_step(
         let outcome = plan_bootstrap_mixed_outputs(
             &ctx.ladder_entries,
             &spendable,
-            resolve_combine_input_cap(),
+            resolve_combine_input_cap(ctx.combine_input_cap),
             &ctx.combine_context,
         );
         if let BootstrapWaitResolution::Complete(completed) = resolve_bootstrap_wait_poll(
@@ -332,6 +332,7 @@ mod tests {
             fee_mojos: 0,
             fee_source: String::new(),
             fee_lookup_error: None,
+            combine_input_cap: 5,
             #[cfg(test)]
             test_overrides: crate::offer::operator::SignerDenominationTestOverrides::default(),
         };

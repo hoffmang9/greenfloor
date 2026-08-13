@@ -1,3 +1,4 @@
+use crate::coin_ops::shape::{plan_combine_inputs_for_target, ShapeCoin};
 use crate::coin_ops::{i64_to_usize, plan_exact_amount_combine_inputs, CoinOpPlan, SpendableCoin};
 
 use super::items::{
@@ -42,13 +43,25 @@ async fn prepare_managed_combine_inputs(
         i64_to_usize(capped_number_of_coins, "combine.capped_op_count"),
     )?;
 
-    let combine_input_coin_ids = plan_exact_amount_combine_inputs(
+    let mut combine_input_coin_ids = plan_exact_amount_combine_inputs(
         &spendable,
         requested_count,
         target_coin_amount_mojos,
         None,
         Some(capped_count),
     );
+    if combine_input_coin_ids.len() < 2 {
+        let shape_coins: Vec<ShapeCoin> = spendable
+            .iter()
+            .map(|coin| ShapeCoin::new(coin.id.clone(), coin.amount))
+            .collect();
+        let cover = target_coin_amount_mojos.saturating_mul(2);
+        if let Some(planned) =
+            plan_combine_inputs_for_target(&shape_coins, cover, capped_number_of_coins)
+        {
+            combine_input_coin_ids = planned.input_coin_ids;
+        }
+    }
     if combine_input_coin_ids.len() < 2 {
         return Err(plan_skip(plan, "no_spendable_combine_coin_available"));
     }

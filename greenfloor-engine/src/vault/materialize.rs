@@ -60,7 +60,7 @@ where
             continue;
         };
         let chia_sdk_driver::SpendKind::Conditions(spend) = kind else {
-            return Err(SignerError::Driver(
+            return Err(SignerError::driver(
                 "unexpected settlement spend in vault cat spend".to_string(),
             ));
         };
@@ -69,7 +69,7 @@ where
             .map_err(SignerError::from)?;
         let nonce = vault_ctx
             .infer_nonce_for_p2_hash(cat.info.p2_puzzle_hash)
-            .ok_or(SignerError::Driver(
+            .ok_or(SignerError::driver(
                 "failed to infer vault nonce for cat p2 puzzle hash".to_string(),
             ))?;
         let inner_spend = build_vault_cat_inner_spend(
@@ -82,7 +82,7 @@ where
         cat_spends.push(CatSpend::new(cat, inner_spend));
     }
     if cat_spends.is_empty() {
-        return Err(SignerError::Driver(
+        return Err(SignerError::driver(
             "no cat spends produced for vault transaction".to_string(),
         ));
     }

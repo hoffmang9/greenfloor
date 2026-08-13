@@ -11,7 +11,7 @@ use crate::storage::SqliteStore;
 
 use super::cancel_context::preload_cancel_submitted_contexts;
 use super::persist::ReconcilePersistOptions;
-use super::reconcile_prep::fetch_and_apply_watched_offer;
+use super::signal_apply::WatchedOfferReconciler;
 use super::transition::WatchedOfferTransitionEnv;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,17 +105,17 @@ pub async fn reconcile_offers_batch(
     let mut changed_count = 0u64;
 
     let persist_options = batch_persist_options(venue);
+    let reconciler = WatchedOfferReconciler::new(&store, &persist_options);
     for row in rows {
-        let (transition, last_seen_status) = fetch_and_apply_watched_offer(
-            &store,
-            &dexie,
-            &row.market_id,
-            &row.offer_id,
-            &row.state,
-            WatchedOfferTransitionEnv::new(now, Some(&cancel_submitted_by_offer)),
-            &persist_options,
-        )
-        .await?;
+        let (transition, last_seen_status) = reconciler
+            .fetch_and_apply(
+                &dexie,
+                &row.market_id,
+                &row.offer_id,
+                &row.state,
+                WatchedOfferTransitionEnv::new(now, Some(&cancel_submitted_by_offer)),
+            )
+            .await?;
 
         if transition.changed {
             changed_count += 1;

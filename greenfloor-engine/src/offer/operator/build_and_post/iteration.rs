@@ -90,7 +90,7 @@ async fn create_offer_for_post(
             error: "signer_offer_text_unavailable".to_string(),
             started,
             create_phase_ms: Some(create_phase_ms),
-            execution_mode: Some(created.execution_mode.clone()),
+            execution_mode: Some(created.execution_mode),
             bootstrap: None,
         })));
     }
@@ -152,7 +152,7 @@ async fn publish_created_offer(
     let persist_record = offer_post_persist_record(
         &publish,
         side,
-        &created.execution_mode,
+        Some(created.execution_mode),
         ctx,
         request.size_base_units,
         Some(created.expires_at_unix),
@@ -161,7 +161,7 @@ async fn publish_created_offer(
     let publish_success = publish.success;
     let result_payload = finalize_publish_payload(
         publish,
-        &created.execution_mode,
+        created.execution_mode,
         timing_payload(
             started,
             Some(create_phase_ms),

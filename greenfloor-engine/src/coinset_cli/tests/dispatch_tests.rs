@@ -8,7 +8,7 @@ use crate::coinset_cli::{
     run_coinset_command, CoinsetCliArgs, CoinsetClientArgs, CoinsetCoinIdFromRecordArgs,
     CoinsetCommands, CoinsetPostArgs, CoinsetResolveClientArgs,
 };
-use crate::error::SignerError;
+use crate::error::{SignerError, TransportError};
 use chia_protocol::SpendBundle;
 use chia_protocol::{Bytes32, Coin};
 use chia_traits::Streamable;
@@ -122,7 +122,10 @@ async fn coin_records_surfaces_retryable_error_on_http_503() {
     )
     .await
     .expect_err("503");
-    assert!(matches!(err, SignerError::Coinset(_)));
+    assert!(matches!(
+        err,
+        SignerError::Transport(TransportError::Coinset(_))
+    ));
     assert!(script_engine_error_retryable(&err));
 }
 

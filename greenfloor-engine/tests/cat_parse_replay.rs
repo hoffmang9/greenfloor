@@ -46,13 +46,13 @@ fn parent_spend_creates_child(
 ) -> SignerResult<bool> {
     let mut allocator = Allocator::new();
     let puzzle = node_from_bytes(&mut allocator, parent_spend.puzzle_reveal.as_ref())
-        .map_err(|err| greenfloor_engine::error::SignerError::Driver(err.to_string()))?;
+        .map_err(|err| greenfloor_engine::error::SignerError::driver(err.to_string()))?;
     let solution = node_from_bytes(&mut allocator, parent_spend.solution.as_ref())
-        .map_err(|err| greenfloor_engine::error::SignerError::Driver(err.to_string()))?;
+        .map_err(|err| greenfloor_engine::error::SignerError::driver(err.to_string()))?;
     let output = run_puzzle(&mut allocator, puzzle, solution)
-        .map_err(|err| greenfloor_engine::error::SignerError::Driver(err.to_string()))?;
+        .map_err(|err| greenfloor_engine::error::SignerError::driver(err.to_string()))?;
     let conditions = Conditions::<NodePtr>::from_clvm(&allocator, output)
-        .map_err(|err| greenfloor_engine::error::SignerError::Driver(err.to_string()))?;
+        .map_err(|err| greenfloor_engine::error::SignerError::driver(err.to_string()))?;
     for condition in conditions.iter() {
         if let Condition::CreateCoin(create) = condition {
             let created = Coin::new(parent_coin.coin_id(), create.puzzle_hash, create.amount);

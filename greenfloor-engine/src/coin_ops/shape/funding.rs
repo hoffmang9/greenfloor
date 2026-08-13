@@ -203,12 +203,7 @@ fn select_smallest_non_cannibalizing_shape_coin<'a>(
 ///
 /// `ladder_shape` must be `Some` whenever `policy` prefers smallest non-cannibalizing
 /// selection or protects ladder rows during combine (i.e. [`ShapeFundingPolicy::Bootstrap`]
-/// or [`ShapeFundingPolicy::DaemonProtected`]).
-///
-/// # Panics
-///
-/// Panics if `ladder_shape` is `None` while `policy` requires a shape context — every such
-/// call site must supply one.
+/// or [`ShapeFundingPolicy::DaemonProtected`]). Missing shape context yields [`CannotFund`].
 #[must_use]
 pub fn resolve_shape_funding(
     coins: &[ShapeCoin],
@@ -218,8 +213,9 @@ pub fn resolve_shape_funding(
 ) -> ShapeFundingResolution {
     let flags = policy.flags();
     let selected = if flags.prefer_smallest_non_cannibalizing {
-        let ctx = ladder_shape
-            .expect("ladder_shape required when prefer_smallest_non_cannibalizing is set");
+        let Some(ctx) = ladder_shape else {
+            return ShapeFundingResolution::CannotFund { required_amount };
+        };
         select_smallest_non_cannibalizing_shape_coin(
             coins,
             required_amount,
@@ -263,7 +259,9 @@ pub fn resolve_shape_funding(
     }
 
     let combine = if ladder_preserving {
-        let ctx = ladder_shape.expect("ladder_shape required when protect_ladder_rows is set");
+        let Some(ctx) = ladder_shape else {
+            return ShapeFundingResolution::CannotFund { required_amount };
+        };
         plan_ladder_preserving_combine(
             coins,
             &ctx.protected_slots,

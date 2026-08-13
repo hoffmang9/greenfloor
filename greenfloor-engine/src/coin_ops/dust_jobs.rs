@@ -1,12 +1,14 @@
+//! Group enabled markets into CAT dust-combine jobs (shared by manager CLI).
+
 use std::collections::{BTreeMap, HashSet};
 
 use serde_json::Value;
 
-use crate::config::MarketsConfig;
+use crate::config::{load_cats_catalog, resolve_asset_id_from_catalog, MarketsConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
-use crate::manager_cli::cats_catalog::{load_cats_catalog, resolve_asset_id_from_catalog};
 
+/// One CAT dust-combine job: one signer + asset, possibly spanning several markets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatDustJob {
     pub cat_asset_id: String,
@@ -15,6 +17,8 @@ pub struct CatDustJob {
     pub market_ids: Vec<String>,
 }
 
+/// Resolve a market base label to a CAT asset id (hex id, or catalog ticker/symbol).
+#[must_use]
 pub fn resolve_market_base_cat_asset_id(
     base_asset: &str,
     base_symbol: &str,
@@ -28,6 +32,12 @@ pub fn resolve_market_base_cat_asset_id(
         .or_else(|| resolve_asset_id_from_catalog(catalog, base_symbol))
 }
 
+/// Group enabled markets into CAT dust-combine jobs (same signer + asset share a job).
+///
+/// # Errors
+///
+/// Returns an error if the cats catalog cannot be loaded, or if markets that share a
+/// signer and CAT disagree on `receive_address`.
 pub fn build_enabled_cat_jobs(
     markets: &MarketsConfig,
     cats_config_path: &std::path::Path,

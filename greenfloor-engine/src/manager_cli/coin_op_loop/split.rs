@@ -5,9 +5,9 @@ use crate::coin_ops::evaluate_coin_split_gate;
 #[cfg(test)]
 use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::{coin_op_non_negative_u64, i64_to_usize};
+use crate::coin_ops::{resolve_split_targets, split_required_count};
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::ladder::{resolve_split_targets, split_required_count};
 
 use super::loop_common::finish_coin_op_command;
 use super::loop_context::{prepare_coin_op_loop_common, CoinOpLoopPrep};

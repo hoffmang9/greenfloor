@@ -66,7 +66,7 @@ fn test_exec_context(
         ),
         resolved_base_asset_id: "xch".to_string(),
         base_unit_mojo_multiplier: 1_000,
-        combine_input_cap: resolve_combine_input_cap(),
+        combine_input_cap: resolve_combine_input_cap(5),
         watched_coin_ids: HashSet::new(),
         test_overrides: CoinOpTestOverrides::new(
             Some(spendable),

@@ -29,11 +29,6 @@ pub fn protected_slots_for_rows(rows: &[ShapeLadderRow]) -> HashMap<i64, i64> {
 }
 
 /// Deficits and mixed-split output amounts from shape context (`sorted_rows` sorted by size).
-///
-/// # Panics
-///
-/// Panics if a computed deficit somehow exceeds `i64::MAX` as a `usize` (unreachable for any
-/// realistic ladder configuration).
 #[must_use]
 pub fn collect_shape_deficits(
     sorted_rows: &[ShapeLadderRow],
@@ -58,10 +53,10 @@ pub fn collect_shape_deficits(
             required_count: required,
             current_count: current,
         });
-        output_amounts.extend(std::iter::repeat_n(
-            size,
-            usize::try_from(deficit).expect("deficit is positive"),
-        ));
+        let Some(repeat) = usize::try_from(deficit).ok() else {
+            continue;
+        };
+        output_amounts.extend(std::iter::repeat_n(size, repeat));
     }
     (deficits, output_amounts)
 }

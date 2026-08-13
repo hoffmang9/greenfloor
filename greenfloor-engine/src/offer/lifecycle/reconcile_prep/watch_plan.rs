@@ -11,8 +11,8 @@ use crate::adapters::DexieClient;
 use crate::coinset::extract_maker_watch_keys_from_offer_text;
 use crate::cycle::ReconcileState;
 use crate::error::SignerResult;
-use crate::hex::normalize_hex_id;
 use crate::offer::dexie_payload::{extract_coin_ids_from_offer_payload, DexieOfferPayload};
+use crate::offer::maker_shape::MakerWatchSeed;
 use crate::storage::OfferStateListRow;
 use crate::storage::SqliteStore;
 
@@ -64,35 +64,11 @@ fn heal_watches_from_local_metadata(
     let Some(meta) = store.offer_cancel_metadata_for_id(offer_id)? else {
         return Ok(false);
     };
-    let mut coins = Vec::new();
-    let mut p2s = Vec::new();
-    if let Some(coin) = meta
-        .fields
-        .input_coin_id
-        .as_deref()
-        .map(normalize_hex_id)
-        .filter(|value| value.len() == 64)
-    {
-        coins.push(coin);
+    let seed = MakerWatchSeed::from_metadata(&meta);
+    if !seed.coin_ids.is_empty() || !seed.p2s.is_empty() {
+        store.ensure_offer_coin_watches(offer_id, market_id, &seed.coin_ids, &seed.p2s)?;
     }
-    // Direct maker_puzzle_hash is shared vault inventory — never per-offer p2.
-    // Presplit-like rows (incl. legacy NULL mode + fixed_delegated) may seed CONDITIONS p2.
-    if meta.is_presplit_like() {
-        if let Some(p2) = meta
-            .fields
-            .maker_puzzle_hash
-            .as_deref()
-            .map(normalize_hex_id)
-            .filter(|value| value.len() == 64)
-        {
-            p2s.push(p2);
-        }
-    }
-    if coins.is_empty() && p2s.is_empty() {
-        return Ok(false);
-    }
-    store.ensure_offer_coin_watches(offer_id, market_id, &coins, &p2s)?;
-    Ok(true)
+    store.offer_has_coin_watches(offer_id)
 }
 
 fn classify_dexie_role(
@@ -127,7 +103,7 @@ pub fn prepare_market_reconcile_local(
     let rows = store.list_offer_states(Some(clean_market), 5000)?;
     let mut local = MarketReconcileLocal::default();
     for row in rows {
-        let Ok(state) = ReconcileState::parse(&row.state) else {
+        let Ok(state) = row.reconcile_state() else {
             continue;
         };
         if matches!(state, ReconcileState::CancelSubmitted) {
@@ -179,10 +155,10 @@ pub fn ensure_watches_from_dexie_payload(
     raw: &Value,
 ) -> SignerResult<()> {
     let (coin_ids, payload_p2s) = maker_watch_keys_from_dexie_payload(raw);
-    // Seed p2 watches only for presplit-like rows (incl. legacy NULL + fixed_delegated).
-    // Direct cancellable inputs share vault inventory puzzle hashes (ADR 0019).
     let p2s = match store.offer_cancel_metadata_for_id(offer_id)? {
-        Some(meta) if meta.is_presplit_like() => payload_p2s,
+        Some(meta) if crate::offer::PostedOfferShape::from_metadata(&meta).is_presplit() => {
+            payload_p2s
+        }
         _ => Vec::new(),
     };
     if !coin_ids.is_empty() || !p2s.is_empty() {
@@ -464,7 +440,7 @@ mod tests {
 
     #[test]
     fn classify_past_grace_cancel_submitted_resets_to_open() {
-        use crate::offer::lifecycle::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+        use crate::offer::lifecycle::{ReconcilePersistOptions, WatchedOfferReconciler};
 
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
@@ -478,17 +454,14 @@ mod tests {
         assert!(local.dexie.authoritative.is_empty());
         assert!(local.dexie.heal_only.is_empty());
         assert_eq!(local.cancel_submitted_rows.len(), 1);
-        apply_cancel_submitted_rows(
-            &store,
-            &local.cancel_submitted_rows,
-            &ReconcilePersistOptions {
-                action: "cancel_submitted_orphan_reconcile",
-                venue: None,
-                dexie_error: None,
-            },
-            chrono::Utc::now(),
-        )
-        .expect("apply");
+        let options = ReconcilePersistOptions {
+            action: "cancel_submitted_orphan_reconcile",
+            venue: None,
+            dexie_error: None,
+        };
+        WatchedOfferReconciler::new(&store, &options)
+            .apply_cancel_submitted(&local.cancel_submitted_rows, chrono::Utc::now())
+            .expect("apply");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");
@@ -497,7 +470,7 @@ mod tests {
 
     #[test]
     fn classify_within_grace_preserves_cancel_submitted() {
-        use crate::offer::lifecycle::{apply_cancel_submitted_rows, ReconcilePersistOptions};
+        use crate::offer::lifecycle::{ReconcilePersistOptions, WatchedOfferReconciler};
 
         let dir = tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
@@ -510,17 +483,14 @@ mod tests {
         assert!(local.dexie.authoritative.is_empty());
         assert!(local.dexie.heal_only.is_empty());
         assert_eq!(local.cancel_submitted_rows.len(), 1);
-        apply_cancel_submitted_rows(
-            &store,
-            &local.cancel_submitted_rows,
-            &ReconcilePersistOptions {
-                action: "cancel_submitted_orphan_reconcile",
-                venue: None,
-                dexie_error: None,
-            },
-            chrono::Utc::now(),
-        )
-        .expect("apply");
+        let options = ReconcilePersistOptions {
+            action: "cancel_submitted_orphan_reconcile",
+            venue: None,
+            dexie_error: None,
+        };
+        WatchedOfferReconciler::new(&store, &options)
+            .apply_cancel_submitted(&local.cancel_submitted_rows, chrono::Utc::now())
+            .expect("apply");
         let rows = store
             .list_offer_states_for_ids(std::slice::from_ref(&offer_id))
             .expect("rows");

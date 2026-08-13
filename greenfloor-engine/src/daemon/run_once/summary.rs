@@ -48,9 +48,16 @@ pub fn elapsed_ms(started: Instant) -> u64 {
 }
 
 #[must_use]
-pub fn compute_cycle_exit_code(plan: &CyclePlan, metrics: &MarketDispatchMetrics) -> i32 {
+pub fn compute_cycle_exit_code(
+    plan: &CyclePlan,
+    metrics: &MarketDispatchMetrics,
+    preamble_error_count: u64,
+) -> i32 {
     let attempted = plan.selected_market_ids.len();
     if attempted > 0 && metrics.markets_processed == 0 {
+        return 1;
+    }
+    if preamble_error_count + metrics.cycle_error_count > 0 {
         return 1;
     }
     0

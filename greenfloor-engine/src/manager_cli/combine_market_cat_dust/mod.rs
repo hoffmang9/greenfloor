@@ -6,14 +6,13 @@ mod combine_test_support;
 mod execute;
 #[cfg(test)]
 mod execute_test;
-mod jobs;
 #[cfg(test)]
 mod lineage_e2e_test;
 mod report;
 #[cfg(test)]
 mod report_test;
 
-use jobs::{build_enabled_cat_jobs, CatDustJob};
+use crate::coin_ops::{build_enabled_cat_jobs, CatDustJob};
 use report::{
     finalize_job_report, list_failed_job_report, signer_blocked_job_report, CombineRunMode,
 };

@@ -385,7 +385,7 @@ impl SqliteStore {
         }
         let sql = format!(
             r"
-            SELECT DISTINCT {state_cols}, w.kind
+            SELECT DISTINCT {state_cols}, w.kind AS watch_kind
             FROM offer_coin_watches w
             INNER JOIN offer_state s ON s.offer_id = w.offer_id
             WHERE w.coin_id IN ({placeholders})
@@ -408,7 +408,7 @@ impl SqliteStore {
             let state = read_offer_state_list_row(row)
                 .map_err(|err| db_err("offer_coin_watches match state", err))?;
             let kind_str: String = row
-                .get(8)
+                .get("watch_kind")
                 .map_err(|err| db_err("offer_coin_watches match kind", err))?;
             let Some(kind) = WatchKind::parse(&kind_str) else {
                 tracing::warn!(

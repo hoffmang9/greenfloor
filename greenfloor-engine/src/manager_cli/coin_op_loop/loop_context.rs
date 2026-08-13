@@ -1,10 +1,10 @@
 //! Shared coin-op loop preparation for split and combine CLI commands.
 
 use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::sell_ladder_entry_for_size;
 use crate::config::LadderEntry;
 use crate::error::SignerResult;
 use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::ladder::sell_ladder_entry_for_size;
 
 use super::loop_common::validate_until_ready_mode;
 use super::until_ready::UntilReadyWaitMode;

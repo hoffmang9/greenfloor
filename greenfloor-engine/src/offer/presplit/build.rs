@@ -13,7 +13,7 @@ fn verify_presplit_fixed_conditions(
     binding: &PresplitOfferBinding,
 ) -> SignerResult<()> {
     if built.fixed_conditions_tree_hash != binding.fixed_conditions_tree_hash {
-        return Err(SignerError::Driver(
+        return Err(SignerError::driver(
             "presplit fixed conditions hash mismatch".to_string(),
         ));
     }

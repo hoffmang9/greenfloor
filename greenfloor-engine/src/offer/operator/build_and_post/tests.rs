@@ -132,18 +132,44 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": false}),
     };
-    assert!(offer_post_persist_record(&failed, "sell", "direct", &ctx, 1, None, None).is_none());
+    assert!(offer_post_persist_record(
+        &failed,
+        "sell",
+        Some(OfferExecutionMode::Direct),
+        &ctx,
+        1,
+        None,
+        None
+    )
+    .is_none());
 
     let success = PublishResult {
         success: true,
         offer_id: Some("offer-1".to_string()),
         body: json!({"success": true, "id": "offer-1"}),
     };
-    let record = offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None, None)
-        .expect("record");
+    let record = offer_post_persist_record(
+        &success,
+        "sell",
+        Some(OfferExecutionMode::Direct),
+        &ctx,
+        10,
+        None,
+        None,
+    )
+    .expect("record");
     assert_eq!(record.offer_id, "offer-1");
     assert_eq!(record.market_id, "m1");
+}
 
+#[test]
+fn offer_post_persist_record_seeds_presplit_watches() {
+    let ctx = sample_resolved_build_and_post_context();
+    let success = PublishResult {
+        success: true,
+        offer_id: Some("offer-1".to_string()),
+        body: json!({"success": true, "id": "offer-1"}),
+    };
     let selected = "aa".repeat(32);
     let presplit_coin = "bb".repeat(32);
     let input_coin = "cc".repeat(32);
@@ -163,9 +189,16 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
             p2.clone(),
         ),
     };
-    let presplit =
-        offer_post_persist_record(&success, "sell", "direct", &ctx, 10, None, Some(&create))
-            .expect("presplit record");
+    let presplit = offer_post_persist_record(
+        &success,
+        "sell",
+        Some(OfferExecutionMode::Direct),
+        &ctx,
+        10,
+        None,
+        Some(&create),
+    )
+    .expect("presplit record");
     assert_eq!(
         presplit.execution_mode,
         Some(OfferExecutionMode::PresplitNew)
@@ -179,7 +212,16 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
         vec![selected, presplit_coin, input_coin]
     );
     assert_eq!(presplit.watched_p2s, vec![p2]);
+}
 
+#[test]
+fn offer_post_persist_record_skips_direct_p2_watch() {
+    let ctx = sample_resolved_build_and_post_context();
+    let success = PublishResult {
+        success: true,
+        offer_id: Some("offer-1".to_string()),
+        body: json!({"success": true, "id": "offer-1"}),
+    };
     let direct_coin = "ee".repeat(32);
     let direct_p2 = "ff".repeat(32);
     let direct_create = CreateOfferResult {
@@ -196,7 +238,7 @@ fn offer_post_persist_record_requires_success_and_offer_id() {
     let direct = offer_post_persist_record(
         &success,
         "sell",
-        "direct",
+        Some(OfferExecutionMode::Direct),
         &ctx,
         10,
         None,
@@ -451,7 +493,7 @@ fn post_failure_venue_result_marks_publish_failure() {
         error: "dexie_http_error:500".to_string(),
         started: Instant::now(),
         create_phase_ms: Some(12),
-        execution_mode: Some("direct".to_string()),
+        execution_mode: Some(OfferExecutionMode::Direct),
         bootstrap: None,
     };
     let venue = failure.to_venue_result("dexie");
@@ -491,7 +533,7 @@ async fn dry_run_returns_preview_payload_in_process() {
     )
     .expect("write markets fixture");
 
-    let response = super::build_and_post_offer(super::BuildAndPostOfferRequest {
+    let mut request = super::BuildAndPostOfferRequest {
         program_path: program,
         markets_path: markets,
         testnet_markets_path: None,
@@ -514,13 +556,15 @@ async fn dry_run_returns_preview_payload_in_process() {
         },
         action_side: None,
         maker_reuse: None,
-        test_overrides: crate::offer::operator::BuildOfferTestOverrides {
-            offer_text: Some("offer1dryrunpreviewstub".to_string()),
-            ..Default::default()
-        },
-    })
-    .await
-    .expect("build and post dry run");
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
+    };
+    request.test_overrides = crate::offer::operator::BuildOfferTestOverrides {
+        offer_text: Some("offer1dryrunpreviewstub".to_string()),
+        ..Default::default()
+    };
+    let response = super::build_and_post_offer(request)
+        .await
+        .expect("build and post dry run");
 
     assert_eq!(response.exit_code, 0);
     assert_eq!(response.payload.get("dry_run"), Some(&json!(true)));

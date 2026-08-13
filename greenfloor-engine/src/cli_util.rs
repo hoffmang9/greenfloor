@@ -3,7 +3,7 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, TransportError};
 
 const RETRYABLE_COINSET_TRANSPORT_MARKERS: &[&str] = &[
     "operation timed out",
@@ -38,7 +38,9 @@ pub fn script_coinset_transport_retryable(message: &str) -> bool {
 #[must_use]
 pub fn script_engine_error_retryable(err: &SignerError) -> bool {
     match err {
-        SignerError::Coinset(message) => script_coinset_transport_retryable(message),
+        SignerError::Transport(TransportError::Coinset(message)) => {
+            script_coinset_transport_retryable(message)
+        }
         _ => false,
     }
 }
@@ -164,7 +166,7 @@ mod tests {
 
     #[test]
     fn script_engine_error_retryable_classifies_coinset_and_parse_errors() {
-        assert!(script_engine_error_retryable(&SignerError::Coinset(
+        assert!(script_engine_error_retryable(&SignerError::coinset(
             "error decoding response body".to_string()
         )));
         assert!(!script_engine_error_retryable(&SignerError::Other(

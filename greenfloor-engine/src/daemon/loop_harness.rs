@@ -50,6 +50,7 @@ mod tests {
     use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
     use crate::operator_log::{CONFIG_RELOADED, DAEMON_CYCLE_SUMMARY};
     use crate::storage::SqliteStore;
+    use crate::test_env::EnvRestoreGuard;
 
     struct LoopFixture {
         _dir: tempfile::TempDir,
@@ -150,8 +151,10 @@ mod tests {
 
     #[tokio::test]
     async fn loop_runs_configured_cycle_count_and_returns_last_exit_code() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let (_server, fixture) = fixture_with_dexie_offers().await;
         let exit_code = fixture.run(DaemonLoopTestHarness::with_cycles(2)).await;
+        // No signer / no mempool poll: inventory is unknown, Dexie is mocked, cycles succeed.
         assert_eq!(exit_code, 0);
         let store = SqliteStore::open(&fixture.db_path).expect("open db");
         assert_eq!(audit_event_count(&store, DAEMON_CYCLE_SUMMARY), 2);
@@ -159,6 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn loop_returns_non_zero_when_last_cycle_fails() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let (_server, fixture) = fixture_with_dexie_offers().await;
         let exit_code = fixture
             .run(DaemonLoopTestHarness {
@@ -176,6 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn loop_clears_reload_marker_during_cycle() {
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_XCH_PRICE_USD", "42.5")]);
         let (_server, fixture) = fixture_with_dexie_offers().await;
         std::fs::write(
             reload_marker_path(&fixture.state_dir),

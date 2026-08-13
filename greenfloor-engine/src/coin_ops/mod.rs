@@ -3,12 +3,14 @@
 //! Lives in the `greenfloor-engine` crate alongside vault signing and cycle policy.
 
 mod amounts;
+mod dust_jobs;
 mod effective_counts;
 pub mod execution;
 mod fee_budget;
 mod gate;
 mod input_selection;
 mod inventory;
+mod ladder;
 mod plan;
 mod policy;
 mod scalars;
@@ -17,9 +19,13 @@ pub mod shape;
 pub mod shape_ownership;
 pub mod shape_protection;
 mod unit_convert;
+mod vault_controlled;
 mod wallet_coin;
 
-pub use amounts::{combine_output_amounts, total_for_coin_ids, COMBINE_SINGLE_OUTPUT_COUNT};
+pub use amounts::{
+    combine_output_amounts, total_for_coin_ids, vault_controlled_total, COMBINE_SINGLE_OUTPUT_COUNT,
+};
+pub use dust_jobs::{build_enabled_cat_jobs, resolve_market_base_cat_asset_id, CatDustJob};
 pub use effective_counts::effective_sell_bucket_counts_for_coin_ops;
 pub use execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, CoinOpExecContext, CoinOpExecItem,
@@ -39,6 +45,9 @@ pub use input_selection::{
     SubCatChangeSkipData,
 };
 pub use inventory::compute_bucket_counts_from_coins;
+pub use ladder::{
+    resolve_combine_count, resolve_split_targets, sell_ladder_entry_for_size, split_required_count,
+};
 pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,
     LadderTargetRow,
@@ -52,8 +61,9 @@ pub use scalars::{
     coin_op_non_negative_u64, coin_op_non_negative_u64_saturating, i64_to_usize, usize_to_i64,
 };
 pub use selection::{
-    select_exact_amount_coin_ids, select_largest_spendable_coin,
-    select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
+    select_exact_amount_coin_ids, select_funding_coin_ids, select_largest_spendable_coin,
+    select_spendable_coins_for_target_amount, split_would_create_sub_cat_change,
+    FundingSelectionMode, SpendableCoin,
 };
 pub use shape_ownership::{
     aggregate_covers_without_single_coin, bootstrap_handoff, daemon_low_watermark_handoff,
@@ -68,4 +78,5 @@ pub use unit_convert::{
     cat_units_string_from_mojos, exact_whole_units_from_mojos, floored_units_from_mojos,
     mojos_from_whole_units, CAT_MOJOS_PER_UNIT,
 };
+pub use vault_controlled::{vault_controlled_balance, UnreturnedMakerCoin, VaultControlledBalance};
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};

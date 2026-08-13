@@ -256,6 +256,61 @@ impl OfferExecutionMode {
             _ => None,
         }
     }
+
+    /// Persist/watch/cancel shape for this assembler mode (legacy NULL mode is not this path).
+    #[must_use]
+    pub fn posted_shape(self) -> PostedOfferShape {
+        match self {
+            Self::Direct => PostedOfferShape::Direct,
+            Self::PresplitNew | Self::PresplitExisting => PostedOfferShape::Presplit,
+        }
+    }
+}
+
+/// Posted maker shape used by persist, watch-seed, cancel, and reclaim.
+///
+/// `OfferInput` is the operator request. [`OfferExecutionMode`] is the assembler that ran.
+/// This enum is the single downstream answer to “is this presplit-like?”
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostedOfferShape {
+    Direct,
+    Presplit,
+}
+
+impl PostedOfferShape {
+    /// Derive once from persisted execution mode + optional fixed CONDITIONS hash.
+    #[must_use]
+    pub fn from_execution(
+        execution_mode: Option<OfferExecutionMode>,
+        fixed_delegated_puzzle_hash: Option<&str>,
+    ) -> Self {
+        match execution_mode {
+            Some(mode) => mode.posted_shape(),
+            None => {
+                if fixed_delegated_puzzle_hash
+                    .map(str::trim)
+                    .is_some_and(|hash| !hash.is_empty())
+                {
+                    Self::Presplit
+                } else {
+                    Self::Direct
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn from_metadata(meta: &StoredOfferCancelMetadata) -> Self {
+        Self::from_execution(
+            meta.execution_mode,
+            meta.fields.fixed_delegated_puzzle_hash.as_deref(),
+        )
+    }
+
+    #[must_use]
+    pub fn is_presplit(self) -> bool {
+        matches!(self, Self::Presplit)
+    }
 }
 
 /// Cancel hints persisted at offer post time (Direct and presplit execution modes).
@@ -270,7 +325,7 @@ pub struct OfferCancelFields {
     pub fixed_delegated_puzzle_hash: Option<String>,
     /// On-chain maker coin puzzle hash (CAT outer, XCH p2, or presplit CONDITIONS).
     /// Persisted for cancel metadata; per-offer `kind='p2'` watches are seeded only
-    /// when [`StoredOfferCancelMetadata::is_presplit_like`] is true.
+    /// when [`PostedOfferShape::from_metadata`] is presplit.
     pub maker_puzzle_hash: Option<String>,
 }
 
@@ -304,37 +359,6 @@ impl OfferCancelFields {
 pub struct StoredOfferCancelMetadata {
     pub fields: OfferCancelFields,
     pub execution_mode: Option<OfferExecutionMode>,
-}
-
-impl StoredOfferCancelMetadata {
-    /// Whether this row is treated as a presplit offer for cancel / watch policy.
-    ///
-    /// Explicit Direct → false. Explicit Presplit → true. NULL `execution_mode` with
-    /// a non-empty `fixed_delegated_puzzle_hash` → true (legacy cancel rule). Direct
-    /// receive coins share vault inventory puzzle hashes, so only presplit-like rows
-    /// may seed per-offer `kind='p2'` watches (ADR 0019).
-    #[must_use]
-    pub fn is_presplit_like(&self) -> bool {
-        Self::is_presplit_like_parts(
-            self.execution_mode,
-            self.fields.fixed_delegated_puzzle_hash.as_deref(),
-        )
-    }
-
-    /// Same gate as [`Self::is_presplit_like`] without building a metadata struct.
-    #[must_use]
-    pub fn is_presplit_like_parts(
-        execution_mode: Option<OfferExecutionMode>,
-        fixed_delegated_puzzle_hash: Option<&str>,
-    ) -> bool {
-        match execution_mode {
-            Some(OfferExecutionMode::Direct) => false,
-            Some(OfferExecutionMode::PresplitNew | OfferExecutionMode::PresplitExisting) => true,
-            None => fixed_delegated_puzzle_hash
-                .map(str::trim)
-                .is_some_and(|hash| !hash.is_empty()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -453,22 +477,18 @@ mod tests {
     }
 
     #[test]
-    fn is_presplit_like_matches_cancel_legacy_null_mode() {
-        assert!(StoredOfferCancelMetadata::is_presplit_like_parts(
-            Some(OfferExecutionMode::PresplitExisting),
-            None
-        ));
-        assert!(!StoredOfferCancelMetadata::is_presplit_like_parts(
+    fn posted_shape_matches_cancel_legacy_null_mode() {
+        assert!(
+            PostedOfferShape::from_execution(Some(OfferExecutionMode::PresplitExisting), None)
+                .is_presplit()
+        );
+        assert!(!PostedOfferShape::from_execution(
             Some(OfferExecutionMode::Direct),
-            Some(&"aa".repeat(32))
-        ));
-        assert!(StoredOfferCancelMetadata::is_presplit_like_parts(
-            None,
-            Some(&"aa".repeat(32))
-        ));
-        assert!(!StoredOfferCancelMetadata::is_presplit_like_parts(
-            None, None
-        ));
+            Some(&*"aa".repeat(32))
+        )
+        .is_presplit());
+        assert!(PostedOfferShape::from_execution(None, Some(&*"aa".repeat(32))).is_presplit());
+        assert!(!PostedOfferShape::from_execution(None, None).is_presplit());
 
         let legacy = StoredOfferCancelMetadata {
             fields: OfferCancelFields::from_presplit_build(
@@ -478,12 +498,12 @@ mod tests {
             ),
             execution_mode: None,
         };
-        assert!(legacy.is_presplit_like());
+        assert!(PostedOfferShape::from_metadata(&legacy).is_presplit());
         let direct = StoredOfferCancelMetadata {
             fields: OfferCancelFields::from_direct_build("coin".into(), "bb".repeat(32)),
             execution_mode: Some(OfferExecutionMode::Direct),
         };
-        assert!(!direct.is_presplit_like());
+        assert!(!PostedOfferShape::from_metadata(&direct).is_presplit());
     }
 
     #[test]

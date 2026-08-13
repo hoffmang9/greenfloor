@@ -1,8 +1,8 @@
+use crate::adapters::is_dexie_offer_missing_error_text;
+
 #[must_use]
 pub(super) fn is_transient_dexie_visibility_404_error(error: &str) -> bool {
-    let normalized = error.trim().to_ascii_lowercase();
-    (normalized.contains("dexie_get_offer_error") && normalized.contains("404"))
-        || normalized.contains("dexie_http_error:404")
+    is_dexie_offer_missing_error_text(error)
 }
 
 #[cfg(test)]

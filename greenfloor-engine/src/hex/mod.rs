@@ -3,10 +3,25 @@
 mod bytes;
 mod clvm;
 
-use crate::coinset::is_canonical_xch_asset;
-
 pub use bytes::{fixed_bytes, hex_to_bytes, hex_to_bytes32, parse_coin_ids};
 pub use clvm::{bytes32_to_hex, hex_to_tree_hash, tree_hash_nil, tree_hash_to_hex};
+
+/// Canonical XCH / TXCH asset identifiers.
+///
+/// Empty/whitespace is **not** XCH. Use [`is_xch_like_asset`] at signer payload
+/// boundaries where empty means native XCH.
+#[must_use]
+pub fn is_canonical_xch_asset(asset_id: &str) -> bool {
+    matches!(
+        asset_id.trim().to_ascii_lowercase().as_str(),
+        "xch" | "txch" | "1"
+    )
+}
+
+#[must_use]
+pub fn is_xch_like_asset(asset_id: &str) -> bool {
+    asset_id.trim().is_empty() || is_canonical_xch_asset(asset_id)
+}
 
 const CANONICAL_XCH_MOJOS: i64 = 1_000_000_000_000;
 /// On-chain mojos per one CAT config/display unit. Fractional units are valid
@@ -143,5 +158,14 @@ mod tests {
             ),
             1_000
         );
+    }
+
+    #[test]
+    fn recognizes_xch_like_assets() {
+        assert!(super::is_xch_like_asset("xch"));
+        assert!(super::is_xch_like_asset("TXCH"));
+        assert!(super::is_xch_like_asset(""));
+        assert!(!super::is_canonical_xch_asset(""));
+        assert!(!super::is_xch_like_asset(&"aa".repeat(32)));
     }
 }

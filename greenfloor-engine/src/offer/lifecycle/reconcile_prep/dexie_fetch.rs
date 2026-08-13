@@ -2,8 +2,10 @@
 
 use serde_json::Value;
 
+use crate::adapters::is_dexie_offer_missing_error_text;
 use crate::adapters::DexieClient;
-use crate::cycle::is_dexie_offer_missing_error_text;
+use crate::error::{SignerError, SignerResult};
+use crate::offer::dexie_payload::DexieOfferPayload;
 
 use super::super::dexie_index::offer_matches_local_id;
 use super::super::transition::missing_offer_error_from_payload;
@@ -78,6 +80,43 @@ pub async fn fetch_dexie_offer(
     }
 }
 
+impl DexieOfferFetch {
+    /// Offer-file bech32 from a found Dexie payload (`offer_file` / nested offer text).
+    #[must_use]
+    pub fn offer_file_text(&self) -> Option<String> {
+        match self {
+            Self::Found(value) => DexieOfferPayload::new(value.clone())
+                .offer_file_text()
+                .map(str::to_string),
+            Self::Missing(_) | Self::Mismatch | Self::LookupError(_) => None,
+        }
+    }
+
+    /// Whether publish visibility polling can treat this lookup as "offer exists".
+    #[must_use]
+    pub fn visibility_ready(&self) -> bool {
+        matches!(self, Self::Found(_))
+    }
+}
+
+/// Fetch Dexie offer-file text for cancel fallback (one parse path with [`fetch_dexie_offer`]).
+pub async fn fetch_dexie_offer_file_text(
+    dexie: &DexieClient,
+    offer_id: &str,
+) -> SignerResult<String> {
+    let fetched = fetch_dexie_offer(dexie, offer_id, DexieFetchMode::LifecycleLoose).await;
+    if let Some(text) = fetched.offer_file_text() {
+        return Ok(text);
+    }
+    match fetched {
+        DexieOfferFetch::Found(_) => Err(SignerError::OfferCancelOfferFileMissing),
+        DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch => {
+            Err(SignerError::OfferCancelOfferFileNotFound)
+        }
+        DexieOfferFetch::LookupError(err) => Err(SignerError::Other(err)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +175,15 @@ mod tests {
             ),
             DexieOfferFetch::Found(_)
         ));
+    }
+
+    #[test]
+    fn found_fetch_exposes_offer_file_text_and_visibility() {
+        let offer_text = "offer1qq";
+        let fetch = DexieOfferFetch::Found(json!({"offer": offer_text, "id": "ab"}));
+        assert!(fetch.visibility_ready());
+        assert_eq!(fetch.offer_file_text().as_deref(), Some(offer_text));
+        assert!(!DexieOfferFetch::Mismatch.visibility_ready());
+        assert!(DexieOfferFetch::Mismatch.offer_file_text().is_none());
     }
 }

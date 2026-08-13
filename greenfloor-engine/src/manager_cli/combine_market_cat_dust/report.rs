@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use super::batches::{preview_batches_report, DustBatchRunSelection};
-use super::jobs::CatDustJob;
+use crate::coin_ops::CatDustJob;
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::coinset::ResolvedCoinsetEndpoint;
 use crate::config::{ManagerProgramConfig, SignerConfig};

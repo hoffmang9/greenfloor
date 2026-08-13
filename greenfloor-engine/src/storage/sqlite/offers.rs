@@ -71,9 +71,12 @@ impl SqliteStore {
 
     /// Upsert offer state.
     ///
+    /// `state` must be a known [`ReconcileState`]. Use [`Self::upsert_offer_state_at`]
+    /// only for timestamped writes of an already-validated state string.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the operation fails.
+    /// Returns an error if `state` is unknown or the write fails.
     pub fn upsert_offer_state(
         &self,
         offer_id: &str,
@@ -81,7 +84,8 @@ impl SqliteStore {
         state: &str,
         last_seen_status: Option<i64>,
     ) -> SignerResult<()> {
-        self.upsert_offer_state_at(offer_id, market_id, state, last_seen_status, &utcnow_iso())
+        let parsed = ReconcileState::parse(state)?;
+        self.upsert_offer_reconcile_state(offer_id, market_id, &parsed, last_seen_status)
     }
 
     /// Upsert offer state using a typed reconcile state.
@@ -96,7 +100,13 @@ impl SqliteStore {
         state: &ReconcileState,
         last_seen_status: Option<i64>,
     ) -> SignerResult<()> {
-        self.upsert_offer_state(offer_id, market_id, &state.as_str(), last_seen_status)
+        self.upsert_offer_state_at(
+            offer_id,
+            market_id,
+            &state.as_str(),
+            last_seen_status,
+            &utcnow_iso(),
+        )
     }
 
     /// Upsert offer state at an explicit timestamp.

@@ -119,7 +119,7 @@ fn upsert_offer_state_null_last_seen_status() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
     store
-        .upsert_offer_state("offer-2", "m1", "unknown", None)
+        .upsert_offer_state_at("offer-2", "m1", "unknown", None, "2020-01-01T00:00:00Z")
         .expect("upsert");
     let rows = store.list_offer_states(None, 10).expect("list");
     assert_eq!(rows.len(), 1);

@@ -7,7 +7,9 @@ use crate::offer::presplit::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
     resolve_member_fixed_conditions_hash_for_binding, PresplitBindingLookup,
 };
-use crate::offer::types::{OfferCancelFields, OfferExecutionMode, StoredOfferCancelMetadata};
+use crate::offer::types::{
+    OfferCancelFields, OfferExecutionMode, PostedOfferShape, StoredOfferCancelMetadata,
+};
 use crate::vault::members::p2_conditions_or_singleton_puzzle_hash;
 use crate::vault::spend::VaultSpendContext;
 use chia_protocol::{Bytes32, Coin, SpendBundle};
@@ -74,7 +76,7 @@ pub(crate) fn stored_presplit_fields(
     metadata: Option<&StoredOfferCancelMetadata>,
 ) -> Option<&OfferCancelFields> {
     let metadata = metadata?;
-    if !metadata.is_presplit_like() {
+    if !PostedOfferShape::from_metadata(metadata).is_presplit() {
         return None;
     }
     let hash = metadata
