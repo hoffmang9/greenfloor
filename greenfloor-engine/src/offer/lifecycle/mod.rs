@@ -57,10 +57,7 @@ pub use signal_apply::WatchedOfferReconciler;
 pub use status_cli::{
     offers_status_cli, OfferStatusAuditEvent, OfferStatusRow, OffersStatusCliResult,
 };
-pub use transition::{
-    coinset_signals_from_dexie_offer_payload, missing_offer_error_from_payload,
-    resolve_watched_offer_transition_from_dexie_fetch, WatchedOfferTransitionEnv,
-};
+pub use transition::{coinset_signals_from_dexie_offer_payload, WatchedOfferTransitionEnv};
 pub use ws_apply::{
     apply_watch_hits_batch, apply_ws_offer_event, promote_cancel_submitted_for_confirmed_txs,
     signals_for_watch_hit, WsOfferApply,

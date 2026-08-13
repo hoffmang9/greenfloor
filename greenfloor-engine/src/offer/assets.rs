@@ -5,7 +5,7 @@ use chia_sdk_coinset::CoinsetClient;
 use crate::coinset::{is_xch_like_asset, lookup_asset_by_symbol};
 use crate::config::{lookup_asset_id_from_ticker, resolve_quote_asset_for_offer, CatTickerIndex};
 use crate::config::{MarketConfig, SignerConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult, VaultError};
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 /// Resolved on-chain asset ids for a configured market row (offer build / reservations).
@@ -215,7 +215,9 @@ pub async fn resolve_offer_asset_ids(
 
 fn ensure_distinct_non_xch_pair(base: &str, quote: &str) -> SignerResult<()> {
     if base == quote && !is_xch_like_asset(base) && !is_xch_like_asset(quote) {
-        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
+        return Err(SignerError::Offer(
+            OfferError::ResolvedAssetsCollideForNonXchPair,
+        ));
     }
     Ok(())
 }
@@ -228,7 +230,7 @@ fn ensure_distinct_non_xch_pair(base: &str, quote: &str) -> SignerResult<()> {
 pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
     let trimmed = raw.trim().to_lowercase();
     if trimmed.is_empty() {
-        return Err(SignerError::MissingAssetId);
+        return Err(SignerError::Vault(VaultError::MissingAssetId));
     }
     if matches!(trimmed.as_str(), "xch" | "txch" | "1") {
         return Ok(trimmed);
@@ -287,7 +289,7 @@ mod tests {
         let err = ensure_distinct_non_xch_pair(&cat, &cat).expect_err("collision");
         assert!(matches!(
             err,
-            SignerError::ResolvedAssetsCollideForNonXchPair
+            SignerError::Offer(OfferError::ResolvedAssetsCollideForNonXchPair)
         ));
     }
 

@@ -1,7 +1,7 @@
 use crate::coin_ops::is_spendable_coin_state;
 use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
 use crate::config::{LadderEntry, MarketPricing, SignerConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::offer::bootstrap::{BootstrapCoin, PlanAmount, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
@@ -33,7 +33,7 @@ pub(super) fn bootstrap_size_mojos_for_side(
                 .max(1);
         size_base_units
             .checked_mul(base_mult)
-            .ok_or(SignerError::InvalidOfferRequestAmount)
+            .ok_or(SignerError::Offer(OfferError::InvalidOfferRequestAmount))
     }
 }
 

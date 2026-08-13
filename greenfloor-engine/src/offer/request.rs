@@ -1,6 +1,6 @@
 //! Deterministic signer ``create_offer`` leg math and request shaping (no IO).
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 
@@ -107,21 +107,22 @@ fn base_and_quote_leg_mojos(
     quote_mult: i64,
 ) -> SignerResult<(u64, u64)> {
     if size_base_units <= 0 {
-        return Err(SignerError::InvalidSizeBaseUnits);
+        return Err(SignerError::Offer(OfferError::InvalidSizeBaseUnits));
     }
     let base_offer = size_base_units
         .checked_mul(base_mult)
-        .ok_or(SignerError::InvalidOfferAmount)?;
+        .ok_or(SignerError::Offer(OfferError::InvalidOfferAmount))?;
     if base_offer <= 0 {
-        return Err(SignerError::InvalidOfferAmount);
+        return Err(SignerError::Offer(OfferError::InvalidOfferAmount));
     }
     let request_amount = quote_mojos_for_base_size(size_base_units, quote_price, quote_mult)?;
     if request_amount <= 0 {
-        return Err(SignerError::InvalidOfferRequestAmount);
+        return Err(SignerError::Offer(OfferError::InvalidOfferRequestAmount));
     }
-    let offer_u = u64::try_from(base_offer).map_err(|_| SignerError::InvalidOfferAmount)?;
-    let request_u =
-        u64::try_from(request_amount).map_err(|_| SignerError::InvalidOfferRequestAmount)?;
+    let offer_u = u64::try_from(base_offer)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidOfferAmount))?;
+    let request_u = u64::try_from(request_amount)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidOfferRequestAmount))?;
     Ok((offer_u, request_u))
 }
 
@@ -250,7 +251,10 @@ mod tests {
             &pricing(1_000, 1_000),
         )
         .unwrap_err();
-        assert!(matches!(err, SignerError::InvalidOfferRequestAmount));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::InvalidOfferRequestAmount)
+        ));
     }
 
     #[test]
@@ -264,7 +268,10 @@ mod tests {
             &pricing(1_000, 1_000),
         )
         .unwrap_err();
-        assert!(matches!(err, SignerError::InvalidSizeBaseUnits));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::InvalidSizeBaseUnits)
+        ));
     }
 
     #[test]
@@ -278,7 +285,10 @@ mod tests {
             &pricing(0, 1_000),
         )
         .unwrap_err();
-        assert!(matches!(err, SignerError::InvalidOfferAmount));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::InvalidOfferAmount)
+        ));
     }
 
     #[test]

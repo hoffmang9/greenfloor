@@ -2,7 +2,7 @@ use chia_protocol::{Bytes32, Coin, SpendBundle};
 use chia_sdk_driver::{Cat, SpendContext};
 use clvm_utils::TreeHash;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::offer::presplit::cancel_binding::{self, PresplitBindingLookup, PresplitCoinBinding};
 use crate::offer::presplit::pipeline::PresplitPaymentContext;
 use crate::offer::types::OfferTerms;
@@ -69,7 +69,9 @@ impl PresplitOfferBinding {
         )? {
             PresplitBindingLookup::Found(binding) => binding,
             PresplitBindingLookup::NotPresplitMaker => {
-                return Err(SignerError::OfferCancelInputNotPresplitMaker);
+                return Err(SignerError::Offer(
+                    OfferError::OfferCancelInputNotPresplitMaker,
+                ));
             }
         };
         Ok(Self::from_coin_binding(coin, &binding))
@@ -86,7 +88,9 @@ pub fn verify_presplit_cat_offer_binding(
     binding: &PresplitOfferBinding,
 ) -> SignerResult<()> {
     if presplit_cat.info.p2_puzzle_hash != binding.p2_puzzle_hash {
-        return Err(SignerError::PresplitCoinPuzzleHashMismatch);
+        return Err(SignerError::Offer(
+            OfferError::PresplitCoinPuzzleHashMismatch,
+        ));
     }
     Ok(())
 }
@@ -119,6 +123,9 @@ mod tests {
                 .expect("binding");
         let mismatched_cat = source_cat.child(Bytes32::new([0x99; 32]), 1000);
         let err = verify_presplit_cat_offer_binding(&mismatched_cat, &binding).unwrap_err();
-        assert!(matches!(err, SignerError::PresplitCoinPuzzleHashMismatch));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitCoinPuzzleHashMismatch)
+        ));
     }
 }

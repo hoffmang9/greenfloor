@@ -9,7 +9,9 @@ use crate::adapters::DexieClient;
 use crate::cycle::reconcile::{
     resolve_watched_offer_transition_from_signals, CancelSubmittedContext, CoinsetTxSignals,
 };
-use crate::cycle::{resolve_missing_watched_offer_transition, CycleOfferTransition};
+use crate::cycle::{
+    resolve_missing_watched_offer_transition, unchanged_offer_transition, CycleOfferTransition,
+};
 use crate::error::SignerResult;
 use crate::storage::{OfferStateListRow, SqliteStore};
 
@@ -18,10 +20,8 @@ use super::cancel_context::{
     preload_cancel_submitted_contexts,
 };
 use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
-use super::transition::{
-    resolve_watched_offer_transition_from_dexie_fetch, transition_from_offer_body,
-    WatchedOfferTransitionEnv,
-};
+use super::reconcile_prep::{fetch_dexie_offer, DexieOfferFetch};
+use super::transition::{transition_from_offer_body, WatchedOfferTransitionEnv};
 
 fn persist_resolved_watched_transition(
     store: &SqliteStore,
@@ -164,7 +164,7 @@ impl<'a> WatchedOfferReconciler<'a> {
 
     /// Resolve + persist a missing Dexie watched offer (404 / not-found).
     ///
-    /// Callers put the Dexie error text on `options.dexie_error`.
+    /// `dexie_error` is recorded on the persist audit when present.
     ///
     /// # Errors
     ///
@@ -174,17 +174,32 @@ impl<'a> WatchedOfferReconciler<'a> {
         market_id: &str,
         offer_id: &str,
         current_state: &str,
+        dexie_error: Option<&str>,
     ) -> SignerResult<CycleOfferTransition> {
         let transition = resolve_missing_watched_offer_transition(current_state)?;
-        self.persist_transition(market_id, offer_id, &transition, None)?;
+        let overlaid = ReconcilePersistOptions {
+            action: self.options.action,
+            venue: self.options.venue,
+            dexie_error: dexie_error.or(self.options.dexie_error),
+        };
+        persist_resolved_watched_transition(
+            self.store,
+            market_id,
+            offer_id,
+            &transition,
+            None,
+            &overlaid,
+        )?;
         Ok(transition)
     }
 
     /// Fetch a watched Dexie offer and persist the resolved lifecycle transition.
     ///
+    /// Transport failures and id-mismatched payloads persist an unchanged transition.
+    ///
     /// # Errors
     ///
-    /// Returns an error if Dexie lookup, transition resolve, or `SQLite` persist fails.
+    /// Returns an error if transition resolve or `SQLite` persist fails.
     pub async fn fetch_and_apply(
         &self,
         dexie: &DexieClient,
@@ -193,32 +208,28 @@ impl<'a> WatchedOfferReconciler<'a> {
         current_state: &str,
         env: WatchedOfferTransitionEnv<'_>,
     ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
-        let (transition, status, dexie_error) = resolve_watched_offer_transition_from_dexie_fetch(
-            self.store,
-            dexie,
-            offer_id,
-            current_state,
-            env,
-        )
-        .await?;
-        if let Some(error_text) = dexie_error.as_deref() {
-            let persist_options = ReconcilePersistOptions {
-                action: self.options.action,
-                venue: self.options.venue,
-                dexie_error: Some(error_text),
-            };
-            persist_resolved_watched_transition(
-                self.store,
+        match fetch_dexie_offer(dexie, offer_id).await {
+            Ok(DexieOfferFetch::Found(offer_body)) => {
+                self.apply_dexie_payload(market_id, offer_id, current_state, &offer_body, env)
+            }
+            Ok(DexieOfferFetch::Missing(error_text)) => {
+                let transition =
+                    self.apply_missing(market_id, offer_id, current_state, Some(&error_text))?;
+                Ok((transition, None))
+            }
+            Ok(DexieOfferFetch::Mismatch) => self.persist_lookup_unchanged(
                 market_id,
                 offer_id,
-                &transition,
-                status,
-                &persist_options,
-            )?;
-        } else {
-            self.persist_transition(market_id, offer_id, &transition, status)?;
+                current_state,
+                "dexie_lookup_error:dexie get_offer payload did not match local offer id",
+            ),
+            Err(err) => self.persist_lookup_unchanged(
+                market_id,
+                offer_id,
+                current_state,
+                format!("dexie_lookup_error:{err}"),
+            ),
         }
-        Ok((transition, status))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -248,5 +259,128 @@ impl<'a> WatchedOfferReconciler<'a> {
         )?;
         self.persist_transition(market_id, offer_id, &transition, last_seen_status)?;
         Ok(transition)
+    }
+
+    fn persist_lookup_unchanged(
+        &self,
+        market_id: &str,
+        offer_id: &str,
+        current_state: &str,
+        reason: impl Into<String>,
+    ) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
+        let transition = unchanged_offer_transition(current_state, reason)?;
+        self.persist_transition(market_id, offer_id, &transition, None)?;
+        Ok((transition, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WatchedOfferReconciler, WatchedOfferTransitionEnv};
+    use crate::adapters::DexieClient;
+    use crate::offer::lifecycle::ReconcilePersistOptions;
+    use crate::storage::SqliteStore;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn fetch_and_apply_expires_on_dexie_404() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/offer-missing")
+            .with_status(404)
+            .with_body(r#"{"success":false,"error":"not_found"}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let options = ReconcilePersistOptions {
+            action: "test",
+            venue: Some(crate::config::Venue::Dexie),
+            dexie_error: None,
+        };
+        let reconciler = WatchedOfferReconciler::new(&store, &options);
+        let (transition, status) = reconciler
+            .fetch_and_apply(
+                &dexie,
+                "m1",
+                "offer-missing",
+                "open",
+                WatchedOfferTransitionEnv::at_now(None),
+            )
+            .await
+            .expect("transition");
+        assert_eq!(
+            transition.new_state,
+            crate::cycle::ReconcileState::parse("expired").expect("state")
+        );
+        assert!(status.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_and_apply_mismatch_leaves_state_unchanged() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/local-id")
+            .with_status(200)
+            .with_body(r#"{"offer":{"id":"other-id","status":1}}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let options = ReconcilePersistOptions {
+            action: "test",
+            venue: Some(crate::config::Venue::Dexie),
+            dexie_error: None,
+        };
+        let reconciler = WatchedOfferReconciler::new(&store, &options);
+        let (transition, status) = reconciler
+            .fetch_and_apply(
+                &dexie,
+                "m1",
+                "local-id",
+                "open",
+                WatchedOfferTransitionEnv::at_now(None),
+            )
+            .await
+            .expect("transition");
+        assert!(!transition.changed);
+        assert_eq!(
+            transition.new_state,
+            crate::cycle::ReconcileState::parse("open").expect("state")
+        );
+        assert!(status.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_and_apply_transport_error_leaves_state_unchanged() {
+        let dir = tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/bad-json")
+            .with_status(200)
+            .with_body("not-json")
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let options = ReconcilePersistOptions {
+            action: "test",
+            venue: Some(crate::config::Venue::Dexie),
+            dexie_error: None,
+        };
+        let reconciler = WatchedOfferReconciler::new(&store, &options);
+        let (transition, status) = reconciler
+            .fetch_and_apply(
+                &dexie,
+                "m1",
+                "bad-json",
+                "open",
+                WatchedOfferTransitionEnv::at_now(None),
+            )
+            .await
+            .expect("transition");
+        assert!(!transition.changed);
+        assert!(transition.reason.contains("dexie_lookup_error"));
+        assert!(status.is_none());
     }
 }

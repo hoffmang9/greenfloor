@@ -1,5 +1,7 @@
 //! Shared transient-retry and polling backoff policy for HTTP adapters.
 
+use crate::error::{SignerError, TransportError};
+
 const RATE_LIMIT_PATTERN: &str = "try again in ";
 const MAX_BACKOFF_ATTEMPT_SHIFT: u32 = 31;
 
@@ -43,11 +45,19 @@ pub fn moderate_retry_next_sleep(current_sleep: f64) -> f64 {
 }
 
 #[must_use]
-pub fn dexie_invalid_offer_should_retry(error: &str, attempt: u32, max_attempts: u32) -> bool {
-    let normalized = error.trim();
-    normalized.contains("dexie_http_error:400")
-        && normalized.contains("Invalid Offer")
-        && attempt < max_attempts.saturating_sub(1)
+pub fn dexie_invalid_offer_should_retry(
+    err: &SignerError,
+    attempt: u32,
+    max_attempts: u32,
+) -> bool {
+    matches!(
+        err,
+        SignerError::Transport(TransportError::HttpStatus {
+            status: 400,
+            message,
+            ..
+        }) if message.contains("Invalid Offer")
+    ) && attempt < max_attempts.saturating_sub(1)
 }
 
 #[must_use]
@@ -98,6 +108,7 @@ pub fn poll_exponential_advance_sleep(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SignerError;
 
     #[test]
     fn parses_rate_limit_seconds_case_insensitive() {
@@ -110,9 +121,18 @@ mod tests {
 
     #[test]
     fn dexie_invalid_offer_retry_gates() {
-        let err = r#"dexie_http_error:400:{"error_message":"Invalid Offer"}"#;
-        assert!(dexie_invalid_offer_should_retry(err, 0, 4));
-        assert!(!dexie_invalid_offer_should_retry(err, 3, 4));
+        let err = SignerError::http_status(
+            "dexie_http_error",
+            400,
+            r#"{"error_message":"Invalid Offer"}"#,
+        );
+        assert!(dexie_invalid_offer_should_retry(&err, 0, 4));
+        assert!(!dexie_invalid_offer_should_retry(&err, 3, 4));
+        assert!(!dexie_invalid_offer_should_retry(
+            &SignerError::http_status("dexie_http_error", 500, "Invalid Offer"),
+            0,
+            4
+        ));
     }
 
     #[test]

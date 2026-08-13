@@ -12,7 +12,7 @@ use crate::cycle::{
 
 use super::{parallel_max_workers, reservation_release_status};
 use crate::daemon::market_context::MarketCycleContext;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{PersistenceError, SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
 
@@ -178,7 +178,7 @@ async fn run_parallel_post_jobs(
                     post_result
                 }
                 Ok(ReservationAcquireResult::Rejected { reason }) => {
-                    return Err(SignerError::ReservationContention(reason.to_string()));
+                    return Err(PersistenceError::ReservationContention(reason.to_string()).into());
                 }
                 Err(err) => return Err(err),
             };
@@ -190,14 +190,7 @@ async fn run_parallel_post_jobs(
     for handle in handles {
         let (action, counts_as_executed) = handle
             .await
-            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?
-            .map_err(|err| {
-                if err.is_sqlite_fatal() {
-                    err
-                } else {
-                    SignerError::Other(format!("parallel worker failed: {err}"))
-                }
-            })?;
+            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))??;
         if counts_as_executed {
             executed += 1;
         }

@@ -1,7 +1,7 @@
 use chia_protocol::Bytes32;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 
 fn default_bake_expiry_into_conditions() -> bool {
     true
@@ -145,7 +145,9 @@ impl TryFrom<CreateOfferRequest> for OfferInput {
 
         if !request.presplit_coin_ids.is_empty() {
             if request.presplit_coin_ids.len() != 1 {
-                return Err(SignerError::PresplitOfferRequiresSingleCoin);
+                return Err(SignerError::Offer(
+                    OfferError::PresplitOfferRequiresSingleCoin,
+                ));
             }
             return Ok(Self::PresplitExisting {
                 terms,
@@ -462,7 +464,9 @@ mod tests {
         invalid.presplit_coin_ids = vec![sample_coin_id(0x02), sample_coin_id(0x03)];
         assert!(matches!(
             OfferInput::try_from(invalid),
-            Err(SignerError::PresplitOfferRequiresSingleCoin)
+            Err(SignerError::Offer(
+                OfferError::PresplitOfferRequiresSingleCoin
+            ))
         ));
     }
 

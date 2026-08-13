@@ -9,7 +9,7 @@ use crate::config::{
     bake_expiry_into_conditions_for_quote, CatTickerIndex, MarketConfig, MarketPricing,
     SignerConfig,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::offer::assets::OfferAssetResolver;
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::resolve_offer_expiry_for_pricing;
@@ -86,7 +86,8 @@ pub(crate) fn offer_terms_from_resolved_assets(
     side: &str,
 ) -> SignerResult<OfferTerms> {
     let quote_price = market.quote_price_for_side(side)?;
-    let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let size_i64 = i64::try_from(size_base_units)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidSizeBaseUnits))?;
     let leg = compute_signer_offer_leg_amounts(
         size_i64,
         quote_price,
@@ -176,8 +177,8 @@ fn leg_amounts_for_request(
     resolved_quote_asset_id: &str,
     quote_price: f64,
 ) -> SignerResult<crate::offer::request::SignerOfferLegAmounts> {
-    let size =
-        i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let size = i64::try_from(request.size_base_units)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidSizeBaseUnits))?;
     compute_signer_offer_leg_amounts(
         size,
         quote_price,

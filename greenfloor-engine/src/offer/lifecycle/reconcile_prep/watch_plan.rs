@@ -17,7 +17,7 @@ use crate::storage::OfferStateListRow;
 use crate::storage::SqliteStore;
 
 use super::super::dexie_index::index_list_offers_by_local_ids;
-use super::dexie_fetch::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
+use super::dexie_fetch::{fetch_dexie_offer, DexieOfferFetch};
 
 /// Dexie HTTP roles after local metadata heal (pure classify result).
 #[derive(Debug, Clone, Default)]
@@ -155,14 +155,10 @@ pub fn ensure_watches_from_dexie_payload(
     raw: &Value,
 ) -> SignerResult<()> {
     let (coin_ids, payload_p2s) = maker_watch_keys_from_dexie_payload(raw);
-    let p2s = match store.offer_cancel_metadata_for_id(offer_id)? {
-        Some(meta) if crate::offer::PostedOfferShape::from_metadata(&meta).is_presplit() => {
-            payload_p2s
-        }
-        _ => Vec::new(),
-    };
-    if !coin_ids.is_empty() || !p2s.is_empty() {
-        store.ensure_offer_coin_watches(offer_id, market_id, &coin_ids, &p2s)?;
+    let meta = store.offer_cancel_metadata_for_id(offer_id)?;
+    let seed = MakerWatchSeed::from_dexie_heal(meta.as_ref(), coin_ids, payload_p2s);
+    if !seed.coin_ids.is_empty() || !seed.p2s.is_empty() {
+        store.ensure_offer_coin_watches(offer_id, market_id, &seed.coin_ids, &seed.p2s)?;
     }
     Ok(())
 }
@@ -178,11 +174,11 @@ async fn fetch_dexie_offer_body_for_heal(
     offer_id: &str,
     on_lookup_error: &mut dyn FnMut(&str, &str, &str) -> SignerResult<()>,
 ) -> SignerResult<Option<Value>> {
-    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::HealStrict).await {
-        DexieOfferFetch::Found(body) => Ok(Some(body)),
-        DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch => Ok(None),
-        DexieOfferFetch::LookupError(err) => {
-            on_lookup_error(market_id, offer_id, &err)?;
+    match fetch_dexie_offer(dexie, offer_id).await {
+        Ok(DexieOfferFetch::Found(body)) => Ok(Some(body)),
+        Ok(DexieOfferFetch::Missing(_) | DexieOfferFetch::Mismatch) => Ok(None),
+        Err(err) => {
+            on_lookup_error(market_id, offer_id, &err.to_string())?;
             Ok(None)
         }
     }

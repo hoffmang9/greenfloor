@@ -2,9 +2,10 @@
 
 use std::collections::HashSet;
 
+use crate::coin_ops::{select_funding_coin_ids, FundingSelectionMode, SpendableCoin};
 use crate::coinset::{is_xch_like_asset, list_wallet_unspent_coins_for_signer, WalletUnspentCoin};
 use crate::config::{MarketConfig, SignerConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, OfferError, SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::offer::assets::ResolvedMarketOfferAssets;
 use crate::offer::request::compute_signer_offer_leg_amounts;
@@ -186,7 +187,8 @@ fn offered_leg_for_unique_pin(
     side: &str,
 ) -> SignerResult<(String, u64)> {
     let quote_price = market.quote_price_for_side(side)?;
-    let size_i64 = i64::try_from(size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let size_i64 = i64::try_from(size_base_units)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidSizeBaseUnits))?;
     let leg = compute_signer_offer_leg_amounts(
         size_i64,
         quote_price,
@@ -252,36 +254,48 @@ fn pick_from_unspent(
     offered_asset_id: &str,
     target_amount_mojos: u64,
 ) -> SignerResult<String> {
-    let free: Vec<&WalletUnspentCoin> = coins
+    let spendable: Vec<SpendableCoin> = coins
         .iter()
-        .filter(|coin| {
-            let id = normalize_hex_id(&coin.id);
-            !id.is_empty() && !excludes.contains(&id)
+        .map(|coin| {
+            SpendableCoin::with_puzzle_hash(
+                normalize_hex_id(&coin.id),
+                i64::try_from(coin.amount).unwrap_or(i64::MAX),
+                normalize_hex_id(&coin.puzzle_hash),
+            )
         })
+        .filter(|coin| !coin.id.is_empty())
         .collect();
-    if free.is_empty() {
-        return Err(empty_unspent_err(offered_asset_id));
+    let ids = select_funding_coin_ids(
+        FundingSelectionMode::ExactDenom,
+        &spendable,
+        i64::try_from(target_amount_mojos).unwrap_or(i64::MAX),
+        Some(excludes),
+        Some(1),
+    );
+    if let Some(id) = ids.into_iter().next() {
+        return Ok(id);
     }
-    free.iter()
-        .find(|coin| coin.amount == target_amount_mojos)
-        .map(|coin| normalize_hex_id(&coin.id))
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| insufficient_err(offered_asset_id))
+    let any_free = spendable.iter().any(|coin| !excludes.contains(&coin.id));
+    Err(if any_free {
+        insufficient_err(offered_asset_id)
+    } else {
+        empty_unspent_err(offered_asset_id)
+    })
 }
 
 fn empty_unspent_err(offered_asset_id: &str) -> SignerError {
     if is_xch_like_asset(offered_asset_id) {
-        SignerError::NoUnspentOfferXchCoins
+        SignerError::CoinOps(CoinOpsError::NoUnspentOfferXchCoins)
     } else {
-        SignerError::NoUnspentCatCoins
+        SignerError::CoinOps(CoinOpsError::NoUnspentCatCoins)
     }
 }
 
 fn insufficient_err(offered_asset_id: &str) -> SignerError {
     if is_xch_like_asset(offered_asset_id) {
-        SignerError::InsufficientOfferXchCoins
+        SignerError::CoinOps(CoinOpsError::InsufficientOfferXchCoins)
     } else {
-        SignerError::InsufficientCatCoins
+        SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
     }
 }
 
@@ -320,7 +334,10 @@ mod tests {
         let excludes = HashSet::new();
         let err =
             pick_from_unspent(&coins, &excludes, &"ab".repeat(32), 10_000).expect_err("exact");
-        assert!(matches!(err, SignerError::InsufficientCatCoins));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
+        ));
     }
 
     #[test]
@@ -329,18 +346,27 @@ mod tests {
         let excludes = HashSet::from([hex::encode([0xaa; 32])]);
         let err =
             pick_from_unspent(&coins, &excludes, &"ab".repeat(32), 10_000).expect_err("empty");
-        assert!(matches!(err, SignerError::NoUnspentCatCoins));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::NoUnspentCatCoins)
+        ));
     }
 
     #[test]
     fn pick_xch_errors_when_empty_or_only_oversize() {
         let excludes = HashSet::new();
         let empty_err = pick_from_unspent(&[], &excludes, "xch", 10_000).expect_err("empty");
-        assert!(matches!(empty_err, SignerError::NoUnspentOfferXchCoins));
+        assert!(matches!(
+            empty_err,
+            SignerError::CoinOps(CoinOpsError::NoUnspentOfferXchCoins)
+        ));
         let oversize = vec![coin(0xaa, 20_000)];
         let insuf =
             pick_from_unspent(&oversize, &excludes, "xch", 10_000).expect_err("insufficient");
-        assert!(matches!(insuf, SignerError::InsufficientOfferXchCoins));
+        assert!(matches!(
+            insuf,
+            SignerError::CoinOps(CoinOpsError::InsufficientOfferXchCoins)
+        ));
     }
 
     #[test]
@@ -588,7 +614,10 @@ mod tests {
             pin_unique_exact_maker_coin_id("mainnet", &signer, RECEIVE, "xch", 5000, &excluded)
                 .await
                 .expect_err("excluded");
-        assert!(matches!(err, SignerError::NoUnspentOfferXchCoins));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::NoUnspentOfferXchCoins)
+        ));
     }
 
     #[tokio::test]
@@ -613,6 +642,9 @@ mod tests {
         )
         .await
         .expect_err("empty");
-        assert!(matches!(err, SignerError::NoUnspentCatCoins));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::NoUnspentCatCoins)
+        ));
     }
 }

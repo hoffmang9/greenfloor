@@ -5,7 +5,7 @@ use chia_sdk_driver::{Action, Cat, Id, Relation, SpendContext, Spends};
 use crate::bech32m::decode_address;
 use crate::coinset::{self, CoinsetClient, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
 use crate::config::SignerConfig;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult, VaultError};
 use crate::vault::cat_create::{assert_cat_creates, created_cats};
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::session::resolve_vault_spend_context;
@@ -42,13 +42,15 @@ pub struct MixedSplitResult {
 
 pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> SignerResult<()> {
     if request.fee_mojos > 0 {
-        return Err(SignerError::MixedSplitVaultWithFeeNotSupported);
+        return Err(SignerError::Vault(
+            VaultError::MixedSplitWithFeeNotSupported,
+        ));
     }
     if request.output_amounts.is_empty() {
-        return Err(SignerError::MissingOutputAmounts);
+        return Err(SignerError::Vault(VaultError::MissingOutputAmounts));
     }
     if request.output_amounts.contains(&0) {
-        return Err(SignerError::InvalidOutputAmount);
+        return Err(SignerError::Vault(VaultError::InvalidOutputAmount));
     }
     if !request.allow_sub_cat_output
         && request
@@ -56,7 +58,7 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
             .iter()
             .any(|amount| *amount < MIN_CAT_OUTPUT_MOJOS)
     {
-        return Err(SignerError::CatOutputBelowMinimum);
+        return Err(SignerError::CoinOps(CoinOpsError::CatOutputBelowMinimum));
     }
     Ok(())
 }
@@ -124,7 +126,7 @@ async fn build_vault_cat_mixed_split_with_selection(
     };
     let change_amount = selection.change_amount;
     if !request.allow_sub_cat_output && change_amount > 0 && change_amount < MIN_CAT_OUTPUT_MOJOS {
-        return Err(SignerError::CatChangeBelowMinimum);
+        return Err(SignerError::CoinOps(CoinOpsError::CatChangeBelowMinimum));
     }
 
     let spend_bundle = build_vault_cat_mixed_split_spend_bundle(
@@ -234,7 +236,7 @@ async fn build_vault_cat_mixed_split_spend_bundle<C: OfferCoinsetBackend>(
 #[cfg(test)]
 mod tests {
     use super::{validate_mixed_split_request, MixedSplitRequest};
-    use crate::error::SignerError;
+    use crate::error::{CoinOpsError, SignerError, VaultError};
     use chia_protocol::Bytes32;
 
     fn sample_request(output_amounts: Vec<u64>, allow_sub_cat_output: bool) -> MixedSplitRequest {
@@ -252,7 +254,10 @@ mod tests {
     #[test]
     fn rejects_sub_unit_cat_outputs() {
         let err = validate_mixed_split_request(&sample_request(vec![999], false)).unwrap_err();
-        assert!(matches!(err, SignerError::CatOutputBelowMinimum));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::CatOutputBelowMinimum)
+        ));
     }
 
     #[test]
@@ -267,20 +272,26 @@ mod tests {
         let err = validate_mixed_split_request(&request).unwrap_err();
         assert!(matches!(
             err,
-            SignerError::MixedSplitVaultWithFeeNotSupported
+            SignerError::Vault(VaultError::MixedSplitWithFeeNotSupported)
         ));
     }
 
     #[test]
     fn rejects_empty_output_amounts() {
         let err = validate_mixed_split_request(&sample_request(vec![], false)).unwrap_err();
-        assert!(matches!(err, SignerError::MissingOutputAmounts));
+        assert!(matches!(
+            err,
+            SignerError::Vault(VaultError::MissingOutputAmounts)
+        ));
     }
 
     #[test]
     fn rejects_zero_output_amount() {
         let err = validate_mixed_split_request(&sample_request(vec![1000, 0], false)).unwrap_err();
-        assert!(matches!(err, SignerError::InvalidOutputAmount));
+        assert!(matches!(
+            err,
+            SignerError::Vault(VaultError::InvalidOutputAmount)
+        ));
     }
 
     #[tokio::test]
@@ -337,7 +348,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            SignerError::VaultCatCreateDestinationIsOuterLayer
+            SignerError::Vault(VaultError::CatCreateDestinationIsOuterLayer)
         ));
     }
 }

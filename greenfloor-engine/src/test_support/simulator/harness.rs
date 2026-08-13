@@ -53,8 +53,9 @@ impl SimulatorVaultHarness {
         let sk = signer.sk;
         vault_ctx.set_local_fast_forward_signer(Arc::new(move |message| {
             let digest: [u8; 32] = Sha256::digest(&message).into();
-            sk.sign_prehashed(&digest)
-                .map_err(|err| crate::error::SignerError::Kms(err.to_string()))
+            sk.sign_prehashed(&digest).map_err(|err| {
+                crate::error::SignerError::Vault(crate::error::VaultError::Kms(err.to_string()))
+            })
         }));
         Self {
             chain: SimChain {

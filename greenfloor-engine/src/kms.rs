@@ -1,7 +1,7 @@
 use aws_sdk_kms::primitives::Blob;
 use sha2::{Digest, Sha256};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::hex::normalize_hex;
 
 mod runtime;
@@ -27,10 +27,14 @@ pub async fn get_public_key_compressed_hex(
         .key_id(key_id)
         .send()
         .await
-        .map_err(|err| SignerError::Kms(format!("GetPublicKey failed: {err}")))?;
-    let der_bytes = response
-        .public_key()
-        .ok_or_else(|| SignerError::Kms("GetPublicKey returned no public key".to_string()))?;
+        .map_err(|err| {
+            SignerError::Vault(VaultError::Kms(format!("GetPublicKey failed: {err}")))
+        })?;
+    let der_bytes = response.public_key().ok_or_else(|| {
+        SignerError::Vault(VaultError::Kms(
+            "GetPublicKey returned no public key".to_string(),
+        ))
+    })?;
     let compressed = der_spki_to_compressed_p256(der_bytes.as_ref())?;
     Ok(hex::encode(compressed))
 }
@@ -46,8 +50,9 @@ pub async fn sign_digest(
     region: &str,
     message_hex: &str,
 ) -> SignerResult<String> {
-    let message_bytes = hex::decode(normalize_hex(message_hex))
-        .map_err(|err| SignerError::Kms(format!("invalid message hex: {err}")))?;
+    let message_bytes = hex::decode(normalize_hex(message_hex)).map_err(|err| {
+        SignerError::Vault(VaultError::Kms(format!("invalid message hex: {err}")))
+    })?;
     let digest = Sha256::digest(&message_bytes);
     let client = runtime.client(region).await?;
     let response = client
@@ -58,10 +63,10 @@ pub async fn sign_digest(
         .signing_algorithm(aws_sdk_kms::types::SigningAlgorithmSpec::EcdsaSha256)
         .send()
         .await
-        .map_err(|err| SignerError::Kms(format!("Sign failed: {err}")))?;
-    let der_sig = response
-        .signature()
-        .ok_or_else(|| SignerError::Kms("Sign returned no signature".to_string()))?;
+        .map_err(|err| SignerError::Vault(VaultError::Kms(format!("Sign failed: {err}"))))?;
+    let der_sig = response.signature().ok_or_else(|| {
+        SignerError::Vault(VaultError::Kms("Sign returned no signature".to_string()))
+    })?;
     let compact = der_ecdsa_to_compact(der_sig.as_ref())?;
     Ok(hex::encode(compact))
 }
@@ -76,23 +81,23 @@ pub fn der_spki_to_compressed_p256(der: &[u8]) -> SignerResult<[u8; 33]> {
     let (idx, algo_len) = read_der_tag_length(der, idx)?;
     let idx = idx + algo_len;
     if der.get(idx) != Some(&0x03) {
-        return Err(SignerError::Kms(
+        return Err(SignerError::Vault(VaultError::Kms(
             "expected BIT STRING tag (0x03)".to_string(),
-        ));
+        )));
     }
     let (idx, bs_len) = read_der_tag_length(der, idx)?;
     if der.get(idx) != Some(&0x00) {
-        return Err(SignerError::Kms(format!(
+        return Err(SignerError::Vault(VaultError::Kms(format!(
             "unexpected unused-bits byte: {:#x}",
             der[idx]
-        )));
+        ))));
     }
     let point = &der[idx + 1..idx + bs_len];
     if point.len() != 65 || point[0] != 0x04 {
-        return Err(SignerError::Kms(format!(
+        return Err(SignerError::Vault(VaultError::Kms(format!(
             "expected 65-byte uncompressed point (0x04||x||y), got {} bytes",
             point.len()
-        )));
+        ))));
     }
     let x = &point[1..33];
     let y = &point[33..65];
@@ -136,7 +141,7 @@ fn read_der_tag_length(data: &[u8], offset: usize) -> SignerResult<(usize, usize
     let offset = offset + 1;
     let first = *data
         .get(offset)
-        .ok_or_else(|| SignerError::Kms("truncated DER".to_string()))?;
+        .ok_or_else(|| SignerError::Vault(VaultError::Kms("truncated DER".to_string())))?;
     if first & 0x80 == 0 {
         return Ok((offset + 1, first as usize));
     }
@@ -152,10 +157,10 @@ fn read_der_tag_length(data: &[u8], offset: usize) -> SignerResult<(usize, usize
 
 fn read_der_integer(data: &[u8], offset: usize) -> SignerResult<(Vec<u8>, usize)> {
     if data.get(offset) != Some(&0x02) {
-        return Err(SignerError::Kms(format!(
+        return Err(SignerError::Vault(VaultError::Kms(format!(
             "expected INTEGER tag (0x02), got {:#x}",
             data.get(offset).copied().unwrap_or_default()
-        )));
+        ))));
     }
     let (offset, length) = read_der_tag_length(data, offset)?;
     let mut raw = data[offset..offset + length].to_vec();

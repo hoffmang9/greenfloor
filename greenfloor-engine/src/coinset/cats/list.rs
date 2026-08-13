@@ -8,7 +8,7 @@ use super::resolve;
 use crate::bech32m::decode_address;
 use crate::coinset::pagination::coin_records_by_puzzle_hash;
 use crate::coinset::retry::with_coinset_client_retries;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 use crate::operator_log::LogContext;
 
 pub(crate) async fn coin_records_for_cat_outer_puzzle_hash(
@@ -42,7 +42,7 @@ pub(crate) async fn cats_with_lineage_from_records(
         match resolve::cat_from_record(client, record).await {
             Ok(Some(cat)) => cats.push(cat),
             Ok(None) => {}
-            Err(err @ SignerError::UnparseableCatLineage(_)) => {
+            Err(err @ SignerError::CoinOps(CoinOpsError::UnparseableCatLineage(_))) => {
                 crate::trace_event!(
                     DEBUG,
                     LogContext::COINSET,

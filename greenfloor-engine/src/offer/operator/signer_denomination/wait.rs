@@ -6,7 +6,7 @@ use crate::coin_ops::execution::resolve_combine_input_cap;
 use crate::coinset::list_wallet_unspent_coins_for_signer;
 use crate::config::SignerConfig;
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 use crate::offer::bootstrap::{
     bootstrap_wait_event_metadata, plan_bootstrap_mixed_outputs, resolve_bootstrap_wait_poll,
     BootstrapCoin, BootstrapPlanOutcome, BootstrapWaitContext, BootstrapWaitPoll,
@@ -97,7 +97,9 @@ pub(super) async fn wait_for_bootstrap_shape_step(
     let mut baseline_spendable: Option<Vec<BootstrapCoin>> = None;
     loop {
         if start.elapsed() >= timeout {
-            return Err(SignerError::BootstrapShapeWaitTimeout);
+            return Err(SignerError::CoinOps(
+                CoinOpsError::BootstrapShapeWaitTimeout,
+            ));
         }
         let elapsed_seconds = i64::try_from(start.elapsed().as_secs()).map_err(|_| {
             SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
@@ -109,7 +111,9 @@ pub(super) async fn wait_for_bootstrap_shape_step(
             initial_sleep,
             max_sleep,
         ) else {
-            return Err(SignerError::BootstrapShapeWaitTimeout);
+            return Err(SignerError::CoinOps(
+                CoinOpsError::BootstrapShapeWaitTimeout,
+            ));
         };
         let spendable = fetch_bootstrap_spendable(network, signer, ctx).await?;
         let snapshot = normalized_spendable_snapshot(&spendable);
@@ -167,7 +171,7 @@ mod tests {
 
     use super::{wait_for_bootstrap_shape_step, BootstrapWaitConfig, BootstrapWaitTimings};
     use crate::coin_ops::shape::{ShapeDeficit, ShapeFunding};
-    use crate::error::SignerError;
+    use crate::error::{CoinOpsError, SignerError};
     use crate::offer::bootstrap::{BootstrapPlan, BootstrapWaitStepKind, PlannerLadderRow};
     use crate::offer::operator::BootstrapShapeContext;
     use crate::test_support::bootstrap_shape::{
@@ -275,7 +279,10 @@ mod tests {
         ))
         .await
         .expect_err("timeout");
-        assert!(matches!(err, SignerError::BootstrapShapeWaitTimeout));
+        assert!(matches!(
+            err,
+            SignerError::CoinOps(CoinOpsError::BootstrapShapeWaitTimeout)
+        ));
     }
 
     #[tokio::test]

@@ -16,7 +16,6 @@ pub mod retry;
 pub mod strategy;
 pub mod strategy_action;
 
-pub use crate::adapters::is_dexie_offer_missing_error_text;
 pub use cancel::{
     abs_move_bps, cancel_move_threshold_bps, evaluate_cancel_policy_decision, CancelPolicyDecision,
 };

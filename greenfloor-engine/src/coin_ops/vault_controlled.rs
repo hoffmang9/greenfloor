@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::coinset::OfferCoinsetBackend;
 use crate::cycle::{unreturned_row_priority, ReconcileState};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id};
 use crate::storage::SqliteStore;
 
@@ -81,7 +81,7 @@ pub async fn vault_controlled_balance<C: OfferCoinsetBackend>(
                 }
                 cat.coin.amount
             }
-            Err(SignerError::PresplitCoinNotFound) => continue,
+            Err(SignerError::Offer(OfferError::PresplitCoinNotFound)) => continue,
             Err(err) => return Err(err),
         };
         unreturned_amount = unreturned_amount.saturating_add(amount);

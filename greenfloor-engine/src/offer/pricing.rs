@@ -3,7 +3,7 @@
 //! Policy: non-finite or out-of-range ladder/offer math returns `SignerError` (no silent zero).
 //! Offer-leg quote mojos use `InvalidOfferRequestAmount`; ladder thresholds use `InvalidLadderMath`.
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, OfferError, SignerError, SignerResult};
 
 #[allow(clippy::cast_precision_loss)]
 #[must_use]
@@ -36,7 +36,8 @@ fn f64_to_i64_round_internal(value: f64) -> Result<i64, ()> {
 /// Returns an error if the operation fails.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 pub fn f64_to_i64_round_ladder(value: f64) -> SignerResult<i64> {
-    f64_to_i64_round_internal(value).map_err(|()| SignerError::InvalidLadderMath)
+    f64_to_i64_round_internal(value)
+        .map_err(|()| SignerError::CoinOps(CoinOpsError::InvalidLadderMath))
 }
 
 /// Quote-leg mojos for a base size at the given price and unit multiplier.
@@ -52,7 +53,7 @@ pub fn quote_mojos_for_base_size(
     f64_to_i64_round_internal(
         i64_to_f64(size_base_units) * quote_price * i64_to_f64(quote_unit_multiplier),
     )
-    .map_err(|()| SignerError::InvalidOfferRequestAmount)
+    .map_err(|()| SignerError::Offer(OfferError::InvalidOfferRequestAmount))
 }
 
 /// Ladder combine threshold: `ceil(target_count * factor)` with a minimum of 2.
@@ -66,7 +67,7 @@ pub fn combine_threshold_count(
 ) -> SignerResult<i64> {
     let scaled = i64_to_f64(target_count) * combine_when_excess_factor;
     if !scaled.is_finite() {
-        return Err(SignerError::InvalidLadderMath);
+        return Err(SignerError::CoinOps(CoinOpsError::InvalidLadderMath));
     }
     f64_to_i64_round_ladder(scaled.ceil().max(2.0))
 }

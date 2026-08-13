@@ -13,7 +13,7 @@ use chia_protocol::Bytes32;
 use chia_sdk_driver::{Cat, Outputs};
 
 use crate::coinset::cat_outer_puzzle_hash;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 
 /// CAT creates recorded on a [`Outputs`] map (after `Spends::prepare`).
 pub(crate) fn created_cats(outputs: &Outputs) -> impl Iterator<Item = &Cat> {
@@ -25,9 +25,9 @@ pub(crate) fn created_cats(outputs: &Outputs) -> impl Iterator<Item = &Cat> {
 ///
 /// # Errors
 ///
-/// - [`SignerError::VaultCatCreateDestinationIsOuterLayer`] when a create used the
+/// - [`crate::error::VaultError::CatCreateDestinationIsOuterLayer`] when a create used the
 ///   receive CAT outer as its p2 (the double-wrap regression).
-/// - [`SignerError::VaultCatCreateDestinationNotReceiveP2`] when a create used any
+/// - [`crate::error::VaultError::CatCreateDestinationNotReceiveP2`] when a create used any
 ///   other unexpected p2.
 pub(crate) fn assert_cat_creates<'a>(
     cats: impl IntoIterator<Item = &'a Cat>,
@@ -42,12 +42,16 @@ pub(crate) fn assert_cat_creates<'a>(
         }
         let p2 = cat.info.p2_puzzle_hash;
         if p2 == receive_outer {
-            return Err(SignerError::VaultCatCreateDestinationIsOuterLayer);
+            return Err(SignerError::Vault(
+                VaultError::CatCreateDestinationIsOuterLayer,
+            ));
         }
         if p2 == receive_p2 || allowed_non_receive_p2s.contains(&p2) {
             continue;
         }
-        return Err(SignerError::VaultCatCreateDestinationNotReceiveP2);
+        return Err(SignerError::Vault(
+            VaultError::CatCreateDestinationNotReceiveP2,
+        ));
     }
     Ok(())
 }
@@ -92,7 +96,7 @@ mod tests {
         let err = assert_cat_creates([&cat], asset, receive, &[]).unwrap_err();
         assert!(matches!(
             err,
-            SignerError::VaultCatCreateDestinationIsOuterLayer
+            SignerError::Vault(VaultError::CatCreateDestinationIsOuterLayer)
         ));
     }
 
@@ -105,7 +109,7 @@ mod tests {
         let err = assert_cat_creates([&cat], asset, receive, &[]).unwrap_err();
         assert!(matches!(
             err,
-            SignerError::VaultCatCreateDestinationNotReceiveP2
+            SignerError::Vault(VaultError::CatCreateDestinationNotReceiveP2)
         ));
     }
 

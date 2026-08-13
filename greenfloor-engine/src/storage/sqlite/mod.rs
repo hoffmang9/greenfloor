@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use chrono::Utc;
 use rusqlite::{Connection, Row};
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{PersistenceError, SignerError, SignerResult};
 use crate::offer::types::{OfferCancelFields, OfferExecutionMode};
 
 use super::schema::schema_sql;
@@ -67,8 +67,19 @@ pub use reservations::{
     OfferReservationRejectReason,
 };
 
-pub(crate) fn db_err(context: &str, err: impl std::fmt::Display) -> SignerError {
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn db_err(context: &str, err: rusqlite::Error) -> SignerError {
+    if is_sqlite_lock_error(&err) {
+        return PersistenceError::DatabaseLocked.into();
+    }
     SignerError::Other(format!("{context}: {err}"))
+}
+
+fn is_sqlite_lock_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    )
 }
 
 /// Numbered `?1, ?2, …` placeholders for `IN (...)` clauses.
@@ -210,9 +221,11 @@ impl SqliteStore {
                 ))
             })?;
         }
-        let conn = Connection::open(db_path).map_err(|err| SignerError::SqliteOpenFailed {
-            path: db_path.display().to_string(),
-            open_error: err.to_string(),
+        let conn = Connection::open(db_path).map_err(|err| {
+            SignerError::Persistence(PersistenceError::SqliteOpenFailed {
+                path: db_path.display().to_string(),
+                open_error: err.to_string(),
+            })
         })?;
         conn.busy_timeout(Duration::from_secs(30)).map_err(|err| {
             SignerError::Other(format!("failed to set sqlite busy_timeout: {err}"))
@@ -241,4 +254,34 @@ impl SqliteStore {
 
 pub(crate) fn utcnow_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::db_err;
+    use crate::error::{PersistenceError, SignerError};
+
+    fn sqlite_failure(code: i32) -> rusqlite::Error {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None)
+    }
+
+    #[test]
+    fn db_err_maps_busy_and_locked_to_database_locked() {
+        const SQLITE_BUSY: i32 = 5;
+        const SQLITE_LOCKED: i32 = 6;
+        assert!(matches!(
+            db_err("query offers", sqlite_failure(SQLITE_BUSY)),
+            SignerError::Persistence(PersistenceError::DatabaseLocked)
+        ));
+        assert!(matches!(
+            db_err("query offers", sqlite_failure(SQLITE_LOCKED)),
+            SignerError::Persistence(PersistenceError::DatabaseLocked)
+        ));
+        let other = db_err("query offers", sqlite_failure(1));
+        assert!(!matches!(
+            other,
+            SignerError::Persistence(PersistenceError::DatabaseLocked)
+        ));
+        assert!(other.to_string().contains("query offers"));
+    }
 }

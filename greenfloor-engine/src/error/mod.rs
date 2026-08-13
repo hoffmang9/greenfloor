@@ -1,269 +1,38 @@
 use thiserror::Error;
 
+mod coin_ops;
+mod config;
+mod offer;
+mod persistence;
 mod transport;
+mod vault;
 
+pub use coin_ops::CoinOpsError;
+pub use config::ConfigError;
+pub use offer::OfferError;
+pub use persistence::PersistenceError;
 pub use transport::TransportError;
+pub use vault::VaultError;
 
+/// Operator failure with a single domain owner per variant.
 #[derive(Debug, Error)]
 pub enum SignerError {
-    #[error("vault custody snapshot unavailable")]
-    VaultSnapshotUnavailable,
-
-    #[error("vault launcher id missing or invalid")]
-    VaultLauncherIdInvalid,
-
-    #[error("vault threshold or timelock invalid")]
-    VaultThresholdOrTimelockInvalid,
-
-    #[error("unsupported vault signer cardinality")]
-    UnsupportedVaultSignerCardinality,
-
-    #[error("unsupported vault threshold")]
-    UnsupportedVaultThreshold,
-
-    #[error("invalid vault recovery timelock")]
-    InvalidVaultRecoveryTimelock,
-
-    #[error("unsupported vault curve: {0}")]
-    UnsupportedVaultCurve(String),
-
-    #[error("kms public key mismatch: kms={kms} custody={custody}")]
-    KmsPublicKeyMismatch { kms: String, custody: String },
-
-    #[error("vault single secp256r1 custody key required, found {0}")]
-    VaultSecp256r1KeyCount(usize),
-
-    #[error("missing config field: {0}")]
-    MissingConfigField(&'static str),
-
-    #[error("kms error: {0}")]
-    Kms(String),
-
     #[error(transparent)]
-    Transport(#[from] TransportError),
-
+    Vault(#[from] VaultError),
+    #[error(transparent)]
+    CoinOps(#[from] CoinOpsError),
+    #[error(transparent)]
+    Offer(#[from] OfferError),
     #[error(transparent)]
     Reconcile(#[from] crate::cycle::ReconcileStateError),
-
-    #[error("unparseable cat lineage: {0}")]
-    UnparseableCatLineage(String),
-
-    #[error("no unspent cat coins")]
-    NoUnspentCatCoins,
-
-    #[error("insufficient cat coins")]
-    InsufficientCatCoins,
-
-    #[error("preselected cat coins do not match requested coin ids")]
-    PreselectedCatCoinIdsMismatch,
-
-    #[error("proven dust coin does not match spend-ready cat")]
-    ProvenDustCoinMismatch,
-
-    #[error("failed to resolve cat lineage for coin {0}")]
-    CatLineageResolutionFailed(String),
-
-    #[error("derivation scan failed for selected coin")]
-    MissingSigningKeyForSelectedCoins,
-
-    #[error("no unspent xch coins")]
-    NoUnspentXchCoins,
-
-    #[error("insufficient xch fee balance for mixed split")]
-    InsufficientXchFeeBalanceForMixedSplit,
-
-    #[error("no unspent offer xch coins")]
-    NoUnspentOfferXchCoins,
-
-    #[error("insufficient offer xch coins")]
-    InsufficientOfferXchCoins,
-
-    #[error("no unspent offer cat coins")]
-    NoUnspentOfferCatCoins,
-
-    #[error("insufficient offer cat coins")]
-    InsufficientOfferCatCoins,
-
-    #[error("unsupported operation type")]
-    UnsupportedOperationType,
-
-    #[error("invalid plan values")]
-    InvalidPlanValues,
-
-    #[error("insufficient selected coin total")]
-    InsufficientSelectedCoinTotal,
-
-    #[error("xch coin selection failed")]
-    XchCoinSelectionFailed,
-
-    #[error("unsupported network for signing")]
-    UnsupportedNetworkForSigning,
-
-    #[error("cat output below minimum mojos")]
-    CatOutputBelowMinimum,
-
-    #[error("cat change below minimum mojos")]
-    CatChangeBelowMinimum,
-
-    #[error(
-        "vault cat create destination is the receive CAT outer puzzle hash (would double-wrap)"
-    )]
-    VaultCatCreateDestinationIsOuterLayer,
-
-    #[error("vault cat create destination is not the vault receive p2 puzzle hash")]
-    VaultCatCreateDestinationNotReceiveP2,
-
-    #[error("vault receive message mode 23 not found")]
-    VaultReceiveMessageNotFound,
-
-    #[error("vault singleton coin not found")]
-    VaultSingletonNotFound,
-
-    #[error("mixed split vault with fee not supported")]
-    MixedSplitVaultWithFeeNotSupported,
-
-    #[error("invalid output amount")]
-    InvalidOutputAmount,
-
-    #[error("selected mixed split coins are not spendable")]
-    MixedSplitSelectedCoinsNotSpendable,
-
-    #[error("missing receive address")]
-    MissingReceiveAddress,
-
-    #[error("missing asset id")]
-    MissingAssetId,
-
-    #[error("missing output amounts")]
-    MissingOutputAmounts,
-
-    #[error("presplit requires a single source cat coin")]
-    PresplitRequiresSingleSourceCat,
-
-    #[error("offer input exceeds offer amount; enable split-input-coins or specify exact coin")]
-    OfferInputRequiresPresplit,
-
-    #[error(
-        "direct offer requires exactly one input coin equal to offer amount; combine or enable split-input-coins"
-    )]
-    DirectOfferRequiresSingleInputCoin,
-
-    #[error("presplit coin not found on chain")]
-    PresplitCoinNotFound,
-
-    #[error("timeout waiting for presplit coin confirmation")]
-    PresplitCoinConfirmationTimeout,
-
-    #[error("combine input verify timeout")]
-    CombineInputVerifyTimeout,
-
-    #[error("bootstrap shape wait timeout")]
-    BootstrapShapeWaitTimeout,
-
-    #[error("presplit offer step requires --offer-coin-ids of original source coins")]
-    PresplitOfferRequiresSourceCoinIds,
-
-    #[error("presplit coin amount {coin} does not match offer amount {offer}")]
-    PresplitCoinAmountMismatch { coin: u64, offer: u64 },
-
-    #[error("presplit coin asset id does not match offer asset id")]
-    PresplitCoinAssetMismatch,
-
-    #[error("presplit offer path supports exactly one presplit coin")]
-    PresplitOfferRequiresSingleCoin,
-
-    #[error("presplit coin p2 puzzle hash does not match offer binding")]
-    PresplitCoinPuzzleHashMismatch,
-
-    #[error("offer_missing_expiration")]
-    OfferMissingExpiration,
-
-    #[error("offer_duplicate_spent_coin_ids")]
-    OfferDuplicateSpentCoinIds,
-
-    #[error("offer_cancel_offer_file_not_found")]
-    OfferCancelOfferFileNotFound,
-
-    #[error("offer_cancel_offer_file_missing")]
-    OfferCancelOfferFileMissing,
-
-    #[error("offer_cancel_no_spendable_input")]
-    OfferCancelNoSpendableInput,
-
-    #[error("offer_cancel_input_not_presplit_maker")]
-    OfferCancelInputNotPresplitMaker,
-
-    #[error("offer_cancel_input_not_vault_owned: coin={coin_id} puzzle_hash={puzzle_hash} launcher={launcher_id}")]
-    OfferCancelInputNotVaultOwned {
-        coin_id: String,
-        puzzle_hash: String,
-        launcher_id: String,
-    },
-
-    #[error("offer_cancel_presplit_binding_parse_failed:{detail}")]
-    OfferCancelPresplitBindingParseFailed { detail: String },
-
-    #[error("offer_cancel_input_coin_already_spent")]
-    OfferCancelInputCoinAlreadySpent,
-
-    #[error("invalid_size_base_units")]
-    InvalidSizeBaseUnits,
-
-    #[error("request_amount must be positive")]
-    InvalidOfferRequestAmount,
-
-    #[error("invalid ladder math")]
-    InvalidLadderMath,
-
-    #[error("invalid_offer_amount")]
-    InvalidOfferAmount,
-
-    #[error("signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair")]
-    ResolvedAssetsCollideForNonXchPair,
-
-    #[error("reservation contention: {0}")]
-    ReservationContention(String),
-
-    #[error("managed upstream transient: {0}")]
-    ManagedUpstreamTransient(String),
-
-    #[error("database is locked")]
-    DatabaseLocked,
-
-    #[error("failed to open sqlite db {path}: {open_error}")]
-    SqliteOpenFailed { path: String, open_error: String },
-
-    #[error("offer execution requires signer.kms_key_id and vault.launcher_id in program config")]
-    SignerPathNotConfigured,
-
-    #[error("daemon_already_running:{path}{detail}")]
-    DaemonAlreadyRunning { path: String, detail: String },
-
+    #[error(transparent)]
+    Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    Transport(#[from] TransportError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
     #[error("{0}")]
     Other(String),
-}
-
-fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "timed out",
-        "timeout",
-        "temporary unavailable",
-        "temporarily unavailable",
-        "bad gateway",
-        "gateway timeout",
-        "service unavailable",
-        "connection reset",
-        "connection refused",
-        "managed_offer_http_error:502",
-        "managed_offer_http_error:503",
-        "managed_offer_http_error:504",
-        "managed_offer_network_error",
-        "signer_http_error:502",
-        "signer_http_error:503",
-        "signer_http_error:504",
-    ];
-    let normalized = error_text.trim().to_ascii_lowercase();
-    MARKERS.iter().any(|marker| normalized.contains(marker))
 }
 
 const MIXED_SPLIT_SELECTED_COINS_NOT_SPENDABLE: &str = "Some selected coins are not spendable";
@@ -288,6 +57,44 @@ impl SignerError {
         })
     }
 
+    /// HTTP timeout (`reqwest::Error::is_timeout`).
+    #[must_use]
+    pub fn http_timeout(layer: &'static str, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Timeout {
+            layer,
+            message: message.into(),
+        })
+    }
+
+    /// HTTP connect failure (`reqwest::Error::is_connect`).
+    #[must_use]
+    pub fn http_connect(layer: &'static str, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::Connect {
+            layer,
+            message: message.into(),
+        })
+    }
+
+    #[must_use]
+    pub fn from_reqwest(layer: &'static str, err: &reqwest::Error) -> Self {
+        Self::Transport(TransportError::from_reqwest(layer, err))
+    }
+
+    /// HTTP response with a non-success status code.
+    #[must_use]
+    pub fn http_status(layer: &'static str, status: u16, message: impl Into<String>) -> Self {
+        Self::Transport(TransportError::HttpStatus {
+            layer,
+            status,
+            message: message.into(),
+        })
+    }
+
+    #[must_use]
+    pub fn is_http_not_found(&self) -> bool {
+        matches!(self, Self::Transport(err) if err.is_http_not_found())
+    }
+
     /// chia-wallet-sdk driver failure.
     #[must_use]
     pub fn driver(message: impl Into<String>) -> Self {
@@ -296,16 +103,22 @@ impl SignerError {
 
     #[must_use]
     pub fn is_mixed_split_selected_coins_not_spendable(&self) -> bool {
-        matches!(self, Self::MixedSplitSelectedCoinsNotSpendable)
+        matches!(
+            self,
+            Self::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
+        )
     }
 
     #[must_use]
     pub fn normalize_mixed_split_error(err: Self) -> Self {
-        if matches!(err, Self::MixedSplitSelectedCoinsNotSpendable) {
+        if matches!(
+            err,
+            Self::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
+        ) {
             return err;
         }
         if mixed_split_selected_coins_not_spendable_message(&err.to_string()) {
-            Self::MixedSplitSelectedCoinsNotSpendable
+            VaultError::MixedSplitSelectedCoinsNotSpendable.into()
         } else {
             err
         }
@@ -313,7 +126,10 @@ impl SignerError {
 
     #[must_use]
     pub fn is_sqlite_fatal(&self) -> bool {
-        matches!(self, Self::SqliteOpenFailed { .. })
+        match self {
+            Self::Persistence(err) => err.is_sqlite_fatal(),
+            _ => false,
+        }
     }
 
     #[must_use]
@@ -322,17 +138,8 @@ impl SignerError {
             return false;
         }
         match self {
-            Self::ReservationContention(_)
-            | Self::ManagedUpstreamTransient(_)
-            | Self::DatabaseLocked => true,
-            Self::Transport(TransportError::Http { message, .. }) => {
-                is_transient_managed_upstream_error_text(message)
-            }
-            Self::Other(message) => {
-                let message = message.as_str();
-                message.contains("database is locked")
-                    || is_transient_managed_upstream_error_text(message)
-            }
+            Self::Persistence(err) => err.is_parallel_dispatch_transient(),
+            Self::Transport(err) => err.is_parallel_dispatch_transient(),
             _ => false,
         }
     }
@@ -353,53 +160,76 @@ impl From<chia_sdk_driver::DriverError> for SignerError {
 
 impl From<reqwest::Error> for SignerError {
     fn from(err: reqwest::Error) -> Self {
-        SignerError::http("http", err.to_string())
+        SignerError::from_reqwest("http", &err)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SignerError, TransportError};
+    use super::{
+        CoinOpsError, ConfigError, OfferError, PersistenceError, SignerError, TransportError,
+        VaultError,
+    };
 
     #[test]
     fn signer_error_display_messages_are_stable() {
         let cases: Vec<(SignerError, &str)> = vec![
             (
-                SignerError::VaultLauncherIdInvalid,
+                VaultError::LauncherIdInvalid.into(),
                 "vault launcher id missing or invalid",
             ),
-            (SignerError::InsufficientCatCoins, "insufficient cat coins"),
             (
-                SignerError::CatLineageResolutionFailed("abcd".to_string()),
+                CoinOpsError::InsufficientCatCoins.into(),
+                "insufficient cat coins",
+            ),
+            (
+                CoinOpsError::CatLineageResolutionFailed("abcd".to_string()).into(),
                 "failed to resolve cat lineage for coin abcd",
             ),
             (
-                SignerError::OfferInputRequiresPresplit,
+                OfferError::OfferInputRequiresPresplit.into(),
                 "offer input exceeds offer amount; enable split-input-coins or specify exact coin",
             ),
             (
-                SignerError::PresplitCoinConfirmationTimeout,
+                OfferError::PresplitCoinConfirmationTimeout.into(),
                 "timeout waiting for presplit coin confirmation",
             ),
             (
-                SignerError::KmsPublicKeyMismatch {
+                VaultError::KmsPublicKeyMismatch {
                     kms: "aa".to_string(),
                     custody: "bb".to_string(),
-                },
+                }
+                .into(),
                 "kms public key mismatch: kms=aa custody=bb",
             ),
             (
-                SignerError::MissingConfigField("signer"),
+                ConfigError::MissingField("signer").into(),
                 "missing config field: signer",
             ),
             (
-                SignerError::ResolvedAssetsCollideForNonXchPair,
+                ConfigError::Parse("markets config root must be a mapping".to_string()).into(),
+                "markets config root must be a mapping",
+            ),
+            (
+                OfferError::ResolvedAssetsCollideForNonXchPair.into(),
                 "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair",
             ),
             (SignerError::coinset("down"), "coinset error: down"),
             (
-                SignerError::http("dexie", "timeout"),
-                "http error (dexie): timeout",
+                SignerError::http("dexie", "bad json"),
+                "http error (dexie): bad json",
+            ),
+            (
+                SignerError::http_timeout("dexie", "timed out"),
+                "http timeout (dexie): timed out",
+            ),
+            (
+                SignerError::http_connect("dexie", "connection refused"),
+                "http connect (dexie): connection refused",
+            ),
+            (
+                SignerError::http_status("dexie_http_error", 404, "missing"),
+                "http status 404 (dexie_http_error): missing",
             ),
             (
                 SignerError::driver("invalid mod hash"),
@@ -412,21 +242,34 @@ mod tests {
     }
 
     #[test]
-    fn transient_error_text_detects_timeout_markers() {
+    fn transient_http_uses_timeout_and_connect_variants() {
         assert!(
-            SignerError::Other("managed_offer_network_error: connection reset".to_string())
+            SignerError::http_timeout("dexie_network_error", "timed out")
                 .is_parallel_dispatch_transient()
+        );
+        assert!(
+            SignerError::http_connect("dexie_network_error", "connection refused")
+                .is_parallel_dispatch_transient()
+        );
+        assert!(!SignerError::http("dexie", "timeout").is_parallel_dispatch_transient());
+        assert!(
+            !SignerError::http_status("dexie_http_error", 404, "missing")
+                .is_parallel_dispatch_transient()
+        );
+        assert!(SignerError::http_status("dexie_http_error", 404, "missing").is_http_not_found());
+        assert!(!SignerError::http("dexie", "missing").is_http_not_found());
+        assert!(
+            !SignerError::Other("connection reset".to_string()).is_parallel_dispatch_transient()
         );
         assert!(!SignerError::Other("invalid offer".to_string()).is_parallel_dispatch_transient());
     }
 
     #[test]
     fn parallel_dispatch_transient_matches_typed_contention_and_upstream() {
-        assert!(SignerError::ManagedUpstreamTransient("timeout".to_string())
-            .is_parallel_dispatch_transient());
-        assert!(
-            SignerError::ReservationContention("busy".to_string()).is_parallel_dispatch_transient()
-        );
+        assert!(SignerError::http_timeout("dexie", "timed out").is_parallel_dispatch_transient());
+        let contention: SignerError =
+            PersistenceError::ReservationContention("busy".to_string()).into();
+        assert!(contention.is_parallel_dispatch_transient());
         assert!(
             !SignerError::Other("PermanentOfferBuildFailure: bad puzzle".to_string())
                 .is_parallel_dispatch_transient()
@@ -435,30 +278,39 @@ mod tests {
 
     #[test]
     fn sqlite_fatal_errors_are_not_parallel_dispatch_transient() {
-        assert!(SignerError::SqliteOpenFailed {
-            path: "/tmp/greenfloor.sqlite".to_string(),
-            open_error: "unable to open database file".to_string(),
-        }
-        .is_sqlite_fatal());
+        assert!(
+            SignerError::Persistence(PersistenceError::SqliteOpenFailed {
+                path: "/tmp/greenfloor.sqlite".to_string(),
+                open_error: "unable to open database file".to_string(),
+            })
+            .is_sqlite_fatal()
+        );
         assert!(!SignerError::Other("database is locked".to_string()).is_sqlite_fatal());
-        assert!(!SignerError::SqliteOpenFailed {
-            path: "/tmp/x".to_string(),
-            open_error: "permission denied".to_string(),
-        }
-        .is_parallel_dispatch_transient());
-        assert!(SignerError::DatabaseLocked.is_parallel_dispatch_transient());
+        assert!(
+            !SignerError::Persistence(PersistenceError::SqliteOpenFailed {
+                path: "/tmp/x".to_string(),
+                open_error: "permission denied".to_string(),
+            })
+            .is_parallel_dispatch_transient()
+        );
+        assert!(SignerError::Persistence(PersistenceError::DatabaseLocked)
+            .is_parallel_dispatch_transient());
     }
 
     #[test]
     fn parallel_dispatch_transient_rejects_non_transient_variants() {
         assert!(!SignerError::driver("invalid mod hash").is_parallel_dispatch_transient());
-        assert!(!SignerError::InsufficientCatCoins.is_parallel_dispatch_transient());
+        assert!(!SignerError::http("dexie", "bad json").is_parallel_dispatch_transient());
+        assert!(!SignerError::CoinOps(CoinOpsError::InsufficientCatCoins)
+            .is_parallel_dispatch_transient());
     }
 
     #[test]
     fn mixed_split_selected_coins_not_spendable_is_classified() {
-        assert!(SignerError::MixedSplitSelectedCoinsNotSpendable
-            .is_mixed_split_selected_coins_not_spendable());
+        assert!(
+            SignerError::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
+                .is_mixed_split_selected_coins_not_spendable()
+        );
         assert!(
             !SignerError::Other("upstream: Some selected coins are not spendable".to_string())
                 .is_mixed_split_selected_coins_not_spendable()
@@ -467,7 +319,7 @@ mod tests {
             SignerError::normalize_mixed_split_error(SignerError::Other(
                 "Some selected coins are not spendable".to_string()
             )),
-            SignerError::MixedSplitSelectedCoinsNotSpendable
+            SignerError::Vault(VaultError::MixedSplitSelectedCoinsNotSpendable)
         ));
     }
 

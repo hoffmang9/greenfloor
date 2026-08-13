@@ -6,6 +6,8 @@ use crate::coin_ops::{
 };
 use crate::coinset::{list_wallet_unspent_coins_for_signer, spend_bundle_hash_from_hex};
 use crate::config::{GatedOperatorMarket, MarketConfig};
+#[cfg(test)]
+use crate::error::VaultError;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, hex_to_bytes32, parse_coin_ids};
 use crate::offer::OfferAssetResolver;
@@ -170,7 +172,9 @@ impl CoinOpExecContext {
         #[cfg(test)]
         if self.test_overrides.take_mixed_split_stale_first_failure() {
             let _ = (output_amounts, coin_ids, fee_mojos);
-            return Err(SignerError::MixedSplitSelectedCoinsNotSpendable);
+            return Err(SignerError::Vault(
+                VaultError::MixedSplitSelectedCoinsNotSpendable,
+            ));
         }
         #[cfg(test)]
         if let Some(operation_id) = self.test_overrides.mixed_split_operation_id_override() {

@@ -3,17 +3,11 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use chrono::{DateTime, Utc};
-
-use crate::adapters::DexieClient;
-use crate::cycle::reconcile::CancelSubmittedContext;
-use crate::cycle::{
-    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-    resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
-    CycleOfferTransition,
-};
+use crate::cycle::reconcile::{CancelSubmittedContext, CoinsetTxSignals};
+use crate::cycle::{resolve_watched_offer_transition_from_signals, CycleOfferTransition};
 use crate::error::SignerResult;
 use crate::offer::dexie_payload::{dexie_offer_status, extract_coinset_tx_ids_from_offer_payload};
 use crate::storage::SqliteStore;
@@ -21,8 +15,6 @@ use crate::storage::SqliteStore;
 use super::cancel_context::{
     cancel_submitted_context_for_offer, chain_confirmed_tx_ids_for_transition,
 };
-use super::reconcile_prep::{fetch_dexie_offer, DexieFetchMode, DexieOfferFetch};
-use crate::cycle::reconcile::CoinsetTxSignals;
 
 /// Clock and optional preloaded cancel-submit context for watched-offer reconcile.
 #[derive(Debug, Clone, Copy)]
@@ -99,22 +91,6 @@ pub fn coinset_signals_from_dexie_offer_payload(
     ))
 }
 
-pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
-    if payload.get("success") != Some(&Value::Bool(false)) {
-        return None;
-    }
-    let error_text = payload.get("error").and_then(Value::as_str).unwrap_or("");
-    if is_dexie_offer_missing_error_text(error_text) {
-        Some(error_text.to_string())
-    } else {
-        None
-    }
-}
-
-fn missing_watched_offer_transition(current_state: &str) -> SignerResult<CycleOfferTransition> {
-    resolve_missing_watched_offer_transition(current_state).map_err(Into::into)
-}
-
 /// Resolve lifecycle + Dexie status from an offer body (list row or `get_offer.offer`).
 ///
 /// # Errors
@@ -148,75 +124,4 @@ pub(crate) fn transition_from_offer_body(
         env.now,
     )?;
     Ok((transition, status))
-}
-
-/// Resolve a lifecycle transition by fetching a single offer from Dexie.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn resolve_watched_offer_transition_from_dexie_fetch(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    offer_id: &str,
-    current_state: &str,
-    env: WatchedOfferTransitionEnv<'_>,
-) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
-    match fetch_dexie_offer(dexie, offer_id, DexieFetchMode::LifecycleLoose).await {
-        DexieOfferFetch::Found(offer_body) => {
-            let (transition, status) =
-                transition_from_offer_body(store, offer_id, current_state, &offer_body, env)?;
-            Ok((transition, status, None))
-        }
-        DexieOfferFetch::Missing(error_text) => {
-            let transition = missing_watched_offer_transition(current_state)?;
-            Ok((transition, None, Some(error_text)))
-        }
-        DexieOfferFetch::Mismatch => {
-            unreachable!("DexieFetchMode::LifecycleLoose never produces Mismatch")
-        }
-        DexieOfferFetch::LookupError(err) => {
-            let transition =
-                unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))?;
-            Ok((transition, None, None))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::adapters::DexieClient;
-    use crate::storage::SqliteStore;
-
-    #[tokio::test]
-    async fn fetch_transition_expires_on_dexie_404() {
-        let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join("state.db");
-        let store = SqliteStore::open(&db_path).expect("open");
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("GET", "/v1/offers/offer-missing")
-            .with_status(404)
-            .with_body(r#"{"success":false,"error":"not_found"}"#)
-            .create();
-        let dexie = DexieClient::new(server.url());
-        let (transition, status, error) = resolve_watched_offer_transition_from_dexie_fetch(
-            &store,
-            &dexie,
-            "offer-missing",
-            "open",
-            WatchedOfferTransitionEnv::at_now(None),
-        )
-        .await
-        .expect("transition");
-        assert_eq!(
-            transition.new_state,
-            crate::cycle::ReconcileState::parse("expired").expect("state")
-        );
-        assert!(status.is_none());
-        assert!(error.is_some());
-    }
 }

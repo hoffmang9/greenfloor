@@ -3,7 +3,7 @@ mod response;
 use serde_json::json;
 
 use crate::adapters::http_json::{self, AdapterResponseTags};
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult, TransportError};
 
 pub use response::SplashResponse;
 
@@ -38,7 +38,7 @@ impl SplashClient {
     ///
     /// Returns an error if the operation fails.
     pub async fn post_offer(&self, offer: &str) -> SignerResult<SplashResponse> {
-        http_json::post_json(
+        match http_json::post_json(
             &self.http,
             &self.base_url,
             json!({"offer": offer}),
@@ -47,6 +47,17 @@ impl SplashClient {
             RESPONSE_TAGS,
         )
         .await
-        .map(SplashResponse::from_value)
+        {
+            Ok(value) => Ok(SplashResponse::from_value(value)),
+            Err(err) => match &err {
+                SignerError::Transport(TransportError::HttpStatus { .. }) => {
+                    Ok(SplashResponse::from_value(json!({
+                        "success": false,
+                        "error": err.to_string(),
+                    })))
+                }
+                _ => Err(err),
+            },
+        }
     }
 }

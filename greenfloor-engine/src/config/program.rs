@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::keys_registry::SignerKeyEntry;
 use super::signer::{parse_signer_config, SignerConfig};
 use crate::coinset::is_xch_like_asset;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 use crate::hex::is_hex_id;
 use crate::paths::expand_home;
 
@@ -63,7 +63,7 @@ impl ManagerProgramConfig {
         if self.signer_offer_path_configured() {
             return Ok(());
         }
-        Err(SignerError::SignerPathNotConfigured)
+        Err(SignerError::Config(ConfigError::SignerPathNotConfigured))
     }
 }
 
@@ -110,7 +110,7 @@ impl CycleProgramConfig {
         self.program.require_signer_offer_path()?;
         self.signer
             .as_ref()
-            .ok_or(SignerError::MissingConfigField("signer"))
+            .ok_or(SignerError::Config(ConfigError::MissingField("signer")))
     }
 }
 
@@ -120,8 +120,12 @@ pub const SIGNER_SKIP_MISSING_SIGNER_CONFIG: &str = "skipped_missing_signer_conf
 #[must_use]
 pub fn signer_execution_skip_reason(err: &SignerError) -> String {
     match err {
-        SignerError::SignerPathNotConfigured => SIGNER_SKIP_NO_SIGNER_PATH.to_string(),
-        SignerError::MissingConfigField("signer") => SIGNER_SKIP_MISSING_SIGNER_CONFIG.to_string(),
+        SignerError::Config(ConfigError::SignerPathNotConfigured) => {
+            SIGNER_SKIP_NO_SIGNER_PATH.to_string()
+        }
+        SignerError::Config(ConfigError::MissingField("signer")) => {
+            SIGNER_SKIP_MISSING_SIGNER_CONFIG.to_string()
+        }
         other => other.to_string(),
     }
 }

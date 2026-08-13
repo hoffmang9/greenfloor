@@ -4,7 +4,7 @@ use chia_sdk_driver::{Cat, CatSpend, SpendContext, Vault};
 use chia_sdk_types::Conditions;
 
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::vault::materialize::{
     append_vault_singleton_spend_for_vault, build_vault_cat_inner_spend,
 };
@@ -18,7 +18,9 @@ use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 /// Returns an error when more or fewer than one source CAT is provided.
 pub fn validate_presplit_source_cats(source_cat_count: usize) -> SignerResult<()> {
     if source_cat_count != 1 {
-        return Err(SignerError::PresplitRequiresSingleSourceCat);
+        return Err(SignerError::Offer(
+            OfferError::PresplitRequiresSingleSourceCat,
+        ));
     }
     Ok(())
 }
@@ -134,6 +136,9 @@ mod tests {
     #[test]
     fn presplit_requires_single_source_cat() {
         let err = validate_presplit_source_cats(2).unwrap_err();
-        assert!(matches!(err, SignerError::PresplitRequiresSingleSourceCat));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitRequiresSingleSourceCat)
+        ));
     }
 }

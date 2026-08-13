@@ -7,7 +7,7 @@ use chia_traits::Streamable;
 use clvm_traits::FromClvm;
 use clvmr::{serde::node_from_bytes, Allocator, NodePtr};
 
-use crate::error::{SignerError, SignerResult, TransportError};
+use crate::error::{OfferError, SignerError, SignerResult, TransportError};
 use crate::hex::normalize_hex_id;
 
 type RequestedXchPayments = Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>;
@@ -102,7 +102,7 @@ pub fn expires_at_seconds_from_offer_spend(
         .coin_spends
         .iter()
         .find(|spend| spend.coin.coin_id() == coin_id)
-        .ok_or(SignerError::OfferCancelNoSpendableInput)?;
+        .ok_or(SignerError::Offer(OfferError::OfferCancelNoSpendableInput))?;
     expires_at_seconds_from_coin_spend(coin_spend)
 }
 
@@ -161,20 +161,22 @@ pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
 pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
     let spend_bundle = decode_and_parse_offer(offer)?;
     if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
-        return Err(SignerError::OfferDuplicateSpentCoinIds);
+        return Err(SignerError::Offer(OfferError::OfferDuplicateSpentCoinIds));
     }
     if !offer_has_expiration_condition(&spend_bundle)? {
-        return Err(SignerError::OfferMissingExpiration);
+        return Err(SignerError::Offer(OfferError::OfferMissingExpiration));
     }
     Ok(())
 }
 
 fn dexie_verify_error_code(err: SignerError) -> String {
     match err {
-        SignerError::OfferDuplicateSpentCoinIds => {
+        SignerError::Offer(OfferError::OfferDuplicateSpentCoinIds) => {
             "wallet_sdk_offer_duplicate_spent_coin_ids".to_string()
         }
-        SignerError::OfferMissingExpiration => "wallet_sdk_offer_missing_expiration".to_string(),
+        SignerError::Offer(OfferError::OfferMissingExpiration) => {
+            "wallet_sdk_offer_missing_expiration".to_string()
+        }
         SignerError::Transport(TransportError::Driver(msg)) => {
             format!("wallet_sdk_offer_validate_failed:driver:{msg}")
         }

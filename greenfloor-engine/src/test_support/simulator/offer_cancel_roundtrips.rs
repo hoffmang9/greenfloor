@@ -11,7 +11,7 @@ use super::offer_roundtrip_setup::{
     TEST_CAT_MOJO_MULT,
 };
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::SignerError;
+use crate::error::{OfferError, SignerError};
 use crate::offer::classify_cancellable_maker_input;
 use crate::offer::presplit::{
     build_offer_from_presplit_xch, vault_change_puzzle_hash, PresplitOfferBinding,
@@ -513,7 +513,10 @@ async fn build_offer_cancel_rejects_non_vault_maker_coin() {
         .await
         .expect_err("non-vault maker must fail");
     assert!(
-        matches!(err, SignerError::OfferCancelInputNotVaultOwned { .. }),
+        matches!(
+            err,
+            SignerError::Offer(OfferError::OfferCancelInputNotVaultOwned { .. })
+        ),
         "expected OfferCancelInputNotVaultOwned, got {err}"
     );
 }
@@ -536,7 +539,10 @@ async fn build_offer_cancel_rejects_spent_direct_vault_cat() {
     .await
     .expect_err("spent direct vault cat must fail fast");
     assert!(
-        matches!(err, SignerError::OfferCancelInputCoinAlreadySpent),
+        matches!(
+            err,
+            SignerError::Offer(OfferError::OfferCancelInputCoinAlreadySpent)
+        ),
         "expected OfferCancelInputCoinAlreadySpent, got {err}"
     );
 }
@@ -573,7 +579,10 @@ async fn build_offer_cancel_rejects_spent_presplit_cat() {
     .await
     .expect_err("spent presplit cat must fail fast");
     assert!(
-        matches!(err, SignerError::OfferCancelInputCoinAlreadySpent),
+        matches!(
+            err,
+            SignerError::Offer(OfferError::OfferCancelInputCoinAlreadySpent)
+        ),
         "expected OfferCancelInputCoinAlreadySpent, got {err}"
     );
 }
@@ -633,7 +642,10 @@ async fn classify_direct_vault_p2_rejects_spent_coin() {
     .await
     .expect_err("spent direct vault p2 must fail fast");
     assert!(
-        matches!(err, SignerError::OfferCancelInputCoinAlreadySpent),
+        matches!(
+            err,
+            SignerError::Offer(OfferError::OfferCancelInputCoinAlreadySpent)
+        ),
         "expected OfferCancelInputCoinAlreadySpent, got {err}"
     );
 }

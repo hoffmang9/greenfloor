@@ -138,7 +138,7 @@ impl DexieClient {
         &self,
         path: &str,
         timeout_secs: u64,
-        network_err_tag: &str,
+        network_err_tag: &'static str,
     ) -> SignerResult<Value> {
         http_json::get_json(
             &self.http,
@@ -155,7 +155,7 @@ impl DexieClient {
         path: &str,
         body: Value,
         timeout_secs: u64,
-        network_err_tag: &str,
+        network_err_tag: &'static str,
     ) -> SignerResult<Value> {
         http_json::post_json(
             &self.http,
@@ -201,22 +201,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_body_http_error_returns_success_false() {
-        let payload =
-            DexieClient::parse_response_body(StatusCode::NOT_FOUND, "missing").expect("parse");
-        assert_eq!(
-            payload.get("success").and_then(serde_json::Value::as_bool),
-            Some(false)
-        );
-        assert_eq!(
-            payload.get("error").and_then(|v| v.as_str()),
-            Some("dexie_http_error:404:missing")
-        );
+    fn parse_response_body_http_error_is_typed_status() {
+        use crate::error::{SignerError, TransportError};
+
+        let err =
+            DexieClient::parse_response_body(StatusCode::NOT_FOUND, "missing").expect_err("404");
+        assert!(matches!(
+            err,
+            SignerError::Transport(TransportError::HttpStatus {
+                layer: "dexie_http_error",
+                status: 404,
+                ..
+            })
+        ));
+        assert!(err.is_http_not_found());
     }
 
     #[test]
     fn parse_response_body_invalid_json_is_err() {
+        use crate::error::{SignerError, TransportError};
+
         let err = DexieClient::parse_response_body(StatusCode::OK, "not-json").unwrap_err();
+        assert!(matches!(
+            err,
+            SignerError::Transport(TransportError::Http {
+                layer: "dexie_json_error",
+                ..
+            })
+        ));
         assert!(err.to_string().contains("dexie_json_error"));
     }
 }

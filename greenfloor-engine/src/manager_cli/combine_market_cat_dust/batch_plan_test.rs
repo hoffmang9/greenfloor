@@ -6,7 +6,7 @@ use serde_json::json;
 use super::batches::DustBatchRunSelection;
 use super::combine_test_support::{ok_mixed_split_result, sample_combine_batch_plan};
 use super::execute::{run_batch_plan, BatchPlanRunner};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCombineBatch, DustPlan};
 
@@ -40,7 +40,9 @@ impl BatchPlanRunner for MockBatchPlanRunner {
     async fn wait_for_batch_spent(&self, _batch: &DustCombineBatch) -> SignerResult<()> {
         self.wait_calls.fetch_add(1, Ordering::SeqCst);
         if self.fail_wait {
-            Err(SignerError::CombineInputVerifyTimeout)
+            Err(SignerError::CoinOps(
+                CoinOpsError::CombineInputVerifyTimeout,
+            ))
         } else {
             Ok(())
         }

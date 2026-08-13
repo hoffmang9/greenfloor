@@ -15,7 +15,7 @@ use chia_secp::R1Signature;
 use clvm_utils::TreeHash;
 
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::vault::members::u32_to_usize;
 use crate::vault::messages::extract_mode23_receive_messages;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
@@ -196,7 +196,7 @@ where
 {
     let receive_messages = extract_mode23_receive_messages(ctx)?;
     if receive_messages.is_empty() {
-        return Err(SignerError::VaultReceiveMessageNotFound);
+        return Err(SignerError::Vault(VaultError::ReceiveMessageNotFound));
     }
     let mut conditions = Conditions::new().create_coin(
         vault_ctx.inner_puzzle_hash.into(),

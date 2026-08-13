@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use crate::bech32m::decode_address;
 use crate::coinset::{client_for_signer_on_network, coin_id_is_unspent, LiveCoinset};
 use crate::config::{market_wants_ladder_size, MarketConfig, SignerConfig};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, normalize_hex_id, tree_hash_to_hex};
 use crate::offer::action::plan_offer_terms_for_market;
 use crate::offer::lifecycle::{restore_stale_maker_claims_synced, ExpiredMakerLease};
@@ -151,8 +151,8 @@ pub async fn ensure_size_n_offer(
     parts: BuildAndPostOfferRequest,
 ) -> SignerResult<bool> {
     let side = effective_offer_side(parts.action_side.as_deref()).to_string();
-    let size_i64 =
-        i64::try_from(parts.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let size_i64 = i64::try_from(parts.size_base_units)
+        .map_err(|_| SignerError::Offer(OfferError::InvalidSizeBaseUnits))?;
     if !market_wants_ladder_size(market, &side, size_i64) {
         return Ok(false);
     }

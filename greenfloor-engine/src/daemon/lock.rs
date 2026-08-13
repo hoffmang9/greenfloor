@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use serde_json::json;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 
 const LOCK_FILENAME: &str = "daemon.lock";
 
@@ -49,10 +49,10 @@ impl DaemonInstanceLock {
             } else {
                 format!(" daemon_lock_metadata={}", existing.trim())
             };
-            return Err(SignerError::DaemonAlreadyRunning {
+            return Err(SignerError::Config(ConfigError::DaemonAlreadyRunning {
                 path: path.display().to_string(),
                 detail,
-            });
+            }));
         }
         let payload = json!({
             "pid": std::process::id(),
@@ -124,7 +124,7 @@ fn unlock(_file: &File) {}
 #[cfg(test)]
 mod tests {
     use super::DaemonInstanceLock;
-    use crate::error::SignerError;
+    use crate::error::{ConfigError, SignerError};
 
     #[test]
     fn acquire_writes_lock_metadata_and_releases_on_drop() {
@@ -144,7 +144,7 @@ mod tests {
         let _first = DaemonInstanceLock::acquire(dir.path(), "loop").expect("first acquire");
         let err = DaemonInstanceLock::acquire(dir.path(), "loop").expect_err("contention");
         match err {
-            SignerError::DaemonAlreadyRunning { detail, .. } => {
+            SignerError::Config(ConfigError::DaemonAlreadyRunning { detail, .. }) => {
                 assert!(detail.contains("daemon_lock_metadata="));
                 assert!(detail.contains("\"mode\":\"loop\""));
             }

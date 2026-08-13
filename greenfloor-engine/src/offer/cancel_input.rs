@@ -1,7 +1,7 @@
 //! Classify cancellable offer maker coins and resolve on-chain CAT inputs for cancel.
 
 use crate::coinset::OfferCoinsetBackend;
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::hex::{hex_to_bytes32, hex_to_tree_hash};
 use crate::offer::presplit::{
     offer_maker_cat_from_coin_input, presplit_binding_from_coin_input,
@@ -137,7 +137,7 @@ pub(crate) async fn resolve_cancellable_cat<C: OfferCoinsetBackend>(
     for coin_id in coin_id_candidates_for_cat_resolution(coin, spend_bundle, metadata)? {
         match fetch_input_cat_by_coin_id(backend, coin_id, coin.amount).await {
             Ok(Some(cat)) if cat.coin.coin_id() == coin.coin_id() => return Ok(Some(cat)),
-            Ok(_) | Err(SignerError::PresplitCoinNotFound) => {}
+            Ok(_) | Err(SignerError::Offer(OfferError::PresplitCoinNotFound)) => {}
             Err(err) => return Err(err),
         }
     }
@@ -156,7 +156,7 @@ fn member_fixed_hash_from_stored_fields(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or(SignerError::OfferCancelNoSpendableInput)?,
+            .ok_or(SignerError::Offer(OfferError::OfferCancelNoSpendableInput))?,
     )?;
     let binding_p2 = cat.map_or(coin.puzzle_hash, |value| value.info.p2_puzzle_hash);
     resolve_member_fixed_conditions_hash_for_binding(launcher_id, binding_p2, hash)
@@ -202,7 +202,7 @@ fn classify_coin_and_cat(
             metadata,
             offer_bundle,
         )?
-        .ok_or(SignerError::OfferCancelNoSpendableInput);
+        .ok_or(SignerError::Offer(OfferError::OfferCancelNoSpendableInput));
     }
 
     resolve_presplit_maker(vault_ctx.launcher_id, coin, None, metadata, offer_bundle)?
@@ -232,7 +232,7 @@ fn resolve_presplit_maker(
                     fixed_conditions_member_hash,
                 }))
             }
-            Err(SignerError::PresplitCoinPuzzleHashMismatch) => {
+            Err(SignerError::Offer(OfferError::PresplitCoinPuzzleHashMismatch)) => {
                 Err(offer_cancel_input_not_vault_owned(coin, launcher_id))
             }
             Err(err) => Err(err),
@@ -256,7 +256,7 @@ fn resolve_presplit_maker(
             }))
         }
         Ok(PresplitBindingLookup::NotPresplitMaker) => Ok(None),
-        Err(SignerError::PresplitCoinPuzzleHashMismatch) => {
+        Err(SignerError::Offer(OfferError::PresplitCoinPuzzleHashMismatch)) => {
             Err(offer_cancel_input_not_vault_owned(coin, launcher_id))
         }
         Err(err) => Err(err),
@@ -264,11 +264,11 @@ fn resolve_presplit_maker(
 }
 
 fn offer_cancel_input_not_vault_owned(coin: Coin, launcher_id: Bytes32) -> SignerError {
-    SignerError::OfferCancelInputNotVaultOwned {
+    SignerError::Offer(OfferError::OfferCancelInputNotVaultOwned {
         coin_id: hex::encode(coin.coin_id()),
         puzzle_hash: hex::encode(coin.puzzle_hash),
         launcher_id: hex::encode(launcher_id),
-    }
+    })
 }
 
 async fn ensure_offer_input_unspent<C: OfferCoinsetBackend>(
@@ -276,7 +276,9 @@ async fn ensure_offer_input_unspent<C: OfferCoinsetBackend>(
     coin_id: Bytes32,
 ) -> SignerResult<()> {
     if backend.offer_input_coin_is_spent(coin_id).await? {
-        return Err(SignerError::OfferCancelInputCoinAlreadySpent);
+        return Err(SignerError::Offer(
+            OfferError::OfferCancelInputCoinAlreadySpent,
+        ));
     }
     Ok(())
 }
@@ -307,8 +309,8 @@ fn direct_vault_cat_missing_on_coinset(
 ///
 /// # Errors
 ///
-/// Returns [`SignerError::OfferCancelInputNotVaultOwned`] when the coin is not vault-owned.
-/// Returns [`SignerError::OfferCancelInputCoinAlreadySpent`] when coinset shows the maker
+/// Returns [`crate::error::OfferError::OfferCancelInputNotVaultOwned`] when the coin is not vault-owned.
+/// Returns [`crate::error::OfferError::OfferCancelInputCoinAlreadySpent`] when coinset shows the maker
 /// input is missing or already spent.
 pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
     vault_ctx: &mut VaultSpendContext,
@@ -339,7 +341,9 @@ pub(crate) async fn classify_cancellable_maker_input<C: OfferCoinsetBackend>(
     }
 
     if direct_vault_cat_missing_on_coinset(vault_ctx, coin, spend_bundle, metadata)? {
-        return Err(SignerError::OfferCancelInputCoinAlreadySpent);
+        return Err(SignerError::Offer(
+            OfferError::OfferCancelInputCoinAlreadySpent,
+        ));
     }
 
     Err(offer_cancel_input_not_vault_owned(
@@ -371,7 +375,7 @@ pub(crate) async fn classify_maker_input_from_stored_metadata<C: OfferCoinsetBac
         Ok(cat) => {
             return classify_coin_and_cat(vault_ctx, cat.coin, Some(cat), Some(metadata), None);
         }
-        Err(SignerError::PresplitCoinNotFound) => {}
+        Err(SignerError::Offer(OfferError::PresplitCoinNotFound)) => {}
         Err(err) => return Err(err),
     }
 

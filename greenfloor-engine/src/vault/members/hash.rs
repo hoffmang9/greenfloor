@@ -1,12 +1,12 @@
 use chia_sdk_driver::{mips_puzzle_hash, MofN};
 use clvm_utils::TreeHash;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 
 use super::config::MemberConfig;
 
 pub(crate) fn u32_to_usize(value: u32) -> SignerResult<usize> {
-    usize::try_from(value).map_err(|_| SignerError::UnsupportedVaultThreshold)
+    usize::try_from(value).map_err(|_| SignerError::Vault(VaultError::UnsupportedThreshold))
 }
 
 pub(crate) fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {

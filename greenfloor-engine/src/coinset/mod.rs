@@ -42,7 +42,7 @@ pub use cats::{
     require_cat_from_parent_spend,
 };
 pub(crate) use cats::{cat_outer_coinset_hex, cat_outer_puzzle_hash};
-pub use coin_select::{select_cats_smallest_first, SelectedCats, MIN_CAT_OUTPUT_MOJOS};
+pub use coin_select::{SelectedCats, MIN_CAT_OUTPUT_MOJOS};
 pub use direct_api::{
     effective_coinset_base_url, explicit_coinset_url_override, normalize_coinset_network,
     normalize_direct_base_url_input, resolve_coinset_endpoint, resolve_direct_client,

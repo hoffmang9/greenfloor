@@ -65,7 +65,9 @@ pub(super) async fn submit_bootstrap_combine(
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
     let ShapeFunding::CombineFirst(inputs) = &bootstrap_plan.funding else {
-        return Err(crate::error::SignerError::InvalidPlanValues);
+        return Err(crate::error::SignerError::CoinOps(
+            crate::error::CoinOpsError::InvalidPlanValues,
+        ));
     };
     // Plan amounts are mojos on the denomination path.
     let output_amounts = bootstrap_combine_vault_outputs_as_mojos(inputs)?;
@@ -96,7 +98,9 @@ pub(super) async fn submit_bootstrap_mixed_split(
     #[cfg(test)] test_overrides: &SignerDenominationTestOverrides,
 ) -> SignerResult<Value> {
     let ShapeFunding::SingleCoin { coin_id, .. } = &bootstrap_plan.funding else {
-        return Err(crate::error::SignerError::InvalidPlanValues);
+        return Err(crate::error::SignerError::CoinOps(
+            crate::error::CoinOpsError::InvalidPlanValues,
+        ));
     };
     let output_amounts_mojos = vault_output_mojos_from_plan_amounts(
         &bootstrap_plan

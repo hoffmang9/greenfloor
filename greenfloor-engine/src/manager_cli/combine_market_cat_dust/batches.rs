@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::error::SignerError;
+use crate::error::{CoinOpsError, SignerError};
 use crate::vault::mixed_split::MixedSplitResult;
 use crate::vault_coinset_scan::{DustCoin, DustCombineBatch, DustPlan};
 
@@ -22,9 +22,11 @@ impl BatchReportReason {
 
 pub(crate) fn batch_stderr_tail(err: &SignerError) -> String {
     match err {
-        SignerError::CombineInputVerifyTimeout => BatchReportReason::CombineInputVerifyTimeout
-            .stderr_tail()
-            .to_string(),
+        SignerError::CoinOps(CoinOpsError::CombineInputVerifyTimeout) => {
+            BatchReportReason::CombineInputVerifyTimeout
+                .stderr_tail()
+                .to_string()
+        }
         SignerError::Other(msg) => msg.clone(),
         _ => err.to_string(),
     }
@@ -172,7 +174,9 @@ mod tests {
     #[test]
     fn batch_stderr_tail_maps_special_cases_and_delegates_display() {
         assert_eq!(
-            batch_stderr_tail(&SignerError::CombineInputVerifyTimeout),
+            batch_stderr_tail(&SignerError::CoinOps(
+                CoinOpsError::CombineInputVerifyTimeout
+            )),
             "combine input verify timeout"
         );
         assert_eq!(
@@ -180,8 +184,10 @@ mod tests {
             "dust batch total is zero"
         );
         assert_eq!(
-            batch_stderr_tail(&SignerError::PreselectedCatCoinIdsMismatch),
-            SignerError::PreselectedCatCoinIdsMismatch.to_string()
+            batch_stderr_tail(&SignerError::CoinOps(
+                CoinOpsError::PreselectedCatCoinIdsMismatch
+            )),
+            SignerError::CoinOps(CoinOpsError::PreselectedCatCoinIdsMismatch).to_string()
         );
     }
 

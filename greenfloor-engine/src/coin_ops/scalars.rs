@@ -3,7 +3,7 @@
 //! Policy: validated plan/CLI inputs propagate errors (`InvalidPlanValues`). Output amount
 //! vectors use `coin_op_non_negative_u64_saturating` when splitting totals (overflow → `u64::MAX`).
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{CoinOpsError, SignerError, SignerResult};
 
 /// Coin op non negative u64.
 ///
@@ -12,7 +12,7 @@ use crate::error::{SignerError, SignerResult};
 /// Returns an error if the operation fails.
 pub fn coin_op_non_negative_u64(value: i64, field: &str) -> SignerResult<u64> {
     if value < 0 {
-        return Err(SignerError::InvalidPlanValues);
+        return Err(SignerError::CoinOps(CoinOpsError::InvalidPlanValues));
     }
     u64::try_from(value)
         .map_err(|_| SignerError::Other(format!("{field} must fit in u64 for coin-op execution")))
@@ -25,7 +25,7 @@ pub fn coin_op_non_negative_u64(value: i64, field: &str) -> SignerResult<u64> {
 /// Returns an error if the operation fails.
 pub fn i64_to_usize(value: i64, field: &str) -> SignerResult<usize> {
     if value < 0 {
-        return Err(SignerError::InvalidPlanValues);
+        return Err(SignerError::CoinOps(CoinOpsError::InvalidPlanValues));
     }
     usize::try_from(value)
         .map_err(|_| SignerError::Other(format!("{field} must fit in usize for coin-op execution")))
@@ -57,7 +57,7 @@ mod tests {
         assert_eq!(coin_op_non_negative_u64(10, "amount").expect("ok"), 10);
         assert!(matches!(
             coin_op_non_negative_u64(-1, "amount"),
-            Err(SignerError::InvalidPlanValues)
+            Err(SignerError::CoinOps(CoinOpsError::InvalidPlanValues))
         ));
     }
 

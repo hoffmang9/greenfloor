@@ -1,7 +1,7 @@
 use mockito::Matcher;
 use serde_json::json;
 
-use super::{poll_dexie_offer_visibility_once, post_offer_phase_dexie, PostOfferPhaseDexieParams};
+use super::{post_offer_phase_dexie, PostOfferPhaseDexieParams};
 use crate::adapters::DexieClient;
 use crate::offer::publish::{ExpectedPublishAssetFields, PublishAssetSide};
 
@@ -26,6 +26,55 @@ async fn post_offer_phase_posts_and_verifies_visibility() {
         .mock("POST", "/v1/offers")
         .with_status(200)
         .with_body(json!({"success": true, "id": offer_id}).to_string())
+        .create_async()
+        .await;
+    let _get = server
+        .mock("GET", Matcher::Regex(r"/v1/offers/.*".to_string()))
+        .with_status(200)
+        .with_body(
+            json!({
+                "offer": {
+                    "id": offer_id,
+                    "offered": [{"id": "basecat"}],
+                    "requested": [{"code": "xch"}],
+                }
+            })
+            .to_string(),
+        )
+        .create_async()
+        .await;
+
+    let dexie = DexieClient::new(server.url());
+    let expected = expected_fields();
+    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
+        dexie: &dexie,
+        offer_text: "offer1test",
+        drop_only: true,
+        claim_rewards: false,
+        expected: &expected,
+    })
+    .await
+    .expect("post");
+    assert!(result.success());
+    assert_eq!(result.offer_id(), Some(offer_id));
+}
+
+#[tokio::test]
+async fn post_offer_phase_retries_http_400_invalid_offer() {
+    let mut server = mockito::Server::new_async().await;
+    let offer_id = "offer-400";
+    let _post_invalid = server
+        .mock("POST", "/v1/offers")
+        .with_status(400)
+        .with_body(r#"{"error_message":"Invalid Offer"}"#)
+        .expect(1)
+        .create_async()
+        .await;
+    let _post_ok = server
+        .mock("POST", "/v1/offers")
+        .with_status(200)
+        .with_body(json!({"success": true, "id": offer_id}).to_string())
+        .expect(1)
         .create_async()
         .await;
     let _get = server
@@ -154,25 +203,48 @@ async fn post_offer_phase_reposts_on_transient_visibility_404() {
 }
 
 #[tokio::test]
-async fn poll_visibility_once_retries_on_http_error_payload() {
+async fn post_offer_phase_mismatch_does_not_repost() {
     let mut server = mockito::Server::new_async().await;
-    let offer_id = "offer-404";
+    let offer_id = "offer-local";
+    let _post = server
+        .mock("POST", "/v1/offers")
+        .with_status(200)
+        .with_body(json!({"success": true, "id": offer_id}).to_string())
+        .expect(1)
+        .create_async()
+        .await;
     let _get = server
         .mock("GET", Matcher::Regex(r"/v1/offers/.*".to_string()))
-        .with_status(404)
-        .with_body("missing")
+        .with_status(200)
+        .with_body(
+            json!({
+                "offer": {
+                    "id": "other-id",
+                    "offered": [{"id": "basecat"}],
+                    "requested": [{"code": "xch"}],
+                }
+            })
+            .to_string(),
+        )
         .create_async()
         .await;
 
     let dexie = DexieClient::new(server.url());
     let expected = expected_fields();
-    let poll = poll_dexie_offer_visibility_once(&dexie, offer_id, &expected).await;
-    match poll {
-        super::OfferVisibilityPoll::Retry(error) => {
-            assert!(error.contains("dexie_http_error:404"));
-        }
-        other => panic!("expected retry, got {other:?}"),
-    }
+    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
+        dexie: &dexie,
+        offer_text: "offer1test",
+        drop_only: true,
+        claim_rewards: false,
+        expected: &expected,
+    })
+    .await
+    .expect("post");
+    assert!(!result.success());
+    assert_eq!(
+        result.error_text(),
+        "dexie_offer_visibility_payload_mismatch"
+    );
 }
 
 #[test]

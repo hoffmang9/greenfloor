@@ -5,7 +5,7 @@ use chia_sdk_driver::{Action, Id, Offer, Spends};
 use clvmr::Allocator;
 
 use crate::coinset::{spend_bundle_hex, OfferCoinsetBackend, SelectedCats};
-use crate::error::{SignerError, SignerResult};
+use crate::error::{OfferError, SignerError, SignerResult};
 use crate::hex::tree_hash_to_hex;
 use crate::offer::plan::{build_offer_payment_bundle, build_offer_request_conditions};
 use crate::offer::presplit::{
@@ -26,13 +26,13 @@ pub(crate) fn validate_existing_presplit_cat(
     offer_amount: u64,
 ) -> SignerResult<()> {
     if presplit_cat.info.asset_id != offer_asset_id {
-        return Err(SignerError::PresplitCoinAssetMismatch);
+        return Err(SignerError::Offer(OfferError::PresplitCoinAssetMismatch));
     }
     if presplit_cat.coin.amount != offer_amount {
-        return Err(SignerError::PresplitCoinAmountMismatch {
+        return Err(SignerError::Offer(OfferError::PresplitCoinAmountMismatch {
             coin: presplit_cat.coin.amount,
             offer: offer_amount,
-        });
+        }));
     }
     Ok(())
 }
@@ -255,7 +255,9 @@ pub(crate) async fn execute_direct_offer<C: OfferCoinsetBackend>(
 
     // Plan enforces a single Direct input; cancel metadata is required for Coinset-primary cancel.
     let [cat] = selection.selected.as_slice() else {
-        return Err(SignerError::DirectOfferRequiresSingleInputCoin);
+        return Err(SignerError::Offer(
+            OfferError::DirectOfferRequiresSingleInputCoin,
+        ));
     };
     let cancel_fields = OfferCancelFields::from_direct_build(
         hex::encode(cat.coin.coin_id()),
@@ -298,16 +300,19 @@ mod tests {
             1000,
         )
         .unwrap_err();
-        assert!(matches!(err, SignerError::PresplitCoinAssetMismatch));
+        assert!(matches!(
+            err,
+            SignerError::Offer(OfferError::PresplitCoinAssetMismatch)
+        ));
 
         let err =
             validate_existing_presplit_cat(&sample_cat(asset_id, 500), asset_id, 1000).unwrap_err();
         assert!(matches!(
             err,
-            SignerError::PresplitCoinAmountMismatch {
+            SignerError::Offer(OfferError::PresplitCoinAmountMismatch {
                 coin: 500,
                 offer: 1000
-            }
+            })
         ));
     }
 

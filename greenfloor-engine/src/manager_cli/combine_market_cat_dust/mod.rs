@@ -23,7 +23,7 @@ use crate::coinset::ResolvedCoinsetEndpoint;
 use crate::config::{
     load_combine_command_resources, CombineCommandLoadRequest, ManagerProgramConfig,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::{ConfigError, SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::vault_scan::{
     manager_vault_scan_params, resolve_manager_vault_launcher, run_manager_vault_scan,
@@ -76,7 +76,10 @@ fn emit_command_error(
 }
 
 fn signer_load_error_reason(err: &SignerError) -> &'static str {
-    if matches!(err, SignerError::SignerPathNotConfigured) {
+    if matches!(
+        err,
+        SignerError::Config(ConfigError::SignerPathNotConfigured)
+    ) {
         "signer_not_configured"
     } else {
         "signer_load_failed"

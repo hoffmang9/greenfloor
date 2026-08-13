@@ -48,7 +48,7 @@ pub async fn run_kms_public_key_compressed_hex_with_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::SignerError;
+    use crate::error::{SignerError, VaultError};
     use crate::kms::KmsOverrides;
     use serde_json::{json, Value};
 
@@ -87,7 +87,7 @@ mod tests {
         )
         .await
         .expect_err("fast fail kms");
-        assert!(matches!(err, SignerError::Kms(_)));
+        assert!(matches!(err, SignerError::Vault(VaultError::Kms(_))));
         assert!(
             err.to_string().to_ascii_lowercase().contains("credentials"),
             "unexpected kms failure: {err}"

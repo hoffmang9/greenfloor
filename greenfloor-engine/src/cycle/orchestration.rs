@@ -239,8 +239,6 @@ pub fn classify_dexie_stale_offer_status(status: i64) -> Option<&'static str> {
     }
 }
 
-pub use crate::adapters::is_dexie_offer_missing_error_text;
-
 #[must_use]
 pub fn record_stale_sweep_check(
     progress: &StaleSweepProgress,
@@ -314,13 +312,5 @@ mod tests {
         assert_eq!(classify_dexie_stale_offer_status(6), Some("offer_expired"));
         assert_eq!(classify_dexie_stale_offer_status(4), Some("tx_confirmed"));
         assert_eq!(classify_dexie_stale_offer_status(0), None);
-    }
-
-    #[test]
-    fn is_dexie_offer_missing_error_text_detects_404() {
-        assert!(is_dexie_offer_missing_error_text(
-            "HTTP Error 404: Not Found"
-        ));
-        assert!(!is_dexie_offer_missing_error_text("timeout"));
     }
 }

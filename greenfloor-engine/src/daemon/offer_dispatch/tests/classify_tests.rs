@@ -8,7 +8,7 @@ use super::super::{
     OfferDispatchOutput, ParallelDispatchDecision,
 };
 use crate::config::ManagerProgramConfig;
-use crate::error::SignerError;
+use crate::error::{PersistenceError, SignerError};
 use crate::storage::{lock_shared_store_for_test, CycleWriteStore};
 use crate::test_support::market_config::sample_market;
 
@@ -62,11 +62,12 @@ fn reservation_release_status_reflects_execution_outcome() {
 
 #[test]
 fn parallel_transient_signer_error_classifies_reservation_and_upstream() {
-    let contention = SignerError::ReservationContention("busy".to_string());
+    let contention: SignerError =
+        PersistenceError::ReservationContention("busy".to_string()).into();
     assert!(contention.is_parallel_dispatch_transient());
-    let upstream = SignerError::ManagedUpstreamTransient("timeout".to_string());
+    let upstream = SignerError::http_timeout("dexie", "timed out");
     assert!(upstream.is_parallel_dispatch_transient());
-    let locked = SignerError::DatabaseLocked;
+    let locked: SignerError = PersistenceError::DatabaseLocked.into();
     assert!(locked.is_parallel_dispatch_transient());
     let fatal = SignerError::Other("permanent_offer_build_failure: bad puzzle".to_string());
     assert!(!fatal.is_parallel_dispatch_transient());
@@ -86,7 +87,7 @@ fn classify_parallel_dispatch_success_returns_output() {
 
 #[test]
 fn classify_parallel_dispatch_transient_error_falls_back() {
-    let err = SignerError::ReservationContention("busy".to_string());
+    let err: SignerError = PersistenceError::ReservationContention("busy".to_string()).into();
     match classify_parallel_dispatch(Err(err)) {
         ParallelDispatchDecision::FallbackTransient(message) => {
             assert!(message.to_string().contains("busy"));
@@ -113,7 +114,9 @@ async fn record_parallel_fallback_audit_persists_event() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = CycleWriteStore::open(&db_path).expect("open");
-    let err = SignerError::ReservationContention("simulated".to_string());
+    let err = SignerError::Persistence(PersistenceError::ReservationContention(
+        "simulated".to_string(),
+    ));
     record_parallel_fallback_audit(&store, "m1", &err).expect("audit");
     let events = lock_shared_store_for_test(&store)
         .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)

@@ -11,7 +11,7 @@ use chia_sdk_types::{
 use chia_secp::{K1PublicKey, R1PublicKey};
 use clvm_utils::TreeHash;
 
-use crate::error::{SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult, VaultError};
 use crate::hex::{fixed_bytes, hex_to_bytes};
 
 use super::config::{MemberConfig, WalletKey};
@@ -152,7 +152,9 @@ impl WalletCurve {
             Self::Bls12_381 => {
                 let key_array = fixed_bytes::<48>(key_bytes)?;
                 let pk = PublicKey::from_bytes(&key_array).map_err(|err| {
-                    SignerError::UnsupportedVaultCurve(format!("BLS12_381 decode: {err}"))
+                    SignerError::Vault(VaultError::UnsupportedCurve(format!(
+                        "BLS12_381 decode: {err}"
+                    )))
                 })?;
                 bls_member_hash(config, pk, false)
             }
@@ -162,14 +164,20 @@ impl WalletCurve {
 
 fn decode_r1_public_key(key_bytes: &[u8], curve_label: &str) -> SignerResult<R1PublicKey> {
     let key_array = fixed_bytes::<33>(key_bytes)?;
-    R1PublicKey::from_bytes(&key_array)
-        .map_err(|err| SignerError::UnsupportedVaultCurve(format!("{curve_label} decode: {err}")))
+    R1PublicKey::from_bytes(&key_array).map_err(|err| {
+        SignerError::Vault(VaultError::UnsupportedCurve(format!(
+            "{curve_label} decode: {err}"
+        )))
+    })
 }
 
 fn decode_k1_public_key(key_bytes: &[u8]) -> SignerResult<K1PublicKey> {
     let key_array = fixed_bytes::<33>(key_bytes)?;
-    K1PublicKey::from_bytes(&key_array)
-        .map_err(|err| SignerError::UnsupportedVaultCurve(format!("SECP256K1 decode: {err}")))
+    K1PublicKey::from_bytes(&key_array).map_err(|err| {
+        SignerError::Vault(VaultError::UnsupportedCurve(format!(
+            "SECP256K1 decode: {err}"
+        )))
+    })
 }
 
 /// Member hash for key.
@@ -179,7 +187,9 @@ fn decode_k1_public_key(key_bytes: &[u8]) -> SignerResult<K1PublicKey> {
 /// Returns an error if the operation fails.
 pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResult<TreeHash> {
     let Some(curve) = WalletCurve::parse(&key.curve) else {
-        return Err(SignerError::UnsupportedVaultCurve(key.curve.clone()));
+        return Err(SignerError::Vault(VaultError::UnsupportedCurve(
+            key.curve.clone(),
+        )));
     };
     let key_bytes = hex_to_bytes(&key.public_key_hex)?;
     curve.hash_key(config, &key_bytes)
@@ -252,6 +262,9 @@ mod tests {
         let config = MemberConfig::default();
         let err = member_hash_for_key(&config, &wallet_key("ED25519", &hex::encode([0u8; 32])))
             .expect_err("unsupported curve");
-        assert!(matches!(err, SignerError::UnsupportedVaultCurve(_)));
+        assert!(matches!(
+            err,
+            SignerError::Vault(VaultError::UnsupportedCurve(_))
+        ));
     }
 }
