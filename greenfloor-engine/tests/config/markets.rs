@@ -26,6 +26,7 @@ fn sample_markets() -> MarketsConfig {
             "base_symbol": "A1",
             "quote_asset": "xch",
             "receive_address": "xch1test",
+            "signer_key_id": "key-main-1",
             "pricing": {"min_price_quote_per_base": 0.0031}
         }]
     }))
