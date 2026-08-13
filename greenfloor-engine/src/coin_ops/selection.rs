@@ -2,8 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::policy::overshoot_change_would_be_dust;
-pub(crate) use super::policy::DustChangeFilter;
+use super::policy::{overshoot_change_would_be_dust, DustChangeFilter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetAmountOvershootRank {
@@ -171,7 +170,6 @@ pub(crate) fn select_spendable_coins_for_target_amount_with_options(
     let TargetAmountSelectionOptions {
         max_input_count,
         min_input_count,
-        dust,
         ..
     } = options;
     if min_input_count == 0 || max_input_count.is_some_and(|max| max < min_input_count) {
@@ -185,7 +183,7 @@ pub(crate) fn select_spendable_coins_for_target_amount_with_options(
 
     let sum_cap = target_amount_sum_cap(required, &entries, max_input_count);
     if max_input_count.is_none() && sum_cap > 500_000 {
-        return greedy_target_amount_selection(&entries, required, min_input_count, dust);
+        return greedy_target_amount_selection(&entries, required, min_input_count);
     }
 
     let best = build_min_cardinality_subset_map(&entries, sum_cap, max_input_count);
@@ -223,7 +221,6 @@ fn greedy_target_amount_selection(
     entries: &[(String, i64)],
     required: i64,
     min_input_count: usize,
-    dust: Option<DustChangeFilter<'_>>,
 ) -> (Vec<String>, i64, bool) {
     let mut ordered = entries.to_vec();
     ordered.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
@@ -233,10 +230,7 @@ fn greedy_target_amount_selection(
         picked_ids.push(coin_id);
         running += amount;
         if running >= required && picked_ids.len() >= min_input_count {
-            let overshoot = running - required;
-            if !dust.is_some_and(|filter| filter.change_is_dust(overshoot)) {
-                return (picked_ids, running, running == required);
-            }
+            return (picked_ids, running, running == required);
         }
     }
     (Vec::new(), 0, false)

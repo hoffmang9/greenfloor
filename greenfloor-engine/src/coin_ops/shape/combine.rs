@@ -3,11 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{CombineInputs, ShapeCoin};
-use crate::coin_ops::overshoot_change_would_be_dust;
 use crate::coin_ops::selection::{
-    select_spendable_coins_for_target_amount_with_options, DustChangeFilter, SpendableCoin,
+    select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
 };
+use crate::coin_ops::DustChangeFilter;
 use crate::metrics::metric_non_negative_usize;
 
 /// Select combine inputs covering `target_amount` from all of `coins` (no ladder-row
@@ -46,14 +46,6 @@ pub(crate) fn plan_combine_inputs_for_target_in(
     )
 }
 
-fn cover_change_is_dust(
-    selected_total: i64,
-    target_amount: i64,
-    dust: Option<DustChangeFilter<'_>>,
-) -> bool {
-    dust.is_some_and(|filter| filter.change_is_dust(selected_total.saturating_sub(target_amount)))
-}
-
 fn plan_combine_inputs_for_target_in_with_dust(
     coins: &[ShapeCoin],
     target_amount: i64,
@@ -88,19 +80,22 @@ fn plan_combine_inputs_for_target_in_with_dust(
         );
     let selected_count_before_cap = unconstrained_ids.len();
     if selected_count_before_cap < 2 {
-        let dusty_single = selected_count_before_cap == 1
-            && cover_change_is_dust(unconstrained_total, target_amount, dust);
-        if !dusty_single {
-            return None;
+        // A legal solo cover is "not a combine". Only a dusty solo cover retries.
+        if let Some(filter) = dust {
+            if selected_count_before_cap == 1
+                && filter.change_is_dust(unconstrained_total.saturating_sub(target_amount))
+            {
+                return select_legal_change_cover(
+                    &spendable,
+                    target_amount,
+                    combine_input_cap,
+                    cap,
+                    filter,
+                    selected_count_before_cap,
+                );
+            }
         }
-        return select_legal_change_cover(
-            &spendable,
-            target_amount,
-            combine_input_cap,
-            cap,
-            dust?,
-            selected_count_before_cap,
-        );
+        return None;
     }
 
     let cap_applied = selected_count_before_cap > cap;
@@ -130,25 +125,27 @@ fn plan_combine_inputs_for_target_in_with_dust(
         );
     }
 
-    if !cover_change_is_dust(selected_total, target_amount, dust) {
-        return Some(CombineInputs {
-            input_coin_ids,
-            selected_total,
-            target_amount,
-            exact_match,
-            cap_applied,
-            selected_count_before_cap,
-            combine_input_cap,
-        });
+    if let Some(filter) = dust {
+        if filter.change_is_dust(selected_total.saturating_sub(target_amount)) {
+            return select_legal_change_cover(
+                &spendable,
+                target_amount,
+                combine_input_cap,
+                cap,
+                filter,
+                selected_count_before_cap,
+            );
+        }
     }
-    select_legal_change_cover(
-        &spendable,
+    Some(CombineInputs {
+        input_coin_ids,
+        selected_total,
         target_amount,
-        combine_input_cap,
-        cap,
-        dust?,
+        exact_match,
+        cap_applied,
         selected_count_before_cap,
-    )
+        combine_input_cap,
+    })
 }
 
 /// Re-select a covering set that skips CAT-dust overshoot so leftover change can land on
@@ -220,20 +217,22 @@ fn combine_with_dust_guard(
     canonical_asset_id: &str,
     allowed_coin_ids: Option<&HashSet<String>>,
 ) -> Option<CombineInputs> {
+    let filter = DustChangeFilter {
+        mojo_multiplier,
+        canonical_asset_id,
+    };
     let selection = plan_combine_inputs_for_target_in_with_dust(
         coins,
         target_amount,
         combine_input_cap,
         allowed_coin_ids,
-        Some(DustChangeFilter {
-            mojo_multiplier,
-            canonical_asset_id,
-        }),
+        Some(filter),
     )?;
-    let change = selection
-        .selected_total
-        .saturating_sub(selection.target_amount);
-    if overshoot_change_would_be_dust(change, mojo_multiplier, canonical_asset_id) {
+    if filter.change_is_dust(
+        selection
+            .selected_total
+            .saturating_sub(selection.target_amount),
+    ) {
         return None;
     }
     Some(selection)

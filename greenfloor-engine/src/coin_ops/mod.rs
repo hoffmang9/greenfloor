@@ -43,6 +43,7 @@ pub use plan::{
     plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanReason, CoinOpPlanningResult,
     LadderTargetRow,
 };
+pub(crate) use policy::DustChangeFilter;
 pub use policy::{
     amount_meets_coin_op_min_mojos, cat_overshoot_change_would_be_dust, coin_op_min_amount_mojos,
     coin_op_target_amount_allowed, overshoot_change_would_be_dust,
