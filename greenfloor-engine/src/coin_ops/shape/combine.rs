@@ -3,11 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{CombineInputs, ShapeCoin};
-use crate::coin_ops::overshoot_change_would_be_dust;
 use crate::coin_ops::selection::{
     select_spendable_coins_for_target_amount_with_options, SpendableCoin,
     TargetAmountSelectionOptions,
 };
+use crate::coin_ops::DustChangeFilter;
 use crate::metrics::metric_non_negative_usize;
 
 /// Select combine inputs covering `target_amount` from all of `coins` (no ladder-row
@@ -24,10 +24,12 @@ pub fn plan_combine_inputs_for_target(
 
 /// [`plan_combine_inputs_for_target`] restricted to `allowed_coin_ids` when provided.
 ///
-/// When `dust` is set and the unconstrained pick is a single covering coin whose overshoot
-/// would be CAT dust, retries with a forced multi-coin selection so dust oversize + fragments
-/// can still combine. Without `dust` (daemon flat combine), a solo covering pick still means
-/// "not a combine" — matching the historical skip when only protected singles cover.
+/// When `dust` is set and the covering pick would leave CAT dust change (solo oversize or
+/// a tight multi-coin cover), retries once while skipping dusty overshoots so leftover
+/// change can land on an extra remainder coin — instead of lowering the CAT dust floor.
+///
+/// Without `dust` (daemon flat combine), a solo covering pick still means "not a combine"
+/// — matching the historical skip when only protected singles cover.
 #[must_use]
 pub(crate) fn plan_combine_inputs_for_target_in(
     coins: &[ShapeCoin],
@@ -44,18 +46,12 @@ pub(crate) fn plan_combine_inputs_for_target_in(
     )
 }
 
-#[derive(Clone, Copy)]
-struct CombineDustContext<'a> {
-    mojo_multiplier: i64,
-    canonical_asset_id: &'a str,
-}
-
 fn plan_combine_inputs_for_target_in_with_dust(
     coins: &[ShapeCoin],
     target_amount: i64,
     combine_input_cap: i64,
     allowed_coin_ids: Option<&HashSet<String>>,
-    dust: Option<CombineDustContext<'_>>,
+    dust: Option<DustChangeFilter<'_>>,
 ) -> Option<CombineInputs> {
     if target_amount <= 0 {
         return None;
@@ -76,37 +72,30 @@ fn plan_combine_inputs_for_target_in_with_dust(
         .map(|coin| SpendableCoin::new(coin.id.clone(), coin.amount))
         .collect();
 
-    let (mut unconstrained_ids, mut unconstrained_total, mut unconstrained_exact) =
+    let (unconstrained_ids, unconstrained_total, unconstrained_exact) =
         select_spendable_coins_for_target_amount_with_options(
             &spendable,
             target_amount,
             TargetAmountSelectionOptions::default(),
         );
-    let mut selected_count_before_cap = unconstrained_ids.len();
+    let selected_count_before_cap = unconstrained_ids.len();
     if selected_count_before_cap < 2 {
-        let retry_multi = selected_count_before_cap == 1
-            && dust.is_some_and(|ctx| {
-                overshoot_change_would_be_dust(
-                    unconstrained_total.saturating_sub(target_amount),
-                    ctx.mojo_multiplier,
-                    ctx.canonical_asset_id,
-                )
-            });
-        if !retry_multi {
-            return None;
+        // A legal solo cover is "not a combine". Only a dusty solo cover retries.
+        if let Some(filter) = dust {
+            if selected_count_before_cap == 1
+                && filter.change_is_dust(unconstrained_total.saturating_sub(target_amount))
+            {
+                return select_legal_change_cover(
+                    &spendable,
+                    target_amount,
+                    combine_input_cap,
+                    cap,
+                    filter,
+                    selected_count_before_cap,
+                );
+            }
         }
-        let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
-            &spendable,
-            target_amount,
-            TargetAmountSelectionOptions::combine_multi_coin(),
-        );
-        if ids.len() < 2 {
-            return None;
-        }
-        unconstrained_ids = ids;
-        unconstrained_total = total;
-        unconstrained_exact = exact;
-        selected_count_before_cap = unconstrained_ids.len();
+        return None;
     }
 
     let cap_applied = selected_count_before_cap > cap;
@@ -136,6 +125,18 @@ fn plan_combine_inputs_for_target_in_with_dust(
         );
     }
 
+    if let Some(filter) = dust {
+        if filter.change_is_dust(selected_total.saturating_sub(target_amount)) {
+            return select_legal_change_cover(
+                &spendable,
+                target_amount,
+                combine_input_cap,
+                cap,
+                filter,
+                selected_count_before_cap,
+            );
+        }
+    }
     Some(CombineInputs {
         input_coin_ids,
         selected_total,
@@ -143,6 +144,35 @@ fn plan_combine_inputs_for_target_in_with_dust(
         exact_match,
         cap_applied,
         selected_count_before_cap,
+        combine_input_cap,
+    })
+}
+
+/// Re-select a covering set that skips CAT-dust overshoot so leftover change can land on
+/// an extra remainder coin (or a different pair whose change is already legal).
+fn select_legal_change_cover(
+    spendable: &[SpendableCoin],
+    target_amount: i64,
+    combine_input_cap: i64,
+    cap: usize,
+    dust: DustChangeFilter<'_>,
+    selected_count_before_cap: usize,
+) -> Option<CombineInputs> {
+    let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
+        spendable,
+        target_amount,
+        TargetAmountSelectionOptions::combine_legal_change(cap, dust),
+    );
+    if ids.len() < 2 {
+        return None;
+    }
+    Some(CombineInputs {
+        selected_count_before_cap: selected_count_before_cap.max(ids.len()),
+        input_coin_ids: ids,
+        selected_total: total,
+        target_amount,
+        exact_match: exact,
+        cap_applied: selected_count_before_cap > cap,
         combine_input_cap,
     })
 }
@@ -187,20 +217,22 @@ fn combine_with_dust_guard(
     canonical_asset_id: &str,
     allowed_coin_ids: Option<&HashSet<String>>,
 ) -> Option<CombineInputs> {
+    let filter = DustChangeFilter {
+        mojo_multiplier,
+        canonical_asset_id,
+    };
     let selection = plan_combine_inputs_for_target_in_with_dust(
         coins,
         target_amount,
         combine_input_cap,
         allowed_coin_ids,
-        Some(CombineDustContext {
-            mojo_multiplier,
-            canonical_asset_id,
-        }),
+        Some(filter),
     )?;
-    let change = selection
-        .selected_total
-        .saturating_sub(selection.target_amount);
-    if overshoot_change_would_be_dust(change, mojo_multiplier, canonical_asset_id) {
+    if filter.change_is_dust(
+        selection
+            .selected_total
+            .saturating_sub(selection.target_amount),
+    ) {
         return None;
     }
     Some(selection)
@@ -342,6 +374,60 @@ mod tests {
             TEST_CAT_ASSET_ID,
         )
         .is_none());
+    }
+
+    #[test]
+    fn dusty_two_clip_combine_takes_third_coin_for_legal_change() {
+        let spendable = coins(&[
+            ("old25_a", 25_025),
+            ("old25_b", 25_025),
+            ("dust_fragment", 50),
+            ("remainder", 4_930),
+        ]);
+        let plan = plan_ladder_preserving_combine(
+            &spendable,
+            &HashMap::new(),
+            49_950,
+            5,
+            1,
+            TEST_CAT_ASSET_ID,
+        )
+        .expect("remainder coin absorbs dust change");
+        assert_eq!(plan.input_coin_ids.len(), 3);
+        assert_eq!(plan.selected_total, 54_980);
+        assert!(plan.input_coin_ids.contains(&"remainder".to_string()));
+        assert!(!plan.input_coin_ids.contains(&"dust_fragment".to_string()));
+    }
+
+    #[test]
+    fn dusty_two_clip_combine_without_remainder_still_rejected() {
+        let spendable = coins(&[("old25_a", 25_025), ("old25_b", 25_025)]);
+        assert!(plan_ladder_preserving_combine(
+            &spendable,
+            &HashMap::new(),
+            49_950,
+            5,
+            1,
+            TEST_CAT_ASSET_ID,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn dusty_two_clip_prefers_alternate_pair_with_legal_change() {
+        let spendable = coins(&[("old25_a", 25_025), ("old25_b", 25_025), ("larger", 26_000)]);
+        let plan = plan_ladder_preserving_combine(
+            &spendable,
+            &HashMap::new(),
+            49_950,
+            5,
+            1,
+            TEST_CAT_ASSET_ID,
+        )
+        .expect("alternate pair leaves legal change");
+        assert_eq!(plan.input_coin_ids.len(), 2);
+        assert_eq!(plan.selected_total, 51_025);
+        assert!(plan.input_coin_ids.contains(&"larger".to_string()));
     }
 
     #[test]

@@ -48,6 +48,24 @@ pub fn overshoot_change_would_be_dust(
     )
 }
 
+/// CAT dust filter for covering-set selection (plan units or mojos).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DustChangeFilter<'a> {
+    pub mojo_multiplier: i64,
+    pub canonical_asset_id: &'a str,
+}
+
+impl DustChangeFilter<'_> {
+    #[must_use]
+    pub(crate) fn change_is_dust(self, overshoot_amount: i64) -> bool {
+        overshoot_change_would_be_dust(
+            overshoot_amount,
+            self.mojo_multiplier,
+            self.canonical_asset_id,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

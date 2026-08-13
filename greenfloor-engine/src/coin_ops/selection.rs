@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::policy::overshoot_change_would_be_dust;
+use super::policy::{overshoot_change_would_be_dust, DustChangeFilter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetAmountOvershootRank {
@@ -11,39 +11,42 @@ pub(crate) enum TargetAmountOvershootRank {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TargetAmountSelectionOptions {
+pub(crate) struct TargetAmountSelectionOptions<'a> {
     pub max_input_count: Option<usize>,
     pub min_input_count: usize,
     pub overshoot_rank: TargetAmountOvershootRank,
+    pub dust: Option<DustChangeFilter<'a>>,
 }
 
-impl Default for TargetAmountSelectionOptions {
+impl Default for TargetAmountSelectionOptions<'_> {
     fn default() -> Self {
         Self {
             max_input_count: None,
             min_input_count: 1,
             overshoot_rank: TargetAmountOvershootRank::MinOvershoot,
+            dust: None,
         }
     }
 }
 
-impl TargetAmountSelectionOptions {
-    /// Multi-coin combine retry: at least two inputs. Used when a solo covering pick would
-    /// leave CAT dust change (that coin belongs on the single-coin path only when change is
-    /// valid; when it is dust, force a multi-coin selection instead).
-    pub(crate) fn combine_multi_coin() -> Self {
-        Self {
-            max_input_count: None,
-            min_input_count: 2,
-            overshoot_rank: TargetAmountOvershootRank::MinOvershoot,
-        }
-    }
-
+impl<'a> TargetAmountSelectionOptions<'a> {
     pub(crate) fn combine_cap(cap: usize) -> Self {
         Self {
             max_input_count: Some(cap),
             min_input_count: 2,
             overshoot_rank: TargetAmountOvershootRank::MinInputCount,
+            dust: None,
+        }
+    }
+
+    /// Combine retry: at least two inputs, capped, skipping CAT-dust overshoot so leftover
+    /// change can land on an extra remainder coin.
+    pub(crate) fn combine_legal_change(cap: usize, dust: DustChangeFilter<'a>) -> Self {
+        Self {
+            max_input_count: Some(cap),
+            min_input_count: 2,
+            overshoot_rank: TargetAmountOvershootRank::MinOvershoot,
+            dust: Some(dust),
         }
     }
 }
@@ -157,7 +160,7 @@ pub fn select_spendable_coins_for_target_amount(
 pub(crate) fn select_spendable_coins_for_target_amount_with_options(
     coins: &[SpendableCoin],
     target_amount: i64,
-    options: TargetAmountSelectionOptions,
+    options: TargetAmountSelectionOptions<'_>,
 ) -> (Vec<String>, i64, bool) {
     let required = target_amount;
     if required <= 0 {
@@ -167,7 +170,7 @@ pub(crate) fn select_spendable_coins_for_target_amount_with_options(
     let TargetAmountSelectionOptions {
         max_input_count,
         min_input_count,
-        overshoot_rank,
+        ..
     } = options;
     if min_input_count == 0 || max_input_count.is_some_and(|max| max < min_input_count) {
         return (Vec::new(), 0, false);
@@ -190,14 +193,7 @@ pub(crate) fn select_spendable_coins_for_target_amount_with_options(
         return exact;
     }
 
-    choose_best_overshoot_subset(
-        &best,
-        &entries,
-        required,
-        min_input_count,
-        max_input_count,
-        overshoot_rank,
-    )
+    choose_best_overshoot_subset(&best, &entries, required, options)
 }
 
 fn positive_spendable_entries(coins: &[SpendableCoin]) -> Vec<(String, i64)> {
@@ -295,16 +291,23 @@ fn choose_best_overshoot_subset(
     best: &std::collections::BTreeMap<i64, Vec<usize>>,
     entries: &[(String, i64)],
     required: i64,
-    min_input_count: usize,
-    max_input_count: Option<usize>,
-    overshoot_rank: TargetAmountOvershootRank,
+    options: TargetAmountSelectionOptions<'_>,
 ) -> (Vec<String>, i64, bool) {
+    let TargetAmountSelectionOptions {
+        max_input_count,
+        min_input_count,
+        overshoot_rank,
+        dust,
+    } = options;
     let mut chosen: Option<(i64, Vec<usize>)> = None;
     for (sum, subset) in best {
         if *sum < required || subset.len() < min_input_count {
             continue;
         }
         if max_input_count.is_some_and(|max| subset.len() > max) {
+            continue;
+        }
+        if dust.is_some_and(|filter| filter.change_is_dust(*sum - required)) {
             continue;
         }
         if chosen.as_ref().is_none_or(|(best_sum, best_subset)| {
@@ -443,6 +446,36 @@ mod tests {
         assert_eq!(
             set,
             HashSet::from(["sixtyfive", "twenty", "ten_a", "ten_b"].map(str::to_string))
+        );
+    }
+
+    #[test]
+    fn legal_change_combine_skips_dusty_two_coin_cover_and_takes_remainder() {
+        let list = coins(&[
+            ("old25_a", 25_025),
+            ("old25_b", 25_025),
+            ("dust_fragment", 50),
+            ("remainder", 4_930),
+        ]);
+        let (ids, total, exact) = select_spendable_coins_for_target_amount_with_options(
+            &list,
+            49_950,
+            TargetAmountSelectionOptions::combine_legal_change(
+                5,
+                DustChangeFilter {
+                    mojo_multiplier: 1,
+                    canonical_asset_id:
+                        "0000000000000000000000000000000000000000000000000000000000000001",
+                },
+            ),
+        );
+        assert!(!exact);
+        assert_eq!(total, 54_980);
+        assert_eq!(ids.len(), 3);
+        let set: HashSet<_> = ids.into_iter().collect();
+        assert_eq!(
+            set,
+            HashSet::from(["old25_a", "old25_b", "remainder"].map(str::to_string))
         );
     }
 }
