@@ -20,6 +20,7 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub dexie_base_url: String,
     pub splash_base_url: String,
     pub offer_assets: ResolvedMarketOfferAssets,
+    pub action_size_base_units: u64,
     action_side_override: Option<String>,
     pub offer_fee_mojos: u64,
     pub offer_fee_source: String,
@@ -90,6 +91,7 @@ pub(super) async fn resolve_build_and_post_context(
         dexie_base_url,
         splash_base_url,
         offer_assets: assets,
+        action_size_base_units: request.size_base_units,
         action_side_override,
         offer_fee_mojos,
         offer_fee_source,
@@ -210,6 +212,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         publish_venue: "dexie".to_string(),
         dexie_base_url: "https://api.dexie.space".to_string(),
         splash_base_url: "http://localhost:4000".to_string(),
+        action_size_base_units: 0,
         offer_assets: ResolvedMarketOfferAssets {
             base_asset_id: "a1".to_string(),
             quote_asset_id: "xch".to_string(),

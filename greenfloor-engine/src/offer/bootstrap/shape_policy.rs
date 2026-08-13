@@ -48,14 +48,34 @@ fn shape_ctx_for(
     )
 }
 
+fn action_clip_ready(shape_ctx: &LadderShapeContext, action_clip_mojos: Option<i64>) -> bool {
+    let Some(size) = action_clip_mojos.filter(|size| *size > 0) else {
+        return false;
+    };
+    shape_ctx
+        .exact_ladder_counts
+        .get(&size)
+        .copied()
+        .unwrap_or(0)
+        > 0
+}
+
 /// Preflight handoff: yield means skip bootstrap shaping and let daemon coin ops backfill.
+///
+/// `action_clip_mojos` is the converted size of the offer being posted. An exact ladder
+/// clip for that row yields even when a *different* row (for example a spare size-25
+/// buffer) still `CannotFund` / `NeedsShape`.
 #[must_use]
 pub(crate) fn bootstrap_preflight_handoff(
     outcome: &BootstrapPlanOutcome,
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
+    action_clip_mojos: Option<i64>,
 ) -> ShapeHandoff {
     let shape_ctx = shape_ctx_for(ladder_entries, spendable_coins);
+    if action_clip_ready(&shape_ctx, action_clip_mojos) {
+        return ShapeHandoff::Yield;
+    }
     let Some(primary_size) = shape_ctx.primary_row_size() else {
         return if matches!(outcome, BootstrapPlanOutcome::Ready) {
             ShapeHandoff::Yield
@@ -149,7 +169,7 @@ mod tests {
         ];
         let replanned = plan_bootstrap(&ladder, &after_one);
         assert_eq!(
-            bootstrap_preflight_handoff(&replanned, &ladder, &after_one),
+            bootstrap_preflight_handoff(&replanned, &ladder, &after_one, None),
             ShapeHandoff::Keep
         );
     }
@@ -176,7 +196,7 @@ mod tests {
         let coins = eco181_after_combine_coins();
         let outcome = plan_bootstrap(&ladder, &coins);
         assert_eq!(
-            bootstrap_preflight_handoff(&outcome, &ladder, &coins),
+            bootstrap_preflight_handoff(&outcome, &ladder, &coins, None),
             ShapeHandoff::Yield
         );
         assert_eq!(
@@ -196,8 +216,73 @@ mod tests {
     #[test]
     fn preflight_ready_without_ladder_rows_yields() {
         assert_eq!(
-            bootstrap_preflight_handoff(&BootstrapPlanOutcome::Ready, &[], &[]),
+            bootstrap_preflight_handoff(&BootstrapPlanOutcome::Ready, &[], &[], None),
             ShapeHandoff::Yield
+        );
+    }
+
+    #[test]
+    fn preflight_yields_exact_ten_when_spare_twenty_five_cannot_fund() {
+        let ladder = vec![row(10, 4, 1), row(25, 1, 1)];
+        let spendable = vec![
+            coin("ten-a", 10),
+            coin("ten-b", 10),
+            coin("ten-c", 10),
+            coin("ten-d", 10),
+            coin("ten-e", 10),
+            coin("twenty-five", 25),
+            coin("fifteen", 15),
+        ];
+        let outcome = plan_bootstrap(&ladder, &spendable);
+        assert!(
+            matches!(outcome, BootstrapPlanOutcome::CannotFund { .. }),
+            "expected CannotFund for spare 25, got {outcome:?}"
+        );
+        assert_eq!(
+            bootstrap_preflight_handoff(&outcome, &ladder, &spendable, Some(10)),
+            ShapeHandoff::Yield
+        );
+        assert_eq!(
+            bootstrap_preflight_handoff(&outcome, &ladder, &spendable, Some(25)),
+            ShapeHandoff::Yield
+        );
+        assert_eq!(
+            bootstrap_preflight_handoff(&outcome, &ladder, &spendable, None),
+            ShapeHandoff::Keep
+        );
+    }
+
+    #[test]
+    fn preflight_yields_exact_ten_when_spare_twenty_five_needs_shape() {
+        let ladder = vec![row(10, 4, 1), row(25, 1, 1)];
+        let spendable = vec![
+            coin("ten-a", 10),
+            coin("ten-b", 10),
+            coin("ten-c", 10),
+            coin("ten-d", 10),
+            coin("ten-e", 10),
+            coin("twenty-five", 25),
+            coin("fifty", 50),
+        ];
+        let outcome = plan_bootstrap(&ladder, &spendable);
+        assert!(
+            matches!(outcome, BootstrapPlanOutcome::NeedsShape(_)),
+            "expected NeedsShape for spare 25, got {outcome:?}"
+        );
+        assert_eq!(
+            bootstrap_preflight_handoff(&outcome, &ladder, &spendable, Some(10)),
+            ShapeHandoff::Yield
+        );
+    }
+
+    #[test]
+    fn preflight_keeps_when_action_clip_is_missing() {
+        let ladder = vec![row(10, 4, 1), row(25, 1, 1)];
+        let spendable = vec![coin("three", 3)];
+        let outcome = plan_bootstrap(&ladder, &spendable);
+        assert_eq!(
+            bootstrap_preflight_handoff(&outcome, &ladder, &spendable, Some(25)),
+            ShapeHandoff::Keep
         );
     }
 }

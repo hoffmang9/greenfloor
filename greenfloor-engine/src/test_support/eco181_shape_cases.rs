@@ -141,7 +141,7 @@ pub fn run_eco181_shape_case(case: &Eco181ShapeCase) {
         Eco181ShapeExpect::PreflightAlreadyReady => {
             let coins = eco181_after_combine_coins();
             let outcome = plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &combine_context());
-            let phase = bootstrap_early_phase(&outcome, &ladder, &coins).expect(case.name);
+            let phase = bootstrap_early_phase(&outcome, &ladder, &coins, None).expect(case.name);
             assert_eq!(phase.reason, "already_ready", "{}", case.name);
             assert!(
                 bootstrap_phase_snapshot_block_error(&phase).is_none(),
@@ -149,7 +149,7 @@ pub fn run_eco181_shape_case(case: &Eco181ShapeCase) {
                 case.name
             );
             assert!(
-                bootstrap_preflight_handoff(&outcome, &ladder, &coins).yields(),
+                bootstrap_preflight_handoff(&outcome, &ladder, &coins, None).yields(),
                 "{}",
                 case.name
             );
@@ -188,7 +188,7 @@ pub fn run_eco181_shape_case(case: &Eco181ShapeCase) {
             }
             let coins = john_deere_after_combine_coins();
             let outcome = plan_bootstrap_mixed_outputs(&ladder, &coins, 5, &combine_context());
-            let phase = bootstrap_early_phase(&outcome, &ladder, &coins).expect(case.name);
+            let phase = bootstrap_early_phase(&outcome, &ladder, &coins, None).expect(case.name);
             assert_eq!(phase.reason, "already_ready", "{}", case.name);
         }
         Eco181ShapeExpect::ReplanAfterCombineReady => {
