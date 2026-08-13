@@ -193,7 +193,7 @@ fn daemon_once_isolates_forced_market_error() {
         }),
     });
     let result = run_daemon_once(&request, DAEMON_ENV);
-    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.exit_code, 1);
     let summary = cycle_summary(result.response.as_ref().expect("response"));
     assert_eq!(summary.get("markets_attempted"), Some(&json!(2)));
     assert_eq!(summary.get("markets_processed"), Some(&json!(1)));
