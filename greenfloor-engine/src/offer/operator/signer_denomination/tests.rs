@@ -163,59 +163,6 @@ async fn run_signer_denomination_phase_fails_when_coin_list_errors() {
 }
 
 #[tokio::test]
-async fn run_signer_denomination_phase_rejects_nonzero_bootstrap_fee() {
-    use crate::config::ManagerProgramConfig;
-    use crate::test_support::ladder::market_with_side_ladder;
-    use crate::test_support::signer_config::test_signer_config;
-
-    const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-    const MOJO_PER_XCH: u64 = 1_000_000_000_000;
-    let coin_body = format!(
-        r#"{{
-        "success": true,
-        "coin_records": [{{
-            "coin": {{
-                "parent_coin_info": "c325057d788bee13367cb8e2d71ff3e209b5e94b31b296322ba1a143053fef5b",
-                "puzzle_hash": "11cd056d9ec93f4612919b445e1ad9afeb7ef7739708c2d16cec4fd2d3cd5e63",
-                "amount": {}
-            }},
-            "coinbase": false,
-            "confirmed_block_index": 1,
-            "spent": false,
-            "spent_block_index": 0,
-            "timestamp": 1
-        }}]
-    }}"#,
-        MOJO_PER_XCH * 1000
-    );
-    let mut server = mockito::Server::new_async().await;
-    let _coin_mock = server
-        .mock("POST", "/get_coin_records_by_puzzle_hash")
-        .with_status(200)
-        .with_body(coin_body)
-        .create_async()
-        .await;
-    let _fee_mock = server
-        .mock("POST", "/get_fee_estimate")
-        .with_status(200)
-        .with_body(r#"{"success":true,"estimates":[100,500]}"#)
-        .create_async()
-        .await;
-
-    let market = market_with_side_ladder(RECEIVE_ADDRESS, "sell", 10, 2);
-    let program = ManagerProgramConfig::default();
-    let signer = test_signer_config(&server.url());
-
-    let ctx = signer_denomination_test_context(program, signer, &market, "sell");
-    let result = run_signer_denomination_phase(&ctx).await.expect("phase");
-
-    assert_eq!(result.reason, "signer_mixed_split_fee_not_supported");
-    assert!(!result.ready);
-    assert_eq!(result.fee_mojos, 500);
-    assert!(!result.ready);
-}
-
-#[tokio::test]
 async fn run_signer_denomination_phase_skips_when_ladder_already_ready() {
     use crate::config::ManagerProgramConfig;
     use crate::test_support::ladder::market_with_side_ladder;
@@ -322,18 +269,9 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
         .with_body(coin_body)
         .create_async()
         .await;
-    let _fee_mock = server
-        .mock("POST", "/get_fee_estimate")
-        .with_status(200)
-        .with_body(r#"{"success":false}"#)
-        .create_async()
-        .await;
 
     let market = market_with_side_ladder(RECEIVE_ADDRESS, "sell", 10, 2);
-    let program = ManagerProgramConfig {
-        coin_ops_minimum_fee_mojos: 0,
-        ..Default::default()
-    };
+    let program = ManagerProgramConfig::default();
     let signer = test_signer_config(&server.url());
 
     let ctx = signer_denomination_test_context(program, signer, &market, "sell");
@@ -344,7 +282,7 @@ async fn prepare_bootstrap_split_plan_returns_zero_fee_split_context() {
 
     assert!(!plan_ctx.bootstrap_plan.requires_combine_first());
     assert_eq!(plan_ctx.fee_mojos, 0);
-    assert_eq!(plan_ctx.fee_source, "config_minimum_fee_fallback");
+    assert_eq!(plan_ctx.fee_source, "vault_mixed_split_no_fee");
     assert!(!plan_ctx.bootstrap_plan.output_amounts.is_empty());
 }
 
@@ -532,7 +470,6 @@ async fn run_signer_denomination_phase_runs_combine_then_split() {
     let mut market = market_with_side_ladder(BOOTSTRAP_TEST_RECEIVE, "sell", 100, 1);
     market.ladders.get_mut("sell").expect("sell ladder")[0].split_buffer_count = 0;
     let program = ManagerProgramConfig {
-        coin_ops_minimum_fee_mojos: 0,
         runtime_offer_bootstrap_wait_timeout_seconds: 30,
         ..Default::default()
     };
@@ -573,7 +510,6 @@ async fn run_signer_denomination_phase_eco181_combine_only_marks_ready_without_s
     let server = coinset_server_for_eco181_combine_only_e2e().await;
     let market = market_with_eco181_sell_ladder(BOOTSTRAP_TEST_RECEIVE);
     let program = ManagerProgramConfig {
-        coin_ops_minimum_fee_mojos: 0,
         runtime_offer_bootstrap_wait_timeout_seconds: 30,
         ..Default::default()
     };

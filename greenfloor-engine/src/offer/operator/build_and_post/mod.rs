@@ -22,7 +22,8 @@ use crate::offer::operator::UniqueMakerPinSession;
 use crate::offer::request::normalize_offer_side;
 use crate::paths::resolve_cats_config_path;
 use crate::storage::{
-    state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
+    persist_offer_post_records, state_db_path_for_home, upsert_offer_post_record,
+    OfferPostPersistRecord, SqliteStore,
 };
 
 use context::resolve_build_and_post_context;
@@ -229,7 +230,11 @@ pub(crate) struct BuildAndPostPersistArtifacts {
     pub ctx: ResolvedBuildAndPostContext,
 }
 
-/// Persist offer-post records collected during build-and-post.
+/// Persist offer-post records collected during build-and-post, then emit audits.
+///
+/// Immediate per-iteration upsert is the primary path. This flush retries those
+/// upserts (idempotent) so a transient store failure after a live venue publish
+/// still writes offer state and watches, then emits deferred audit rows.
 ///
 /// # Errors
 ///
@@ -238,6 +243,7 @@ pub(crate) fn flush_build_and_post_persist(
     store: &SqliteStore,
     artifacts: &BuildAndPostPersistArtifacts,
 ) -> SignerResult<()> {
+    persist_offer_post_records(store, &artifacts.persist.persist_records)?;
     let emitter = PostBatchEmitter::new(&artifacts.ctx);
     emitter.flush_audits(
         store,

@@ -3,8 +3,9 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
+use crate::config::bake_expiry_into_conditions_for_quote;
 use crate::error::SignerResult;
-use crate::offer::codec::verify_offer_for_dexie;
+use crate::offer::codec::verify_offer_for_post;
 use crate::offer::publish::expected_publish_asset_fields;
 
 use super::context::ResolvedBuildAndPostContext;
@@ -103,7 +104,10 @@ async fn create_offer_for_post(
         }))));
     }
 
-    if let Some(verify_error) = verify_offer_for_dexie(&created.offer_text) {
+    if let Some(verify_error) = verify_offer_for_post(
+        &created.offer_text,
+        bake_expiry_into_conditions_for_quote(&ctx.gated.market_row.quote_asset_type),
+    ) {
         return Ok(Err(PostIterationOutcome::Failure(PostFailure {
             error: verify_error,
             started,
@@ -272,7 +276,8 @@ mod tests {
 
     use super::create_offer_for_post;
     use super::PostIterationOutcome;
-    use crate::offer::codec::verify_offer_for_dexie;
+    use crate::config::bake_expiry_into_conditions_for_quote;
+    use crate::offer::codec::verify_offer_for_post;
     use crate::offer::operator::build_and_post::context::sample_resolved_build_and_post_context;
     use crate::offer::operator::UniqueMakerPinSession;
     use crate::test_support::build_and_post::unused_post_iteration_request;
@@ -283,7 +288,11 @@ mod tests {
         ctx.test_overrides.offer_text = Some("not-an-offer".to_string());
         let offer_text = "not-an-offer";
         let request = unused_post_iteration_request(false, Some(offer_text));
-        let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
+        let expected_verify_error = verify_offer_for_post(
+            offer_text,
+            bake_expiry_into_conditions_for_quote(&ctx.gated.market_row.quote_asset_type),
+        )
+        .expect("verify error");
 
         let outcome = create_offer_for_post(&request, &ctx, Instant::now(), &[])
             .await
@@ -351,7 +360,11 @@ mod tests {
             coin_id: "aa".repeat(32),
             offer_nonce: "bb".repeat(32),
         });
-        let expected_verify_error = verify_offer_for_dexie(offer_text).expect("verify error");
+        let expected_verify_error = verify_offer_for_post(
+            offer_text,
+            bake_expiry_into_conditions_for_quote(&ctx.gated.market_row.quote_asset_type),
+        )
+        .expect("verify error");
         let mut session = UniqueMakerPinSession::inactive();
 
         let (bootstrap_action, outcome) =

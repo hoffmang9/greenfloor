@@ -153,20 +153,32 @@ pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
     Ok(())
 }
 
+/// Structure, duplicate spends, and on-chain expiry when `require_on_chain_expiry`.
+///
+/// The operator post path passes
+/// [`crate::config::bake_expiry_into_conditions_for_quote`] so stable makers
+/// (ADR 0020) are not rejected for omitting `AssertBeforeSecondsAbsolute`.
+pub(crate) fn validate_offer_for_post(
+    offer: &str,
+    require_on_chain_expiry: bool,
+) -> SignerResult<()> {
+    let spend_bundle = decode_and_parse_offer(offer)?;
+    if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
+        return Err(SignerError::Offer(OfferError::OfferDuplicateSpentCoinIds));
+    }
+    if require_on_chain_expiry && !offer_has_expiration_condition(&spend_bundle)? {
+        return Err(SignerError::Offer(OfferError::OfferMissingExpiration));
+    }
+    Ok(())
+}
+
 /// Full Dexie pre-post validation: structure, expiry, and duplicate spends.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
 pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
-    let spend_bundle = decode_and_parse_offer(offer)?;
-    if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
-        return Err(SignerError::Offer(OfferError::OfferDuplicateSpentCoinIds));
-    }
-    if !offer_has_expiration_condition(&spend_bundle)? {
-        return Err(SignerError::Offer(OfferError::OfferMissingExpiration));
-    }
-    Ok(())
+    validate_offer_for_post(offer, true)
 }
 
 fn dexie_verify_error_code(err: SignerError) -> String {
@@ -185,13 +197,19 @@ fn dexie_verify_error_code(err: SignerError) -> String {
     }
 }
 
-/// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
+/// Operator post gate: structure and duplicates always; expiry when required.
 #[must_use]
-pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
-    match validate_offer_text(offer) {
+pub(crate) fn verify_offer_for_post(offer: &str, require_on_chain_expiry: bool) -> Option<String> {
+    match validate_offer_for_post(offer, require_on_chain_expiry) {
         Ok(()) => None,
         Err(err) => Some(dexie_verify_error_code(err)),
     }
+}
+
+/// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
+#[must_use]
+pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
+    verify_offer_for_post(offer, true)
 }
 
 /// Encode offer from spend bundle bytes.
@@ -284,7 +302,8 @@ mod tests {
         encode_offer_from_spend_bundle_bytes, expires_at_seconds_from_coin_spend,
         expires_at_seconds_from_offer_spend, from_input_spend_bundle_xch_bytes,
         offer_has_duplicate_spent_coin_ids, offer_has_expiration_condition,
-        validate_offer_structure, validate_offer_text, verify_offer_for_dexie,
+        validate_offer_for_post, validate_offer_structure, validate_offer_text,
+        verify_offer_for_dexie, verify_offer_for_post,
     };
     use crate::bech32m::decode_offer;
     use crate::hex::hex_to_bytes32;
@@ -321,6 +340,8 @@ mod tests {
     fn verify_offer_for_dexie_rejects_garbage_offer_text() {
         let error = verify_offer_for_dexie("not-an-offer").expect("error");
         assert!(error.contains("wallet_sdk_offer_validate_failed"));
+        let soft = verify_offer_for_post("not-an-offer", false).expect("error");
+        assert!(soft.contains("wallet_sdk_offer_validate_failed"));
     }
 
     #[test]
@@ -363,6 +384,30 @@ mod tests {
         assert_eq!(
             expires_at_seconds_from_coin_spend(coin_spend).expect("coin spend expiry"),
             Some(expires_at)
+        );
+    }
+
+    #[tokio::test]
+    async fn soft_expiry_presplit_passes_post_gate_without_on_chain_expiry() {
+        let mut setup = setup_roundtrip_opts(
+            OfferRoundtripScenario::PresplitNew {
+                broadcast_split: false,
+            },
+            Some(4_000_000_000),
+        )
+        .await;
+        setup.request.bake_expiry_into_conditions = false;
+        let result = build_offer_from_setup(&mut setup)
+            .await
+            .expect("build offer");
+        validate_offer_structure(&result.offer).expect("structure");
+        validate_offer_for_post(&result.offer, false).expect("soft-expiry post gate");
+        assert!(verify_offer_for_post(&result.offer, false).is_none());
+        let spend_bundle = decode_offer(&result.offer).expect("decode");
+        assert!(!offer_has_expiration_condition(&spend_bundle).expect("expiration"));
+        assert_eq!(
+            verify_offer_for_dexie(&result.offer).as_deref(),
+            Some("wallet_sdk_offer_missing_expiration")
         );
     }
 }

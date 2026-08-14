@@ -455,6 +455,44 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
 }
 
 #[test]
+fn flush_build_and_post_persist_retries_offer_upsert() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = SqliteStore::open(&state_db_path_for_home(dir.path())).expect("open");
+    let artifacts = super::BuildAndPostPersistArtifacts {
+        persist: PostPersistPayload {
+            persist_records: vec![crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-flush-retry".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: OfferCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: vec!["aa".repeat(32)],
+                watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
+            }],
+            failure_audits: Vec::new(),
+        },
+        ctx: sample_resolved_build_and_post_context(),
+    };
+
+    super::flush_build_and_post_persist(&store, &artifacts).expect("flush persist");
+
+    assert_eq!(
+        store
+            .offer_state_for_id("offer-flush-retry")
+            .expect("state")
+            .as_deref(),
+        Some("open")
+    );
+}
+
+#[test]
 fn post_emit_target_skips_persist_for_dry_run() {
     assert_eq!(
         PostEmitTarget::from_run(true, true),
