@@ -82,6 +82,8 @@ Severity tags:
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.
+- `[MUST]` Do not flatten typed `SignerError` / Coinset / Dexie outcomes to strings and re-parse
+  them for control flow. Retryability and 404/missing are variant matches (ADR 0027).
 - `[MUST]` Use allowlists for state checks; never rely on negated blocklists.
 - `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence
   must be additive (`next_warning += warning_interval`). See `docs/plan.md` → **Delivery

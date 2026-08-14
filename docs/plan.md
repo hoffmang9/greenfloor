@@ -32,7 +32,8 @@ adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
   `CatSelection::Preselected`.
 - **Shared shape planning:** `coin_ops::shape` (deficit → combine-first / single-coin
   funding → output amounts). Bootstrap planner and managed auto-split are thin wrappers;
-  `plan_coin_ops` remains the batch count/fee scheduler. See ADR 0021.
+  `plan_coin_ops` remains the batch count/fee scheduler. See ADR 0021. Combine policy is
+  ADR 0026; typed operator outcomes are ADR 0027.
 - **Expired / surplus makers:** `offer::lifecycle::expired_maker` (soft-mark, CAS lease,
   surplus reclaim plan). Daemon `soft_expire_phase` is a thin adapter; cancel stays
   separate (ADR 0015).
@@ -56,7 +57,7 @@ Core trading/runtime (V1):
 2. `config-validate` — validate program + markets YAML
 3. `doctor` — readiness check (config, keys, DB, env overrides)
 4. `keys-onboard` — key selection and onboarding state
-5. `build-and-post-offer` — vault KMS offer build + Dexie/Splash publish
+5. `build-and-post-offer` — vault KMS offer build + publish (`coinset` default; Dexie/Splash opt-in)
 6. `offers-status` — offer states and recent audit events
 7. `offers-reconcile` — refresh states from venue + Coinset tx signals
 8. `offers-cancel` — on-chain cancel by offer id or `--cancel-open` (Dexie fetch + Coinset submit)

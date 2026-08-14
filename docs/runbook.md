@@ -53,7 +53,7 @@ Optional developer bootstrap for testnet markets:
 - **CAT dust via Coinset (enabled markets):** Sub-unit CAT outputs (strictly below **1000** mojos per coin) can be merged with the direct Coinset signer path, one batch per `keys.registry` signer used on the market rows. From the repo root: `PATH="$(pwd)/.venv/bin:$PATH" greenfloor-manager combine-market-cat-dust --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml --json`. Prefer `--dry-run` or `--list-only` before live combines; `--cat-asset-id <hex>` scopes a single asset; optional `--testnet-markets-config` matches daemon overlay semantics.
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
-  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch`
+  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 5 --asset-id xch`
   - Config-driven shaping (from market `ladders.sell`): `greenfloor-manager coin-split --pair TDBX:txch --size-base-units 10`
   - Config-driven combine threshold (from market `ladders.sell`): `greenfloor-manager coin-combine --pair TDBX:txch --size-base-units 10`
   - Optional venue context annotation for prep commands: add `--venue dexie` or `--venue splash` (coin-prep works without it).
@@ -269,6 +269,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - For `testnet11`, do not route to mainnet Coinset endpoint unless you explicitly set `GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11=1` for temporary debugging.
 - Coin combine input cap (manager/daemon coin-op execution; `~/.greenfloor/config/program.yaml` -> `coin_ops`):
   - `combine_input_coin_cap` (default: `5`, min `2`)
+  - Managed/CLI combine is exact-denomination only. `--input-coin-count` is `min(requested, combine_input_coin_cap)`.
 - Daemon tx-signal ingestion controls (`~/.greenfloor/config/program.yaml` -> `chain_signals.tx_block_trigger`):
   - `mode`: must be `websocket`
   - `websocket_url`: Coinset websocket endpoint (defaults by network when blank)
@@ -283,6 +284,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - Daemon singleton lock behavior:
   - daemon loop and `--once` both require exclusive lock on `state_dir/daemon.lock`.
   - if lock is held, process exits with `daemon_lock_conflict` event and non-zero exit code.
+  - `--once` also exits 1 when any preamble or cycle error occurred, or when markets were attempted and none processed. Isolation still runs the other markets.
 - Validate config + override sanity before deploy:
   - `greenfloor-manager doctor` (includes warnings for invalid runtime override env values)
 - Test-only overrides (debug builds / CI; not for production):
