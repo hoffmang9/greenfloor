@@ -13,6 +13,23 @@ pub(crate) fn build_and_post_exit_code(publish_failures: u32) -> i32 {
     }
 }
 
+/// Venue outcome, plus persist-after-publish only after flush is known.
+pub(crate) fn post_completed_outcome(
+    publish_attempts: usize,
+    publish_failures: u32,
+    persist_failed: bool,
+) -> &'static str {
+    if persist_failed {
+        "persist_failed"
+    } else if publish_failures == 0 {
+        "success"
+    } else if publish_failures == u32::try_from(publish_attempts).unwrap_or(u32::MAX) {
+        "failure"
+    } else {
+        "partial_failure"
+    }
+}
+
 pub(super) enum PostIterationOutcome {
     Preview(Value),
     Failure(PostFailure),

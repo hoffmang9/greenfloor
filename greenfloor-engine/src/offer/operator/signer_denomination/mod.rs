@@ -36,7 +36,6 @@ pub(crate) use test_overrides::SignerDenominationTestOverrides;
 use bootstrap_execute::execute_bootstrap_shape;
 use planning::{
     action_clip_mojos_for_side, bootstrap_coins_as_plan_mojos, bootstrap_ladder_entries_for_side,
-    resolve_bootstrap_split_fee,
 };
 use types::{BootstrapExecutedExtras, BootstrapExecutionMetadata, BootstrapPhaseFailure};
 
@@ -54,10 +53,6 @@ fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> 
 
 fn bootstrap_skipped(reason: impl Into<String>) -> BootstrapPhaseResult {
     BootstrapPhaseResult::skipped(reason)
-}
-
-fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
-    BootstrapPhaseResult::failed(failure)
 }
 
 async fn load_asset_scoped_coins(
@@ -210,22 +205,6 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
     let BootstrapPlanOutcome::NeedsShape(bootstrap_plan) = outcome else {
         return Ok(Err(bootstrap_skipped("bootstrap_precheck_failed")));
     };
-    let output_count = bootstrap_plan.output_amounts.len();
-    let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
-        &ctx.gated.signer,
-        &ctx.gated.operator_network,
-        ctx.gated.program.coin_ops_minimum_fee_mojos,
-        output_count,
-    )
-    .await;
-    if fee_mojos > 0 {
-        return Ok(Err(bootstrap_failed(BootstrapPhaseFailure::new(
-            "signer_mixed_split_fee_not_supported",
-            fee_mojos,
-            fee_source,
-            fee_lookup_error,
-        ))));
-    }
 
     Ok(Ok(BootstrapShapeContext {
         split_asset_id,
@@ -233,9 +212,10 @@ pub(crate) async fn prepare_bootstrap_execution_plan(
         bootstrap_plan,
         ladder_entries,
         combine_context,
-        fee_mojos,
-        fee_source,
-        fee_lookup_error,
+        // Vault mixed-split cannot attach a fee; submit always uses 0.
+        fee_mojos: 0,
+        fee_source: "vault_mixed_split_no_fee".to_string(),
+        fee_lookup_error: None,
         combine_input_cap: resolve_combine_input_cap(
             ctx.gated.program.coin_ops_combine_input_coin_cap,
         ),

@@ -9,9 +9,12 @@ use super::post_batch::{
     PostIterationBatch, PostPersistPayload,
 };
 use super::publish::offer_post_persist_record;
-use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
+use super::types::{
+    build_and_post_exit_code, post_completed_outcome, PostAttemptSuccess, PostFailure,
+    PublishResult,
+};
 use crate::offer::types::{CreateOfferResult, OfferCancelFields, OfferExecutionMode};
-use crate::operator_log::OFFER_POST_FAILURE;
+use crate::operator_log::{OFFER_POST_COMPLETED, OFFER_POST_FAILURE};
 use crate::storage::{
     state_db_path_for_home, upsert_offer_post_record, CycleWriteStore, SqliteStore,
 };
@@ -58,10 +61,7 @@ fn dry_run_failure_traces_without_persisting() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceOnly,
@@ -98,10 +98,7 @@ fn persist_path_defers_failure_trace_until_flush() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceAndStore,
@@ -335,10 +332,7 @@ fn success_persists_offer_state_immediately_before_flush() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let coin = "aa".repeat(32);
     let p2 = "bb".repeat(32);
@@ -401,10 +395,7 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let mut persist = |_record: &crate::storage::OfferPostPersistRecord| {
         Err(crate::error::SignerError::Other(
@@ -440,18 +431,67 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
         Some(&mut persist),
     );
 
-    assert_eq!(batch.publish_failures, 1);
-    assert_eq!(batch.persist.failure_audits.len(), 1);
+    assert_eq!(batch.publish_failures, 0);
+    assert_eq!(batch.persist.failure_audits.len(), 0);
+    assert_eq!(batch.persist.deferred_persist_failures.len(), 1);
     assert_eq!(batch.persist.persist_records.len(), 1);
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
-    emitter
-        .flush_audits(
-            &store,
-            &batch.persist.persist_records,
-            &batch.persist.failure_audits,
-        )
-        .expect("flush audits");
-    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
+
+    super::flush_build_and_post_persist(
+        &store,
+        &super::BuildAndPostPersistArtifacts::for_test(batch.persist.clone(), ctx.clone()),
+    )
+    .expect("flush recovers persist");
+    assert_eq!(
+        store
+            .offer_state_for_id("offer-persist-failure")
+            .expect("state")
+            .as_deref(),
+        Some("open")
+    );
+    assert_eq!(
+        capture.count_substr(OFFER_POST_FAILURE),
+        0,
+        "recovered persist must not emit OFFER_POST_FAILURE"
+    );
+}
+
+#[test]
+fn flush_build_and_post_persist_retries_offer_upsert() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = SqliteStore::open(&state_db_path_for_home(dir.path())).expect("open");
+    let artifacts = super::BuildAndPostPersistArtifacts::for_test(
+        PostPersistPayload {
+            persist_records: vec![crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-flush-retry".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: OfferCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: vec!["aa".repeat(32)],
+                watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
+            }],
+            ..PostPersistPayload::default()
+        },
+        sample_resolved_build_and_post_context(),
+    );
+
+    super::flush_build_and_post_persist(&store, &artifacts).expect("flush persist");
+
+    assert_eq!(
+        store
+            .offer_state_for_id("offer-flush-retry")
+            .expect("state")
+            .as_deref(),
+        Some("open")
+    );
 }
 
 #[test]
@@ -485,6 +525,56 @@ fn build_and_post_exit_code_reflects_publish_failures() {
     assert_eq!(build_and_post_exit_code(0), 0);
     assert_eq!(build_and_post_exit_code(1), 2);
     assert_eq!(build_and_post_exit_code(3), 2);
+}
+
+#[test]
+fn post_completed_outcome_waits_for_persist() {
+    assert_eq!(post_completed_outcome(1, 0, false), "success");
+    assert_eq!(post_completed_outcome(1, 0, true), "persist_failed");
+    assert_eq!(post_completed_outcome(2, 2, false), "failure");
+    assert_eq!(post_completed_outcome(2, 1, false), "partial_failure");
+    assert_eq!(post_completed_outcome(2, 1, true), "persist_failed");
+}
+
+#[test]
+fn complete_build_and_post_emits_success_after_persist() {
+    let capture = crate::operator_log::TraceCapture::install();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = SqliteStore::open(&state_db_path_for_home(dir.path())).expect("open");
+    let mut artifacts = super::BuildAndPostPersistArtifacts::for_test(
+        PostPersistPayload {
+            persist_records: vec![crate::storage::OfferPostPersistRecord {
+                offer_id: "offer-complete-after-flush".to_string(),
+                market_id: "m1".to_string(),
+                side: "sell".to_string(),
+                size_base_units: 5,
+                publish_venue: "coinset".to_string(),
+                resolved_base_asset_id: "a1".to_string(),
+                resolved_quote_asset_id: "xch".to_string(),
+                created_extra: json!({}),
+                cancel_fields: OfferCancelFields::default(),
+                execution_mode: Some(OfferExecutionMode::Direct),
+                watched_coin_ids: Vec::new(),
+                watched_p2s: Vec::new(),
+                listing_expires_at: None,
+                offer_nonce: None,
+            }],
+            ..PostPersistPayload::default()
+        },
+        sample_resolved_build_and_post_context(),
+    );
+    artifacts.publish_attempts = 1;
+
+    super::complete_build_and_post(Some(&store), &artifacts).expect("flush persist");
+    assert_eq!(
+        store
+            .offer_state_for_id("offer-complete-after-flush")
+            .expect("state")
+            .as_deref(),
+        Some("open")
+    );
+    assert_eq!(capture.count_substr(OFFER_POST_COMPLETED), 1);
+    assert!(capture.logs().contains("success"));
 }
 
 #[test]

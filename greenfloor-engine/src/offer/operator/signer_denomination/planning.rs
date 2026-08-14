@@ -1,6 +1,6 @@
 use crate::coin_ops::is_spendable_coin_state;
-use crate::coinset::{get_conservative_fee_estimate_for_signer, WalletUnspentCoin};
-use crate::config::{LadderEntry, MarketPricing, SignerConfig};
+use crate::coinset::WalletUnspentCoin;
+use crate::config::{LadderEntry, MarketPricing};
 use crate::error::{OfferError, SignerError, SignerResult};
 use crate::offer::bootstrap::{BootstrapCoin, PlanAmount, PlannerLadderRow};
 use crate::offer::build_context::mojo_multiplier_for_leg;
@@ -101,41 +101,6 @@ pub(super) fn action_clip_mojos_for_side(
     Ok((mojos > 0).then_some(mojos))
 }
 
-fn bootstrap_fee_cost_for_output_count(output_count: usize) -> u64 {
-    let count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
-    1_000_000 + count.saturating_sub(1) * 250_000
-}
-
-pub(super) async fn resolve_bootstrap_split_fee(
-    signer: &SignerConfig,
-    operator_network: &str,
-    minimum_fee_mojos: u64,
-    output_count: usize,
-) -> (u64, String, Option<String>) {
-    let fee_cost = bootstrap_fee_cost_for_output_count(output_count);
-    let spend_count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
-    match get_conservative_fee_estimate_for_signer(
-        signer,
-        operator_network,
-        fee_cost,
-        Some(spend_count),
-    )
-    .await
-    {
-        Ok(Some(fee_mojos)) => (fee_mojos, "coinset_conservative_fee".to_string(), None),
-        Ok(None) => (
-            minimum_fee_mojos,
-            "config_minimum_fee_fallback".to_string(),
-            None,
-        ),
-        Err(err) => (
-            minimum_fee_mojos,
-            "config_minimum_fee_fallback".to_string(),
-            Some(err.to_string()),
-        ),
-    }
-}
-
 pub(super) fn wallet_coin_spendable(coin: &WalletUnspentCoin) -> bool {
     is_spendable_coin_state(&coin.state)
 }
@@ -159,11 +124,10 @@ pub(super) fn bootstrap_coins_as_plan_mojos(coins: &[WalletUnspentCoin]) -> Vec<
 mod tests {
     use super::{
         action_clip_mojos_for_side, bootstrap_coins_as_plan_mojos,
-        bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
+        bootstrap_ladder_entries_for_side, wallet_coin_spendable,
     };
     use crate::coinset::WalletUnspentCoin;
     use crate::config::{LadderEntry, MarketPricing};
-    use crate::test_support::signer_config::test_signer_config;
 
     #[test]
     fn bootstrap_ladder_entries_for_sell_side_converts_to_mojos() {
@@ -367,61 +331,5 @@ mod tests {
         };
         assert!(wallet_coin_spendable(&confirmed));
         assert!(!wallet_coin_spendable(&pending));
-    }
-
-    #[tokio::test]
-    async fn resolve_bootstrap_split_fee_uses_coinset_conservative_fee() {
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/get_fee_estimate")
-            .with_status(200)
-            .with_body(r#"{"success":true,"estimates":[100,500]}"#)
-            .create_async()
-            .await;
-
-        let signer = test_signer_config(&server.url());
-
-        let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
-        assert_eq!(fee_mojos, 500);
-        assert_eq!(fee_source, "coinset_conservative_fee");
-        assert!(lookup_error.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_bootstrap_split_fee_falls_back_on_lookup_failure() {
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/get_fee_estimate")
-            .with_status(500)
-            .create_async()
-            .await;
-
-        let signer = test_signer_config(&server.url());
-
-        let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
-        assert_eq!(fee_mojos, 99);
-        assert_eq!(fee_source, "config_minimum_fee_fallback");
-        assert!(lookup_error.is_some());
-    }
-
-    #[tokio::test]
-    async fn resolve_bootstrap_split_fee_falls_back_when_estimate_empty() {
-        let mut server = mockito::Server::new_async().await;
-        let _mock = server
-            .mock("POST", "/get_fee_estimate")
-            .with_status(200)
-            .with_body(r#"{"success":false}"#)
-            .create_async()
-            .await;
-
-        let signer = test_signer_config(&server.url());
-
-        let (fee_mojos, fee_source, lookup_error) =
-            resolve_bootstrap_split_fee(&signer, "mainnet", 99, 2).await;
-        assert_eq!(fee_mojos, 99);
-        assert_eq!(fee_source, "config_minimum_fee_fallback");
-        assert!(lookup_error.is_none());
     }
 }

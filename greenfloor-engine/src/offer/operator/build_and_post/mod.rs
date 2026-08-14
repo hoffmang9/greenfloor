@@ -22,7 +22,8 @@ use crate::offer::operator::UniqueMakerPinSession;
 use crate::offer::request::normalize_offer_side;
 use crate::paths::resolve_cats_config_path;
 use crate::storage::{
-    state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
+    persist_offer_post_records, state_db_path_for_home, upsert_offer_post_record,
+    OfferPostPersistRecord, SqliteStore,
 };
 
 use context::resolve_build_and_post_context;
@@ -36,7 +37,7 @@ use post_batch::{
     apply_post_iteration_outcome, PostBatchEmitter, PostEmitTarget, PostIterationBatch,
     PostPersistPayload,
 };
-use types::build_and_post_exit_code;
+use types::{build_and_post_exit_code, post_completed_outcome};
 
 /// Synchronously persist a successful venue post before its outcome is recorded.
 ///
@@ -172,10 +173,7 @@ async fn run_post_iterations(
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let emitter = PostBatchEmitter::new(ctx);
     for _ in 0..request.repeat {
@@ -227,9 +225,17 @@ fn build_and_post_payload(
 pub(crate) struct BuildAndPostPersistArtifacts {
     pub persist: PostPersistPayload,
     pub ctx: ResolvedBuildAndPostContext,
+    publish_attempts: usize,
+    publish_failures: u32,
+    dry_run: bool,
 }
 
-/// Persist offer-post records collected during build-and-post.
+/// Persist offer-post records collected during build-and-post, then emit audits.
+///
+/// Immediate per-iteration upsert is the primary path. This flush retries those
+/// upserts (idempotent) so a transient store failure after a live venue publish
+/// still writes offer state and watches. Audits always run: persist-after-publish
+/// failures are emitted only when this retry also fails.
 ///
 /// # Errors
 ///
@@ -238,12 +244,37 @@ pub(crate) fn flush_build_and_post_persist(
     store: &SqliteStore,
     artifacts: &BuildAndPostPersistArtifacts,
 ) -> SignerResult<()> {
+    let persist_result = persist_offer_post_records(store, &artifacts.persist.persist_records);
+    let mut failure_audits = artifacts.persist.failure_audits.clone();
+    if persist_result.is_err() {
+        failure_audits.extend(artifacts.persist.deferred_persist_failures.iter().cloned());
+    }
     let emitter = PostBatchEmitter::new(&artifacts.ctx);
-    emitter.flush_audits(
-        store,
-        &artifacts.persist.persist_records,
-        &artifacts.persist.failure_audits,
-    )
+    emitter.flush_audits(store, &artifacts.persist.persist_records, &failure_audits)?;
+    persist_result
+}
+
+/// Flush when a store is present, then emit completion. Persist retry failure is
+/// never reported as venue success.
+fn complete_build_and_post(
+    store: Option<&SqliteStore>,
+    artifacts: &BuildAndPostPersistArtifacts,
+) -> SignerResult<()> {
+    let persist_result = match store {
+        Some(store) => flush_build_and_post_persist(store, artifacts),
+        None => Ok(()),
+    };
+    PostBatchEmitter::new(&artifacts.ctx).trace_completed(
+        post_completed_outcome(
+            artifacts.publish_attempts,
+            artifacts.publish_failures,
+            persist_result.is_err(),
+        ),
+        artifacts.publish_attempts,
+        artifacts.publish_failures,
+        artifacts.dry_run,
+    );
+    persist_result
 }
 
 fn lock_cli_store(
@@ -261,10 +292,7 @@ async fn finish_build_and_post(
     persist: Option<&mut OfferPostPersistSink<'_>>,
     session: &mut UniqueMakerPinSession,
     preopened_cli_store: Option<Arc<Mutex<SqliteStore>>>,
-) -> SignerResult<(
-    BuildAndPostOfferResponse,
-    Option<BuildAndPostPersistArtifacts>,
-)> {
+) -> SignerResult<(BuildAndPostOfferResponse, BuildAndPostPersistArtifacts)> {
     let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
 
     let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
@@ -316,36 +344,18 @@ async fn finish_build_and_post(
     )
     .await?;
 
+    let publish_attempts = batch.post_results.len();
+    let publish_failures = batch.publish_failures;
     let payload = build_and_post_payload(request, &ctx, &batch);
-    let exit_code = build_and_post_exit_code(batch.publish_failures);
-    let outcome = if batch.publish_failures == 0 {
-        "success"
-    } else if batch.publish_failures == u32::try_from(batch.post_results.len()).unwrap_or(u32::MAX)
-    {
-        "failure"
-    } else {
-        "partial_failure"
+    let exit_code = build_and_post_exit_code(publish_failures);
+    let artifacts = BuildAndPostPersistArtifacts {
+        persist: batch.into_persist_payload(),
+        ctx,
+        publish_attempts,
+        publish_failures,
+        dry_run: request.run.dry_run,
     };
-    PostBatchEmitter::new(&ctx).trace_completed(
-        outcome,
-        batch.post_results.len(),
-        batch.publish_failures,
-        request.run.dry_run,
-    );
-
-    let persist_artifacts = if target == PostEmitTarget::TraceAndStore {
-        Some(BuildAndPostPersistArtifacts {
-            persist: batch.into_persist_payload(),
-            ctx: ctx.clone(),
-        })
-    } else {
-        None
-    };
-
-    Ok((
-        BuildAndPostOfferResponse { exit_code, payload },
-        persist_artifacts,
-    ))
+    Ok((BuildAndPostOfferResponse { exit_code, payload }, artifacts))
 }
 
 async fn build_and_post_offer_async(
@@ -382,14 +392,15 @@ async fn build_and_post_offer_async(
     };
     let (response, artifacts) =
         finish_build_and_post(&request, ctx, None, &mut session, cli_store.clone()).await?;
-    if let Some(artifacts) = artifacts {
-        let store = lock_cli_store(cli_store.as_ref().expect("TraceAndStore opened CLI store"))?;
-        flush_build_and_post_persist(&store, &artifacts)?;
-    }
+    let persist_store = match cli_store.as_ref() {
+        Some(arc) if target == PostEmitTarget::TraceAndStore => Some(lock_cli_store(arc)?),
+        _ => None,
+    };
+    complete_build_and_post(persist_store.as_deref(), &artifacts)?;
     Ok(response)
 }
 
-/// Run build-and-post and return optional persist artifacts for caller-side flush.
+/// Run build-and-post and return persist artifacts for caller-side completion.
 ///
 /// Callers construct [`UniqueMakerPinSession`] via [`UniqueMakerPinSession::begin`] on their
 /// held store (daemon/ensure: cycle write store; CLI: home-DB shared with persist).
@@ -401,10 +412,7 @@ pub(crate) async fn build_and_post_offer_with_persist_artifacts(
     request: BuildAndPostOfferRequest,
     persist: Option<&mut OfferPostPersistSink<'_>>,
     session: &mut UniqueMakerPinSession,
-) -> SignerResult<(
-    BuildAndPostOfferResponse,
-    Option<BuildAndPostPersistArtifacts>,
-)> {
+) -> SignerResult<(BuildAndPostOfferResponse, BuildAndPostPersistArtifacts)> {
     if request.size_base_units == 0 {
         return Err(SignerError::Other(
             "size_base_units must be positive".to_string(),
@@ -442,25 +450,38 @@ pub(crate) async fn build_and_post_offer_on_cycle_store(
     let mut persist = move |record: &OfferPostPersistRecord| {
         persist_store.sync(|store| upsert_offer_post_record(store, record))
     };
+    let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
     let (response, artifacts) =
         build_and_post_offer_with_persist_artifacts(request, Some(&mut persist), &mut session)
             .await?;
-    if let Some(artifacts) = artifacts {
-        let store = write_store.lock()?;
-        flush_build_and_post_persist(&store, &artifacts)?;
-    }
+    let locked = if target == PostEmitTarget::TraceAndStore {
+        Some(write_store.lock()?)
+    } else {
+        None
+    };
+    complete_build_and_post(locked.as_deref(), &artifacts)?;
     Ok(response)
 }
 
 #[cfg(test)]
-pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts {
-    BuildAndPostPersistArtifacts {
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
-        ctx: context::sample_resolved_build_and_post_context(),
+impl BuildAndPostPersistArtifacts {
+    fn for_test(persist: PostPersistPayload, ctx: ResolvedBuildAndPostContext) -> Self {
+        Self {
+            persist,
+            ctx,
+            publish_attempts: 0,
+            publish_failures: 0,
+            dry_run: false,
+        }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts {
+    BuildAndPostPersistArtifacts::for_test(
+        PostPersistPayload::default(),
+        context::sample_resolved_build_and_post_context(),
+    )
 }
 
 #[cfg(test)]
