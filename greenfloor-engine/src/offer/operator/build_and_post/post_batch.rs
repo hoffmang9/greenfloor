@@ -35,10 +35,12 @@ pub struct PostFailureAudit {
     pub offer_ref: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PostPersistPayload {
     pub persist_records: Vec<OfferPostPersistRecord>,
     pub failure_audits: Vec<PostFailureAudit>,
+    /// Persist-after-publish errors. Emitted only if flush persist also fails.
+    pub deferred_persist_failures: Vec<PostFailureAudit>,
 }
 
 pub struct PostIterationBatch {
@@ -187,7 +189,7 @@ impl<'a> PostBatchEmitter<'a> {
 /// When `persist` is present and `target` is [`PostEmitTarget::TraceAndStore`], each
 /// successful publish persists offer state + watches immediately so a later
 /// batch/flush failure cannot leave a live venue listing without local rows.
-/// Per-record persist failures become iteration failures (not panics).
+/// Immediate persist failures stay venue-success and retry on flush.
 pub fn apply_post_iteration_outcome(
     target: PostEmitTarget,
     emitter: &PostBatchEmitter<'_>,
@@ -219,32 +221,18 @@ pub fn apply_post_iteration_outcome(
                 .push(failure.to_venue_result(&emitter.ctx.publish_venue));
         }
         PostIterationOutcome::Success(success) => {
-            let mut success = *success;
+            let success = *success;
             if success.success {
                 if let (PostEmitTarget::TraceAndStore, Some(persist), Some(record)) =
                     (target, persist, success.persist_record.as_ref())
                 {
                     if let Err(err) = persist(record) {
-                        let offer_ref = offer_log_ref(&record.offer_id);
-                        let error = format!(
-                            "publish succeeded but local persist failed (live listing may need manual cancel): {err}"
-                        );
-                        batch.persist.failure_audits.push(PostFailureAudit {
-                            error: error.clone(),
-                            offer_ref: Some(offer_ref.clone()),
+                        batch.persist.deferred_persist_failures.push(PostFailureAudit {
+                            error: format!(
+                                "publish succeeded but local persist failed (live listing may need manual cancel): {err}"
+                            ),
+                            offer_ref: Some(offer_log_ref(&record.offer_id)),
                         });
-                        batch.publish_failures += 1;
-                        if let Value::Object(obj) = &mut success.result {
-                            obj.insert("success".to_string(), json!(false));
-                            obj.insert("error".to_string(), json!(error));
-                        }
-                        success.success = false;
-                        batch.post_results.push(success.to_venue_result());
-                        // The venue accepted this offer, so retain its execution audit
-                        // record while deferring the persist failure's only trace/audit
-                        // emission to the normal TraceAndStore flush path.
-                        batch.persist.persist_records.push(record.clone());
-                        return;
                     }
                 }
                 let offer_ref = success

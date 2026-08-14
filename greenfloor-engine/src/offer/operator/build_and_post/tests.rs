@@ -58,10 +58,7 @@ fn dry_run_failure_traces_without_persisting() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceOnly,
@@ -98,10 +95,7 @@ fn persist_path_defers_failure_trace_until_flush() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     apply_post_iteration_outcome(
         PostEmitTarget::TraceAndStore,
@@ -335,10 +329,7 @@ fn success_persists_offer_state_immediately_before_flush() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let coin = "aa".repeat(32);
     let p2 = "bb".repeat(32);
@@ -401,10 +392,7 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let mut persist = |_record: &crate::storage::OfferPostPersistRecord| {
         Err(crate::error::SignerError::Other(
@@ -440,18 +428,32 @@ fn immediate_persist_failure_defers_a_single_failure_emit() {
         Some(&mut persist),
     );
 
-    assert_eq!(batch.publish_failures, 1);
-    assert_eq!(batch.persist.failure_audits.len(), 1);
+    assert_eq!(batch.publish_failures, 0);
+    assert_eq!(batch.persist.failure_audits.len(), 0);
+    assert_eq!(batch.persist.deferred_persist_failures.len(), 1);
     assert_eq!(batch.persist.persist_records.len(), 1);
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
-    emitter
-        .flush_audits(
-            &store,
-            &batch.persist.persist_records,
-            &batch.persist.failure_audits,
-        )
-        .expect("flush audits");
-    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
+
+    super::flush_build_and_post_persist(
+        &store,
+        &super::BuildAndPostPersistArtifacts {
+            persist: batch.persist.clone(),
+            ctx: ctx.clone(),
+        },
+    )
+    .expect("flush recovers persist");
+    assert_eq!(
+        store
+            .offer_state_for_id("offer-persist-failure")
+            .expect("state")
+            .as_deref(),
+        Some("open")
+    );
+    assert_eq!(
+        capture.count_substr(OFFER_POST_FAILURE),
+        0,
+        "recovered persist must not emit OFFER_POST_FAILURE"
+    );
 }
 
 #[test]
@@ -476,7 +478,7 @@ fn flush_build_and_post_persist_retries_offer_upsert() {
                 listing_expires_at: None,
                 offer_nonce: None,
             }],
-            failure_audits: Vec::new(),
+            ..PostPersistPayload::default()
         },
         ctx: sample_resolved_build_and_post_context(),
     };

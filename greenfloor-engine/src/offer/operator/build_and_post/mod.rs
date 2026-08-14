@@ -173,10 +173,7 @@ async fn run_post_iterations(
         built_offers_preview: Vec::new(),
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
     };
     let emitter = PostBatchEmitter::new(ctx);
     for _ in 0..request.repeat {
@@ -234,7 +231,8 @@ pub(crate) struct BuildAndPostPersistArtifacts {
 ///
 /// Immediate per-iteration upsert is the primary path. This flush retries those
 /// upserts (idempotent) so a transient store failure after a live venue publish
-/// still writes offer state and watches, then emits deferred audit rows.
+/// still writes offer state and watches. Audits always run: persist-after-publish
+/// failures are emitted only when this retry also fails.
 ///
 /// # Errors
 ///
@@ -243,13 +241,14 @@ pub(crate) fn flush_build_and_post_persist(
     store: &SqliteStore,
     artifacts: &BuildAndPostPersistArtifacts,
 ) -> SignerResult<()> {
-    persist_offer_post_records(store, &artifacts.persist.persist_records)?;
+    let persist_result = persist_offer_post_records(store, &artifacts.persist.persist_records);
+    let mut failure_audits = artifacts.persist.failure_audits.clone();
+    if persist_result.is_err() {
+        failure_audits.extend(artifacts.persist.deferred_persist_failures.iter().cloned());
+    }
     let emitter = PostBatchEmitter::new(&artifacts.ctx);
-    emitter.flush_audits(
-        store,
-        &artifacts.persist.persist_records,
-        &artifacts.persist.failure_audits,
-    )
+    emitter.flush_audits(store, &artifacts.persist.persist_records, &failure_audits)?;
+    persist_result
 }
 
 fn lock_cli_store(
@@ -461,10 +460,7 @@ pub(crate) async fn build_and_post_offer_on_cycle_store(
 #[cfg(test)]
 pub(crate) fn empty_persist_artifacts_for_test() -> BuildAndPostPersistArtifacts {
     BuildAndPostPersistArtifacts {
-        persist: PostPersistPayload {
-            persist_records: Vec::new(),
-            failure_audits: Vec::new(),
-        },
+        persist: PostPersistPayload::default(),
         ctx: context::sample_resolved_build_and_post_context(),
     }
 }
